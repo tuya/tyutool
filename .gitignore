@@ -1,0 +1,18 @@
+# *.bin
+*.log
+*.pyc
+*.DS_Store
+__pycache__
+.vscode
+.tags
+poetry.lock
+tyutool_cli
+tyutool_gui
+
+
+/tmp
+/output
+/build
+/dist
+/cache
+/.venv

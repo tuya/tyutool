@@ -1,0 +1,11 @@
+{
+    "version": "x.x.x",
+    "linux_tyutool_cli": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/tyutool_cli.tar.gz",
+    "linux_tyutool_gui": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/tyutool_gui.tar.gz",
+    "windows_tyutool_cli": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/win_tyutool_cli.tar.gz",
+    "windows_tyutool_gui": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/win_tyutool_gui.tar.gz",
+    "darwin_x86_tyutool_cli": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_x86_tyutool_cli.tar.gz",
+    "darwin_x86_tyutool_gui": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_x86_tyutool_gui.tar.gz",
+    "darwin_arm64_tyutool_cli": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_arm64_tyutool_cli.tar.gz",
+    "darwin_arm64_tyutool_gui": "https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_arm64_tyutool_gui.tar.gz"
+}

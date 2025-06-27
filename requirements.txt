@@ -1,0 +1,8 @@
+click
+pyinstaller
+pyserial
+PySide6
+PyYAML
+requests
+rich
+tqdm
