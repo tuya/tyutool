@@ -24,7 +24,7 @@ This tool currently supports (but is not limited to) the following chip platform
 - ESP32 / ESP32-C3 / ESP32-S3
 - LN882H
 - T5
-- ... (and other chips that can be flashed using protocols like `esptool.py`)
+- ...
 
 ## 🚀 Quick Start
 
