@@ -24,7 +24,7 @@
 - ESP32 / ESP32-C3 / ESP32-S3
 - LN882H
 - T5
-- ... (以及其他可通过 `esptool.py` 等协议进行烧录的芯片)
+- ...
 
 ## 🚀 快速开始 (Quick Start)
 

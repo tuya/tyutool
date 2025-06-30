@@ -1,0 +1,27 @@
+name: Sync to Gitee
+
+on:
+  push:
+    branches: [ master ]  # 监听 master 分支的推送
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitHub code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史记录
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "Github Action"  # 保留，不需要修改
+          git config --global user.email "action@github.com"  # 保留，不需要修改
+
+      - name: Add Gitee Remote
+        run: |
+          git remote add gitee https://${{ secrets.GITEE_USER }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_REPO }}.git
+
+      - name: Push to Gitee
+        run: git push gitee master:master --force
+
