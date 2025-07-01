@@ -27,7 +27,7 @@ jobs:
         run: ./tools/build_package.sh
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
           path: |
@@ -57,7 +57,7 @@ jobs:
         run: ./tools/build_package.sh
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macos-x86-artifacts
           path: |
@@ -85,7 +85,7 @@ jobs:
         run: ./tools/build_package.sh
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macos-arm-artifacts
           path: |
@@ -97,12 +97,12 @@ jobs:
     needs: [build-linux, build-macos-x86, build-macos-arm]
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/linux-artifacts/*
