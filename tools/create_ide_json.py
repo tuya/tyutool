@@ -84,6 +84,9 @@ def gen_upgrade_json(temp_file, version_file, out_file):
 
 
 def pack_file(file_path, tar_path):
+    if not os.path.exists(file_path):
+        print(f"Erorr: can't found {file_path}")
+        return
     tar = tarfile.open(tar_path, "w:gz")
     tar.add(file_path, arcname=os.path.basename(file_path), recursive=False)
     tar.close()
