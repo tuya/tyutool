@@ -136,3 +136,21 @@ jobs:
             artifacts/windows-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-to-gitee:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Sync Release to Gitee
+        uses: wearerequired/action-gitee-release@v1
+        with:
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+          gitee-repo: "tuya-open/tyutool"
+          tag-name: ${{ github.ref_name }}
+          release-name: "Release ${{ github.ref_name }}"
+          assets: "artifacts/**/*"
