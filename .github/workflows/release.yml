@@ -31,8 +31,8 @@ jobs:
         with:
           name: linux-artifacts
           path: |
-            dist/tyutool_cli.tar.gz
-            dist/tyutool_gui.tar.gz
+            dist/linux_tyutool_cli.tar.gz
+            dist/linux_tyutool_gui.tar.gz
             dist/ideserial.json
             dist/upgrade_config.json
 
@@ -92,9 +92,34 @@ jobs:
             dist/darwin_arm64_tyutool_cli.tar.gz
             dist/darwin_arm64_tyutool_gui.tar.gz
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build package
+        run: .\tools\build_package.bat
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/win_tyutool_cli.zip
+            dist/win_tyutool_gui.zip
+
   release:
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos-x86, build-macos-arm]
+    needs: [build-linux, build-macos-x86, build-macos-arm, build-windows]
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -108,5 +133,6 @@ jobs:
             artifacts/linux-artifacts/*
             artifacts/macos-x86-artifacts/*
             artifacts/macos-arm-artifacts/*
+            artifacts/windows-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
