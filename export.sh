@@ -1,13 +1,46 @@
 #!/usr/bin/env bash
 
 # Usage: . ./export.sh
-#
 
-TYUTOOL_ROOT=$(realpath $(dirname "$0"))
+find_project_root() {
+    local pwd_dir="$(pwd)"
+    local script_dir=$(realpath $(dirname "$0"))
+
+    if [ -e "$script_dir/export.sh" ] && [ -e "$script_dir/requirements.txt" ]; then
+        echo "$script_dir"
+        return 0
+    fi
+
+    if [ -e "$pwd_dir/export.sh" ] && [ -e "$pwd_dir/requirements.txt" ]; then
+        echo "$pwd_dir"
+        return 0
+    fi
+
+    return 1
+}
+
+TYUTOOL_ROOT=$(find_project_root)
 
 # Debug information
 echo "TYUTOOL_ROOT = $TYUTOOL_ROOT"
 echo "Current root = $(pwd)"
+echo "Script path: $0"
+
+echo "Project files check:"
+EXIT_FLAG=0
+for file in "export.sh" "requirements.txt" "tyutool_cli.py" "tyutool_gui.py"; do
+    if [ -f "$TYUTOOL_ROOT/$file" ]; then
+        echo "  ✓ Found $file"
+    else
+        echo "  ✗ Missing $file"
+        EXIT_FLAG=1
+    fi
+done
+
+if [ x"1" = x"$EXIT_FLAG" ]; then
+    echo "Erorr: Can't export!"
+    return 1
+fi
 
 # Function to check Python version
 check_python_version() {

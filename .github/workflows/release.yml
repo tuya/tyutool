@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Make build script executable
+        run: chmod +x ./tools/build_package.sh
+
+      - name: Build package
+        run: ./tools/build_package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            dist/linux_tyutool_cli.tar.gz
+            dist/linux_tyutool_gui.tar.gz
+            dist/ideserial.json
+            dist/upgrade_config.json
+
+  build-macos-x86:
+    runs-on: macos-13
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Make build script executable
+        run: chmod +x ./tools/build_package.sh
+
+      - name: Build package
+        run: ./tools/build_package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86-artifacts
+          path: |
+            dist/darwin_x86_tyutool_cli.tar.gz
+            dist/darwin_x86_tyutool_gui.tar.gz
+
+  build-macos-arm:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Make build script executable
+        run: chmod +x ./tools/build_package.sh
+
+      - name: Build package
+        run: ./tools/build_package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm-artifacts
+          path: |
+            dist/darwin_arm64_tyutool_cli.tar.gz
+            dist/darwin_arm64_tyutool_gui.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build package
+        run: .\tools\build_package.bat
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/win_tyutool_cli.zip
+            dist/win_tyutool_gui.zip
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos-x86, build-macos-arm, build-windows]
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/linux-artifacts/*
+            artifacts/macos-x86-artifacts/*
+            artifacts/macos-arm-artifacts/*
+            artifacts/windows-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-to-gitee:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Sync Release to Gitee
+        uses: wearerequired/action-gitee-release@v1
+        with:
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+          gitee-repo: "tuya-open/tyutool"
+          tag-name: ${{ github.ref_name }}
+          release-name: "Release ${{ github.ref_name }}"
+          assets: "artifacts/**/*"

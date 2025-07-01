@@ -12,6 +12,7 @@ import platform
 import hashlib
 import json
 import tarfile
+import zipfile
 import re
 
 
@@ -83,11 +84,17 @@ def gen_upgrade_json(temp_file, version_file, out_file):
     pass
 
 
-def pack_file(file_path, tar_path):
-    tar = tarfile.open(tar_path, "w:gz")
-    tar.add(file_path, arcname=os.path.basename(file_path), recursive=False)
-    tar.close()
-    pass
+def pack_file(file_path, archive_path):
+    if not os.path.exists(file_path):
+        print(f"Erorr: can't found {file_path}")
+        return
+    if archive_path.endswith('.zip'):
+        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(file_path, os.path.basename(file_path))
+    else:
+        with tarfile.open(archive_path, "w:gz") as tar:
+            tar.add(file_path, arcname=os.path.basename(file_path),
+                    recursive=False)
 
 
 def tyutool_env():
@@ -113,13 +120,13 @@ if __name__ == '__main__':
         cli_path = os.path.join(output_dir, "tyutool_cli")  # 根据可执行文件位置修改
         gui_path = os.path.join(output_dir, "tyutool_gui")
         # 名称不要修改和IDE保持一致
-        cli_tar_path = os.path.join(output_dir, "tyutool_cli.tar.gz")
-        gui_tar_path = os.path.join(output_dir, "tyutool_gui.tar.gz")
+        cli_tar_path = os.path.join(output_dir, "linux_tyutool_cli.tar.gz")
+        gui_tar_path = os.path.join(output_dir, "linux_tyutool_gui.tar.gz")
     elif env == "windows":
         cli_path = os.path.join(output_dir, "tyutool_cli.exe")
         gui_path = os.path.join(output_dir, "tyutool_gui.exe")
-        cli_tar_path = os.path.join(output_dir, "win_tyutool_cli.tar.gz")
-        gui_tar_path = os.path.join(output_dir, "win_tyutool_gui.tar.gz")
+        cli_tar_path = os.path.join(output_dir, "win_tyutool_cli.zip")
+        gui_tar_path = os.path.join(output_dir, "win_tyutool_gui.zip")
     else:
         cli_path = os.path.join(output_dir, "tyutool_cli")
         gui_path = os.path.join(output_dir, "tyutool_gui")

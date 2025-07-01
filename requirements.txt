@@ -1,5 +1,5 @@
 click
-pyinstaller
+pyinstaller<=6.15.0
 pyserial
 PySide6
 PyYAML
