@@ -147,7 +147,7 @@ jobs:
           path: artifacts
 
       - name: Sync Release to Gitee
-        uses: wangyoucao577/go-release-action@v1.4.0
+        uses: wangyoucao577/go-release-action@v1.53
         with:
           gitee_token: ${{ secrets.GITEE_TOKEN }}
           gitee_owner: "tuya-open"
