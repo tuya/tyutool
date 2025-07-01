@@ -99,6 +99,7 @@ def tyutool_env():
     if "linux" in _env:
         env = "linux"
     elif "darwin" in _env:
+        print(f">>>>>>>debug: {platform.machine()}")
         machine = "x86" if "x86" in platform.machine().lower() else "arm64"
         env = f"darwin_{machine}"
     else:
