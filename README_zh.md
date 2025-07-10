@@ -69,14 +69,9 @@
 
 1.  **下载**: 从下面的链接中选择对应您操作系统的最新版本下载。
 
-    > - [Linux-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/tyutool_cli.tar.gz)
-    > - [Linux-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/tyutool_gui.tar.gz)
-    > - [Windows-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/win_tyutool_cli.tar.gz)
-    > - [Windows-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/win_tyutool_gui.tar.gz)
-    > - [MAC-ARM64-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_arm64_tyutool_cli.tar.gz)
-    > - [MAC-ARM64-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_arm64_tyutool_gui.tar.gz)
-    > - [MAC-X86-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_x86_tyutool_cli.tar.gz)
-    > - [MAC-X86-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_x86_tyutool_gui.tar.gz)
+    > - [github](https://github.com/tuya/tyutool/releases)
+
+    > - [gitee](https://gitee.com/tuya-open/tyutool/releases)
 
 2.  **解压**: 将下载的压缩包解压到任意目录。
 3.  **运行**:
@@ -145,6 +140,7 @@ python tyutool_cli.py --help
 以下是常用 **CH34x** 系列芯片的驱动下载链接：
 
 - **Windows**: [CH343SER_EXE](https://www.wch.cn/downloads/ch343ser_exe.html)
+
 - **macOS**: [CH34XSER_MAC_ZIP](https://www.wch.cn/downloads/CH34XSER_MAC_ZIP.html)
 
 以下是常用 **CP210x** 系列芯片的驱动下载链接：

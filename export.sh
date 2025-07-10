@@ -2,10 +2,9 @@
 
 # Usage: . ./export.sh
 
+pwd_dir="$(pwd)"
+script_dir=$(realpath $(dirname "$0"))
 find_project_root() {
-    local pwd_dir="$(pwd)"
-    local script_dir=$(realpath $(dirname "$0"))
-
     if [ -e "$script_dir/export.sh" ] && [ -e "$script_dir/requirements.txt" ]; then
         echo "$script_dir"
         return 0

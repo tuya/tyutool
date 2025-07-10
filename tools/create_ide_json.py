@@ -3,17 +3,13 @@
 
 '''
 在生成可执行文件后，如果需要更新IDE插件中的cli工具，
-使用此脚本生成json文件，详情见README.md
 '''
 
 import os
-import sys
 import platform
 import hashlib
-import json
 import tarfile
 import zipfile
-import re
 
 
 def create_md5_file(file_name):
@@ -41,47 +37,6 @@ def md5sum(fname):
     ret = m.hexdigest()
     f.close()
     return ret
-
-
-def gen_json(tar_path, json_path):
-    if not os.path.exists(tar_path):
-        print(f'cli not found: {tar_path}')
-        return False
-    hash_data = md5sum(tar_path)
-    url = "https://images.tuyacn.com/smart/embed/package/vscode/\
-data/ide_serial/tyutool_cli.tar.gz"
-    json_data = {'tyutool_cli': {
-        'full_name': "tyutool_cli.tar.gz",
-        'md5': hash_data,
-        'version': "",
-        'url': url
-    }}
-    json_str = json.dumps(json_data, indent=4, ensure_ascii=False)
-    with open(json_path, 'w', encoding='utf-8') as f:
-        f.write(json_str)
-    pass
-
-
-def gen_upgrade_json(temp_file, version_file, out_file):
-    ver_context = ""
-    with open(version_file, encoding='utf-8') as f:
-        ver_context = f.read()
-    ver_pattern = r'(?<=TYUTOOL_VERSION = ")\d*\.\d*\.\d*(?=\")'
-    ret = re.search(ver_pattern, ver_context)
-    if not ret:
-        print("Search version error.")
-        sys.exit(1)
-    version = ret.group()
-
-    f = open(temp_file, "r", encoding='utf-8')
-    temp_data = json.load(f)
-    f.close()
-    temp_data['version'] = version
-
-    out_str = json.dumps(temp_data, indent=4, ensure_ascii=False)
-    with open(out_file, "w") as f:
-        f.write(out_str)
-    pass
 
 
 def pack_file(file_path, archive_path):
@@ -116,17 +71,11 @@ if __name__ == '__main__':
     root = os.path.abspath(root_re)
     output_dir = os.path.join(root, "dist")
 
-    if env == "linux":
-        cli_path = os.path.join(output_dir, "tyutool_cli")  # 根据可执行文件位置修改
-        gui_path = os.path.join(output_dir, "tyutool_gui")
-        # 名称不要修改和IDE保持一致
-        cli_tar_path = os.path.join(output_dir, "linux_tyutool_cli.tar.gz")
-        gui_tar_path = os.path.join(output_dir, "linux_tyutool_gui.tar.gz")
-    elif env == "windows":
+    if env == "windows":
         cli_path = os.path.join(output_dir, "tyutool_cli.exe")
         gui_path = os.path.join(output_dir, "tyutool_gui.exe")
-        cli_tar_path = os.path.join(output_dir, "win_tyutool_cli.zip")
-        gui_tar_path = os.path.join(output_dir, "win_tyutool_gui.zip")
+        cli_tar_path = os.path.join(output_dir, "windows_tyutool_cli.zip")
+        gui_tar_path = os.path.join(output_dir, "windows_tyutool_gui.zip")
     else:
         cli_path = os.path.join(output_dir, "tyutool_cli")
         gui_path = os.path.join(output_dir, "tyutool_gui")
@@ -135,13 +84,5 @@ if __name__ == '__main__':
 
     pack_file(cli_path, cli_tar_path)
     pack_file(gui_path, gui_tar_path)
-
-    if env == "linux":
-        json_path = os.path.join(output_dir, "ideserial.json")  # 不能修改
-        gen_json(cli_tar_path, json_path)
-        temp_file = os.path.join(root, "tools", "upgrade_config.json")
-        version_file = os.path.join(root, "tyutool", "util", "util.py")
-        out_file = os.path.join(output_dir, "upgrade_config.json")
-        gen_upgrade_json(temp_file, version_file, out_file)
 
     print('Finished updata files.')

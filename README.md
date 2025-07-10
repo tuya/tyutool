@@ -69,14 +69,9 @@ This is the simplest and fastest way, requiring no installation of Python or any
 
 1.  **Download**: Choose the latest version for your operating system from the links below.
 
-    > - [Linux-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/tyutool_cli.tar.gz)
-    > - [Linux-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/tyutool_gui.tar.gz)
-    > - [Windows-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/win_tyutool_cli.tar.gz)
-    > - [Windows-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/win_tyutool_gui.tar.gz)
-    > - [MAC-ARM64-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_arm64_tyutool_cli.tar.gz)
-    > - [MAC-ARM64-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_arm64_tyutool_gui.tar.gz)
-    > - [MAC-X86-CLI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_x86_tyutool_cli.tar.gz)
-    > - [MAC-X86-GUI](https://images.tuyacn.com/smart/embed/package/vscode/data/ide_serial/darwin_x86_tyutool_gui.tar.gz)
+    > - [github](https://github.com/tuya/tyutool/releases)
+
+    > - [gitee](https://gitee.com/tuya-open/tyutool/releases)
 
 2.  **Extract**: Unzip the downloaded archive to any directory.
 3.  **Run**:
@@ -144,6 +139,7 @@ If your computer cannot recognize the serial port, it is usually because the USB
 Here are the download links for common **CH34x** series chip drivers:
 
 - **Windows**: [CH343SER_EXE](https://www.wch.cn/downloads/ch343ser_exe.html)
+
 - **macOS**: [CH34XSER_MAC_ZIP](https://www.wch.cn/downloads/CH34XSER_MAC_ZIP.html)
 
 Here are the download links for common **CP210x** series chip drivers:
