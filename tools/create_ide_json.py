@@ -116,17 +116,11 @@ if __name__ == '__main__':
     root = os.path.abspath(root_re)
     output_dir = os.path.join(root, "dist")
 
-    if env == "linux":
-        cli_path = os.path.join(output_dir, "tyutool_cli")  # 根据可执行文件位置修改
-        gui_path = os.path.join(output_dir, "tyutool_gui")
-        # 名称不要修改和IDE保持一致
-        cli_tar_path = os.path.join(output_dir, "linux_tyutool_cli.tar.gz")
-        gui_tar_path = os.path.join(output_dir, "linux_tyutool_gui.tar.gz")
-    elif env == "windows":
+    if env == "windows":
         cli_path = os.path.join(output_dir, "tyutool_cli.exe")
         gui_path = os.path.join(output_dir, "tyutool_gui.exe")
-        cli_tar_path = os.path.join(output_dir, "win_tyutool_cli.zip")
-        gui_tar_path = os.path.join(output_dir, "win_tyutool_gui.zip")
+        cli_tar_path = os.path.join(output_dir, "windows_tyutool_cli.zip")
+        gui_tar_path = os.path.join(output_dir, "windows_tyutool_gui.zip")
     else:
         cli_path = os.path.join(output_dir, "tyutool_cli")
         gui_path = os.path.join(output_dir, "tyutool_gui")

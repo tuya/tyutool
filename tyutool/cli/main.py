@@ -15,7 +15,7 @@ from tyutool.util.util import set_clis, tyutool_version, set_logger
 def ask_for_upgrade(server_version=""):
     # 0-yes 1-no* 2-skip
     print(f"Upgrade Tyutool to [{server_version}] ?")
-    ans = input("Upgrade Tyutool [y(es) / n(o) / s(kip)]:")
+    ans = input("Upgrade Tyutool [y(es) / n(o) / s(kip)]: ")
     if ans.lower() == "y":
         return 0
     elif ans.lower() == "s":
