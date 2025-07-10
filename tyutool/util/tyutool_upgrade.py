@@ -7,7 +7,6 @@ import shutil
 import tarfile
 import zipfile
 import subprocess
-import urllib.request
 import requests
 import socket
 import json
@@ -18,7 +17,7 @@ from tyutool.util.util import tyutool_version
 
 class TyutoolUpgrade(object):
     def __init__(self, logger, running_type,
-                 show_progress=None):
+                 show_progress=None, exit_callback=None):
         self.logger = logger
         self.running_type = "tyutool_" + running_type  # "cli" or "gui"
         self.running_env = TYUTOOL_ENV  # linux/windows/darwin_x86/darwin_arm64
@@ -48,6 +47,11 @@ tuya/tyutool/releases/latest"
         else:
             self.show_progress = self._show_progress
 
+        if exit_callback:
+            self.exit_callback = exit_callback
+        else:
+            self.exit_callback = self._default_exit
+
         self.logger.debug(f"running_type: {self.running_type}")
         self.logger.debug(f"running_env: {self.running_env}")
         self.logger.debug(f"is_script: {self.is_script}")
@@ -67,6 +71,10 @@ tuya/tyutool/releases/latest"
         print(f"\rprogress: {progress:.1f}%", end="", flush=True)
         pass
 
+    def _default_exit(self):
+        '''Default exit implementation for CLI'''
+        sys.exit(0)
+
     def _check_connect(self):
         self.logger.debug("check connect ...")
         try:
@@ -83,6 +91,33 @@ tuya/tyutool/releases/latest"
             pass
         return False
 
+    def _download_by_url(self, download_url):
+        # use requests download and set timeout
+        self.logger.debug(f"download_url: {download_url}")
+        try:
+            response = requests.get(download_url, stream=True, timeout=5)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+
+            with open(self.download_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        block_num = downloaded // 8192
+                        self.show_progress(block_num, 8192, total_size)
+
+            self.logger.debug("download success")
+        except requests.exceptions.Timeout:
+            self.logger.error("Download timeout.")
+            return False
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Download failed: {e}.")
+            return False
+        return True
+
     def _download(self):
         # {linux/windows/darwin_{x86/arm64}}_{cli/gui}
         target = os.path.basename(self.download_file)
@@ -91,10 +126,13 @@ tuya/tyutool/releases/latest"
         self.logger.debug(f"current_version: {current_version}")
 
         try:
-            response = requests.get(self.github_api_url)
+            response = requests.get(self.github_api_url, timeout=2)
             data = response.json()
+        except requests.exceptions.Timeout:
+            self.logger.error("Get version timeout.")
+            return False
         except Exception as e:
-            self.logger.error(f"Error: {e}")
+            self.logger.error(f"Get version error: {e}")
             return False
 
         server_version = data.get('tag_name', "").lstrip('v')
@@ -122,13 +160,11 @@ tuya/tyutool/releases/latest"
             self.logger.error(f"No matching asset found for {target}")
             return False
 
-        self.logger.debug(f"download_url: {download_url}")
-
         shutil.rmtree(self.download_file, ignore_errors=True)
         shutil.rmtree(self.new_file, ignore_errors=True)
         os.makedirs(self.download_path, exist_ok=True)
-        urllib.request.urlretrieve(download_url, self.download_file,
-                                   self.show_progress)
+
+        self._download_by_url(download_url)
 
         if self.download_file.endswith('.zip'):
             with zipfile.ZipFile(self.download_file, 'r') as zip_file:
@@ -185,30 +221,36 @@ pause
 
         if not self._check_connect():
             self.logger.error("Network error.")
-            return
+            return False
         if not self._download():
-            return
+            return False
 
         if self.running_env == "windows":
             self._windows_do()
         else:
             self._linux_do()
-        sys.exit()
 
-    def ask_upgrade(self, ask: Callable[[str], bool]):
+        self.exit_callback()
+        return True
+
+    def ask_upgrade(self, ask: Callable[[str], bool], auto_upgrade=True):
         if self.is_script:
             self.logger.debug("script doesn't need to ask for upgrade.")
-            return
+            return False
 
         if not self._check_connect():
-            return
+            return False
 
         try:
-            response = requests.get(self.github_api_url)
+            response = requests.get(self.github_api_url, timeout=1)
             data = response.json()
+        except requests.exceptions.Timeout:
+            self.logger.debug("Get version timeout.")
+            return False
         except Exception as e:
             self.logger.debug(f"Error: {e}")
-            return
+            return False
+
         server_version = data.get('tag_name', "").lstrip('v')
         self.logger.debug(f"server_version: {server_version}")
 
@@ -224,18 +266,18 @@ pause
         if skip_version >= server_version:
             self.logger.debug(f"skip_version[{skip_version}] >= \
 server_version[{server_version}].")
-            return
+            return False
 
         current_version = tyutool_version()
         self.logger.debug(f"current_version: {current_version}")
         if server_version <= current_version:
             self.logger.debug(f"[{current_version}] is last version.")
-            return
+            return False
 
         ask_ans = ask(server_version)  # 0-yes 1-no 2-skip
 
         if ask_ans == 1:
-            return
+            return False
         elif ask_ans == 2:
             skip_version_data = {"version": server_version}
             os.makedirs(os.path.join(TYUTOOL_ROOT, "cache"), exist_ok=True)
@@ -244,7 +286,10 @@ server_version[{server_version}].")
             f = open(skip_version_file, 'w', encoding='utf-8')
             f.write(json_str)
             f.close()
-            return
+            return False
+        elif ask_ans == 0:
+            if not auto_upgrade:
+                return True  # gui
 
-        self.upgrade()
-        pass
+        self.upgrade()  # cli
+        return False

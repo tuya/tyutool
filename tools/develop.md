@@ -41,15 +41,13 @@ ui文件转py文件：`pyside6-uic ./tyutool/gui/ui_main.ui -o ./tyutool/gui/ui_
 
 1. 分别在4个环境（Linux/Windows/Mac-x86/Mac-arm64）中执行命令（`./tools/build_package.sh`）
 
-1. linux将生成的文件：`tyutool_cli.tar.gz`、`tyutool_gui.tar.gz`、`ideserial.json`、`upgrade_config.json`
+1. linux将生成的文件：`linux_tyutool_cli.tar.gz`、`linux_tyutool_gui.tar.gz`
 
-1. windows将生成文件：`win_tyutool_cli.tar.gz`、`win_tyutool_gui.tar.gz`
+1. windows将生成文件：`windows_tyutool_cli.zip`、`windows_tyutool_gui.zip`
 
 1. Mac x86将生成文件：`darwin_x86_tyutool_cli.tar.gz`、`darwin_x86_tyutool_gui.tar.gz`
 
 1. Mac arm64将生成文件：`darwin_arm64_tyutool_cli.tar.gz`、`darwin_arm64_tyutool_gui.tar.gz`
-
-1. 检查`upgrade_config.json`文件中的版本号是否正确
 
 
 ## 遗留问题

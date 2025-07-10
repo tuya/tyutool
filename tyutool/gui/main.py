@@ -10,7 +10,7 @@ import logging.handlers
 from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QFileDialog
 from PySide6.QtGui import QAction, QIcon, QPixmap
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QTimer, QThread, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui_main import Ui_MainWindow
@@ -36,6 +36,40 @@ class EmittingStr(QtCore.QObject):
         pass
 
 
+class UpgradeThread(QThread):
+    progress_updated = Signal(int)
+    upgrade_finished = Signal(bool, str)
+
+    def __init__(self, logger, running_type):
+        super().__init__()
+        self.logger = logger
+        self.running_type = running_type
+
+    def run(self):
+        try:
+            def progress_callback(block_num, block_size, total_size):
+                if total_size > 0:
+                    downloaded = block_num * block_size
+                    progress = min(100, int((downloaded / total_size) * 100))
+                    self.progress_updated.emit(progress)
+
+            def exit_callback():
+                # exit by GUI self
+                pass
+
+            up_handle = TyutoolUpgrade(self.logger, self.running_type,
+                                       show_progress=progress_callback,
+                                       exit_callback=exit_callback)
+
+            success = up_handle.upgrade()
+            if success:
+                self.upgrade_finished.emit(True, "Upgrade success.")
+            else:
+                self.upgrade_finished.emit(False, "Upgrade failed.")
+        except Exception as e:
+            self.upgrade_finished.emit(False, str(e))
+
+
 #  class QTextEditHandler(logging.Handler):
 #      def __init__(self, text_edit):
 #          super().__init__()
@@ -49,9 +83,11 @@ class EmittingStr(QtCore.QObject):
 class MyWidget(FlashGUI, SerialGUI):
     def __init__(self):
         super().__init__()
-        # 下面将输出重定向到textBrowser中(屏蔽下面两句恢复终端日志)
+
+        # log to textBrowser or to terminal
         sys.stderr = EmittingStr()
         sys.stderr.textWritten.connect(self.outputWritten)
+
         ui = Ui_MainWindow()
         ui.setupUi(self)
         self.ui = ui
@@ -79,6 +115,8 @@ class MyWidget(FlashGUI, SerialGUI):
         self.ui.actionUpgrade.triggered.connect(self.guiUpgrade)
         self.ui.actionVersion.triggered.connect(self.showVersion)
 
+        self.upgrade_thread = None
+
         QTimer.singleShot(500, self.guiAskUpgrade)
 
         pass
@@ -104,16 +142,31 @@ class MyWidget(FlashGUI, SerialGUI):
         pass
 
     def guiUpgrade(self):
-        up_handle = TyutoolUpgrade(self.logger, "gui")
-        up_handle.upgrade()
+        self.startUpgradeWithProgress()
         pass
+
+    def updateProgress(self, progress):
+        self.ui.progressBarShow.setValue(progress)
+
+    def upgradeFinished(self, success, message):
+        if success:
+            self.logger.info(message)
+            # close GUI, delay 1s
+            QTimer.singleShot(1000, lambda: QApplication.instance().quit())
+        else:
+            self.logger.error(message)
+
+        self.ui.pushButtonStart.setEnabled(True)
+        self.ui.pushButtonStop.setEnabled(True)
+        self.ui.progressBarShow.setVisible(False)
+        self.upgrade_thread = None
 
     def guiAskUpgrade(self):
         def ask(server_version=""):
             msg = QMessageBox(self)
             msg.setWindowTitle("Upgrade")
             msg.setText(f"Upgrade Tyutool to [{server_version}] ?")
-            # 添加自定义按钮
+
             confirm_button = msg.addButton("Ok", QMessageBox.ActionRole)
             skip_button = msg.addButton("Skip", QMessageBox.ActionRole)
             cancel_button = msg.addButton("Cancel", QMessageBox.RejectRole)
@@ -125,9 +178,33 @@ class MyWidget(FlashGUI, SerialGUI):
             elif msg.clickedButton() == skip_button:
                 result = 2
             return result
+
         up_handle = TyutoolUpgrade(self.logger, "gui")
-        up_handle.ask_upgrade(ask)
+        should_upgrade = up_handle.ask_upgrade(ask, auto_upgrade=False)
+
+        if should_upgrade:
+            QTimer.singleShot(100, self.startUpgradeWithProgress)
         pass
+
+    def startUpgradeWithProgress(self):
+        if self.upgrade_thread and self.upgrade_thread.isRunning():
+            self.logger.info("Upgrade running ...")
+            return
+
+        # progress
+        self.ui.progressBarShow.setMaximum(100)
+        self.ui.progressBarShow.setValue(0)
+        self.ui.progressBarShow.setVisible(True)
+
+        # Start and Stop
+        self.ui.pushButtonStart.setEnabled(False)
+        self.ui.pushButtonStop.setEnabled(False)
+
+        # upgrade
+        self.upgrade_thread = UpgradeThread(self.logger, "gui")
+        self.upgrade_thread.progress_updated.connect(self.updateProgress)
+        self.upgrade_thread.upgrade_finished.connect(self.upgradeFinished)
+        self.upgrade_thread.start()
 
     def showVersion(self):
         self.logger.debug(f"Tyutool version: {TYUTOOL_VERSION}")
