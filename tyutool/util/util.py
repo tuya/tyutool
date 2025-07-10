@@ -3,13 +3,15 @@
 
 import os
 import sys
+import requests
 import logging
 import click
 import platform
 import string
+import socket
 
 TYUTOOL_ROOT = os.path.dirname(os.path.abspath(sys.argv[0]))
-TYUTOOL_VERSION = "1.9.2"
+TYUTOOL_VERSION = "2.0.0"
 
 
 def tyutool_env():
@@ -73,6 +75,79 @@ def get_logger():
         return TYUT_LOGGER
     set_logger()
     return TYUT_LOGGER
+
+
+NETWORK_AVAILABLE = None
+
+
+def network_available():
+    global NETWORK_AVAILABLE
+    if NETWORK_AVAILABLE is not None:
+        return NETWORK_AVAILABLE
+
+    logger = get_logger()
+
+    # List of reliable servers to check (IP, port)
+    test_servers = [
+        ("8.8.8.8", 53),          # Google DNS
+        ("1.1.1.1", 53),          # Cloudflare DNS
+        ("223.5.5.5", 53),        # Alibaba DNS (for China)
+        ("114.114.114.114", 53),  # China Telecom DNS
+    ]
+
+    NETWORK_AVAILABLE = False
+    for server_ip, port in test_servers:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect((server_ip, port))
+            s.close()
+            logger.debug(f"Network available, connected to {server_ip}:{port}")
+            NETWORK_AVAILABLE = True
+            break
+        except Exception as e:
+            logger.debug(f"network check error: {str(e)}")
+            continue
+
+    return NETWORK_AVAILABLE
+
+
+COUNTRY_CODE = ""  # "China" or other
+
+
+def set_country_code():
+    logger = get_logger()
+    global COUNTRY_CODE
+    if len(COUNTRY_CODE):
+        return COUNTRY_CODE
+
+    # Check network availability first
+    if not network_available():
+        logger.debug("Network not available, skipping country code detection")
+        return COUNTRY_CODE
+
+    logger.debug("getting country code...")
+    try:
+        response = requests.get('http://www.ip-api.com/json', timeout=2)
+        response.raise_for_status()
+        logger.debug(response.elapsed)
+
+        result = response.json()
+        country = result.get("country", "")
+        logger.debug(f"country code: {country}")
+
+        COUNTRY_CODE = country
+    except requests.exceptions.RequestException as e:
+        logger.warn(f"country code error: {e}")
+
+    return COUNTRY_CODE
+
+
+def get_country_code():
+    global COUNTRY_CODE
+    if len(COUNTRY_CODE):
+        return COUNTRY_CODE
+    return set_country_code()
 
 
 def set_clis(clis):

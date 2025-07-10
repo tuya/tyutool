@@ -8,11 +8,12 @@ import tarfile
 import zipfile
 import subprocess
 import requests
-import socket
 import json
 from typing import Callable
 from tyutool.util.util import TYUTOOL_ENV, TYUTOOL_ROOT
-from tyutool.util.util import tyutool_version
+from tyutool.util.util import (
+    tyutool_version, get_country_code, network_available
+)
 
 
 class TyutoolUpgrade(object):
@@ -31,15 +32,20 @@ class TyutoolUpgrade(object):
 
         self.is_script = True if '.py' in sys.argv[0] else False
         self.download_path = os.path.join(TYUTOOL_ROOT, "cache")
-        self.download_file = os.path.join(TYUTOOL_ROOT,
-                                          "cache", target)
+        self.download_file = os.path.join(self.download_path, target)
 
         self.new_file = os.path.join(self.download_path, self.running_type) + \
             file_suffix
         self.old_file = os.path.join(TYUTOOL_ROOT, self.running_type) + \
             file_suffix
 
-        self.github_api_url = "https://api.github.com/repos/\
+        country = get_country_code()
+
+        if country == "China":
+            self.github_api_url = "https://gitee.com/api/v5/repos/\
+tuya-open/tyutool/releases/latest"
+        else:
+            self.github_api_url = "https://api.github.com/repos/\
 tuya/tyutool/releases/latest"
 
         if show_progress:
@@ -74,22 +80,6 @@ tuya/tyutool/releases/latest"
     def _default_exit(self):
         '''Default exit implementation for CLI'''
         sys.exit(0)
-
-    def _check_connect(self):
-        self.logger.debug("check connect ...")
-        try:
-            # check github api connectivity
-            target_ip = "140.82.112.5"  # github.com IP
-            port = 443
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1)
-            s.connect((target_ip, port))
-            s.close()
-            return True
-        except OSError:
-            self.logger.debug("can't connect to [api.github.com].")
-            pass
-        return False
 
     def _download_by_url(self, download_url):
         # use requests download and set timeout
@@ -219,9 +209,10 @@ pause
             self.logger.info("Please running [git pull].")
             return
 
-        if not self._check_connect():
+        if not network_available():
             self.logger.error("Network error.")
             return False
+
         if not self._download():
             return False
 
@@ -238,7 +229,7 @@ pause
             self.logger.debug("script doesn't need to ask for upgrade.")
             return False
 
-        if not self._check_connect():
+        if not network_available():
             return False
 
         try:
