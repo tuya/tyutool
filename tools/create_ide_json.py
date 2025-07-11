@@ -7,36 +7,8 @@ Generate different product packages according to the environment
 
 import os
 import platform
-import hashlib
 import tarfile
 import zipfile
-
-
-def create_md5_file(file_name):
-    md5_hash = hashlib.md5()
-
-    a_file = open(file_name, "rb")
-    content = a_file.read()
-    md5_hash.update(content)
-    a_file.close()
-    hash_data = md5_hash.hexdigest()
-    return hash_data
-
-
-def md5sum(fname):
-    if not os.path.isfile(fname):
-        return False
-    f = open(fname, 'rb')
-    m = hashlib.md5()
-    # 大文件处理
-    while True:
-        d = f.read(8096)
-        if not d:
-            break
-        m.update(d)
-    ret = m.hexdigest()
-    f.close()
-    return ret
 
 
 def pack_file(file_path, archive_path):
