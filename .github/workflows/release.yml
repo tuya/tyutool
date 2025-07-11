@@ -134,8 +134,8 @@ jobs:
         with:
           name: windows-artifacts
           path: |
-            dist/win_tyutool_cli.zip
-            dist/win_tyutool_gui.zip
+            dist/windows_tyutool_cli.zip
+            dist/windows_tyutool_gui.zip
 
   release:
     runs-on: ubuntu-latest
