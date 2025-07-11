@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 '''
-在生成可执行文件后，如果需要更新IDE插件中的cli工具，
+Generate different product packages according to the environment
 '''
 
 import os
@@ -71,6 +71,8 @@ if __name__ == '__main__':
     root = os.path.abspath(root_re)
     output_dir = os.path.join(root, "dist")
 
+    # Be consistent with the content of file ->
+    # .github/workflows/release.yml
     if env == "windows":
         cli_path = os.path.join(output_dir, "tyutool_cli.exe")
         gui_path = os.path.join(output_dir, "tyutool_gui.exe")
