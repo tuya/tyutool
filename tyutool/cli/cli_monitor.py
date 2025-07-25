@@ -24,7 +24,10 @@ from .flash.choose_port import choose_port
 @click.option('-b', '--baud',
               type=int,
               help="Uart baud rate")
-def cli(device, port, baud):
+@click.option('-s', '--save',
+              type=str, default="monitor.log",
+              help="Save log to file")
+def cli(device, port, baud, save):
     logger = get_logger()
     logger.debug("CLI monitor")
     logger.debug(f'device in: {device}')
@@ -46,9 +49,20 @@ def cli(device, port, baud):
         sys.exit(1)
 
     logger.info("Open Monitor. (Quit: Ctrl+c)")
+
+    # 打开日志文件
+    log_file = None
+    if save:
+        try:
+            log_file = open(save, 'w', encoding='utf-8')
+            logger.info(f"Saving log to: {save}")
+        except Exception as e:
+            logger.error(f"Failed to open log file: {e}")
+            log_file = None
+
     stop_event = threading.Event()
     receive_thread = threading.Thread(target=receive_data,
-                                      args=(ser, stop_event, logger))
+                                      args=(ser, stop_event, logger, log_file))
     send_thread = threading.Thread(target=send_data,
                                    args=(ser, stop_event, logger))
     receive_thread.start()
@@ -66,17 +80,29 @@ def cli(device, port, baud):
     send_thread.join()
 
     ser.close()
+
+    # 关闭日志文件
+    if log_file:
+        log_file.close()
+        logger.info(f"Log saved to: {save}")
+
     logger.info("Monitor exit.")
-    pass
 
 
-def receive_data(ser, stop_event, logger):
+def receive_data(ser, stop_event, logger, log_file=None):
     try:
         while not stop_event.is_set():
             if ser.in_waiting:
                 data = ser.readline().decode('utf-8', errors='ignore').strip()
                 if data:
                     print(data)
+                    # 写入日志文件
+                    if log_file:
+                        try:
+                            log_file.write(data + '\n')
+                            log_file.flush()
+                        except Exception as e:
+                            logger.error(f"Write log error: {e}")
     except Exception as e:
         logger.error(f"Recive error: {e}")
 
