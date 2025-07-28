@@ -8,6 +8,7 @@ from tyutool.util import TyutoolUpgrade
 
 from tyutool.cli.cli_upgrade import cli as upgrade_cli
 from tyutool.cli.cli_monitor import cli as monitor_cli
+from tyutool.cli.cli_ai_debug import cli as debug_cli
 from tyutool.cli.flash import flash_write_cli, flash_read_cli
 from tyutool.util.util import set_clis, tyutool_version, set_logger
 
@@ -28,6 +29,7 @@ CLIS = {
     "read": flash_read_cli,
     "monitor": monitor_cli,
     "upgrade": upgrade_cli,
+    "debug": debug_cli,
 }
 
 

@@ -50,7 +50,6 @@ def cli(device, port, baud, save):
 
     logger.info("Open Monitor. (Quit: Ctrl+c)")
 
-    # 打开日志文件
     log_file = None
     if save:
         try:
@@ -81,7 +80,6 @@ def cli(device, port, baud, save):
 
     ser.close()
 
-    # 关闭日志文件
     if log_file:
         log_file.close()
         logger.info(f"Log saved to: {save}")
@@ -96,7 +94,6 @@ def receive_data(ser, stop_event, logger, log_file=None):
                 data = ser.readline().decode('utf-8', errors='ignore').strip()
                 if data:
                     print(data)
-                    # 写入日志文件
                     if log_file:
                         try:
                             log_file.write(data + '\n')
