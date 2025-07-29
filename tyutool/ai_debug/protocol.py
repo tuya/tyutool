@@ -5,6 +5,13 @@ import struct
 
 from tyutool.util.util import get_logger
 
+TYPE_MAPPING = {
+    'a': 31,  # Audio
+    't': 34,  # Text
+    'v': 30,  # Video
+    'p': 32,  # Image
+}
+
 logger = get_logger()
 
 
@@ -87,8 +94,8 @@ actual 0x{magic:08x}")
         sequence = struct.unpack('>H', data[6:8])[0]
 
         byte7 = data[8]
-        frag_flag = (byte7 >> 6) & 0x03  # 0x00000011
-        security_level = (byte7 >> 1) & 0x1F  # 0x00011111 must 0
+        frag_flag = (byte7 & 0xC0) >> 6  # 0x11000000
+        security_level = (byte7 & 0x3E) >> 1  # 0x00111110 must 0
         iv_flag = byte7 & 0x01  # 0x00000001
 
         if security_level != 0 or iv_flag != 0:
@@ -137,3 +144,187 @@ actual 0x{magic:08x}")
         header['signature'] = data[offset:(offset+signature_length)]
 
         return header, data[total_needed:]
+
+    @staticmethod
+    def parse_attributes(attr_data):
+        """Parse attribute data"""
+        attributes = {}
+        offset = 0
+
+        while offset < len(attr_data):
+            if len(attr_data) < offset + 7:
+                break
+
+            attr_type = struct.unpack(
+                '>H', attr_data[offset:offset + 2]
+            )[0]
+            payload_type = attr_data[offset + 2]
+            attr_length = struct.unpack(
+                '>I', attr_data[(offset+3):(offset+7)]
+            )[0]
+
+            offset += 7
+            if len(attr_data) < offset + attr_length:
+                break
+
+            attr_payload = attr_data[offset:(offset+attr_length)]
+            offset += attr_length
+
+            # Parse attribute value based on payload_type
+            if payload_type == 0x01 and len(attr_payload) >= 1:  # uint8
+                value = attr_payload[0]
+            elif payload_type == 0x02 and len(attr_payload) >= 2:  # uint16
+                value = struct.unpack('>H', attr_payload)[0]
+            elif payload_type == 0x03 and len(attr_payload) >= 4:  # uint32
+                value = struct.unpack('>I', attr_payload)[0]
+            elif payload_type == 0x04 and len(attr_payload) >= 8:  # uint64
+                value = struct.unpack('>Q', attr_payload)[0]
+            elif payload_type == 0x05:  # bytes
+                value = attr_payload
+            elif payload_type == 0x06:  # string
+                value = attr_payload.decode('utf-8', errors='ignore')
+            else:
+                value = attr_payload
+
+            attr_name = ProtocolParser.ATTRIBUTE_TYPES.get(
+                attr_type, f"Attr{attr_type}"
+            )
+            attributes[attr_name] = value
+
+        return attributes
+
+    @staticmethod
+    def parse_media_packet(payload):
+        """Parse video/audio packet"""
+        if len(payload) < 22:
+            return {}
+
+        data_id = struct.unpack('>H', payload[0:2])[0]
+        byte2 = payload[2]
+        stream_flag = (byte2 & 0xC0) >> 6  # 0x11000000
+        timestamp = struct.unpack('>Q', payload[3:11])[0]
+        pts = struct.unpack('>Q', payload[11:19])[0]
+        length = struct.unpack('>I', payload[19:23])[0]
+
+        media_payload = b''
+        if len(payload) >= 23+length:
+            media_payload = payload[23:(23+length)]
+
+        return {
+            'data_id': data_id,
+            'stream_flag': stream_flag,
+            'timestamp': timestamp,
+            'pts': pts,
+            'media_payload': media_payload,
+        }
+
+    @staticmethod
+    def parse_image_packet(payload):
+        """Parse image packet"""
+        if len(payload) < 15:
+            return {}
+
+        data_id = struct.unpack('>H', payload[0:2])[0]
+        byte2 = payload[2]
+        stream_flag = (byte2 >> 6) & 0x03
+        timestamp = struct.unpack('>Q', payload[3:11])[0]
+        length = struct.unpack('>I', payload[11:15])[0]
+
+        image_payload = b''
+        if len(payload) >= 15+length:
+            image_payload = payload[15:(15+length)]
+
+        return {
+            'data_id': data_id,
+            'stream_flag': stream_flag,
+            'timestamp': timestamp,
+            'image_payload': image_payload,
+        }
+
+    @staticmethod
+    def parse_text_packet(payload):
+        """Parse text packet"""
+        if len(payload) < 7:
+            return {}
+
+        data_id = struct.unpack('>H', payload[0:2])[0]
+        byte2 = payload[2]
+        stream_flag = (byte2 >> 6) & 0x03
+        length = struct.unpack('>I', payload[3:7])[0]
+
+        text_data = b''
+        if len(payload) >= 7+length:
+            text_data = payload[7:(7+length)]
+        text_content = text_data.decode('utf-8', errors='ignore')
+
+        return {
+            'data_id': data_id,
+            'stream_flag': stream_flag,
+            'text_content': text_content,
+        }
+
+    @staticmethod
+    def parse_packet(payload, signature):
+        """Parse application layer packet"""
+        if len(payload) < 5:
+            return None
+
+        if len(signature) != 32:
+            return None
+
+        # Parse first byte
+        byte0 = payload[0]
+        packet_type = (byte0 & 0xFE) >> 1  # 0x1111110
+        attribute_flag = byte0 & 0x01  # 0x0000001
+        type_name = ProtocolParser.PACKET_TYPES.get(
+            packet_type, f"Unknown({packet_type})"
+        )
+
+        offset = 1
+        attributes = {}
+
+        # Parse attributes: 0-no attributes; 1-have attributes;
+        if attribute_flag:
+            if len(payload) < offset + 4:
+                return None
+
+            attr_length = struct.unpack('>I', payload[offset:(offset+4)])[0]
+            offset += 4
+
+            if len(payload) < offset + attr_length:
+                return None
+
+            attributes = ProtocolParser.parse_attributes(
+                payload[offset:(offset+attr_length)]
+            )
+            offset += attr_length
+
+        # Parse payload length
+        if len(payload) < offset + 4:
+            return None
+
+        payload_length = struct.unpack('>I', payload[offset:offset + 4])[0]
+        offset += 4
+
+        # Extract payload data
+        if len(payload) < offset + payload_length:
+            return None
+
+        packet_payload = payload[offset:offset + payload_length]
+
+        packet = {
+            'type': packet_type,
+            'type_name': type_name,
+            'attributes': attributes,
+            'payload': packet_payload
+        }
+
+        # Parse specific content based on packet type
+        if packet_type in [30, 31]:  # Video/Audio
+            packet.update(ProtocolParser.parse_media_packet(packet_payload))
+        elif packet_type == 32:  # Image
+            packet.update(ProtocolParser.parse_image_packet(packet_payload))
+        elif packet_type == 34:  # Text
+            packet.update(ProtocolParser.parse_text_packet(packet_payload))
+
+        return packet

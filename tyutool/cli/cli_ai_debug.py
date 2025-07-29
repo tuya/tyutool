@@ -4,10 +4,12 @@
 import sys
 import click
 import threading
+import pprint
 
 from tyutool.ai_debug import TYPE_MAPPING
 from tyutool.ai_debug import SocketConnector
 from tyutool.ai_debug import ProtocolParser
+from tyutool.ai_debug import DataDisplay
 from tyutool.util.util import get_logger
 
 
@@ -21,6 +23,8 @@ class AIDebugMonitor(object):
         self.logger = logger
 
         self.connector = SocketConnector(host, port, logger)
+        self.parser = ProtocolParser()
+        self.display = DataDisplay(logger)
         pass
 
     def connect(self, timeout=10):
@@ -28,7 +32,6 @@ class AIDebugMonitor(object):
             return False
 
         self.connector.send_subscription(self.monitor_types)
-        self.parser = ProtocolParser()
 
         self.running = True
         self.buffer = b''
@@ -67,7 +70,51 @@ class AIDebugMonitor(object):
                     break
 
                 self.buffer = remaining
-                print(f"header: {header}")
+
+                frag_flag = header['frag_flag']
+
+                if frag_flag == 0:  # No fragmentation
+                    # Parse packet
+                    packet = self.parser.parse_packet(
+                        header['payload'], header['signature']
+                    )
+                    if packet:
+                        self._handle_packet(packet)
+
+                elif frag_flag == 1:  # Fragment start
+                    self.fragment_buffer = [header['payload']]
+
+                elif frag_flag == 2:  # Fragment middle
+                    if self.fragment_buffer:
+                        self.fragment_buffer.append(header['payload'])
+
+                elif frag_flag == 3:  # Fragment end
+                    if self.fragment_buffer:
+                        self.fragment_buffer.append(header['payload'])
+                        complete_payload = b''.join(self.fragment_buffer)
+                        self.fragment_buffer = None
+
+                        # Parse complete packet
+                        packet = self.parser.parse_packet(
+                            complete_payload, header['signature']
+                        )
+                        if packet:
+                            self._handle_packet(packet)
+        pass
+
+    def _handle_packet(self, packet):
+        packet_format = pprint.pformat(packet, indent=2, sort_dicts=False)
+        self.logger.debug(f"packet: \n{packet_format}")
+
+        should_monitor = False
+        packet_type = packet['type']
+        for monitor_type in self.monitor_types:
+            if packet_type == TYPE_MAPPING.get(monitor_type):
+                should_monitor = True
+                break
+
+        if should_monitor:
+            self.display.display_packet(packet)
         pass
 
 

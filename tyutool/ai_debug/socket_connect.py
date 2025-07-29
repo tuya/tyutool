@@ -9,12 +9,7 @@ import uuid
 import logging
 
 
-TYPE_MAPPING = {
-    'a': 31,  # Audio
-    't': 34,  # Text
-    'v': 30,  # Video
-    'p': 32,  # Image
-}
+from .protocol import TYPE_MAPPING
 
 
 class SocketConnector(object):
