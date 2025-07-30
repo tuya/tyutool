@@ -24,6 +24,7 @@ class SocketConnector(object):
         self.sequence = 1
         self.data_queue = queue.Queue()
         self.receive_thread = None
+        self.logger.debug("SocketConnector init.")
         pass
 
     def _receive_loop(self):

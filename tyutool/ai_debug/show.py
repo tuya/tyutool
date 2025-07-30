@@ -3,14 +3,87 @@
 
 from datetime import datetime
 
-from .protocol import TYPE_MAPPING
-
 logger = None
 
 
 class DataDisplay:
     def __init__(self, logger):
         self.logger = logger
+
+    def _display_audio(self, packet, msg):
+        data_id = packet.get('data_id', 0)
+        stream_status = packet.get('stream_status', "Unknown")
+        direction = "Uplink" if data_id % 2 == 1 else "Downlink"
+
+        audio_msg = f'''
+🎵 Audio data:
+   - DataID: {data_id} ({direction})
+   - Status: {stream_status}
+   - Timestamp: {packet.get('timestamp', 0)}
+   - PTS: {packet.get('pts', 0)}
+   - Size: {packet.get('size', 0)} bytes
+'''
+
+        msg += audio_msg
+        self.logger.info(msg)
+        pass
+
+    def _display_text(self, packet, msg):
+        data_id = packet.get('data_id', 0)
+        stream_status = packet.get('stream_status', "Unknown")
+        text_content = packet.get('text_content', '')
+
+        text_msg = f'''
+📝 Text data:
+   - DataID: {data_id}
+   - Status: {stream_status}
+   - Content: {text_content}
+'''
+        msg += text_msg
+        self.logger.info(msg)
+        pass
+
+    def _display_video(self, packet, msg):
+        data_id = packet.get('data_id', 0)
+        stream_status = packet.get('stream_status', "Unknown")
+
+        video_msg = f'''
+🎥 Video data:
+   - DataID: {data_id}
+   - Status: {stream_status}
+   - Timestamp: {packet.get('timestamp', 0)}
+   - PTS: {packet.get('pts', 0)}
+   - Size: {packet.get('size', 0)} bytes
+'''
+
+        msg += video_msg
+        self.logger.info(msg)
+        pass
+
+    def _display_image(self, packet, msg):
+        data_id = packet.get('data_id', 0)
+        stream_status = packet.get('stream_status', "Unknown")
+        timestamp = packet.get('timestamp', 0)
+        size = packet.get('size', 0)
+        format = "None"
+        image_payload = packet.get('image_payload', b'')
+        if image_payload.startswith(b'\xff\xd8\xff'):
+            format = "JPEG"
+        elif image_payload.startswith(b'\x89PNG'):
+            format = "PNG"
+
+        image_msg = f'''
+🖼️  Image data:
+   - DataID: {data_id}
+   - Status: {stream_status}
+   - Timestamp: {timestamp}
+   - Format: {format}
+   - Size: {size} bytes
+'''
+
+        msg += image_msg
+        self.logger.info(msg)
+        pass
 
     def display_packet(self, packet):
         # Display packet information
@@ -40,104 +113,3 @@ class DataDisplay:
         elif packet_type == 32:  # Image
             self._display_image(packet, msg)
         pass
-
-    def _display_audio(self, packet, msg):
-        data_id = packet.get('data_id', 0)
-        stream_flag = packet.get('stream_flag', 0)
-        direction = "Uplink" if data_id % 2 == 1 else "Downlink"
-
-        stream_status = {
-            0: "Single packet",
-            1: "Stream start",
-            2: "Stream continue",
-            3: "Stream end",
-        }
-        status = stream_status.get(stream_flag, "Unknown")
-        media_payload = packet.get('media_payload', b'')
-
-        audio_msg = f'''
-🎵 Audio data:
-   - DataID: {data_id} ({direction})
-   - Status: {status}
-   - Timestamp: {packet.get('timestamp', 0)}
-   - PTS: {packet.get('pts', 0)}
-   - Size: {len(media_payload)} bytes
-'''
-
-        msg += audio_msg
-        self.logger.info(msg)
-        pass
-
-    def _display_text(self, packet, msg):
-        data_id = packet.get('data_id', 0)
-        stream_flag = packet.get('stream_flag', 0)
-        text_content = packet.get('text_content', '')
-
-        stream_status = {
-            0: "Single packet",
-            1: "Stream start",
-            2: "Stream continue",
-            3: "Stream end",
-        }
-        status = stream_status.get(stream_flag, "Unknown")
-
-        text_msg = f'''
-📝 Text data:
-   - DataID: {data_id}
-   - Status: {status}
-   - Content: {text_content}
-'''
-        msg += text_msg
-        self.logger.info(msg)
-        pass
-
-    def _display_video(self, packet, msg):
-        data_id = packet.get('data_id', 0)
-        stream_flag = packet.get('stream_flag', 0)
-
-        stream_status = {
-            0: "Single packet",
-            1: "Stream start",
-            2: "Stream continue",
-            3: "Stream end",
-        }
-        status = stream_status.get(stream_flag, "Unknown")
-        media_payload = packet.get('media_payload', b'')
-
-        video_msg = f'''
-🎥 Video data:
-   - DataID: {data_id}
-   - Status: {status}
-   - Timestamp: {packet.get('timestamp', 0)}
-   - PTS: {packet.get('pts', 0)}
-   - Size: {len(media_payload)} bytes
-'''
-
-        msg += video_msg
-        self.logger.info(msg)
-        pass
-
-    def _display_image(self, packet, msg):
-        data_id = packet.get('data_id', 0)
-        timestamp = packet.get('timestamp', 0)
-        format = "None"
-        image_payload = packet.get('image_payload', b'')
-        if image_payload.startswith(b'\xff\xd8\xff'):
-            format = "JPEG"
-        elif image_payload.startswith(b'\x89PNG'):
-            format = "PNG"
-
-        image_msg = f'''
-🖼️  Image data:
-   - DataID: {data_id}
-   - Timestamp: {timestamp}
-   - Format: {format}
-   - Size: {len(image_payload)} bytes
-'''
-
-        msg += image_msg
-        self.logger.info(msg)
-        pass
-
-    def get_type_name(self, type_char):
-        return TYPE_MAPPING.get(type_char, type_char)

@@ -53,6 +53,13 @@ class ProtocolParser:
         114: "ServerTimestamp"
     }
 
+    STREAM_STATUS = {
+        0: "Single packet",
+        1: "Stream start",
+        2: "Stream continue",
+        3: "Stream end",
+    }
+
     @staticmethod
     def _find_frame_sync(data):
         """Frame sync - Find magic field in data stream"""
@@ -202,6 +209,7 @@ actual 0x{magic:08x}")
         data_id = struct.unpack('>H', payload[0:2])[0]
         byte2 = payload[2]
         stream_flag = (byte2 & 0xC0) >> 6  # 0x11000000
+        status = ProtocolParser.STREAM_STATUS.get(stream_flag, "Unknown")
         timestamp = struct.unpack('>Q', payload[3:11])[0]
         pts = struct.unpack('>Q', payload[11:19])[0]
         length = struct.unpack('>I', payload[19:23])[0]
@@ -213,9 +221,11 @@ actual 0x{magic:08x}")
         return {
             'data_id': data_id,
             'stream_flag': stream_flag,
+            'stream_status': status,
             'timestamp': timestamp,
             'pts': pts,
             'media_payload': media_payload,
+            'size': length,
         }
 
     @staticmethod
@@ -226,7 +236,8 @@ actual 0x{magic:08x}")
 
         data_id = struct.unpack('>H', payload[0:2])[0]
         byte2 = payload[2]
-        stream_flag = (byte2 >> 6) & 0x03
+        stream_flag = (byte2 & 0xC0) >> 6  # 0x11000000
+        status = ProtocolParser.STREAM_STATUS.get(stream_flag, "Unknown")
         timestamp = struct.unpack('>Q', payload[3:11])[0]
         length = struct.unpack('>I', payload[11:15])[0]
 
@@ -237,8 +248,10 @@ actual 0x{magic:08x}")
         return {
             'data_id': data_id,
             'stream_flag': stream_flag,
+            'stream_status': status,
             'timestamp': timestamp,
             'image_payload': image_payload,
+            'size': length,
         }
 
     @staticmethod
@@ -250,6 +263,7 @@ actual 0x{magic:08x}")
         data_id = struct.unpack('>H', payload[0:2])[0]
         byte2 = payload[2]
         stream_flag = (byte2 >> 6) & 0x03
+        status = ProtocolParser.STREAM_STATUS.get(stream_flag, "Unknown")
         length = struct.unpack('>I', payload[3:7])[0]
 
         text_data = b''
@@ -260,11 +274,13 @@ actual 0x{magic:08x}")
         return {
             'data_id': data_id,
             'stream_flag': stream_flag,
+            'stream_status': status,
             'text_content': text_content,
+            'size': length,
         }
 
     @staticmethod
-    def parse_packet(payload, signature):
+    def parse_packet(payload, signature, header):
         """Parse application layer packet"""
         if len(payload) < 5:
             return None
@@ -313,6 +329,7 @@ actual 0x{magic:08x}")
         packet_payload = payload[offset:offset + payload_length]
 
         packet = {
+            'direction': header["direction"],
             'type': packet_type,
             'type_name': type_name,
             'attributes': attributes,

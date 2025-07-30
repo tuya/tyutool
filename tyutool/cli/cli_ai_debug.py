@@ -2,21 +2,29 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import os
 import click
 import threading
 import pprint
+from datetime import datetime
 
 from tyutool.ai_debug import TYPE_MAPPING
 from tyutool.ai_debug import SocketConnector
 from tyutool.ai_debug import ProtocolParser
 from tyutool.ai_debug import DataDisplay
+from tyutool.ai_debug import SaveDatabase
 from tyutool.util.util import get_logger
 
 
 class AIDebugMonitor(object):
     def __init__(self,
-                 host='localhost', port=5055, monitor_types=[],
-                 logger=None):
+                 host="localhost", port=5055, monitor_types=[],
+                 save_dir="ai_debug_db", logger=None):
+        now = datetime.now().strftime("%Y%m%d-%H%M%S")
+        save_db = ""
+        if save_dir:
+            save_db = os.path.join(save_dir, now, "ai.db")
+
         self.host = host
         self.port = port
         self.monitor_types = monitor_types
@@ -25,6 +33,7 @@ class AIDebugMonitor(object):
         self.connector = SocketConnector(host, port, logger)
         self.parser = ProtocolParser()
         self.display = DataDisplay(logger)
+        self.save = SaveDatabase(save_db, logger) if save_db else None
         pass
 
     def connect(self, timeout=10):
@@ -76,10 +85,9 @@ class AIDebugMonitor(object):
                 if frag_flag == 0:  # No fragmentation
                     # Parse packet
                     packet = self.parser.parse_packet(
-                        header['payload'], header['signature']
+                        header['payload'], header['signature'], header
                     )
-                    if packet:
-                        self._handle_packet(packet)
+                    self._handle_packet(packet)
 
                 elif frag_flag == 1:  # Fragment start
                     self.fragment_buffer = [header['payload']]
@@ -96,14 +104,20 @@ class AIDebugMonitor(object):
 
                         # Parse complete packet
                         packet = self.parser.parse_packet(
-                            complete_payload, header['signature']
+                            complete_payload, header['signature'], header
                         )
-                        if packet:
-                            self._handle_packet(packet)
+                        self._handle_packet(packet)
         pass
 
     def _handle_packet(self, packet):
-        packet_format = pprint.pformat(packet, indent=2, sort_dicts=False)
+        if not packet:
+            return
+
+        # sort_dicts=False: only for python3.8+
+        packet_format = pprint.pformat(packet,
+                                       indent=2,
+                                       # sort_dicts=False,
+                                       )
         self.logger.debug(f"packet: \n{packet_format}")
 
         should_monitor = False
@@ -115,6 +129,8 @@ class AIDebugMonitor(object):
 
         if should_monitor:
             self.display.display_packet(packet)
+            if self.save:
+                self.save.save(packet)
         pass
 
 
@@ -132,14 +148,18 @@ e_option_type = click.Choice(TYPE_MAPPING.keys(), case_sensitive=False)
               type=e_option_type, default=['t'],
               multiple=True,
               help="Data type to monitor, can be specified multiple times")
-def cli(ip, port, event):
+@click.option('-s', '--save',
+              type=str, default="ai_debug_db",
+              help="Save db file to catalog")
+def cli(ip, port, event, save):
     logger = get_logger()
     logger.debug("CLI debug")
     logger.info(f"ip: {ip}")
     logger.info(f"port: {port}")
     logger.info(f"event: {event}")
+    logger.info(f"save: {save}")
 
-    monitor = AIDebugMonitor(ip, port, event, logger)
+    monitor = AIDebugMonitor(ip, port, event, save, logger)
 
     # Connect to server
     if not monitor.connect():
