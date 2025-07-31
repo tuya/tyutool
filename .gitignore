@@ -15,5 +15,6 @@ tyutool_gui
 /build
 /dist
 /cache
-/ai_debug_db
+/web_ai_debug
+/ser_ai_debug
 /.venv

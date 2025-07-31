@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from .flash.choose_port import choose_port
+
 __all__ = [
-    "cli"
+    "choose_port",
+    "cli",
 ]
 
 
