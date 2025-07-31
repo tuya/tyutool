@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 # coding=utf-8
 
+import os
 import sys
 import time
 import serial
 import threading
+from datetime import datetime
 
 from tyutool.cli import choose_port
 
 
 class SerAIDebugMonitor(object):
-    def __init__(self, port, baud, save, logger):
+    def __init__(self, port, baud, save,
+                 logger):
+        self.logger = logger
         self.port = port or choose_port()
         self.baud = baud
-        self.save = save
+        now = datetime.now().strftime("%Y%m%d-%H%M%S")
+        save_path = os.path.join(save, now)
+        os.makedirs(save_path, exist_ok=True)
+        self.save_path = os.path.abspath(save_path)
+        self.logger.debug(f"save_path: {save_path}.")
 
         self.ser = None
         self.running = False
@@ -30,34 +38,32 @@ class SerAIDebugMonitor(object):
         pass
 
     def open_port(self):
-        """打开指定串口"""
         try:
             self.ser = serial.Serial(
                 port=self.port,
-                baudrate=2000000,
+                baudrate=460800,
                 timeout=0.1
             )
             time.sleep(0.5)  # 等待串口初始化
-            return True
         except Exception as e:
-            print(f"打开串口失败: {e}")
+            self.logger.error(f"Open serial: {e}")
             return False
+        return True
 
     def start_reading(self):
-        """启动数据读取线程"""
         self.running = True
         self.read_thread = threading.Thread(target=self.read_from_serial)
         self.read_thread.daemon = True
         self.read_thread.start()
+        pass
 
     def stop_reading(self):
-        """停止数据读取"""
         self.running = False
         if hasattr(self, 'read_thread') and self.read_thread.is_alive():
             self.read_thread.join()
+        pass
 
     def read_from_serial(self):
-        """串口数据读取线程"""
         while self.running:
             if self.ser and self.ser.is_open:
                 try:
@@ -66,32 +72,37 @@ class SerAIDebugMonitor(object):
                         self.last_data_time = time.time()  # 更新最后接收时间
                         self.process_received_data(data)
                 except Exception as e:
-                    print(f"读取错误: {e}")
+                    self.logger.error(f"read serial: {e}")
 
             # 检查dump超时
             if self.current_dump_channel:
                 if time.time() - self.last_data_time > 0.1:  # 100ms超时
-                    self.stop_dump(self.current_dump_channel)
+                    self.stop_dump()
 
             time.sleep(0.01)
+        pass
 
     def process_received_data(self, data):
-        """处理接收到的数据"""
-        # 更新dump文件长度
-        if self.current_dump_channel and self.dump_files[self.current_dump_channel]['active']:
-            self.dump_files[self.current_dump_channel]['length'] += len(data)
-            self.update_length_display()
-
-        # 写入当前dump文件
-        if self.current_dump_channel and self.dump_files[self.current_dump_channel]['file']:
-            self.dump_files[self.current_dump_channel]['file'].write(data)
-
         # 非dump模式下显示接收数据
         if not self.current_dump_channel:
             try:
                 print(data.decode('utf-8', errors='replace'), end='')
-            except:
+            except Exception as e:
+                self.logger.debug(f"decode error: {e}")
                 pass  # 忽略非文本数据
+            return
+
+        # 更新dump文件长度
+        dump_active = self.dump_files[self.current_dump_channel]['active']
+        if dump_active:
+            self.dump_files[self.current_dump_channel]['length'] += len(data)
+            self.update_length_display()
+
+        # 写入当前dump文件
+        dump_file = self.dump_files[self.current_dump_channel]['file']
+        if dump_file:
+            dump_file.write(data)
+        pass
 
     def update_length_display(self):
         """更新dump长度显示（同一行刷新）"""
@@ -99,75 +110,139 @@ class SerAIDebugMonitor(object):
             channel = self.current_dump_channel
             length = self.dump_files[channel]['length']
             times = length/32000
-            sys.stdout.write(f"\r接收数据长度: {length} 字节, 录音时间 {times:.3f} s")
+            sys.stdout.write(f"\rReceived: {length} bytes ({times:.3f}s)")
             sys.stdout.flush()
+        pass
 
     def send_command(self, cmd):
-        """发送命令到串口"""
         if not self.ser or not self.ser.is_open:
-            print("串口未连接！")
+            self.logger.warning("The serial port is not connected.")
             return False
 
         try:
             # 添加"ao "前缀和回车换行
             full_cmd = f"ao {cmd}\r\n"
             self.ser.write(full_cmd.encode('utf-8'))
-            print(f"已发送: ao {cmd}")
-            return True
+            self.logger.info(f"Send: ao {cmd}")
         except Exception as e:
-            print(f"发送失败: {e}")
+            self.logger.error(f"Send failed: {e}")
             return False
+        return True
 
     def start_dump(self, channel):
-        """启动数据转储"""
         if channel not in self.dump_files:
-            print(f"无效通道: {channel}")
+            self.logger.warning(f"Invalid channel: {channel}")
             return
 
         # 如果已有dump在运行，先停止
-        if self.current_dump_channel:
-            self.stop_dump(self.current_dump_channel)
+        self.stop_dump()
 
         # 发送dump命令
         self.send_command(f"dump {channel}")
 
         try:
             # 打开文件（二进制写入），覆盖已存在的文件
-            self.dump_files[channel]['file'] = open(self.dump_files[channel]['name'], 'wb')
+            now = datetime.now().strftime("%H%M%S")
+            file_name = f"{now}-{self.dump_files[channel]['name']}"
+            file_path = os.path.join(self.save_path, file_name)
+            self.dump_files[channel]['file'] = open(file_path, 'wb')
             self.dump_files[channel]['active'] = True
             self.dump_files[channel]['length'] = 0
             self.current_dump_channel = channel
             self.last_data_time = time.time()  # 记录开始时间
 
-            print(f"开始转储通道 {channel} -> {self.dump_files[channel]['name']}")
-            print("等待接收数据...(100ms无数据自动停止)")
+            self.logger.info(f"dump {channel} -> {file_path}")
+            self.logger.info("Waiting... (timeout 100ms)")
         except Exception as e:
-            print(f"创建文件失败: {e}")
+            self.logger.error(f"dump {channel}: {e}")
+        pass
 
-    def stop_dump(self, channel=None):
-        """停止数据转储"""
-        if not channel and self.current_dump_channel:
-            channel = self.current_dump_channel
+    def stop_dump(self):
+        if not self.current_dump_channel:
+            return
 
-        if channel and channel in self.dump_files and self.dump_files[channel]['active']:
-            # 停止指定通道
+        channel = self.current_dump_channel
+        if channel and self.dump_files[channel]['active']:
             if self.dump_files[channel]['file']:
                 self.dump_files[channel]['file'].close()
             self.dump_files[channel]['file'] = None
             self.dump_files[channel]['active'] = False
 
             length = self.dump_files[channel]['length']
-            print(f"\n已停止转储通道 {channel}, 接收长度: {length} 字节")
-            print(f"数据已保存到: {self.dump_files[channel]['name']}")
+            self.logger.info(f"\nStop dump {channel} ({length} bytes)")
+            self.logger.info(f"Saved to: {self.dump_files[channel]['name']}")
 
             # 重置当前通道
             self.current_dump_channel = None
+        pass
 
     def close_port(self):
-        """关闭串口"""
-        if self.current_dump_channel:
-            self.stop_dump(self.current_dump_channel)
+        self.stop_dump()
 
         if self.ser and self.ser.is_open:
             self.ser.close()
-            print("串口已关闭")
+            self.logger.info("The serial port has been closed.")
+
+    def show_help(self):
+        print("\n支持命令:")
+        print("start       - 启动录音")
+        print("stop        - 停止录音")
+        print("reset       - 重置录音")
+        print("dump 0      - 转储参考通道到 dump_mic.pcm")
+        print("dump 1      - 转储麦克风通道到 dump_ref.pcm")
+        print("dump 2      - 转储AEC通道到 dump_aec.pcm")
+        print("bg 0        - white noise")
+        print("bg 1        - 1K-0dB (bg 1 1000)")
+        print("bg 2        - sweep frequency constantly")
+        print("bg 3        - sweep discrete frequency")
+        print("bg 4        - min single frequency")
+        print("volume 50   - 设置音量为 50%")
+        print("micgain 50   - default micgain=70")
+        print("alg set <para> <value> - 设置音频算法参数 (如: alg set aec_ec_depth 1)")
+        print("alg set vad_SPthr <0-13> <value> - 设置音频算法参数 (如: alg set vad_SPthr 0 1000)")
+        print("alg get <para> - 获取音频算法参数 (如: alg get aec_ec_depth)")
+        print("alg dump    - 转储音频算法参数")
+        print("quit        - 退出程序")
+        pass
+
+    def process_input_cmd(self, cmd):
+        # Quit
+        if cmd == 'quit':
+            return False
+
+        # Help
+        if cmd.startswith('help'):
+            self.show_help()
+            return True
+
+        # Dump
+        if cmd in ['dump 0', 'dump 1', 'dump 2']:
+            channel = cmd.split()[1]
+            self.start_dump(channel)
+            return True
+
+        # Check [alg set] params
+        elif cmd.startswith('alg set '):
+            parts = cmd.split()
+            if len(parts) == 4:
+                self.send_command(f"alg set {parts[2]} {parts[3]}")
+            elif len(parts) == 5 and "vad_SPthr" == parts[2]:
+                # SPthr 参数需要两个值
+                idx = parts[3]  # 0~13
+                value = parts[4]  # 0~65535
+                # check if idx is a number
+                if idx.isdigit() and 0 <= int(idx) <= 13:
+                    # 拼接命令 spthr_idx[8] || rev[8] || value[16]
+                    alg_parm = (int(idx) << 24) | (int(value) & 0xFFFF)
+                    alg_cmd = f"alg set vad_SPthr {alg_parm}"
+                    self.send_command(alg_cmd)
+                    self.logger.info(f"->: {alg_cmd}")
+                else:
+                    self.logger.error("<idx> should be between 0 and 13")
+            else:
+                self.logger.error("Command error")
+            return True
+
+        # Other
+        self.send_command(cmd)
+        return True

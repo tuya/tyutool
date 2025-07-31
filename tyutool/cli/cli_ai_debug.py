@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import sys
-import os
 import click
 import threading
 
@@ -79,54 +78,18 @@ def ser_cli(port, baud, save):
     monitor.start_reading()
 
     # 主命令循环
-    print("\n支持命令:")
-    print("start       - 启动录音")
-    print("stop        - 停止录音")
-    print("reset       - 重置录音")
-    print("dump 0      - 转储参考通道到 dump_mic.pcm")
-    print("dump 1      - 转储麦克风通道到 dump_ref.pcm")
-    print("dump 2      - 转储AEC通道到 dump_aec.pcm")
-    print("bg 0        - 5s white")
-    print("bg 1        - 5s 1K-0dB (bg 1 1000)")
-    print("bg 2        - 4s sweep frequency")
-    print("volume 50   - 设置音量为 50%")
-    print("quit        - 退出程序")
+    monitor.show_help()
 
-    # 检查并覆盖已存在的文件
-    for channel in monitor.dump_files:
-        filename = monitor.dump_files[channel]['name']
-        if os.path.exists(filename):
-            print(f"注意: 已存在文件 {filename}，将被覆盖")
-
+    # Loop input cmd
     try:
         while True:
-            user_input = input("> ").strip().lower()
+            user_input = input("> ").strip()
 
-            if user_input == 'quit':
+            if not monitor.process_input_cmd(user_input):
                 break
 
-            # 处理dump命令
-            elif user_input in ['dump 0', 'dump 1', 'dump 2']:
-                channel = user_input.split()[1]
-                monitor.start_dump(channel)
-
-            # 处理其他命令
-            elif user_input in ['start', 'stop', 'reset', 'bg 0', 'bg 1', 'bg 2']:
-                monitor.send_command(user_input)
-
-            # 处理 bg 1 单频率命令
-            elif user_input.startswith('bg 1 '):
-                monitor.send_command(user_input)
-
-            # 处理音量设置
-            elif user_input.startswith('volume '):
-                monitor.send_command(user_input)
-
-            # 提示支持命令
-            else:
-                print("支持的命令: start, stop, reset, dump 0, dump 1, dump 2, bg 0, bg 1, bg 2, quit")
     except KeyboardInterrupt:
-        print("\n程序中断")
+        logger.info("\nKeyboard Interrupt")
     finally:
         # 清理资源
         monitor.stop_reading()
