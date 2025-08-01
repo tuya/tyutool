@@ -58,16 +58,16 @@ def web_cli(ip, port, event, save):
               type=str, required=False,
               help="Target port")
 @click.option('-b', '--baud',
-              type=int, default=115200,
+              type=int, default=460800,
               help="Uart baud rate")
 @click.option('-s', '--save',
               type=str, default="ser_ai_debug",
               help="Save assets to catalog.")
 def ser_cli(port, baud, save):
     logger = get_logger()
-    logger.info(f"port: {port}")
-    logger.info(f"baud: {baud}")
-    logger.info(f"save: {save}")
+    logger.debug(f"port: {port}")
+    logger.debug(f"baud: {baud}")
+    logger.debug(f"save: {save}")
 
     monitor = SerAIDebugMonitor(port, baud, save, logger)
 
@@ -97,9 +97,47 @@ def ser_cli(port, baud, save):
     pass
 
 
+@click.command()
+@click.option('-p', '--port',
+              type=str, required=False,
+              help="Target port")
+@click.option('-b', '--baud',
+              type=int, default=460800,
+              help="Uart baud rate")
+@click.option('-s', '--save',
+              type=str, default="ser_ai_debug",
+              help="Save assets to catalog.")
+def ser_auto_cli(port, baud, save):
+    logger = get_logger()
+    logger.debug(f"port: {port}")
+    logger.debug(f"baud: {baud}")
+    logger.debug(f"save: {save}")
+
+    monitor = SerAIDebugMonitor(port, baud, save, logger)
+
+    if not monitor.open_port():
+        return
+
+    # 启动读取线程
+    monitor.start_reading()
+
+    # Loop input cmd
+    try:
+        monitor.auto_test()
+
+    except KeyboardInterrupt:
+        logger.info("\nKeyboard Interrupt")
+    finally:
+        # 清理资源
+        monitor.stop_reading()
+        monitor.close_port()
+    pass
+
+
 CLIS = {
     "web": web_cli,
     "ser": ser_cli,
+    "ser_auto": ser_auto_cli,
 }
 
 

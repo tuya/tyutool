@@ -8,6 +8,7 @@ import serial
 import threading
 from datetime import datetime
 
+from .audio_test import AudioTestTools
 from tyutool.cli import choose_port
 
 
@@ -41,7 +42,7 @@ class SerAIDebugMonitor(object):
         try:
             self.ser = serial.Serial(
                 port=self.port,
-                baudrate=460800,
+                baudrate=self.baud,
                 timeout=0.1
             )
             time.sleep(0.5)  # 等待串口初始化
@@ -129,7 +130,7 @@ class SerAIDebugMonitor(object):
             return False
         return True
 
-    def start_dump(self, channel):
+    def start_dump(self, channel, prefix):
         if channel not in self.dump_files:
             self.logger.warning(f"Invalid channel: {channel}")
             return
@@ -142,8 +143,8 @@ class SerAIDebugMonitor(object):
 
         try:
             # 打开文件（二进制写入），覆盖已存在的文件
-            now = datetime.now().strftime("%H%M%S")
-            file_name = f"{now}-{self.dump_files[channel]['name']}"
+            prefix = prefix or datetime.now().strftime("%H%M%S")
+            file_name = f"{prefix}-{self.dump_files[channel]['name']}"
             file_path = os.path.join(self.save_path, file_name)
             self.dump_files[channel]['file'] = open(file_path, 'wb')
             self.dump_files[channel]['active'] = True
@@ -199,7 +200,8 @@ class SerAIDebugMonitor(object):
         print("volume 50   - 设置音量为 50%")
         print("micgain 50   - default micgain=70")
         print("alg set <para> <value> - 设置音频算法参数 (如: alg set aec_ec_depth 1)")
-        print("alg set vad_SPthr <0-13> <value> - 设置音频算法参数 (如: alg set vad_SPthr 0 1000)")
+        print("alg set vad_SPthr <0-13> <value> \
+- 设置音频算法参数 (如: alg set vad_SPthr 0 1000)")
         print("alg get <para> - 获取音频算法参数 (如: alg get aec_ec_depth)")
         print("alg dump    - 转储音频算法参数")
         print("quit        - 退出程序")
@@ -246,3 +248,72 @@ class SerAIDebugMonitor(object):
         # Other
         self.send_command(cmd)
         return True
+
+    def auto_test(self):
+        '''
+        '''
+        cmd_sleep = 0.1
+        play_sleep = 5
+        dump_sleep = 10
+
+        # white
+        self.send_command("start")
+        time.sleep(cmd_sleep)
+        self.send_command("bg 0")
+        time.sleep(play_sleep)
+        self.send_command("stop")
+        time.sleep(cmd_sleep)
+        self.start_dump("0", "white")
+        time.sleep(dump_sleep)
+        self.start_dump("1", "white")
+        time.sleep(dump_sleep)
+
+        file_name = f"white-{self.dump_files['0']['name']}"
+        white_mic1 = os.path.join(self.save_path, file_name)
+        white_mic2 = white_mic1
+        file_name = f"white-{self.dump_files['1']['name']}"
+        white_ref = os.path.join(self.save_path, file_name)
+
+        # 1K-0dB
+        self.send_command("start")
+        time.sleep(cmd_sleep)
+        self.send_command("bg 1")
+        time.sleep(play_sleep)
+        self.send_command("stop")
+        time.sleep(cmd_sleep)
+        self.start_dump("0", "1k")
+        time.sleep(dump_sleep)
+        self.start_dump("1", "1k")
+        time.sleep(dump_sleep)
+
+        file_name = f"1k-{self.dump_files['0']['name']}"
+        k1_mic1 = os.path.join(self.save_path, file_name)
+        k1_mic2 = k1_mic1
+        file_name = f"1k-{self.dump_files['1']['name']}"
+        k1_ref = os.path.join(self.save_path, file_name)
+
+        # silence
+        self.send_command("start")
+        time.sleep(cmd_sleep)
+        self.send_command("bg 4")
+        time.sleep(play_sleep)
+        self.send_command("stop")
+        time.sleep(cmd_sleep)
+        self.start_dump("0", "silence")
+        time.sleep(dump_sleep)
+        self.start_dump("1", "silence")
+        time.sleep(dump_sleep)
+
+        file_name = f"silence-{self.dump_files['0']['name']}"
+        silence_mic1 = os.path.join(self.save_path, file_name)
+        silence_mic2 = silence_mic1
+        file_name = f"silence-{self.dump_files['1']['name']}"
+        silence_ref = os.path.join(self.save_path, file_name)
+
+        # test all
+        tool = AudioTestTools(self.save_path, self.logger)
+        tool.test_all(k1_mic1, k1_mic2, k1_ref,
+                      white_mic1, white_mic2, white_ref,
+                      silence_mic1, silence_mic2, silence_ref)
+
+        pass
