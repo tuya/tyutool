@@ -185,26 +185,28 @@ class SerAIDebugMonitor(object):
             self.logger.info("The serial port has been closed.")
 
     def show_help(self):
-        print("\n支持命令:")
-        print("start       - 启动录音")
-        print("stop        - 停止录音")
-        print("reset       - 重置录音")
-        print("dump 0      - 转储参考通道到 dump_mic.pcm")
-        print("dump 1      - 转储麦克风通道到 dump_ref.pcm")
-        print("dump 2      - 转储AEC通道到 dump_aec.pcm")
+        print("\nSupport commands:")
+        print("start       - Start recording")
+        print("stop        - Stop recording")
+        print("reset       - Reset recording")
+        print("dump 0      - Dump microphone channel")
+        print("dump 1      - Dump reference channel")
+        print("dump 2      - Dump AEC channel")
         print("bg 0        - white noise")
         print("bg 1        - 1K-0dB (bg 1 1000)")
         print("bg 2        - sweep frequency constantly")
         print("bg 3        - sweep discrete frequency")
         print("bg 4        - min single frequency")
-        print("volume 50   - 设置音量为 50%")
-        print("micgain 50   - default micgain=70")
-        print("alg set <para> <value> - 设置音频算法参数 (如: alg set aec_ec_depth 1)")
+        print("volume <70>   - Set volume to 70%")
+        print("micgain <70>   - Default micgain=70")
+        print("alg set <para> <value> \
+- Set audio algorithm parameters (e.g.: alg set aec_ec_depth 1)")
         print("alg set vad_SPthr <0-13> <value> \
-- 设置音频算法参数 (如: alg set vad_SPthr 0 1000)")
-        print("alg get <para> - 获取音频算法参数 (如: alg get aec_ec_depth)")
-        print("alg dump    - 转储音频算法参数")
-        print("quit        - 退出程序")
+- Set audio algorithm parameters (e.g.: alg set vad_SPthr 0 1000)")
+        print("alg get <para> \
+- Get audio algorithm parameters (e.g.: alg get aec_ec_depth)")
+        print("alg dump    - Dump audio algorithm parameters")
+        print("quit        - Exit the program")
         pass
 
     def process_input_cmd(self, cmd):
