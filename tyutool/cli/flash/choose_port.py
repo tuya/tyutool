@@ -18,6 +18,7 @@ def choose_port():
     if len(port_items) == 1:
         return port_items[0]
 
+    port_items.sort()
     print("--------------------")
     for i in range(len(port_items)):
         print(f"{i+1}. {port_items[i]}")
