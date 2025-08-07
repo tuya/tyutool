@@ -157,6 +157,10 @@ python tyutool_cli.py --help
 
 关于项目的构建、打包和代码结构的更多详细信息，请参考 [开发文档](tools/develop.md)。
 
+## 📁 其他文档
+
+- [T5音频调试指南](docs/zh/T5音频调试指南.md)
+
 ## 📄 许可证 (License)
 
 本项目采用 [Apache-2.0](LICENSE) 许可证。

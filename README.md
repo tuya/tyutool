@@ -157,6 +157,10 @@ python tyutool_cli.py --help
 
 For more details on the project's build process, packaging, and code structure, please refer to the [Development Documentation](tools/develop.md).
 
+## 📁 Other Documents
+
+- [T5-Audio-Debug-Guide](docs/en/T5-Audio-Debug-Guide.md)
+
 ## 📄 License
 
 This project is licensed under the [Apache-2.0](LICENSE) License.
