@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 from scipy.signal import coherence
 from scipy.fft import rfft, rfftfreq
@@ -11,7 +12,8 @@ class AudioTestTools():
         self.logger = logger
         pass
 
-    def load_signals(self, mic1_path, mic2_path, ref_path, sr=16000, dtype='int16'):
+    def load_signals(self, mic1_path, mic2_path, ref_path,
+                     sr=16000, dtype='int16'):
         def read_pcm(path):
             data = np.fromfile(path, dtype=dtype)
             return data.astype(np.float32) / np.iinfo(dtype).max
@@ -32,7 +34,8 @@ class AudioTestTools():
             return idx
 
         loc = split_pcm(ref)
-        return mic1[loc:loc+16000*2], mic2[loc:loc+16000*2], ref[loc:loc+16000*2], sr
+        return (mic1[loc:loc+16000*2], mic2[loc:loc+16000*2],
+                ref[loc:loc+16000*2], sr)
 
     def dc_offset(self, signal):
         if signal is None:
@@ -40,17 +43,18 @@ class AudioTestTools():
         else:
             dc = np.mean(signal)
             if dc > 0.01:
-                print("dc offset: 不通过")
+                ans = False
             else:
-                print("dc offset: 通过")
-            return dc
+                ans = True
+            return ans, dc
 
     def mic_coherence(self, mic1, mic2, ref, sr):
         plt.figure(figsize=(8, 4))
         # 对齐信号（以ref为基准，mic1/mic2与ref做互相关，找到最大相关位置进行对齐）
         mic1_aligned, ref1 = self.align_signal(mic1, ref)
         f, Cxy_1 = coherence(
-            mic1_aligned, ref1, fs=sr, window='hann', nperseg=1024, noverlap=512
+            mic1_aligned, ref1, fs=sr, window='hann',
+            nperseg=1024, noverlap=512
         )
         f, Cxy_3 = coherence(
             ref, ref, fs=sr, window='hann', nperseg=1024, noverlap=512
@@ -79,10 +83,10 @@ class AudioTestTools():
             Cxy = Cxy_1
 
         if np.mean(Cxy[(f >= 100) & (f < 4000)]) > 0.7:
-            print(" coherence: 通过")
+            ans = True
         else:
-            print(" coherence: 不通过")
-        return f, Cxy
+            ans = False
+        return ans, np.mean(Cxy[f < 4000])
 
     # 对齐信号
     def align_signal(self, sig, ref):
@@ -110,12 +114,12 @@ class AudioTestTools():
         # 计算RMS噪声的dB值（相对于满刻度，FS）
         rms = np.sqrt(np.mean(np.abs(signal)**2))
         db = 20 * np.log10(rms + 1e-12)  # 防止log(0)
-        # print(f"Noise floor: {db:.2f} dBFS")
+        self.logger.debug(f"Noise floor: {db:.2f} dBFS")
         if db > -50:
-            print("Noise floor: 不通过")
+            ans = False
         else:
-            print("Noise floor: 通过")
-        return db
+            ans = True
+        return ans, db
 
     # 削波检测
     def clip_detect(self, signal):
@@ -123,10 +127,10 @@ class AudioTestTools():
         threshold = 0.99
         clipped_samples = np.sum(np.abs(signal) >= threshold)
         if clipped_samples > 0:
-            print("Clipping: 不通过")
+            ans = False
         else:
-            print("Clipping: 通过")
-        return clipped_samples
+            ans = True
+        return ans, clipped_samples
 
     # 总谐波失真
     def thd(self, signal, sr, freq):
@@ -143,15 +147,16 @@ class AudioTestTools():
             harm_power += yf[idx]**2
         thd_value = np.sqrt(harm_power) / fund_power
         if thd_value > 0.05:
-            print("THD: 不通过")
+            ans = False
         else:
-            print("THD: 通过")
-        return thd_value
+            ans = True
+        return ans, thd_value
 
     # 延时稳定性
     def plot_delay_stability_over_time(self, mic1, mic2, ref, sr,
                                        window_ms=300, hop_ms=100,
-                                       save_file='delay_stability.png'):
+                                       save_file='delay_stability.png',
+                                       need_show=False):
         """
         每window_ms毫秒计算一次延时,窗移hop_ms毫秒,画出延时随时间变化的曲线,并保存图片。
         """
@@ -177,10 +182,9 @@ class AudioTestTools():
         diff1 = np.diff(delays1, 1)
         diff2 = np.diff(delays2, 1)
         if np.any(np.abs(diff1) > 2) or np.any(np.abs(diff2) > 2):
-            print("延迟波动过大: 不通过")
+            ans = False
         else:
-            print("延迟波动正常: 通过")
-        print
+            ans = True
         plt.figure(figsize=(8, 4))
         plt.plot(times, delays1, label='Mic1-Ref')
         plt.plot(times, delays2, label='Mic2-Ref')
@@ -191,41 +195,108 @@ class AudioTestTools():
         plt.grid(True)
         save_path = os.path.join(self.save_path, save_file)
         plt.savefig(save_path)
-        # plt.show()
-        print("\nfigure saved at delay_stability.png")
+        self.logger.info("\nfigure saved at delay_stability.png")
+        if need_show:
+            plt.show()
+        return ans
 
     def test_all(self, k1_mic1, k1_mic2, k1_ref,
                  white_mic1, white_mic2, white_ref,
                  silence_mic1, silence_mic2, silence_ref):
+        report = {}
+
         # 1K-0dB
         mic1, mic2, ref, sr = self.load_signals(k1_mic1, k1_mic2, k1_ref)
-        print("直流偏置 (DC Offset):")
-        print(f"Mic1: {self.dc_offset(mic1):.6f}, Ref: {self.dc_offset(ref):.6f}")
-        print("\n总谐波失真 (THD):")
-        # Assume test tone at 1kHz
         freq = 1000
-        print(f"Mic1: {self.thd(mic1, sr, freq):.4f}, Ref: {self.thd(ref, sr, freq):.4f}")
+        mic1_dc_ans, mic1_dc_dc = self.dc_offset(mic1)
+        mic2_dc_ans, mic2_dc_dc = self.dc_offset(mic2)
+        ref_dc_ans, ref_dc_dc = self.dc_offset(ref)
+        mic1_thd_ans, mic1_thd_thd = self.thd(mic1, sr, freq)
+        mic2_thd_ans, mic2_thd_thd = self.thd(mic2, sr, freq)
+        ref_thd_ans, ref_thd_thd = self.thd(ref, sr, freq)
+        report["1K-0dB"] = {
+            "DC-Offset": {
+                "mic1_pass": mic1_dc_ans,
+                "mic1_dc_value": f"{mic1_dc_dc:.6f}",
+                "mic2_pass": mic2_dc_ans,
+                "mic2_dc_value": f"{mic2_dc_dc:.6f}",
+                "ref_pass": ref_dc_ans,
+                "ref_dc_value": f"{ref_dc_dc:.6f}",
+            },
+            "THD": {
+                "mic1_pass": mic1_thd_ans,
+                "mic1_thd": f"{mic1_thd_thd:.4f}",
+                "mic2_pass": mic2_thd_ans,
+                "mic2_thd": f"{mic2_thd_thd:.4f}",
+                "ref_pass": ref_thd_ans,
+                "ref_thd": f"{ref_thd_thd:.4f}",
+            },
+        }
 
         # silence
-        mic1, mic2, ref, sr = self.load_signals(silence_mic1, silence_mic2, silence_ref)
-        print("直流偏置 (DC Offset):")
-        print(f"Mic1: {self.dc_offset(mic1):.6f}, Mic2: {self.dc_offset(mic2):.6f}, Ref: {self.dc_offset(ref):.6f}")
-        print("\n底噪 (Noise Floor):")
-        print(f"Mic1: {self.noise_floor(mic1):.6f}, Mic2: {self.noise_floor(mic2):.6f}")
+        mic1, mic2, ref, sr = self.load_signals(silence_mic1, silence_mic2,
+                                                silence_ref)
+        mic1_dc_ans, mic1_dc_dc = self.dc_offset(mic1)
+        mic2_dc_ans, mic2_dc_dc = self.dc_offset(mic2)
+        ref_dc_ans, ref_dc_dc = self.dc_offset(ref)
+        mic1_db_ans, mic1_db_db = self.noise_floor(mic1)
+        mic2_db_ans, mic2_db_db = self.noise_floor(mic2)
+        report["Silence"] = {
+            "DC-Offset": {
+                "mic1_pass": mic1_dc_ans,
+                "mic1_dc_value": f"{mic1_dc_dc:.6f}",
+                "mic2_pass": mic2_dc_ans,
+                "mic2_dc_value": f"{mic2_dc_dc:.6f}",
+                "ref_pass": ref_dc_ans,
+                "ref_dc_value": f"{ref_dc_dc:.6f}",
+            },
+            "NoiseFloor": {
+                "mic1_pass": mic1_db_ans,
+                "mic1_db": f"{mic1_db_db:.6f}",
+                "mic2_pass": mic2_db_ans,
+                "mic2_db": f"{mic2_db_db:.6f}",
+            },
+        }
 
         # white
-        mic1, mic2, ref, sr = self.load_signals(white_mic1, white_mic2, white_ref)
-        print("直流偏置 (DC Offset):")
-        print(f"Mic1: {self.dc_offset(mic1):.6f}, Ref: {self.dc_offset(ref):.6f}")
-        print("\nMic相干性 (Coherence):")
-        f, Cxy = self.mic_coherence(mic1, mic2, ref, sr)
-        print(f"Mean coherence (0-4kHz): {np.mean(Cxy[f < 4000]):.3f}")
-        print("\n削波检测 (Signal Integrity):")
-        clipped1 = self.clip_detect(mic1)
-        clipped2 = self.clip_detect(mic2)
-        print(f"Mic1: Clipped={clipped1}")
-        print(f"Mic2: Clipped={clipped2}")
-        print("\n延时稳定性 (Delay Stability)")
-        self.plot_delay_stability_over_time(mic1, mic2, ref, sr)
+        mic1, mic2, ref, sr = self.load_signals(white_mic1, white_mic2,
+                                                white_ref)
+        mic1_dc_ans, mic1_dc_dc = self.dc_offset(mic1)
+        mic2_dc_ans, mic2_dc_dc = self.dc_offset(mic2)
+        ref_dc_ans, ref_dc_dc = self.dc_offset(ref)
+        coherence_ans, coherence_mean = self.mic_coherence(mic1, mic2, ref, sr)
+        mic1_clipped, mic1_samples = self.clip_detect(mic1)
+        mic2_clipped, mic2_samples = self.clip_detect(mic2)
+        delay_stability = self.plot_delay_stability_over_time(mic1, mic2,
+                                                              ref, sr)
+        report["White"] = {
+            "DC-Offset": {
+                "mic1_pass": mic1_dc_ans,
+                "mic1_dc_value": f"{mic1_dc_dc:.6f}",
+                "mic2_pass": mic2_dc_ans,
+                "mic2_dc_value": f"{mic2_dc_dc:.6f}",
+                "ref_pass": ref_dc_ans,
+                "ref_dc_value": f"{ref_dc_dc:.6f}",
+            },
+            "Coherence": {
+                "coherence_pass": coherence_ans,
+                "coherence_mean": f"{coherence_mean:.3f}",
+            },
+            "SignalIntegrity": {
+                "mic1_pass": mic1_clipped,
+                "mic1_samples": int(mic1_samples),
+                "mic2_pass": mic2_clipped,
+                "mic2_samples": int(mic2_samples),
+            },
+            "DelayStability": {
+                "delay_stability_pass": delay_stability,
+            },
+        }
+
+        report_format = json.dumps(report, indent=4, ensure_ascii=False)
+        self.logger.info(f"report: \n{report_format}")
+        save_file = os.path.join(self.save_path, "report.json")
+        with open(save_file, 'w') as f:
+            f.write(report_format)
 
         pass

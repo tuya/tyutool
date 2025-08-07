@@ -122,9 +122,44 @@ python tyutool_cli.py --help
   python tyutool_cli.py read -d BK7231N -p /dev/ttyACM0 -b 2000000 -s 0x11000 -l 0x200000 -f read.bin
   ```
 
+- **AI Debug (Debug)**
+  Provides AI debug tools that support collecting and analyzing various data types such as audio, video, images, and text through network or serial connections.
+
+  1. **Web Mode (web)**: Connect to a debug server over the network to monitor specified data types in real-time.
+     ```bash
+     # Syntax: tyutool_cli.py debug web -i <server_ip> -p <port> -e <event_type> -s <save_dir>
+     # Monitor text data, connecting to localhost on port 5055
+     python tyutool_cli.py debug web -i localhost -p 5055 -e t -s web_ai_debug
+
+     # Monitor both audio and video data
+     python tyutool_cli.py debug web -i 192.168.1.100 -p 5055 -e a -e v -s debug_output
+     ```
+     Event type parameters (-e):
+     - `a`: Audio data
+     - `t`: Text data
+     - `v`: Video data
+     - `p`: Image data
+
+  2. **Serial Mode (ser)**: Connect to devices via serial port for AI debugging with interactive commands.
+     ```bash
+     # Syntax: tyutool_cli.py debug ser -p <port> -b <baudrate> -s <save_dir>
+     python tyutool_cli.py debug ser -p /dev/ttyUSB0 -b 460800 -s ser_ai_debug
+     ```
+     After entering interactive mode, you can use built-in commands to control the debugging process.
+
+  3. **Serial Auto Mode (ser_auto)**: Automated serial debugging test without manual interaction.
+     ```bash
+     # Syntax: tyutool_cli.py debug ser_auto -p <port> -b <baudrate> -s <save_dir>
+     python tyutool_cli.py debug ser_auto -p /dev/ttyUSB0 -b 460800 -s auto_debug
+     ```
+
 ## 📝 Development Notes
 
 For more details on the project's build process, packaging, and code structure, please refer to the [Development Documentation](tools/develop.md).
+
+## 📁 Other Documents
+
+- [T5-Audio-Debug-Guide](docs/en/T5-Audio-Debug-Guide.md)
 
 ## 📄 License
 
