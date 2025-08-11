@@ -27,9 +27,6 @@
 3. 提供问题快速定位和诊断能力
 4. 适用于开发调试和测试验证阶段
 
-## 参考文档
-
-- [2.0 Essential Protocol](https://registry.code.tuya-inc.top/TuyaBEMiddleWare/steam/-/issues/1#packet "2.0 Essential Protocol")
 
 ## 方案
 
@@ -88,7 +85,7 @@
 
 | 字段名           | 字段长度(Bits) | 说明                                                         |
 | ---------------- | -------------- | ------------------------------------------------------------ |
-| `type`           | 7              | - `1` ~~ClientHello~~<br>- `2` ~~AuthenticateRequest~~<br>- `3` ~~AuthenticateResponse~~<br>- `4` Ping<br>- `5` Pong<br>- `6` ~~ConnectionClose~~<br>- `7` ~~SessionNew~~<br>- `8` ~~SessionClose~~<br>- `9` ~~ConnectionRefreshRequest~~<br>- `10` ~~ConnectionRefreshResponse~~<br>- `30` Video<br>- `31` Audio<br>- `32` Image<br>- `33` File<br>- `34` Text<br>- `35` Event |
+| `type`           | 7              | - `4` Ping<br>- `5` Pong<br>- `30` Video<br>- `31` Audio<br>- `32` Image<br>- `33` File<br>- `34` Text<br>- `35` Event |
 | `attribute_flag` | 1              | 属性标识符：<br>- `0` 不包含属性<br>- `1` 包含属性           |
 | `attributes`     |                | 根据 attribute_flag 决定是否包含 attributes                  |
 | `length`         | 32             | Payload 长度（最大 4 GB）                                    |
@@ -112,27 +109,7 @@
 
 | Attribute Type                    | Attribute Description                                        | Attribute Payload                                            |
 | --------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `11` ~~ClientType~~               | Client 类型                                                  | **uint8**<br><br>- `1` Device<br>- `2` APP                   |
-| `12` ~~ClientID~~                 | 派生 Client ID                                               | **string**                                                   |
-| `13` ~~EncryptRandom~~            | 用于生成加密密钥的随机数，复用连接时复用随机数               | **string**                                                   |
-| `14` ~~SignRandom~~               | 用于生成签名密钥的随机数，复用连接时复用随机数               | **string**                                                   |
-| `15` ~~MaxFragmentLength~~        | Client 能处理的 Transport Payload 最大长度                   | **uint32**                                                   |
-| `16` ~~ReadBufferSize~~           | Server Socket 接收缓冲区大小                                 | **uint32**                                                   |
-| `17` ~~WriteBufferSize~~          | Server Socket 发送缓冲区大小                                 | **uint32**                                                   |
-| `18` ~~DerivedAlgorithm~~         | 派生 Client ID 的算法                                        | **string**                                                   |
-| `19` ~~DerivedIV~~                | 派生 Client ID 的 IV                                         | **string**                                                   |
-| `21` ~~Username~~                 | 用户名                                                       | **string**                                                   |
-| `22` ~~Password~~                 | 密码                                                         | **string**                                                   |
-| `23` ~~ConnectionID~~             | 连接 ID                                                      | **string**<br><br>Version 4 UUID                             |
-| `24` ~~ConnectionStatusCode~~     | 连接状态码                                                   | **uint16**<br><br>- `200` OK<br>- `400` Bad Request<br>- `401` Unauthenticated<br>- `404` Not Found<br>- `408` Request Timeout<br>- `500` Internal Server Error<br>- `504` Gateway Timeout<br>- `601` CloseByClient<br>- `602` CloseByReuse<br>- `603` CloseByIO<br>- `604` CloseByKeepalive<br>- `605` CloseByExpire |
 | `25` LatestExpireTimestamp        | 最新的 Connection 过期时间戳，秒                             | **uint64**                                                   |
-| `31` ~~ConnectionCloseErrorCode~~ | 连接关闭错误码                                               | **uint16**<br><br>- `200` OK<br>- `400` Bad Request<br>- `401` Unauthenticated<br>- `404` Not Found<br>- `408` Request Timeout<br>- `500` Internal Server Error<br>- `504` Gateway Timeout<br>- `601` CloseByClient<br>- `602` CloseByReuse<br>- `603` CloseByIO<br>- `604` CloseByKeepalive<br>- `605` CloseByExpire |
-| `41` ~~BizCode~~                  | 业务 Code                                                    | **uint32**<br><br>- `100` BizTypeLLMChart_100                |
-| `42` ~~BizTag~~                   | 业务 Tag                                                     | **uint64**                                                   |
-| `43` ~~SessionID~~                | 会话 ID                                                      | **string**<br><br>Version 4 UUID                             |
-| `44` ~~SessionStatusCode~~        | 会话状态码                                                   | **uint16**<br><br>- `200` OK<br>- `400` Bad Request          |
-| `45` ~~AgentToken~~               | Agent Token                                                  | **string**                                                   |
-| `51` ~~SessionCloseErrorCode~~    | 会话关闭错误码                                               | **uint16**<br><br>- `200` OK<br>- `400` Bad Request<br>- `401` Unauthenticated<br>- `404` Not Found<br>- `408` Request Timeout<br>- `500` Internal Server Error<br>- `504` Gateway Timeout<br>- `601` CloseByClient<br>- `602` CloseByReuse<br>- `603` CloseByIO<br>- `604` CloseByKeepalive<br>- `605` CloseByExpire |
 | `61` EventID                      | 事件 ID                                                      | **string**<br><br>Version 4 UUID                             |
 | `62` EventTimestamp               | 事件时间戳，透传给业务层                                     | **uint64**                                                   |
 | `63` StreamStartTimestamp         | 媒体流开始时间戳                                             | **uint64**                                                   |
@@ -294,4 +271,4 @@
 
 5. 数据传输
    - AI多模态数据: 通过 Packet 传输
-   - **TODO:** 设备日志数据: 通过 Packet 传输，Packet.type类型为`Text` 
+   - **TODO:** 设备日志数据: 通过 Packet 传输，Packet.type类型为`Text`
