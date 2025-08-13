@@ -272,7 +272,7 @@
                <item row="0" column="0">
                 <widget class="QPushButton" name="pushButtonCom">
                  <property name="text">
-                  <string>COM</string>
+                  <string>PortScan</string>
                  </property>
                 </widget>
                </item>
@@ -463,15 +463,15 @@
           <item>
            <layout class="QHBoxLayout" name="horizontalLayout_29">
             <item>
-             <widget class="QLabel" name="labelSDPort">
+             <widget class="QPushButton" name="pushButtonSDCom">
               <property name="sizePolicy">
-               <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+               <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
                 <horstretch>0</horstretch>
                 <verstretch>0</verstretch>
                </sizepolicy>
               </property>
               <property name="text">
-               <string>PortNum:</string>
+               <string>PortScan:</string>
               </property>
              </widget>
             </item>
@@ -754,7 +754,14 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDVolume"/>
+                 <widget class="QLineEdit" name="lineEditSDVolume">
+                  <property name="inputMask">
+                   <string/>
+                  </property>
+                  <property name="placeholderText">
+                   <string>70</string>
+                  </property>
+                 </widget>
                 </item>
                 <item>
                  <widget class="QLabel" name="label_3">
@@ -787,7 +794,11 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDMicgain"/>
+                 <widget class="QLineEdit" name="lineEditSDMicgain">
+                  <property name="placeholderText">
+                   <string>70</string>
+                  </property>
+                 </widget>
                 </item>
                </layout>
               </item>
@@ -797,7 +808,7 @@ padding-bottom: 4px;</string>
                  <widget class="QPushButton" name="pushButtonSDAlgSet">
                   <property name="minimumSize">
                    <size>
-                    <width>120</width>
+                    <width>65</width>
                     <height>0</height>
                    </size>
                   </property>
@@ -813,10 +824,42 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgSetP"/>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetP">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>140</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="placeholderText">
+                   <string>aec_ec_depth</string>
+                  </property>
+                 </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgSetV"/>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetV">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>50</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="placeholderText">
+                   <string>1</string>
+                  </property>
+                 </widget>
                 </item>
                </layout>
               </item>
@@ -842,10 +885,18 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgSetVadC"/>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetVadC">
+                  <property name="placeholderText">
+                   <string>0</string>
+                  </property>
+                 </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgSetVadV"/>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetVadV">
+                  <property name="placeholderText">
+                   <string>1000</string>
+                  </property>
+                 </widget>
                 </item>
                </layout>
               </item>
@@ -855,7 +906,7 @@ padding-bottom: 4px;</string>
                  <widget class="QPushButton" name="pushButtonSDAlgGet">
                   <property name="minimumSize">
                    <size>
-                    <width>150</width>
+                    <width>65</width>
                     <height>0</height>
                    </size>
                   </property>
@@ -871,7 +922,11 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgGetP"/>
+                 <widget class="QLineEdit" name="lineEditSDAlgGetP">
+                  <property name="placeholderText">
+                   <string>aec_ec_depth</string>
+                  </property>
+                 </widget>
                 </item>
                </layout>
               </item>

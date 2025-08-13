@@ -86,11 +86,11 @@ class SerAIDebugMonitor(object):
     def process_received_data(self, data):
         # 非dump模式下显示接收数据
         if not self.current_dump_channel:
-            try:
-                print(data.decode('utf-8', errors='replace'), end='')
-            except Exception as e:
-                self.logger.debug(f"decode error: {e}")
-                pass  # 忽略非文本数据
+            # try:
+            #     print(data.decode('utf-8', errors='replace'), end='')
+            # except Exception as e:
+            #     self.logger.debug(f"decode error: {e}")
+            #     pass  # 忽略非文本数据
             return
 
         # 更新dump文件长度
@@ -111,8 +111,9 @@ class SerAIDebugMonitor(object):
             channel = self.current_dump_channel
             length = self.dump_files[channel]['length']
             times = length/32000
-            sys.stdout.write(f"\rReceived: {length} bytes ({times:.3f}s)")
-            sys.stdout.flush()
+            self.logger.info(f"Received: {length} bytes ({times:.3f}s)")
+            # sys.stdout.write(f"\rReceived: {length} bytes ({times:.3f}s)")
+            # sys.stdout.flush()
         pass
 
     def send_command(self, cmd):
@@ -130,7 +131,7 @@ class SerAIDebugMonitor(object):
             return False
         return True
 
-    def start_dump(self, channel, prefix):
+    def start_dump(self, channel, prefix=""):
         if channel not in self.dump_files:
             self.logger.warning(f"Invalid channel: {channel}")
             return

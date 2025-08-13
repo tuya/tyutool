@@ -18,6 +18,7 @@ from .ui_logo import LOGO_ICON_BYTES
 
 from tyutool.gui.flash import FlashGUI
 from tyutool.gui.serial import SerialGUI
+from tyutool.gui.ser_debug import SerDebugGUI
 from tyutool.util import TyutoolUpgrade
 from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION
 
@@ -70,17 +71,7 @@ class UpgradeThread(QThread):
             self.upgrade_finished.emit(False, str(e))
 
 
-#  class QTextEditHandler(logging.Handler):
-#      def __init__(self, text_edit):
-#          super().__init__()
-#          self.text_edit = text_edit
-#
-#      def emit(self, record):
-#          msg = self.format(record)
-#          self.text_edit.append(msg)
-
-
-class MyWidget(FlashGUI, SerialGUI):
+class MyWidget(FlashGUI, SerialGUI, SerDebugGUI):
     def __init__(self):
         super().__init__()
 
@@ -103,13 +94,12 @@ class MyWidget(FlashGUI, SerialGUI):
         icon_pixmap.loadFromData(logo_icon)
         self.setWindowIcon(QIcon(icon_pixmap))
 
-        #  handler = QTextEditHandler(ui.textBrowserShow)
-        #  self.logger = set_logger(logging.INFO, handler=handler)
         self.logger = set_logger(logging.INFO)
         self.logger.info("Show Tuya Uart Tool.")
 
         self.flashUiSetup()
         self.serialUiSetup()
+        self.serDebugUiSetup()
 
         self.ui.menuDebug.triggered[QAction].connect(self.LogDebugSwitch)
         self.ui.actionUpgrade.triggered.connect(self.guiUpgrade)
