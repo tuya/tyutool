@@ -27,7 +27,7 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(761, 735)
+        MainWindow.resize(800, 800)
         self.actionOnDebug = QAction(MainWindow)
         self.actionOnDebug.setObjectName(u"actionOnDebug")
         self.actionOnDebug.setCheckable(False)
@@ -472,7 +472,7 @@ class Ui_MainWindow(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, -147, 297, 728))
+        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 304, 768))
         self.verticalLayout_11 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_11.setSpacing(10)
         self.verticalLayout_11.setObjectName(u"verticalLayout_11")
@@ -630,6 +630,31 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_11.addLayout(self.horizontalLayout_22)
 
+        self.horizontalLayout_27 = QHBoxLayout()
+        self.horizontalLayout_27.setObjectName(u"horizontalLayout_27")
+        self.pushButtonSDPinSet = QPushButton(self.scrollAreaWidgetContents)
+        self.pushButtonSDPinSet.setObjectName(u"pushButtonSDPinSet")
+        self.pushButtonSDPinSet.setMinimumSize(QSize(120, 0))
+        self.pushButtonSDPinSet.setStyleSheet(u"text-align: left;\n"
+"padding-left: 10px;\n"
+"padding-top: 4px;\n"
+"padding-bottom: 4px;")
+
+        self.horizontalLayout_27.addWidget(self.pushButtonSDPinSet)
+
+        self.lineEditSDPinSetT = QLineEdit(self.scrollAreaWidgetContents)
+        self.lineEditSDPinSetT.setObjectName(u"lineEditSDPinSetT")
+
+        self.horizontalLayout_27.addWidget(self.lineEditSDPinSetT)
+
+        self.lineEditSDPinSetV = QLineEdit(self.scrollAreaWidgetContents)
+        self.lineEditSDPinSetV.setObjectName(u"lineEditSDPinSetV")
+
+        self.horizontalLayout_27.addWidget(self.lineEditSDPinSetV)
+
+
+        self.verticalLayout_11.addLayout(self.horizontalLayout_27)
+
         self.horizontalLayout_23 = QHBoxLayout()
         self.horizontalLayout_23.setObjectName(u"horizontalLayout_23")
         self.pushButtonSDVolume = QPushButton(self.scrollAreaWidgetContents)
@@ -687,16 +712,17 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout_24.addWidget(self.pushButtonSDAlgSet)
 
-        self.lineEditSDAlgSetP = QLineEdit(self.scrollAreaWidgetContents)
-        self.lineEditSDAlgSetP.setObjectName(u"lineEditSDAlgSetP")
+        self.comboBoxSDAlgSetP = QComboBox(self.scrollAreaWidgetContents)
+        self.comboBoxSDAlgSetP.setObjectName(u"comboBoxSDAlgSetP")
         sizePolicy5 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         sizePolicy5.setHorizontalStretch(0)
         sizePolicy5.setVerticalStretch(0)
-        sizePolicy5.setHeightForWidth(self.lineEditSDAlgSetP.sizePolicy().hasHeightForWidth())
-        self.lineEditSDAlgSetP.setSizePolicy(sizePolicy5)
-        self.lineEditSDAlgSetP.setMinimumSize(QSize(140, 0))
+        sizePolicy5.setHeightForWidth(self.comboBoxSDAlgSetP.sizePolicy().hasHeightForWidth())
+        self.comboBoxSDAlgSetP.setSizePolicy(sizePolicy5)
+        self.comboBoxSDAlgSetP.setMinimumSize(QSize(140, 0))
+        self.comboBoxSDAlgSetP.setEditable(True)
 
-        self.horizontalLayout_24.addWidget(self.lineEditSDAlgSetP)
+        self.horizontalLayout_24.addWidget(self.comboBoxSDAlgSetP)
 
         self.lineEditSDAlgSetV = QLineEdit(self.scrollAreaWidgetContents)
         self.lineEditSDAlgSetV.setObjectName(u"lineEditSDAlgSetV")
@@ -738,7 +764,9 @@ class Ui_MainWindow(object):
         self.horizontalLayout_26.setObjectName(u"horizontalLayout_26")
         self.pushButtonSDAlgGet = QPushButton(self.scrollAreaWidgetContents)
         self.pushButtonSDAlgGet.setObjectName(u"pushButtonSDAlgGet")
-        self.pushButtonSDAlgGet.setMinimumSize(QSize(65, 0))
+        sizePolicy1.setHeightForWidth(self.pushButtonSDAlgGet.sizePolicy().hasHeightForWidth())
+        self.pushButtonSDAlgGet.setSizePolicy(sizePolicy1)
+        self.pushButtonSDAlgGet.setMinimumSize(QSize(0, 0))
         self.pushButtonSDAlgGet.setStyleSheet(u"text-align: left;\n"
 "padding-left: 10px;\n"
 "padding-top: 4px;\n"
@@ -746,10 +774,12 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout_26.addWidget(self.pushButtonSDAlgGet)
 
-        self.lineEditSDAlgGetP = QLineEdit(self.scrollAreaWidgetContents)
-        self.lineEditSDAlgGetP.setObjectName(u"lineEditSDAlgGetP")
+        self.comboBoxSDAlgGetP = QComboBox(self.scrollAreaWidgetContents)
+        self.comboBoxSDAlgGetP.setObjectName(u"comboBoxSDAlgGetP")
+        self.comboBoxSDAlgGetP.setMinimumSize(QSize(200, 0))
+        self.comboBoxSDAlgGetP.setEditable(True)
 
-        self.horizontalLayout_26.addWidget(self.lineEditSDAlgGetP)
+        self.horizontalLayout_26.addWidget(self.comboBoxSDAlgGetP)
 
 
         self.verticalLayout_11.addLayout(self.horizontalLayout_26)
@@ -807,7 +837,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 761, 23))
+        self.menubar.setGeometry(QRect(0, 0, 800, 23))
         self.menuMain = QMenu(self.menubar)
         self.menuMain.setObjectName(u"menuMain")
         self.menuDebug = QMenu(self.menuMain)
@@ -891,6 +921,9 @@ class Ui_MainWindow(object):
         self.pushButtonSDBg2.setText(QCoreApplication.translate("MainWindow", u"play: sweep frequency constantly", None))
         self.pushButtonSDBg3.setText(QCoreApplication.translate("MainWindow", u"play: sweep discrete frequency", None))
         self.pushButtonSDBg4.setText(QCoreApplication.translate("MainWindow", u"play: min single frequency", None))
+        self.pushButtonSDPinSet.setText(QCoreApplication.translate("MainWindow", u"pin_set", None))
+        self.lineEditSDPinSetT.setPlaceholderText(QCoreApplication.translate("MainWindow", u"0", None))
+        self.lineEditSDPinSetV.setPlaceholderText(QCoreApplication.translate("MainWindow", u"39", None))
         self.pushButtonSDVolume.setText(QCoreApplication.translate("MainWindow", u"set volume", None))
         self.lineEditSDVolume.setInputMask("")
         self.lineEditSDVolume.setPlaceholderText(QCoreApplication.translate("MainWindow", u"70", None))
@@ -898,13 +931,10 @@ class Ui_MainWindow(object):
         self.pushButtonSDMicgain.setText(QCoreApplication.translate("MainWindow", u"set micgain", None))
         self.lineEditSDMicgain.setPlaceholderText(QCoreApplication.translate("MainWindow", u"70", None))
         self.pushButtonSDAlgSet.setText(QCoreApplication.translate("MainWindow", u"alg set", None))
-        self.lineEditSDAlgSetP.setPlaceholderText(QCoreApplication.translate("MainWindow", u"aec_ec_depth", None))
-        self.lineEditSDAlgSetV.setPlaceholderText(QCoreApplication.translate("MainWindow", u"1", None))
         self.pushButtonSDAlgSetVad.setText(QCoreApplication.translate("MainWindow", u"set vad_SPthr", None))
         self.lineEditSDAlgSetVadC.setPlaceholderText(QCoreApplication.translate("MainWindow", u"0", None))
         self.lineEditSDAlgSetVadV.setPlaceholderText(QCoreApplication.translate("MainWindow", u"1000", None))
         self.pushButtonSDAlgGet.setText(QCoreApplication.translate("MainWindow", u"alg get", None))
-        self.lineEditSDAlgGetP.setPlaceholderText(QCoreApplication.translate("MainWindow", u"aec_ec_depth", None))
         self.pushButtonSDAlgDump.setText(QCoreApplication.translate("MainWindow", u"alg dump", None))
         self.pushButtonAutoTest.setText(QCoreApplication.translate("MainWindow", u"Auto test and gen reports", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabSerDebug), QCoreApplication.translate("MainWindow", u"SerDebug", None))

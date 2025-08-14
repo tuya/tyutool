@@ -6,29 +6,65 @@ import logging
 from serial.tools import list_ports
 
 from PySide6 import QtWidgets
-from PySide6.QtCore import QRegularExpression
+from PySide6.QtCore import QRegularExpression, QObject, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 
 from tyutool.ai_debug import SerAIDebugMonitor
+
+
+def _check_monitor(func):
+    def wrapper(self, *args, **kwargs):
+        if not self.monitor:
+            self.sd_logger.warning("Monitor not initialized.")
+            return
+        return func(self, *args, **kwargs)
+    return wrapper
+
+
+class LogSignal(QObject):
+    log_message = Signal(str)
+    pass
 
 
 class QTextEditHandler(logging.Handler):
     def __init__(self, text_edit):
         super().__init__()
         self.text_edit = text_edit
+        self.log_signal = LogSignal()
+        self.log_signal.log_message.connect(self._append_log)
+        pass
 
     def emit(self, record):
         msg = self.format(record)
+        self.log_signal.log_message.emit(msg)
+        pass
+
+    def _append_log(self, msg):
         self.text_edit.append(msg)
+        pass
 
 
 class SerDebugGUI(QtWidgets.QMainWindow):
+    ALG_PARAMS = {
+        "aec_ec_depth": "20",
+        "aec_init_flags": "1",
+        "aec_mic_delay": "0",
+        "aec_ref_scale": "0",
+        "aec_voice_vol": "13",
+        "aec_TxRxThr": "30",
+        "aec_TxRxFlr": "6",
+        "aec_ns_level": "5",
+        "aec_ns_para": "2",
+        "aec_drc": "4",
+    }
+
     def __init__(self):
         super().__init__()
         self.monitor = None
         pass
 
     def _setupLogger(self):
+        return
         logger = logging.getLogger("tyut_ser_debug")
         logger.setLevel(logging.DEBUG)
         log_format = "[%(levelname)s]: %(message)s"
@@ -46,6 +82,12 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         reg_baud = QRegularExpression('[0-9]+$')
         validator_baud = QRegularExpressionValidator(reg_baud)
         self.ui.comboBoxSDBaud.setValidator(validator_baud)
+        self.ui.comboBoxSDBaud.setCurrentText("460800")
+
+        self.ui.comboBoxSDAlgSetP.addItems(self.ALG_PARAMS)
+        self.ui.lineEditSDAlgSetV.setPlaceholderText("1")
+        self.ui.comboBoxSDAlgGetP.addItems(self.ALG_PARAMS)
+
         self.ui.textBrowserSD.setStyleSheet(
             "color: rgb(37, 214, 78); background-color: rgb(35, 35, 35);")
 
@@ -90,6 +132,9 @@ class SerDebugGUI(QtWidgets.QMainWindow):
             lambda: self.pushButtonSDCmdClicked("bg 4")
         )
 
+        self.ui.pushButtonSDPinSet.clicked.connect(
+            self.pushButtonSDPinSetClicked
+        )
         self.ui.pushButtonSDVolume.clicked.connect(
             self.pushButtonSDVolumeClicked
         )
@@ -112,11 +157,15 @@ class SerDebugGUI(QtWidgets.QMainWindow):
             self.pushButtonAutoTestClicked
         )
 
+        self.ui.comboBoxSDAlgSetP.currentIndexChanged.connect(
+            self.comboBoxSDAlgSetPChanged
+        )
+
         self._setupLogger()
         pass
 
     def pushButtonSDComClicked(self):
-        self.logger.debug(sys._getframe().f_code.co_name)
+        self.sd_logger.debug(sys._getframe().f_code.co_name)
         port_list = list(list_ports.comports())
         port_items = []
         self.ui.comboBoxSDPort.clear()
@@ -125,7 +174,6 @@ class SerDebugGUI(QtWidgets.QMainWindow):
                 pl = list(port)
                 if pl[0].startswith("/dev/ttyS"):
                     continue
-                self.logger.debug(f'port info: {pl}')
                 port_items.append(pl[0])
         port_items.sort()
         self.ui.comboBoxSDPort.addItems(port_items)
@@ -135,7 +183,7 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         port = self.ui.comboBoxSDPort.currentText()
         baudrate = int(self.ui.comboBoxSDBaud.currentText())
         monitor = SerAIDebugMonitor(
-            port, baudrate, "ser_ai_debug", self.sd_logger
+            port, baudrate, "ser_ai_debug", self.sd_logger, gui_mode=True
         )
 
         if not monitor.open_port():
@@ -158,7 +206,7 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         self.monitor.close_port()
         self.monitor = None
 
-        self.ui.pushButtonSDConnect.setText("Start")
+        self.ui.pushButtonSDConnect.setText("Connect")
         self.ui.pushButtonSDConnect.clicked.disconnect()
         self.ui.pushButtonSDConnect.clicked.connect(
             self.pushButtonSDConnectClicked
@@ -166,65 +214,57 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         self.sd_logger.info("Quit success.")
         pass
 
+    @_check_monitor
     def pushButtonSDCmdClicked(self, cmd=""):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
-
         self.monitor.process_input_cmd(cmd)
         pass
 
-    def pushButtonSDVolumeClicked(self):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
+    @_check_monitor
+    def pushButtonSDPinSetClicked(self):
+        typ = self.ui.lineEditSDPinSetT.text()
+        value = self.ui.lineEditSDPinSetV.text()
+        self.monitor.process_input_cmd(f"pin_set {typ} {value}")
+        pass
 
+    @_check_monitor
+    def pushButtonSDVolumeClicked(self):
         volume = self.ui.lineEditSDVolume.text()
         self.monitor.process_input_cmd(f"volume {volume}")
         pass
 
+    @_check_monitor
     def pushButtonSDMicgainClicked(self):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
-
-        micgain = self.ui.lineEditSDMicgain.currentText()
+        micgain = self.ui.lineEditSDMicgain.text()
         self.monitor.process_input_cmd(f"micgain {micgain}")
         pass
 
+    @_check_monitor
     def pushButtonSDAlgSetClicked(self):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
-
-        param = self.ui.lineEditSDAlgSetP.text()
+        param = self.ui.comboBoxSDAlgSetP.currentText()
         value = self.ui.lineEditSDAlgSetV.text()
         self.monitor.process_input_cmd(f"alg set {param} {value}")
         pass
 
+    @_check_monitor
     def pushButtonSDAlgSetVadClicked(self):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
-
         channel = self.ui.lineEditSDAlgSetVadC.text()
         value = self.ui.lineEditSDAlgSetVadV.text()
         self.monitor.process_input_cmd(f"alg set vad_SPthr {channel} {value}")
         pass
 
+    @_check_monitor
     def pushButtonSDAlgGetClicked(self):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
-
-        param = self.ui.lineEditSDAlgGetP.text()
+        param = self.ui.comboBoxSDAlgGetP.currentText()
         self.monitor.process_input_cmd(f"alg get {param}")
         pass
 
+    @_check_monitor
     def pushButtonAutoTestClicked(self):
-        if not self.monitor:
-            self.sd_logger.debug("Monitor not initialized.")
-            return
-
         self.monitor.auto_test()
+        pass
+
+    def comboBoxSDAlgSetPChanged(self, idx):
+        param = self.ui.comboBoxSDAlgSetP.currentText()
+        holder = self.ALG_PARAMS.get(param, "")
+        self.ui.lineEditSDAlgSetV.setPlaceholderText(holder)
         pass

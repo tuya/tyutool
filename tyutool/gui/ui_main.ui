@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>761</width>
-    <height>735</height>
+    <width>800</width>
+    <height>800</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -536,9 +536,9 @@
              <property name="geometry">
               <rect>
                <x>0</x>
-               <y>-147</y>
-               <width>297</width>
-               <height>728</height>
+               <y>0</y>
+               <width>304</width>
+               <height>768</height>
               </rect>
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_11">
@@ -733,6 +733,43 @@ padding-bottom: 4px;</string>
                </layout>
               </item>
               <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_27">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDPinSet">
+                  <property name="minimumSize">
+                   <size>
+                    <width>120</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>pin_set</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDPinSetT">
+                  <property name="placeholderText">
+                   <string>0</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDPinSetV">
+                  <property name="placeholderText">
+                   <string>39</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
                <layout class="QHBoxLayout" name="horizontalLayout_23">
                 <item>
                  <widget class="QPushButton" name="pushButtonSDVolume">
@@ -824,7 +861,7 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgSetP">
+                 <widget class="QComboBox" name="comboBoxSDAlgSetP">
                   <property name="sizePolicy">
                    <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
                     <horstretch>0</horstretch>
@@ -837,8 +874,8 @@ padding-bottom: 4px;</string>
                     <height>0</height>
                    </size>
                   </property>
-                  <property name="placeholderText">
-                   <string>aec_ec_depth</string>
+                  <property name="editable">
+                   <bool>true</bool>
                   </property>
                  </widget>
                 </item>
@@ -855,9 +892,6 @@ padding-bottom: 4px;</string>
                     <width>50</width>
                     <height>0</height>
                    </size>
-                  </property>
-                  <property name="placeholderText">
-                   <string>1</string>
                   </property>
                  </widget>
                 </item>
@@ -904,9 +938,15 @@ padding-bottom: 4px;</string>
                <layout class="QHBoxLayout" name="horizontalLayout_26">
                 <item>
                  <widget class="QPushButton" name="pushButtonSDAlgGet">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
                   <property name="minimumSize">
                    <size>
-                    <width>65</width>
+                    <width>0</width>
                     <height>0</height>
                    </size>
                   </property>
@@ -922,9 +962,15 @@ padding-bottom: 4px;</string>
                  </widget>
                 </item>
                 <item>
-                 <widget class="QLineEdit" name="lineEditSDAlgGetP">
-                  <property name="placeholderText">
-                   <string>aec_ec_depth</string>
+                 <widget class="QComboBox" name="comboBoxSDAlgGetP">
+                  <property name="minimumSize">
+                   <size>
+                    <width>200</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="editable">
+                   <bool>true</bool>
                   </property>
                  </widget>
                 </item>
@@ -997,7 +1043,7 @@ padding-bottom: 4px;</string>
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>761</width>
+     <width>800</width>
      <height>23</height>
     </rect>
    </property>

@@ -69,7 +69,7 @@ def ser_cli(port, baud, save):
     logger.debug(f"baud: {baud}")
     logger.debug(f"save: {save}")
 
-    monitor = SerAIDebugMonitor(port, baud, save, logger)
+    monitor = SerAIDebugMonitor(port, baud, save, logger, gui_mode=False)
 
     if not monitor.open_port():
         return
@@ -113,7 +113,7 @@ def ser_auto_cli(port, baud, save):
     logger.debug(f"baud: {baud}")
     logger.debug(f"save: {save}")
 
-    monitor = SerAIDebugMonitor(port, baud, save, logger)
+    monitor = SerAIDebugMonitor(port, baud, save, logger, gui_mode=False)
 
     if not monitor.open_port():
         return
