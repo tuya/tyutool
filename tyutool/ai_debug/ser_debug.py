@@ -14,8 +14,9 @@ from tyutool.cli import choose_port
 
 class SerAIDebugMonitor(object):
     def __init__(self, port, baud, save,
-                 logger):
+                 logger, gui_mode=False):
         self.logger = logger
+        self.gui_mode = gui_mode
         self.port = port or choose_port()
         self.baud = baud
         now = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -87,7 +88,7 @@ class SerAIDebugMonitor(object):
         # 非dump模式下显示接收数据
         if not self.current_dump_channel:
             try:
-                print(data.decode('utf-8', errors='replace'), end='')
+                self.logger.info(data.decode('utf-8', errors='replace'))
             except Exception as e:
                 self.logger.debug(f"decode error: {e}")
                 pass  # 忽略非文本数据
@@ -111,8 +112,9 @@ class SerAIDebugMonitor(object):
             channel = self.current_dump_channel
             length = self.dump_files[channel]['length']
             times = length/32000
-            sys.stdout.write(f"\rReceived: {length} bytes ({times:.3f}s)")
-            sys.stdout.flush()
+            if not self.gui_mode:
+                sys.stdout.write(f"\rReceived: {length} bytes ({times:.3f}s)")
+                sys.stdout.flush()
         pass
 
     def send_command(self, cmd):
@@ -130,7 +132,7 @@ class SerAIDebugMonitor(object):
             return False
         return True
 
-    def start_dump(self, channel, prefix):
+    def start_dump(self, channel, prefix=""):
         if channel not in self.dump_files:
             self.logger.warning(f"Invalid channel: {channel}")
             return
@@ -170,7 +172,7 @@ class SerAIDebugMonitor(object):
             self.dump_files[channel]['active'] = False
 
             length = self.dump_files[channel]['length']
-            self.logger.info(f"\nStop dump {channel} ({length} bytes)")
+            self.logger.info(f"Stop dump {channel} ({length} bytes)")
             self.logger.info(f"Saved to: {self.dump_files[channel]['name']}")
 
             # 重置当前通道
@@ -197,6 +199,7 @@ class SerAIDebugMonitor(object):
         print("bg 2        - sweep frequency constantly")
         print("bg 3        - sweep discrete frequency")
         print("bg 4        - min single frequency")
+        print("pin_set <pin_type> <pin_num> - set pin_num to pin_type")
         print("volume <70>   - Set volume to 70%")
         print("micgain <70>   - Default micgain=70")
         print("alg set <para> <value> \
@@ -253,69 +256,97 @@ class SerAIDebugMonitor(object):
 
     def auto_test(self):
         '''
+        启动自动测试
+        GUI模式：异步执行
+        CLI模式：同步执行
         '''
-        cmd_sleep = 0.1
-        play_sleep = 5
-        dump_sleep = 10
+        if self.gui_mode:
+            # GUI模式：异步执行，避免阻塞界面
+            self.auto_test_thread = threading.Thread(
+                target=self._auto_test_worker
+            )
+            self.auto_test_thread.daemon = True
+            self.auto_test_thread.start()
+            self.logger.info("Auto test started in background...")
+        else:
+            # CLI模式：同步执行，等待完成
+            self.logger.info("Starting auto test...")
+            self._auto_test_worker()
 
-        # white
-        self.send_command("start")
-        time.sleep(cmd_sleep)
-        self.send_command("bg 0")
-        time.sleep(play_sleep)
-        self.send_command("stop")
-        time.sleep(cmd_sleep)
-        self.start_dump("0", "white")
-        time.sleep(dump_sleep)
-        self.start_dump("1", "white")
-        time.sleep(dump_sleep)
+    def _auto_test_worker(self):
+        '''
+        自动测试的实际工作函数（在后台线程中执行）
+        '''
+        try:
+            cmd_sleep = 0.1
+            play_sleep = 5
+            dump_sleep = 10
 
-        file_name = f"white-{self.dump_files['0']['name']}"
-        white_mic1 = os.path.join(self.save_path, file_name)
-        white_mic2 = white_mic1
-        file_name = f"white-{self.dump_files['1']['name']}"
-        white_ref = os.path.join(self.save_path, file_name)
+            # white
+            self.logger.info(">>> Step (1/4) [white]")
+            self.send_command("start")
+            time.sleep(cmd_sleep)
+            self.send_command("bg 0")
+            time.sleep(play_sleep)
+            self.send_command("stop")
+            time.sleep(cmd_sleep)
+            self.start_dump("0", "white")
+            time.sleep(dump_sleep)
+            self.start_dump("1", "white")
+            time.sleep(dump_sleep)
 
-        # 1K-0dB
-        self.send_command("start")
-        time.sleep(cmd_sleep)
-        self.send_command("bg 1")
-        time.sleep(play_sleep)
-        self.send_command("stop")
-        time.sleep(cmd_sleep)
-        self.start_dump("0", "1k")
-        time.sleep(dump_sleep)
-        self.start_dump("1", "1k")
-        time.sleep(dump_sleep)
+            file_name = f"white-{self.dump_files['0']['name']}"
+            white_mic1 = os.path.join(self.save_path, file_name)
+            white_mic2 = white_mic1
+            file_name = f"white-{self.dump_files['1']['name']}"
+            white_ref = os.path.join(self.save_path, file_name)
 
-        file_name = f"1k-{self.dump_files['0']['name']}"
-        k1_mic1 = os.path.join(self.save_path, file_name)
-        k1_mic2 = k1_mic1
-        file_name = f"1k-{self.dump_files['1']['name']}"
-        k1_ref = os.path.join(self.save_path, file_name)
+            # 1K-0dB
+            self.logger.info(">>> Step (2/4) [1K-0dB]")
+            self.send_command("start")
+            time.sleep(cmd_sleep)
+            self.send_command("bg 1")
+            time.sleep(play_sleep)
+            self.send_command("stop")
+            time.sleep(cmd_sleep)
+            self.start_dump("0", "1k")
+            time.sleep(dump_sleep)
+            self.start_dump("1", "1k")
+            time.sleep(dump_sleep)
 
-        # silence
-        self.send_command("start")
-        time.sleep(cmd_sleep)
-        self.send_command("bg 4")
-        time.sleep(play_sleep)
-        self.send_command("stop")
-        time.sleep(cmd_sleep)
-        self.start_dump("0", "silence")
-        time.sleep(dump_sleep)
-        self.start_dump("1", "silence")
-        time.sleep(dump_sleep)
+            file_name = f"1k-{self.dump_files['0']['name']}"
+            k1_mic1 = os.path.join(self.save_path, file_name)
+            k1_mic2 = k1_mic1
+            file_name = f"1k-{self.dump_files['1']['name']}"
+            k1_ref = os.path.join(self.save_path, file_name)
 
-        file_name = f"silence-{self.dump_files['0']['name']}"
-        silence_mic1 = os.path.join(self.save_path, file_name)
-        silence_mic2 = silence_mic1
-        file_name = f"silence-{self.dump_files['1']['name']}"
-        silence_ref = os.path.join(self.save_path, file_name)
+            # silence
+            self.logger.info(">>> Step (3/4) [silence]")
+            self.send_command("start")
+            time.sleep(cmd_sleep)
+            self.send_command("bg 4")
+            time.sleep(play_sleep)
+            self.send_command("stop")
+            time.sleep(cmd_sleep)
+            self.start_dump("0", "silence")
+            time.sleep(dump_sleep)
+            self.start_dump("1", "silence")
+            time.sleep(dump_sleep)
 
-        # test all
-        tool = AudioTestTools(self.save_path, self.logger)
-        tool.test_all(k1_mic1, k1_mic2, k1_ref,
-                      white_mic1, white_mic2, white_ref,
-                      silence_mic1, silence_mic2, silence_ref)
+            file_name = f"silence-{self.dump_files['0']['name']}"
+            silence_mic1 = os.path.join(self.save_path, file_name)
+            silence_mic2 = silence_mic1
+            file_name = f"silence-{self.dump_files['1']['name']}"
+            silence_ref = os.path.join(self.save_path, file_name)
 
+            # test all
+            self.logger.info(">>> Step (4/4) [report]")
+            tool = AudioTestTools(self.save_path, self.logger)
+            tool.test_all(k1_mic1, k1_mic2, k1_ref,
+                          white_mic1, white_mic2, white_ref,
+                          silence_mic1, silence_mic2, silence_ref)
+
+            self.logger.info("Auto test completed successfully!")
+        except Exception as e:
+            self.logger.error(f"Auto test failed: {e}")
         pass

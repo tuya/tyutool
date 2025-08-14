@@ -78,6 +78,7 @@ class SerialGUI(QtWidgets.QMainWindow):
                     continue
                 self.logger.debug(f'port info: {pl}')
                 port_items.append(pl[0])
+        port_items.sort()
         self.ui.comboBoxCom.addItems(port_items)
         pass
 

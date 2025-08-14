@@ -12,7 +12,10 @@ TYPE_MAPPING = {
     'p': 32,  # Image
 }
 
-logger = get_logger()
+
+def _get_logger():
+    """延迟初始化logger"""
+    return get_logger()
 
 
 class ProtocolParser:
@@ -69,10 +72,10 @@ class ProtocolParser:
             if len(data) >= i + 4:
                 magic = struct.unpack('>I', data[i:i+4])[0]
                 if magic == expected_magic:
-                    logger.debug(f"Found magic field at offset {i}.")
+                    _get_logger().debug(f"Found magic field at offset {i}.")
                     return ProtocolParser.parse_transport_header(data[i:])
 
-        logger.debug("Magic field not found.")
+        _get_logger().debug("Magic field not found.")
         return None, data
 
     @staticmethod
@@ -85,8 +88,8 @@ class ProtocolParser:
         magic = struct.unpack('>I', data[0:4])[0]
         expected_magic = 0x54594149  # "TYAI"
         if magic != expected_magic:
-            logger.debug("Magic field mismatch:")
-            logger.debug(f"expected 0x{expected_magic:08x}, \
+            _get_logger().debug("Magic field mismatch:")
+            _get_logger().debug(f"expected 0x{expected_magic:08x}, \
 actual 0x{magic:08x}")
             return ProtocolParser._find_frame_sync(data)
 
@@ -95,7 +98,7 @@ actual 0x{magic:08x}")
 
         version = data[5]
         if version != 1:
-            logger.debug(f"Unsupported version: {version}")
+            _get_logger().debug(f"Unsupported version: {version}")
             return ProtocolParser._find_frame_sync(data[4:])
 
         sequence = struct.unpack('>H', data[6:8])[0]
@@ -106,7 +109,7 @@ actual 0x{magic:08x}")
         iv_flag = byte7 & 0x01  # 0x00000001
 
         if security_level != 0 or iv_flag != 0:
-            logger.debug(f"Unsupported security level: {security_level}")
+            _get_logger().debug(f"Unsupported security level: {security_level}")
             return ProtocolParser._find_frame_sync(data[4:])
 
         reserve = data[9]
@@ -142,7 +145,7 @@ actual 0x{magic:08x}")
         signature_length = 32
         payload_length = length - signature_length
         if payload_length < 0:
-            logger.error(f"Invalid payload length: {payload_length}")
+            _get_logger().error(f"Invalid payload length: {payload_length}")
             return None, data
 
         header['payload'] = data[offset:(offset+payload_length)]

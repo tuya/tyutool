@@ -6,15 +6,15 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>785</width>
-    <height>792</height>
+    <width>800</width>
+    <height>800</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Tuya Uart Tool</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QHBoxLayout" name="horizontalLayout_9">
+   <layout class="QVBoxLayout" name="verticalLayout_10">
     <item>
      <widget class="QTabWidget" name="tabWidget">
       <property name="currentIndex">
@@ -195,7 +195,7 @@
                     <string>&lt;a href=&quot;https://iot.tuya.com&quot;&gt;Tuya&lt;/a&gt;</string>
                    </property>
                    <property name="alignment">
-                    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                    <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                    </property>
                    <property name="openExternalLinks">
                     <bool>true</bool>
@@ -225,13 +225,13 @@
                <cursorShape>ForbiddenCursor</cursorShape>
               </property>
               <property name="frameShape">
-               <enum>QFrame::StyledPanel</enum>
+               <enum>QFrame::Shape::StyledPanel</enum>
               </property>
               <property name="text">
                <string/>
               </property>
               <property name="textInteractionFlags">
-               <set>Qt::LinksAccessibleByMouse</set>
+               <set>Qt::TextInteractionFlag::LinksAccessibleByMouse</set>
               </property>
              </widget>
             </item>
@@ -272,7 +272,7 @@
                <item row="0" column="0">
                 <widget class="QPushButton" name="pushButtonCom">
                  <property name="text">
-                  <string>COM</string>
+                  <string>PortScan</string>
                  </property>
                 </widget>
                </item>
@@ -418,6 +418,16 @@
                  </property>
                 </widget>
                </item>
+               <item>
+                <widget class="QCheckBox" name="checkBoxTxReturn">
+                 <property name="text">
+                  <string>&quot;\n&quot;</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
               </layout>
              </item>
             </layout>
@@ -443,6 +453,587 @@
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="tabSerDebug">
+       <attribute name="title">
+        <string>SerDebug</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_12">
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_8">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_29">
+            <item>
+             <widget class="QPushButton" name="pushButtonSDCom">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="text">
+               <string>PortScan:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="comboBoxSDPort"/>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_30">
+            <item>
+             <widget class="QLabel" name="labelSDBaud">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="text">
+               <string>BaudRate:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="comboBoxSDBaud">
+              <property name="editable">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButtonSDConnect">
+            <property name="text">
+             <string>Connect</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_9">
+          <item>
+           <widget class="QScrollArea" name="scrollArea">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Expanding">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>320</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="widgetResizable">
+             <bool>true</bool>
+            </property>
+            <widget class="QWidget" name="scrollAreaWidgetContents">
+             <property name="geometry">
+              <rect>
+               <x>0</x>
+               <y>0</y>
+               <width>304</width>
+               <height>768</height>
+              </rect>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_11">
+              <property name="spacing">
+               <number>10</number>
+              </property>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_12">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDStart">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>start recording</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_13">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDStop">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>stop recording</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_14">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDReset">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>reset recording</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_15">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDDump0">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>dump: microphone channel</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_16">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDDump1">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>dump: reference channel</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_17">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDDump2">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>dump: AEC channel</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_18">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDBg0">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>play: white noise</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QVBoxLayout" name="verticalLayout_13">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDBg1">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>play: 1K-0dB</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_20">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDBg2">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>play: sweep frequency constantly</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_21">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDBg3">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>play: sweep discrete frequency</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_22">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDBg4">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>play: min single frequency</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_27">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDPinSet">
+                  <property name="minimumSize">
+                   <size>
+                    <width>120</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>pin_set</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDPinSetT">
+                  <property name="placeholderText">
+                   <string>0</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDPinSetV">
+                  <property name="placeholderText">
+                   <string>39</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_23">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDVolume">
+                  <property name="minimumSize">
+                   <size>
+                    <width>120</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>set volume</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDVolume">
+                  <property name="inputMask">
+                   <string/>
+                  </property>
+                  <property name="placeholderText">
+                   <string>70</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="label_3">
+                  <property name="text">
+                   <string>%</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_11">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDMicgain">
+                  <property name="minimumSize">
+                   <size>
+                    <width>120</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>set micgain</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDMicgain">
+                  <property name="placeholderText">
+                   <string>70</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_24">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDAlgSet">
+                  <property name="minimumSize">
+                   <size>
+                    <width>65</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>alg set</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QComboBox" name="comboBoxSDAlgSetP">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>140</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="editable">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetV">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>50</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_25">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDAlgSetVad">
+                  <property name="minimumSize">
+                   <size>
+                    <width>120</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>set vad_SPthr</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetVadC">
+                  <property name="placeholderText">
+                   <string>0</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLineEdit" name="lineEditSDAlgSetVadV">
+                  <property name="placeholderText">
+                   <string>1000</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_26">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDAlgGet">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>alg get</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QComboBox" name="comboBoxSDAlgGetP">
+                  <property name="minimumSize">
+                   <size>
+                    <width>200</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="editable">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_28">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDAlgDump">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>alg dump</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QVBoxLayout" name="verticalLayout_14">
+                <item>
+                 <widget class="QPushButton" name="pushButtonAutoTest">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>Auto test and gen reports</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </widget>
+           </widget>
+          </item>
+          <item>
+           <widget class="QTextBrowser" name="textBrowserSD">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>400</width>
+              <height>0</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
    </layout>
@@ -452,7 +1043,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>785</width>
+     <width>800</width>
      <height>23</height>
     </rect>
    </property>

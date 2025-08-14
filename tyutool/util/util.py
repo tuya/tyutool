@@ -11,7 +11,7 @@ import string
 import socket
 
 TYUTOOL_ROOT = os.path.dirname(os.path.abspath(sys.argv[0]))
-TYUTOOL_VERSION = "2.0.3"
+TYUTOOL_VERSION = "2.0.4"
 
 
 def tyutool_env():
