@@ -27,7 +27,7 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(801, 801)
+        MainWindow.resize(761, 735)
         self.actionOnDebug = QAction(MainWindow)
         self.actionOnDebug.setObjectName(u"actionOnDebug")
         self.actionOnDebug.setCheckable(False)
@@ -472,7 +472,7 @@ class Ui_MainWindow(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 304, 688))
+        self.scrollAreaWidgetContents.setGeometry(QRect(0, -147, 297, 728))
         self.verticalLayout_11 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_11.setSpacing(10)
         self.verticalLayout_11.setObjectName(u"verticalLayout_11")
@@ -768,6 +768,20 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_11.addLayout(self.horizontalLayout_28)
 
+        self.verticalLayout_14 = QVBoxLayout()
+        self.verticalLayout_14.setObjectName(u"verticalLayout_14")
+        self.pushButtonAutoTest = QPushButton(self.scrollAreaWidgetContents)
+        self.pushButtonAutoTest.setObjectName(u"pushButtonAutoTest")
+        self.pushButtonAutoTest.setStyleSheet(u"text-align: left;\n"
+"padding-left: 10px;\n"
+"padding-top: 4px;\n"
+"padding-bottom: 4px;")
+
+        self.verticalLayout_14.addWidget(self.pushButtonAutoTest)
+
+
+        self.verticalLayout_11.addLayout(self.verticalLayout_14)
+
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
 
         self.horizontalLayout_9.addWidget(self.scrollArea)
@@ -793,7 +807,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 801, 23))
+        self.menubar.setGeometry(QRect(0, 0, 761, 23))
         self.menuMain = QMenu(self.menubar)
         self.menuMain.setObjectName(u"menuMain")
         self.menuDebug = QMenu(self.menuMain)
@@ -892,6 +906,7 @@ class Ui_MainWindow(object):
         self.pushButtonSDAlgGet.setText(QCoreApplication.translate("MainWindow", u"alg get", None))
         self.lineEditSDAlgGetP.setPlaceholderText(QCoreApplication.translate("MainWindow", u"aec_ec_depth", None))
         self.pushButtonSDAlgDump.setText(QCoreApplication.translate("MainWindow", u"alg dump", None))
+        self.pushButtonAutoTest.setText(QCoreApplication.translate("MainWindow", u"Auto test and gen reports", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabSerDebug), QCoreApplication.translate("MainWindow", u"SerDebug", None))
         self.menuMain.setTitle(QCoreApplication.translate("MainWindow", u"Main", None))
         self.menuDebug.setTitle(QCoreApplication.translate("MainWindow", u"Debug", None))

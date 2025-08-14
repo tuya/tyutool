@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>801</width>
-    <height>801</height>
+    <width>761</width>
+    <height>735</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -536,9 +536,9 @@
              <property name="geometry">
               <rect>
                <x>0</x>
-               <y>0</y>
-               <width>304</width>
-               <height>688</height>
+               <y>-147</y>
+               <width>297</width>
+               <height>728</height>
               </rect>
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_11">
@@ -947,6 +947,23 @@ padding-bottom: 4px;</string>
                 </item>
                </layout>
               </item>
+              <item>
+               <layout class="QVBoxLayout" name="verticalLayout_14">
+                <item>
+                 <widget class="QPushButton" name="pushButtonAutoTest">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>Auto test and gen reports</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
              </layout>
             </widget>
            </widget>
@@ -980,7 +997,7 @@ padding-bottom: 4px;</string>
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>801</width>
+     <width>761</width>
      <height>23</height>
     </rect>
    </property>
