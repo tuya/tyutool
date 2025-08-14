@@ -64,7 +64,6 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         pass
 
     def _setupLogger(self):
-        return
         logger = logging.getLogger("tyut_ser_debug")
         logger.setLevel(logging.DEBUG)
         log_format = "[%(levelname)s]: %(message)s"
