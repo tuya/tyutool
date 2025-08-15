@@ -70,9 +70,32 @@ class SocketConnector(object):
         return True
 
     def send_subscription(self, monitor_types):
+        # Construct Event packet attributes
+        attributes = []
+
+        # SessionID attribute (type 43)
+        session_id = "debug-session"
+        session_id_bytes = session_id.encode('utf-8')
+        attributes.append({
+            'type': 43,  # SessionID
+            'payload_type': 6,  # string
+            'length': len(session_id_bytes),
+            'payload': session_id_bytes
+        })
+
+        # EventID attribute (type 61)
+        event_id = str(uuid.uuid4())
+        event_id_bytes = event_id.encode('utf-8')
+        attributes.append({
+            'type': 61,  # EventID
+            'payload_type': 6,  # string
+            'length': len(event_id_bytes),
+            'payload': event_id_bytes
+        })
+
+        # UserData attribute (type 111) - contains bitmap data
         # Create 64-bit bitmap, each data type corresponds to one bit
         bitmap = 0
-
         # Set corresponding bit
         for monitor_type in monitor_types:
             packet_type = TYPE_MAPPING.get(monitor_type)
@@ -81,35 +104,28 @@ class SocketConnector(object):
 
         # Convert bitmap to 8-byte binary data
         bitmap_bytes = struct.pack('>Q', bitmap)
+        attributes.append({
+            'type': 111,  # UserData
+            'payload_type': 5,  # bytes
+            'length': len(bitmap_bytes),  # 固定8字节
+            'payload': bitmap_bytes
+        })
 
-        # Construct Event packet attributes
+        # 构造attributes的二进制数据
         attributes_data = b''
-
-        # SessionID attribute (type 43)
-        session_id = "monitor-session"
-        session_id_bytes = session_id.encode('utf-8')
-        attributes_data += struct.pack('>H', 43)  # attribute type
-        attributes_data += struct.pack('B', 6)     # payload_type: string
-        attributes_data += struct.pack('>I', len(session_id_bytes))
-        attributes_data += session_id_bytes
-
-        # EventID attribute (type 61)
-        event_id = str(uuid.uuid4())
-        event_id_bytes = event_id.encode('utf-8')
-        attributes_data += struct.pack('>H', 61)  # attribute type
-        attributes_data += struct.pack('B', 6)     # payload_type: string
-        attributes_data += struct.pack('>I', len(event_id_bytes))
-        attributes_data += event_id_bytes
-
-        # UserData attribute (type 111) - contains bitmap data
-        attributes_data += struct.pack('>H', 111)  # attribute type
-        attributes_data += struct.pack('B', 5)      # payload_type: bytes
-        attributes_data += struct.pack('>I', len(bitmap_bytes))
-        attributes_data += bitmap_bytes
+        for attr in attributes:
+            # 属性类型 (2字节)
+            attributes_data += struct.pack('>H', attr['type'])
+            # 属性内容类型 (1字节)
+            attributes_data += struct.pack('B', attr['payload_type'])
+            # 属性长度 (4字节)
+            attributes_data += struct.pack('>I', attr['length'])
+            # 属性内容
+            attributes_data += attr['payload']
 
         # Construct Event packet data
         event_data = b''
-        event_data += struct.pack('>H', 0x0009)  # MonitorTypeFilter event type
+        event_data += struct.pack('>H', 0xF000)  # MonitorTypeFilter event type
         event_data += struct.pack('>H', 0)       # Event payload length (0)
 
         # Construct Packet data
@@ -123,9 +139,6 @@ class SocketConnector(object):
         packet_data += struct.pack('>I', len(event_data))
         packet_data += event_data
 
-        # Generate signature (simplified version, using all zeros)
-        signature = b'\x00' * 32
-
         # Construct transport layer protocol header
         transport_header = b''
         transport_header += struct.pack('>I', 0x54594149)  # magic "TYAI"
@@ -135,11 +148,11 @@ class SocketConnector(object):
         self.sequence = (self.sequence + 1) & 0xFFFF
         transport_header += struct.pack('B', 0x00)  # flags: no frag, L0, no IV
         transport_header += struct.pack('B', 0x00)  # reserve
-        total_len = len(packet_data) + len(signature)
+        total_len = len(packet_data)
         transport_header += struct.pack('>I', total_len)
 
         # Send complete packet
-        transport_packet = transport_header + packet_data + signature
+        transport_packet = transport_header + packet_data
 
         try:
             self.socket.send(transport_packet)
