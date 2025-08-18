@@ -19,6 +19,7 @@ from .ui_logo import LOGO_ICON_BYTES
 from tyutool.gui.flash import FlashGUI
 from tyutool.gui.serial import SerialGUI
 from tyutool.gui.ser_debug import SerDebugGUI
+from tyutool.gui.web_debug import WebDebugGUI
 from tyutool.util import TyutoolUpgrade
 from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION
 
@@ -71,7 +72,7 @@ class UpgradeThread(QThread):
             self.upgrade_finished.emit(False, str(e))
 
 
-class MyWidget(FlashGUI, SerialGUI, SerDebugGUI):
+class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
     def __init__(self):
         super().__init__()
 
@@ -100,6 +101,7 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI):
         self.flashUiSetup()
         self.serialUiSetup()
         self.serDebugUiSetup()
+        self.webDebugUiSetup()
 
         self.ui.menuDebug.triggered[QAction].connect(self.LogDebugSwitch)
         self.ui.actionUpgrade.triggered.connect(self.guiUpgrade)

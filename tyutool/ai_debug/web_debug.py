@@ -15,8 +15,8 @@ from .web.save_db import SaveDatabase
 
 class WebAIDebugMonitor(object):
     def __init__(self,
-                 host="localhost", port=5055, monitor_types=[],
-                 save_dir="ai_debug_db", logger=None):
+                 host="localhost", port=5055, monitor_types=['a'],
+                 save_dir="web_ai_debug", logger=None):
         now = datetime.now().strftime("%Y%m%d-%H%M%S")
         save_db = ""
         if save_dir:
