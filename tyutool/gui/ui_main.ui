@@ -537,7 +537,7 @@
               <rect>
                <x>0</x>
                <y>0</y>
-               <width>304</width>
+               <width>287</width>
                <height>768</height>
               </rect>
              </property>
@@ -1134,8 +1134,21 @@ padding-bottom: 4px;</string>
                  <layout class="QHBoxLayout" name="horizontalLayout_34">
                   <item>
                    <widget class="QCheckBox" name="checkBoxWDText">
+                    <property name="sizePolicy">
+                     <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                      <horstretch>0</horstretch>
+                      <verstretch>0</verstretch>
+                     </sizepolicy>
+                    </property>
                     <property name="text">
-                     <string>Text</string>
+                     <string>Text  -&gt;</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="labelWDTextCount">
+                    <property name="text">
+                     <string>0</string>
                     </property>
                    </widget>
                   </item>
@@ -1145,8 +1158,21 @@ padding-bottom: 4px;</string>
                  <layout class="QHBoxLayout" name="horizontalLayout_35">
                   <item>
                    <widget class="QCheckBox" name="checkBoxWDAudio">
+                    <property name="sizePolicy">
+                     <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                      <horstretch>0</horstretch>
+                      <verstretch>0</verstretch>
+                     </sizepolicy>
+                    </property>
                     <property name="text">
-                     <string>Audio</string>
+                     <string>Audio  -&gt;</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="labelWDAudioCount">
+                    <property name="text">
+                     <string>0</string>
                     </property>
                    </widget>
                   </item>
@@ -1156,8 +1182,21 @@ padding-bottom: 4px;</string>
                  <layout class="QHBoxLayout" name="horizontalLayout_36">
                   <item>
                    <widget class="QCheckBox" name="checkBoxWDPicture">
+                    <property name="sizePolicy">
+                     <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                      <horstretch>0</horstretch>
+                      <verstretch>0</verstretch>
+                     </sizepolicy>
+                    </property>
                     <property name="text">
-                     <string>Picture</string>
+                     <string>Picture  -&gt;</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="labelWDPictureCount">
+                    <property name="text">
+                     <string>0</string>
                     </property>
                    </widget>
                   </item>
@@ -1167,8 +1206,21 @@ padding-bottom: 4px;</string>
                  <layout class="QHBoxLayout" name="horizontalLayout_37">
                   <item>
                    <widget class="QCheckBox" name="checkBoxWDVideo">
+                    <property name="sizePolicy">
+                     <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                      <horstretch>0</horstretch>
+                      <verstretch>0</verstretch>
+                     </sizepolicy>
+                    </property>
                     <property name="text">
-                     <string>Video</string>
+                     <string>Video  -&gt;</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="labelWDVideoCount">
+                    <property name="text">
+                     <string>0</string>
                     </property>
                    </widget>
                   </item>
@@ -1210,7 +1262,7 @@ padding-bottom: 4px;</string>
             <item>
              <widget class="QTabWidget" name="tabWidgetWD">
               <property name="currentIndex">
-               <number>0</number>
+               <number>3</number>
               </property>
               <widget class="QWidget" name="tabWDText">
                <attribute name="title">
@@ -1218,17 +1270,17 @@ padding-bottom: 4px;</string>
                </attribute>
                <layout class="QVBoxLayout" name="verticalLayout_10">
                 <item>
-                 <widget class="QScrollArea" name="scrollArea_3">
+                 <widget class="QScrollArea" name="scrollAreaWDText">
                   <property name="widgetResizable">
                    <bool>true</bool>
                   </property>
-                  <widget class="QWidget" name="scrollAreaWidgetContents_3">
+                  <widget class="QWidget" name="scrollAreaWidgetContentsWDText">
                    <property name="geometry">
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>521</width>
-                     <height>474</height>
+                     <width>98</width>
+                     <height>28</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_22"/>
@@ -1243,17 +1295,17 @@ padding-bottom: 4px;</string>
                </attribute>
                <layout class="QVBoxLayout" name="verticalLayout_19">
                 <item>
-                 <widget class="QScrollArea" name="scrollArea_4">
+                 <widget class="QScrollArea" name="scrollAreaWDAudio">
                   <property name="widgetResizable">
                    <bool>true</bool>
                   </property>
-                  <widget class="QWidget" name="scrollAreaWidgetContents_4">
+                  <widget class="QWidget" name="scrollAreaWidgetContentsWDAudio">
                    <property name="geometry">
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>521</width>
-                     <height>474</height>
+                     <width>98</width>
+                     <height>28</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_23"/>
@@ -1268,17 +1320,17 @@ padding-bottom: 4px;</string>
                </attribute>
                <layout class="QVBoxLayout" name="verticalLayout_20">
                 <item>
-                 <widget class="QScrollArea" name="scrollArea_5">
+                 <widget class="QScrollArea" name="scrollAreaWDPicture">
                   <property name="widgetResizable">
                    <bool>true</bool>
                   </property>
-                  <widget class="QWidget" name="scrollAreaWidgetContents_5">
+                  <widget class="QWidget" name="scrollAreaWidgetContentsWDPicture">
                    <property name="geometry">
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>521</width>
-                     <height>474</height>
+                     <width>98</width>
+                     <height>28</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_24"/>
@@ -1293,11 +1345,11 @@ padding-bottom: 4px;</string>
                </attribute>
                <layout class="QVBoxLayout" name="verticalLayout_21">
                 <item>
-                 <widget class="QScrollArea" name="scrollArea_6">
+                 <widget class="QScrollArea" name="scrollAreaWDVideo">
                   <property name="widgetResizable">
                    <bool>true</bool>
                   </property>
-                  <widget class="QWidget" name="scrollAreaWidgetContents_6">
+                  <widget class="QWidget" name="scrollAreaWidgetContentsWDVideo">
                    <property name="geometry">
                     <rect>
                      <x>0</x>
