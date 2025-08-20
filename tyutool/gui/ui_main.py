@@ -1004,7 +1004,7 @@ class Ui_MainWindow(object):
         self.scrollAreaWDText.setWidgetResizable(True)
         self.scrollAreaWidgetContentsWDText = QWidget()
         self.scrollAreaWidgetContentsWDText.setObjectName(u"scrollAreaWidgetContentsWDText")
-        self.scrollAreaWidgetContentsWDText.setGeometry(QRect(0, 0, 98, 28))
+        self.scrollAreaWidgetContentsWDText.setGeometry(QRect(0, 0, 521, 474))
         self.verticalLayout_22 = QVBoxLayout(self.scrollAreaWidgetContentsWDText)
         self.verticalLayout_22.setObjectName(u"verticalLayout_22")
         self.scrollAreaWDText.setWidget(self.scrollAreaWidgetContentsWDText)
@@ -1111,7 +1111,7 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
 
         self.tabWidget.setCurrentIndex(0)
-        self.tabWidgetWD.setCurrentIndex(3)
+        self.tabWidgetWD.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(MainWindow)

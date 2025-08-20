@@ -1262,7 +1262,7 @@ padding-bottom: 4px;</string>
             <item>
              <widget class="QTabWidget" name="tabWidgetWD">
               <property name="currentIndex">
-               <number>3</number>
+               <number>0</number>
               </property>
               <widget class="QWidget" name="tabWDText">
                <attribute name="title">
@@ -1279,8 +1279,8 @@ padding-bottom: 4px;</string>
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>98</width>
-                     <height>28</height>
+                     <width>521</width>
+                     <height>474</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_22"/>

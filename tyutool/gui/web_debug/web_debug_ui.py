@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
+import json
 import logging
 
 from PySide6 import QtWidgets
@@ -26,6 +28,28 @@ class WebGuiDataDisplayHook:
         self.logger = logger
         self.hook_signal = WebDisplayHookSignal()
         self.hook_signal.hook_signal.connect(self.show_packet)
+        self.pack_count = {
+            "text": 0,
+            "audio": 0,
+            "picture": 0,
+            "video": 0,
+        }
+        self._update_count()
+        pass
+
+    def _update_count(self):
+        self.ui.labelWDTextCount.setText(f"{self.pack_count['text']}")
+        self.ui.labelWDAudioCount.setText(f"{self.pack_count['audio']}")
+        self.ui.labelWDPictureCount.setText(f"{self.pack_count['picture']}")
+        self.ui.labelWDVideoCount.setText(f"{self.pack_count['video']}")
+        pass
+
+    def clear_count(self):
+        self.pack_count["text"] = 0
+        self.pack_count["audio"] = 0
+        self.pack_count["picture"] = 0
+        self.pack_count["video"] = 0
+        self._update_count()
         pass
 
     def hook(self, packet, msg):
@@ -68,18 +92,24 @@ class WebGuiDataDisplayHook:
             scroll_area = self.ui.scrollAreaWDAudio
             scroll_content = self.ui.scrollAreaWidgetContentsWDAudio
             scroll_layout = self.ui.verticalLayout_23
+            self.pack_count["audio"] += 1
         elif packet_type == 34:  # Text
             scroll_area = self.ui.scrollAreaWDText
             scroll_content = self.ui.scrollAreaWidgetContentsWDText
             scroll_layout = self.ui.verticalLayout_22
+            self.pack_count["text"] += 1
         elif packet_type == 30:  # Video
             scroll_area = self.ui.scrollAreaWDVideo
             scroll_content = self.ui.scrollAreaWidgetContentsWDVideo
             scroll_layout = self.ui.verticalLayout_25
+            self.pack_count["video"] += 1
         elif packet_type == 32:  # Image
             scroll_area = self.ui.scrollAreaWDPicture
             scroll_content = self.ui.scrollAreaWidgetContentsWDPicture
             scroll_layout = self.ui.verticalLayout_24
+            self.pack_count["picture"] += 1
+
+        self._update_count()
 
         self._add_mag_to_scroll(
             scroll_area, scroll_content, scroll_layout, packet, msg
@@ -115,6 +145,7 @@ class WebDebugGUI(QtWidgets.QMainWindow):
         super().__init__()
         self.wd_monitor = None
         self.wd_logger = None
+        self.wd_display_hook = None
         pass
 
     def _setupWebLogger(self):
@@ -129,9 +160,56 @@ class WebDebugGUI(QtWidgets.QMainWindow):
         self.wd_logger = logger
         pass
 
+    def wdCacheSave(self):
+        cache_data = {
+            "ip": self.ui.lineEditWDIP.text(),
+            "port": self.ui.lineEditWDPort.text(),
+            "save": self.ui.lineEditWDSave.text(),
+            "enable_text": self.ui.checkBoxWDText.isChecked(),
+            "enable_audio": self.ui.checkBoxWDAudio.isChecked(),
+            "enable_picture": self.ui.checkBoxWDPicture.isChecked(),
+            "enable_video": self.ui.checkBoxWDVideo.isChecked(),
+        }
+        json_str = json.dumps(cache_data, indent=4, ensure_ascii=False)
+        with open(self.web_debug_cache, 'w', encoding='utf-8') as f:
+            f.write(json_str)
+        pass
+
+    def wdCacheUse(self):
+        cache_data = {}
+        if os.path.exists(self.web_debug_cache):
+            f = open(self.web_debug_cache, 'r', encoding='utf-8')
+            cache_data = json.load(f)
+            f.close()
+
+        ip = cache_data.get('ip', "localhost")
+        port = cache_data.get('port', "5055")
+        save = cache_data.get('save', "web_ai_debug")
+        self.ui.lineEditWDIP.setText(ip)
+        self.ui.lineEditWDPort.setText(port)
+        self.ui.lineEditWDSave.setText(save)
+
+        self.ui.checkBoxWDText.setChecked(
+            cache_data.get('enable_text', False)
+        )
+        self.ui.checkBoxWDAudio.setChecked(
+            cache_data.get('enable_audio', False)
+        )
+        self.ui.checkBoxWDPicture.setChecked(
+            cache_data.get('enable_picture', False)
+        )
+        self.ui.checkBoxWDVideo.setChecked(
+            cache_data.get('enable_video', False)
+        )
+        pass
+
     def webDebugUiSetup(self):
+        self.web_debug_cache = os.path.join(
+            self.cache_dir, "web_debug.cache"
+        )
         self.ui.textBrowserWD.setStyleSheet(
-            "color: rgb(37, 214, 78); background-color: rgb(35, 35, 35);")
+            "color: rgb(37, 214, 78); background-color: rgb(35, 35, 35);"
+        )
 
         reg_port = QRegularExpression('[0-9]+$')
         validator_port = QRegularExpressionValidator(reg_port)
@@ -148,6 +226,7 @@ class WebDebugGUI(QtWidgets.QMainWindow):
         )
 
         self._setupWebLogger()
+        self.wdCacheUse()
         pass
 
     def pushButtonWDConnectClicked(self):
@@ -164,7 +243,10 @@ class WebDebugGUI(QtWidgets.QMainWindow):
         ip = self.ui.lineEditWDIP.text()
         port = int(self.ui.lineEditWDPort.text())
         save = self.ui.lineEditWDSave.text()
-        display_hook = WebGuiDataDisplayHook(self.ui, self.wd_logger)
+        if self.wd_display_hook:
+            display_hook = self.wd_display_hook
+        else:
+            display_hook = WebGuiDataDisplayHook(self.ui, self.wd_logger)
 
         monitor = WebAIDebugMonitor(
             ip, port, event, save, self.wd_logger,
@@ -177,6 +259,8 @@ class WebDebugGUI(QtWidgets.QMainWindow):
             return
 
         self.wd_monitor = monitor
+        self.wd_display_hook = display_hook
+        self.wdCacheSave()
 
         self.ui.pushButtonWDConnect.setText("Quit")
         self.ui.pushButtonWDConnect.clicked.disconnect()
@@ -226,6 +310,8 @@ class WebDebugGUI(QtWidgets.QMainWindow):
             self.ui.scrollAreaWDVideo,
             self.ui.scrollAreaWidgetContentsWDVideo,
             self.ui.verticalLayout_25)
+
+        self.wd_display_hook.clear_count()
         pass
 
     def checkBoxWDDebugChecked(self, state):
