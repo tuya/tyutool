@@ -20,7 +20,8 @@ class WebAIDebugMonitor(object):
                  save_dir="web_ai_debug", logger=None,
                  display_hook=None):
         now = datetime.now().strftime("%Y%m%d-%H%M%S")
-        save_db = os.path.join(save_dir, now, "ai.db")
+        save_dir_now = os.path.join(save_dir, now)
+        save_db = os.path.join(save_dir_now, "ai.db")
 
         self.host = host
         self.port = port
@@ -30,7 +31,7 @@ class WebAIDebugMonitor(object):
         self.connector = SocketConnector(host, port, logger)
         self.parser = ProtocolParser()
         self.save = SaveDatabase(save_db, logger)
-        self.save_audio = SaveAudioStream(logger)
+        self.save_audio = SaveAudioStream(save_dir_now, logger)
         self.display = DataDisplay(logger, display_hook)
         pass
 
