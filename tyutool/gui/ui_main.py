@@ -472,7 +472,7 @@ class Ui_MainWindow(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 287, 768))
+        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 304, 768))
         self.verticalLayout_11 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_11.setSpacing(10)
         self.verticalLayout_11.setObjectName(u"verticalLayout_11")
@@ -1021,7 +1021,7 @@ class Ui_MainWindow(object):
         self.scrollAreaWDAudio.setWidgetResizable(True)
         self.scrollAreaWidgetContentsWDAudio = QWidget()
         self.scrollAreaWidgetContentsWDAudio.setObjectName(u"scrollAreaWidgetContentsWDAudio")
-        self.scrollAreaWidgetContentsWDAudio.setGeometry(QRect(0, 0, 98, 28))
+        self.scrollAreaWidgetContentsWDAudio.setGeometry(QRect(0, 0, 521, 474))
         self.verticalLayout_23 = QVBoxLayout(self.scrollAreaWidgetContentsWDAudio)
         self.verticalLayout_23.setObjectName(u"verticalLayout_23")
         self.scrollAreaWDAudio.setWidget(self.scrollAreaWidgetContentsWDAudio)
@@ -1038,7 +1038,7 @@ class Ui_MainWindow(object):
         self.scrollAreaWDPicture.setWidgetResizable(True)
         self.scrollAreaWidgetContentsWDPicture = QWidget()
         self.scrollAreaWidgetContentsWDPicture.setObjectName(u"scrollAreaWidgetContentsWDPicture")
-        self.scrollAreaWidgetContentsWDPicture.setGeometry(QRect(0, 0, 98, 28))
+        self.scrollAreaWidgetContentsWDPicture.setGeometry(QRect(0, 0, 521, 474))
         self.verticalLayout_24 = QVBoxLayout(self.scrollAreaWidgetContentsWDPicture)
         self.verticalLayout_24.setObjectName(u"verticalLayout_24")
         self.scrollAreaWDPicture.setWidget(self.scrollAreaWidgetContentsWDPicture)
@@ -1063,6 +1063,23 @@ class Ui_MainWindow(object):
         self.verticalLayout_21.addWidget(self.scrollAreaWDVideo)
 
         self.tabWidgetWD.addTab(self.tabWDVideo, "")
+        self.tabWDMsg = QWidget()
+        self.tabWDMsg.setObjectName(u"tabWDMsg")
+        self.verticalLayout_26 = QVBoxLayout(self.tabWDMsg)
+        self.verticalLayout_26.setObjectName(u"verticalLayout_26")
+        self.scrollAreaWDMsg = QScrollArea(self.tabWDMsg)
+        self.scrollAreaWDMsg.setObjectName(u"scrollAreaWDMsg")
+        self.scrollAreaWDMsg.setWidgetResizable(True)
+        self.scrollAreaWidgetContentsWDMsg = QWidget()
+        self.scrollAreaWidgetContentsWDMsg.setObjectName(u"scrollAreaWidgetContentsWDMsg")
+        self.scrollAreaWidgetContentsWDMsg.setGeometry(QRect(0, 0, 521, 474))
+        self.verticalLayout_27 = QVBoxLayout(self.scrollAreaWidgetContentsWDMsg)
+        self.verticalLayout_27.setObjectName(u"verticalLayout_27")
+        self.scrollAreaWDMsg.setWidget(self.scrollAreaWidgetContentsWDMsg)
+
+        self.verticalLayout_26.addWidget(self.scrollAreaWDMsg)
+
+        self.tabWidgetWD.addTab(self.tabWDMsg, "")
 
         self.horizontalLayout_31.addWidget(self.tabWidgetWD)
 
@@ -1111,7 +1128,7 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
 
         self.tabWidget.setCurrentIndex(0)
-        self.tabWidgetWD.setCurrentIndex(0)
+        self.tabWidgetWD.setCurrentIndex(4)
 
 
         QMetaObject.connectSlotsByName(MainWindow)
@@ -1213,6 +1230,7 @@ class Ui_MainWindow(object):
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDAudio), QCoreApplication.translate("MainWindow", u"Audio", None))
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDPicture), QCoreApplication.translate("MainWindow", u"Picture", None))
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDVideo), QCoreApplication.translate("MainWindow", u"Video", None))
+        self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDMsg), QCoreApplication.translate("MainWindow", u"msg", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabWebDebug), QCoreApplication.translate("MainWindow", u"WebDebug", None))
         self.menuMain.setTitle(QCoreApplication.translate("MainWindow", u"Main", None))
         self.menuDebug.setTitle(QCoreApplication.translate("MainWindow", u"Debug", None))

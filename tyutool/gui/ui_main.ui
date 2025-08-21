@@ -537,7 +537,7 @@
               <rect>
                <x>0</x>
                <y>0</y>
-               <width>287</width>
+               <width>304</width>
                <height>768</height>
               </rect>
              </property>
@@ -1262,7 +1262,7 @@ padding-bottom: 4px;</string>
             <item>
              <widget class="QTabWidget" name="tabWidgetWD">
               <property name="currentIndex">
-               <number>0</number>
+               <number>4</number>
               </property>
               <widget class="QWidget" name="tabWDText">
                <attribute name="title">
@@ -1304,8 +1304,8 @@ padding-bottom: 4px;</string>
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>98</width>
-                     <height>28</height>
+                     <width>521</width>
+                     <height>474</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_23"/>
@@ -1329,8 +1329,8 @@ padding-bottom: 4px;</string>
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>98</width>
-                     <height>28</height>
+                     <width>521</width>
+                     <height>474</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_24"/>
@@ -1359,6 +1359,31 @@ padding-bottom: 4px;</string>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_25"/>
+                  </widget>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="tabWDMsg">
+               <attribute name="title">
+                <string>msg</string>
+               </attribute>
+               <layout class="QVBoxLayout" name="verticalLayout_26">
+                <item>
+                 <widget class="QScrollArea" name="scrollAreaWDMsg">
+                  <property name="widgetResizable">
+                   <bool>true</bool>
+                  </property>
+                  <widget class="QWidget" name="scrollAreaWidgetContentsWDMsg">
+                   <property name="geometry">
+                    <rect>
+                     <x>0</x>
+                     <y>0</y>
+                     <width>521</width>
+                     <height>474</height>
+                    </rect>
+                   </property>
+                   <layout class="QVBoxLayout" name="verticalLayout_27"/>
                   </widget>
                  </widget>
                 </item>

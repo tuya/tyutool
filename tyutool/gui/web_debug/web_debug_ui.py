@@ -62,9 +62,9 @@ class WebGuiDataDisplayHook:
         QTimer.singleShot(0, lambda: scroll_bar.setValue(scroll_bar.maximum()))
         pass
 
-    def _add_mag_to_scroll(self,
+    def _add_msg_to_scroll(self,
                            scroll_area, scroll_content, scroll_layout,
-                           packet, msg):
+                           msg):
         scroll_bar = scroll_area.verticalScrollBar()
         scroll_at_bottom = scroll_bar.value() >= (scroll_bar.maximum() - 1)
 
@@ -89,30 +89,37 @@ class WebGuiDataDisplayHook:
     def show_packet(self, packet, msg):
         packet_type = packet['type']
         if packet_type == 31:  # Audio
-            scroll_area = self.ui.scrollAreaWDAudio
-            scroll_content = self.ui.scrollAreaWidgetContentsWDAudio
-            scroll_layout = self.ui.verticalLayout_23
+            # scroll_area = self.ui.scrollAreaWDAudio
+            # scroll_content = self.ui.scrollAreaWidgetContentsWDAudio
+            # scroll_layout = self.ui.verticalLayout_23
             self.pack_count["audio"] += 1
         elif packet_type == 34:  # Text
+            self.pack_count["text"] += 1
             scroll_area = self.ui.scrollAreaWDText
             scroll_content = self.ui.scrollAreaWidgetContentsWDText
             scroll_layout = self.ui.verticalLayout_22
-            self.pack_count["text"] += 1
+            text_msg = packet["text_content"]
+            self._add_msg_to_scroll(
+                scroll_area, scroll_content, scroll_layout, text_msg
+            )
         elif packet_type == 30:  # Video
-            scroll_area = self.ui.scrollAreaWDVideo
-            scroll_content = self.ui.scrollAreaWidgetContentsWDVideo
-            scroll_layout = self.ui.verticalLayout_25
+            # scroll_area = self.ui.scrollAreaWDVideo
+            # scroll_content = self.ui.scrollAreaWidgetContentsWDVideo
+            # scroll_layout = self.ui.verticalLayout_25
             self.pack_count["video"] += 1
         elif packet_type == 32:  # Image
-            scroll_area = self.ui.scrollAreaWDPicture
-            scroll_content = self.ui.scrollAreaWidgetContentsWDPicture
-            scroll_layout = self.ui.verticalLayout_24
+            # scroll_area = self.ui.scrollAreaWDPicture
+            # scroll_content = self.ui.scrollAreaWidgetContentsWDPicture
+            # scroll_layout = self.ui.verticalLayout_24
             self.pack_count["picture"] += 1
 
         self._update_count()
 
-        self._add_mag_to_scroll(
-            scroll_area, scroll_content, scroll_layout, packet, msg
+        scroll_area = self.ui.scrollAreaWDMsg
+        scroll_content = self.ui.scrollAreaWidgetContentsWDMsg
+        scroll_layout = self.ui.verticalLayout_27
+        self._add_msg_to_scroll(
+            scroll_area, scroll_content, scroll_layout, msg
         )
         pass
 

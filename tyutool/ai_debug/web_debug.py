@@ -11,6 +11,7 @@ from .web.protocol import ProtocolParser
 from .web.socket_connect import SocketConnector
 from .web.show import DataDisplay
 from .web.save_db import SaveDatabase
+from .web.save_audio_stream import SaveAudioStream
 
 
 class WebAIDebugMonitor(object):
@@ -29,6 +30,7 @@ class WebAIDebugMonitor(object):
         self.connector = SocketConnector(host, port, logger)
         self.parser = ProtocolParser()
         self.save = SaveDatabase(save_db, logger)
+        self.save_audio = SaveAudioStream(logger)
         self.display = DataDisplay(logger, display_hook)
         pass
 
@@ -125,5 +127,6 @@ class WebAIDebugMonitor(object):
 
         if should_monitor:
             self.save.save(packet)
+            self.save_audio.save(packet)
             self.display.display_packet(packet)
         pass
