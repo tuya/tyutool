@@ -13,6 +13,10 @@ TYPE_MAPPING = {
 }
 
 
+MEDIA_STREAM_COUNT = 0
+MEDIA_STREAM_ID = ""
+
+
 def _get_logger():
     """延迟初始化logger"""
     return get_logger()
@@ -209,6 +213,9 @@ actual 0x{magic:08x}")
         if len(payload) < 22:
             return {}
 
+        global MEDIA_STREAM_COUNT
+        global MEDIA_STREAM_ID
+
         data_id = struct.unpack('>H', payload[0:2])[0]
         byte2 = payload[2]
         stream_flag = (byte2 & 0xC0) >> 6  # 0x11000000
@@ -221,6 +228,11 @@ actual 0x{magic:08x}")
         if len(payload) >= 23+length:
             media_payload = payload[23:(23+length)]
 
+        # 针对流开始的包，更新流唯一标识，方便后续保存文件
+        if stream_flag == 1:
+            MEDIA_STREAM_COUNT += 1
+            MEDIA_STREAM_ID = f"{MEDIA_STREAM_COUNT}_date{data_id}"
+
         return {
             'data_id': data_id,
             'stream_flag': stream_flag,
@@ -229,6 +241,7 @@ actual 0x{magic:08x}")
             'pts': pts,
             'media_payload': media_payload,
             'size': length,
+            'stream_id': MEDIA_STREAM_ID,  # 工具自定义字段
         }
 
     @staticmethod

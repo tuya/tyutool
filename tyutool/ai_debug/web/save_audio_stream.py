@@ -149,18 +149,20 @@ frame_count: {frame_count}, frame_size: {frame_size}")
         # 生成新的内部流ID
         internal_stream_id = self.next_stream_id
         self.next_stream_id += 1
+        start_time = datetime.now()
+        stream_id = packet.get("stream_id", "") or start_time
 
         # 创建新的音频流，使用内部ID作为唯一标识
         self.audio_streams[internal_stream_id] = {
-            'id': internal_stream_id,
+            'id': stream_id,
             'data_id': data_id,  # 保留原始data_id用于调试
             'direction': direction,  # 标识流方向
             'chunks': [],
             'attributes': packet.get('attributes', {}),
-            'start_time': datetime.now(),
+            'start_time': start_time,
             'total_size': 0,
             'is_active': True,
-            'current_stream_id': internal_stream_id  # 标记当前活跃的流ID
+            'current_stream_id': internal_stream_id,  # 标记当前活跃的流ID
         }
 
         # 添加第一个音频数据块（流开始包通常也包含数据）
@@ -344,14 +346,14 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
             wav_header += struct.pack('<I', data_size)
 
             # 保存文件
-            filename = f"{stream_id}_data{data_id}_{timestamp}.wav"
+            filename = f"{stream_id}.wav"
             filepath = os.path.join(self.save_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(wav_header)
                 f.write(audio_data)
 
-            self.logger.info(f"Audio stream {stream_id} save to WAV file: \
+            self.logger.info(f"Audio stream save to WAV file: \
 {filepath} ({len(audio_data)} bytes PCM + WAV header)")
 
         except Exception as e:
@@ -360,13 +362,13 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
     def _save_as_mp3(self, audio_data, stream_id, data_id, timestamp):
         """保存为MP3格式（直接保存，因为数据已经是MP3编码）"""
         try:
-            filename = f"{stream_id}_data{data_id}_{timestamp}.mp3"
+            filename = f"{stream_id}.mp3"
             filepath = os.path.join(self.save_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(audio_data)
 
-            self.logger.info(f"Audio stream {stream_id} save to MP3 file: \
+            self.logger.info(f"Audio stream save to MP3 file: \
 {filepath} ({len(audio_data)} bytes)")
 
         except Exception as e:
@@ -386,13 +388,13 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
             else:
                 ext = "aac"
 
-            filename = f"{stream_id}_data{data_id}_{timestamp}.{ext}"
+            filename = f"{stream_id}.{ext}"
             filepath = os.path.join(self.save_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(audio_data)
 
-            self.logger.info(f"Audio stream {stream_id} save to AAC file: \
+            self.logger.info(f"Audio stream save to AAC file: \
 {filepath} ({len(audio_data)} bytes)")
 
         except Exception as e:
@@ -401,13 +403,13 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
     def _save_as_opus(self, audio_data, stream_id, data_id, timestamp):
         """保存为Opus格式"""
         try:
-            filename = f"{stream_id}_data{data_id}_{timestamp}.opus"
+            filename = f"{stream_id}.opus"
             filepath = os.path.join(self.save_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(audio_data)
 
-            self.logger.info(f"Audio stream {stream_id} save to Opus file: \
+            self.logger.info(f"Audio stream save to Opus file: \
 {filepath} ({len(audio_data)} bytes)")
 
         except Exception as e:
@@ -424,13 +426,13 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
             }
 
             codec_name = codec_names.get(codec_type, f'codec{codec_type}')
-            filename = f"{stream_id}_data{data_id}_{timestamp}.{codec_name}"
+            filename = f"{stream_id}.{codec_name}"
             filepath = os.path.join(self.save_dir, filename)
 
             with open(filepath, 'wb') as f:
                 f.write(audio_data)
 
-            self.logger.info(f"Audio stream {stream_id} save to RAW file: \
+            self.logger.info(f"Audio stream save to RAW file: \
 {filepath} ({len(audio_data)} bytes, codec: {codec_name})")
 
         except Exception as e:
