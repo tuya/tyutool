@@ -4,6 +4,7 @@
 import click
 
 from tyutool.audio import pcm2wav
+from tyutool.audio import play_sound
 from tyutool.util.util import set_clis, get_logger
 
 
@@ -41,7 +42,19 @@ def pcm2wav_cli(input, output,
     pass
 
 
+@click.command()
+@click.option('-f', '--file',
+              type=str, required=True,
+              help="Input pcm file")
+def play_cli(file):
+    logger = get_logger()
+    logger.debug(f"file: {file}")
+    play_sound(file)
+    pass
+
+
 CLIS = {
+    "play": play_cli,
     "pcm2wav": pcm2wav_cli,
 }
 

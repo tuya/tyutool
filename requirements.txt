@@ -11,3 +11,4 @@ PySide6
 numpy
 scipy
 matplotlib
+pygame

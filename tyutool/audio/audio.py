@@ -2,11 +2,30 @@
 # coding=utf-8
 
 import os
+import time
 import wave
-
+import warnings
 from tyutool.util.util import get_logger
 
+# 屏蔽import pygame 时的 pkg_resources警告
+warnings.filterwarnings("ignore", category=UserWarning, module="pygame")
+import pygame
+
 logger = get_logger()
+
+
+def play_sound(file):
+    pygame.mixer.init()
+    try:
+        pygame.mixer.music.load(file)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():  # 等待播放完成
+            time.sleep(0.1)
+    except Exception as e:
+        print(f"播放失败: {e}")
+    finally:
+        pygame.mixer.quit()
+    pass
 
 
 def pcm2wav(pcm_file, wav_file,

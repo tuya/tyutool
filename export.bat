@@ -77,6 +77,7 @@ if not exist "%TYUTOOL_ROOT%\.venv\Scripts\pip.exe" (
 echo DEBUG: Activating virtual environment from %TYUTOOL_ROOT%\.venv\Scripts
 set PATH=%TYUTOOL_ROOT%\.venv\Scripts;%PATH%
 set OPEN_SDK_PYTHON=%TYUTOOL_ROOT%\.venv\Scripts\python.exe
+set PYGAME_HIDE_SUPPORT_PROMPT=1  :: hide [import pygame ] hello
 
 :: Verify activation worked by checking if we're using the right Python
 for /f %%i in ('where python') do set ACTIVE_PYTHON=%%i

@@ -113,7 +113,8 @@ actual 0x{magic:08x}")
         iv_flag = byte7 & 0x01  # 0x00000001
 
         if security_level != 0 or iv_flag != 0:
-            _get_logger().debug(f"Unsupported security level: {security_level}")
+            _get_logger().debug(f"Unsupported security level: \
+{security_level}")
             return ProtocolParser._find_frame_sync(data[4:])
 
         reserve = data[9]

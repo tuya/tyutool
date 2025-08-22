@@ -26,11 +26,13 @@ class SaveAudioStream:
 
         # 创建保存目录
         os.makedirs(self.save_dir, exist_ok=True)
+        pass
 
     def save(self, packet):
         """保存音频数据包"""
         if packet.get('type') == 31:  # Audio packet
             self._handle_audio_stream(packet)
+        pass
 
     def _handle_audio_stream(self, packet):
         """处理音频流数据包"""
@@ -81,6 +83,7 @@ sample_rate: {sample_rate}, channels: {channels}, codec_type: {codec_type}")
         except Exception as e:
             self.logger.error(f"Audio Stream: {e}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
+        pass
 
     def _handle_opus_decode(self, packet, stream_flag, sample_rate, channels):
         """处理Opus解码成PCM的特殊逻辑"""
@@ -143,6 +146,7 @@ frame_count: {frame_count}, frame_size: {frame_size}")
         except Exception as e:
             self.logger.error(f"Opus decode: {e}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
+        pass
 
     def _handle_stream_start(self, packet, data_id, direction):
         """处理音频流开始"""
@@ -172,6 +176,7 @@ frame_count: {frame_count}, frame_size: {frame_size}")
         self.logger.info(f"Audio stream {internal_stream_id} start, \
 data_id: {data_id}, direction: {direction}, \
 attributes: {packet.get('attributes', {})}")
+        pass
 
     def _handle_stream_continue(self, packet, data_id, direction, stream_flag):
         """处理音频流继续"""
@@ -187,6 +192,7 @@ not a active stream, skip.")
         # 添加音频数据块到活跃流
         if packet.get('media_payload'):
             self._add_audio_chunk(active_stream_id, packet)
+        pass
 
     def _handle_stream_end(self, packet, data_id, direction):
         """处理音频流结束"""
@@ -217,7 +223,9 @@ data_id: {data_id}, total: {len(stream['chunks'])}, \
 size: {stream['total_size']} bytes")
 
         # 自动保存到文件
-        self._save_audio_stream_to_file(stream)
+        save_path = self._save_audio_stream_to_file(stream)
+        packet["stream_save"] = save_path  # 记录保存路径，便于GUI播放
+        pass
 
     def _find_active_stream(self, data_id, direction):
         """查找指定data_id和方向的最新活跃流"""
@@ -265,9 +273,11 @@ size: {stream['total_size']} bytes")
 
         self.logger.debug(f"add audio chunk {stream_id}, \
 total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
+        pass
 
     def _save_audio_stream_to_file(self, stream):
         """将音频流保存到文件，根据编码格式生成不同类型的文件"""
+        save_path = ""
         try:
             # 获取流信息
             stream_id = stream['id']
@@ -290,33 +300,42 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
 
             if not audio_data:
                 self.logger.warning(f"Audio stream {stream_id} no data")
-                return
+                return save_path
 
             # 根据编码类型生成不同格式的文件
             if codec_type == 101:  # PCM
-                self._save_as_wav(audio_data, stream_id, data_id,
-                                  start_time, sample_rate, channels, bit_depth)
+                save_path = self._save_as_wav(
+                    audio_data, stream_id, data_id,
+                    start_time, sample_rate, channels,
+                    bit_depth)
             elif codec_type == 109:  # MP3
-                self._save_as_mp3(audio_data, stream_id, data_id,
-                                  start_time)
+                save_path = self._save_as_mp3(
+                    audio_data, stream_id, data_id,
+                    start_time)
             elif codec_type in [102, 103, 104]:  # AAC variants
-                self._save_as_aac(audio_data, stream_id, data_id,
-                                  start_time, codec_type)
+                save_path = self._save_as_aac(
+                    audio_data, stream_id, data_id,
+                    start_time, codec_type)
             elif codec_type == 111:  # Opus
-                self._save_as_opus(audio_data, stream_id, data_id,
-                                   start_time)
+                save_path = self._save_as_opus(
+                    audio_data, stream_id, data_id,
+                    start_time)
             else:
                 # 其他格式保存为原始数据
-                self._save_as_raw(audio_data, stream_id, data_id,
-                                  start_time, codec_type)
+                save_path = self._save_as_raw(
+                    audio_data, stream_id, data_id,
+                    start_time, codec_type)
 
         except Exception as e:
             self.logger.error(f"Save audio stream to file: {e}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
 
+        return save_path
+
     def _save_as_wav(self, audio_data, stream_id, data_id,
                      timestamp, sample_rate, channels, bit_depth):
         """保存为WAV格式（添加WAV头）"""
+        save_path = ""
         try:
             # 计算相关参数
             byte_rate = sample_rate * channels * bit_depth // 8
@@ -347,36 +366,42 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
 
             # 保存文件
             filename = f"{stream_id}.wav"
-            filepath = os.path.join(self.save_dir, filename)
+            save_path = os.path.join(self.save_dir, filename)
 
-            with open(filepath, 'wb') as f:
+            with open(save_path, 'wb') as f:
                 f.write(wav_header)
                 f.write(audio_data)
 
             self.logger.info(f"Audio stream save to WAV file: \
-{filepath} ({len(audio_data)} bytes PCM + WAV header)")
+{save_path} ({len(audio_data)} bytes PCM + WAV header)")
 
         except Exception as e:
             self.logger.error(f"Save WAV file: {e}")
 
+        return save_path
+
     def _save_as_mp3(self, audio_data, stream_id, data_id, timestamp):
         """保存为MP3格式（直接保存，因为数据已经是MP3编码）"""
+        save_path = ""
         try:
             filename = f"{stream_id}.mp3"
-            filepath = os.path.join(self.save_dir, filename)
+            save_path = os.path.join(self.save_dir, filename)
 
-            with open(filepath, 'wb') as f:
+            with open(save_path, 'wb') as f:
                 f.write(audio_data)
 
             self.logger.info(f"Audio stream save to MP3 file: \
-{filepath} ({len(audio_data)} bytes)")
+{save_path} ({len(audio_data)} bytes)")
 
         except Exception as e:
             self.logger.error(f"Save MP3 file: {e}")
 
+        return save_path
+
     def _save_as_aac(self, audio_data, stream_id, data_id,
                      timestamp, codec_type):
         """保存为AAC格式"""
+        save_path = ""
         try:
             # 根据AAC类型确定扩展名
             if codec_type == 102:  # AAC Raw
@@ -389,35 +414,41 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
                 ext = "aac"
 
             filename = f"{stream_id}.{ext}"
-            filepath = os.path.join(self.save_dir, filename)
+            save_path = os.path.join(self.save_dir, filename)
 
-            with open(filepath, 'wb') as f:
+            with open(save_path, 'wb') as f:
                 f.write(audio_data)
 
             self.logger.info(f"Audio stream save to AAC file: \
-{filepath} ({len(audio_data)} bytes)")
+{save_path} ({len(audio_data)} bytes)")
 
         except Exception as e:
             self.logger.error(f"Save AAC file: {e}")
 
+        return save_path
+
     def _save_as_opus(self, audio_data, stream_id, data_id, timestamp):
         """保存为Opus格式"""
+        save_path = ""
         try:
             filename = f"{stream_id}.opus"
-            filepath = os.path.join(self.save_dir, filename)
+            save_path = os.path.join(self.save_dir, filename)
 
-            with open(filepath, 'wb') as f:
+            with open(save_path, 'wb') as f:
                 f.write(audio_data)
 
             self.logger.info(f"Audio stream save to Opus file: \
-{filepath} ({len(audio_data)} bytes)")
+{save_path} ({len(audio_data)} bytes)")
 
         except Exception as e:
             self.logger.error(f"Save Opus file: {e}")
 
+        return save_path
+
     def _save_as_raw(self, audio_data, stream_id, data_id,
                      timestamp, codec_type):
         """保存为原始格式"""
+        save_path = ""
         try:
             # 获取编码类型名称
             codec_names = {
@@ -427,13 +458,15 @@ total: {len(stream['chunks'])}, size: {stream['total_size']} bytes")
 
             codec_name = codec_names.get(codec_type, f'codec{codec_type}')
             filename = f"{stream_id}.{codec_name}"
-            filepath = os.path.join(self.save_dir, filename)
+            save_path = os.path.join(self.save_dir, filename)
 
-            with open(filepath, 'wb') as f:
+            with open(save_path, 'wb') as f:
                 f.write(audio_data)
 
             self.logger.info(f"Audio stream save to RAW file: \
-{filepath} ({len(audio_data)} bytes, codec: {codec_name})")
+{save_path} ({len(audio_data)} bytes, codec: {codec_name})")
 
         except Exception as e:
             self.logger.error(f"Save RAW file: {e}")
+
+        return save_path
