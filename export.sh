@@ -105,7 +105,6 @@ fi
 echo "DEBUG: Activating virtual environment from $TYUTOOL_ROOT/.venv/bin/activate"
 . ${TYUTOOL_ROOT}/.venv/bin/activate
 export PATH=$PATH:${TYUTOOL_ROOT}
-export PYGAME_HIDE_SUPPORT_PROMPT=1  # hide [import pygame ] hello
 
 # Verify activation worked
 if [ -z "$VIRTUAL_ENV" ]; then

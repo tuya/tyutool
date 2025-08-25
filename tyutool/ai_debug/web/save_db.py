@@ -88,7 +88,8 @@ class SaveDatabase:
             'pts': pts,
             'media_payload': media_payload,
             'size': length,
-            'stream_id': MEDIA_STREAM_ID,  # 工具自定义字段
+            'size_sum': AUDIO_PACK_STATIC["size_sum"],  # 工具自定义字段
+            'stream_id': AUDIO_PACK_STATIC["stream_id"],  # 工具自定义字段
         }
         '''
         conn = sqlite3.connect(self.save_db)
@@ -106,6 +107,7 @@ class SaveDatabase:
             timestamp TIMESTAMP,
             pts TIMESTAMP,
             size INTEGER,
+            size_sum INTEGER,
             stream_id TEXT
         );
         """
@@ -122,6 +124,7 @@ class SaveDatabase:
             packet["timestamp"],           # timestamp (TIMESTAMP)
             packet["pts"],                 # pts (TIMESTAMP)
             packet["size"],                # size (INTEGER)
+            packet["size_sum"],            # size_sum (INTEGER)
             packet["stream_id"],           # stream_id (TEXT)
         )
 
@@ -129,8 +132,8 @@ class SaveDatabase:
         INSERT INTO audio_pack
         (direction, type, type_name, attributes, data_id,
         stream_flag, stream_status, timestamp, pts, size,
-        stream_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        size_sum, stream_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         cursor.execute(insert_sql, sample_data)
 

@@ -7,14 +7,19 @@ import logging
 
 from PySide6 import QtWidgets
 from PySide6.QtCore import (
-    Qt, QRegularExpression, QObject, Signal, QTimer
+    Qt, QRegularExpression, QObject, Signal, QTimer, QUrl
 )
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
-    QTextEdit
+    QTextEdit, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QFrame
 )
 
 from tyutool.ai_debug import WebAIDebugMonitor
+
+# 屏蔽import QtMultimedia 时的警告
+os.environ["QT_LOGGING_RULES"] = "qt.multimedia.symbolsresolver.warning=false;\
+qt.multimedia.ffmpeg*=false"
+from PySide6 import QtMultimedia
 
 
 class WebDisplayHookSignal(QObject):
@@ -86,13 +91,231 @@ class WebGuiDataDisplayHook:
             QTimer.singleShot(10, lambda: self._scroll_to_bottom(scroll_area))
         pass
 
+    def _add_audio_to_scroll(self,
+                             scroll_area, scroll_content, scroll_layout,
+                             packet):
+        stream_flag = packet.get('stream_flag', 0)
+        stream_save = packet.get('stream_save', "")
+        if (3 != stream_flag) or (not os.path.exists(stream_save)):
+            return
+
+        # Create audio player widget
+        audio_widget = self._create_audio_player_widget(packet)
+
+        # Add to scroll layout
+        scroll_bar = scroll_area.verticalScrollBar()
+        scroll_at_bottom = scroll_bar.value() >= (scroll_bar.maximum() - 1)
+
+        # Remove existing stretch if any
+        for i in reversed(range(scroll_layout.count())):
+            item = scroll_layout.itemAt(i)
+            if item and item.spacerItem():
+                scroll_layout.removeItem(item)
+                break
+
+        # Add audio widget
+        scroll_layout.addWidget(audio_widget)
+
+        # Add stretch to push all widgets to top
+        scroll_layout.addStretch()
+
+        scroll_content.updateGeometry()
+        scroll_area.updateGeometry()
+
+        if scroll_at_bottom:
+            QTimer.singleShot(10, lambda: self._scroll_to_bottom(scroll_area))
+        pass
+
+    def _create_audio_player_widget(self, packet):
+        """Create audio player widget with controls and info"""
+        main_widget = QWidget()
+        main_widget.setFixedHeight(60)  # Fixed height for long bar shape
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(2, 2, 2, 2)
+        main_layout.setSpacing(0)
+
+        # Create frame for styling
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Box)
+        frame.setStyleSheet("QFrame { border: 1px solid #555555; \
+background-color: #2a2a2a; border-radius: 5px; }")
+        frame.setFixedHeight(56)
+
+        # Main horizontal layout inside frame
+        frame_layout = QHBoxLayout(frame)
+        frame_layout.setContentsMargins(15, 8, 15, 8)
+        # Increased spacing for less compact layout
+        frame_layout.setSpacing(25)
+
+        # Play/Stop button - leftmost
+        play_button = QPushButton("▶ Play")
+        play_button.setFixedSize(75, 35)
+        play_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3e8e41;
+            }
+        """)
+        frame_layout.addWidget(play_button)
+
+        # File path label (highlighted)
+        file_path = packet.get('stream_save', '')
+        file_name = os.path.basename(file_path) if file_path else 'unknown'
+        path_label = QLabel(f"File: {file_name}")
+        path_label.setStyleSheet("QLabel { color: #FFD700; \
+font-weight: bold; font-size: 13px; \
+background-color: #404040; padding: 4px 8px; \
+border-radius: 3px; }")
+        path_label.setToolTip(file_path)  # Full path in tooltip
+        path_label.setMinimumWidth(150)
+        path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        frame_layout.addWidget(path_label)
+
+        # Direction
+        direction = packet.get('direction', 'unknown')
+        dir_label = QLabel(f"Dir: {direction}")
+        dir_label.setStyleSheet("QLabel { color: #2196F3; font-size: 14px; }")
+        dir_label.setFixedWidth(60)
+        dir_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        frame_layout.addWidget(dir_label)
+
+        # Size
+        size = packet.get('size_sum', 0)
+        size_str = f"{size} bytes" if size else 'N/A'
+        size_label = QLabel(f"Size: {size_str}")
+        size_label.setStyleSheet("QLabel { color: #4CAF50; \
+font-weight: bold; font-size: 14px; }")
+        size_label.setFixedWidth(150)
+        size_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        frame_layout.addWidget(size_label)
+
+        # Timestamp
+        timestamp = packet.get('timestamp', 0)
+        time_label = QLabel(f"Time: {timestamp}")
+        time_label.setStyleSheet("QLabel { color: #FF9800; font-size: 14px; }")
+        time_label.setFixedWidth(170)
+        time_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        frame_layout.addWidget(time_label)
+
+        # Add stretch to push remaining elements to the right
+        frame_layout.addStretch()
+
+        main_layout.addWidget(frame)
+
+        # Setup audio player
+        audio_player = QtMultimedia.QMediaPlayer()
+        audio_output = QtMultimedia.QAudioOutput()
+        audio_player.setAudioOutput(audio_output)
+
+        # Store references in widget
+        main_widget.audio_player = audio_player
+        main_widget.audio_output = audio_output
+        main_widget.play_button = play_button
+        main_widget.is_playing = False
+
+        # Set audio source
+        if file_path and os.path.exists(file_path):
+            audio_player.setSource(QUrl.fromLocalFile(file_path))
+
+        # Connect play button
+        def toggle_playback():
+            if main_widget.is_playing:
+                audio_player.stop()
+                play_button.setText("▶ Play")
+                play_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 11px;
+                    }
+                    QPushButton:hover {
+                        background-color: #45a049;
+                    }
+                    QPushButton:pressed {
+                        background-color: #3e8e41;
+                    }
+                """)
+                main_widget.is_playing = False
+            else:
+                audio_player.play()
+                play_button.setText("⏹ Stop")
+                play_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #f44336;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 11px;
+                    }
+                    QPushButton:hover {
+                        background-color: #da190b;
+                    }
+                    QPushButton:pressed {
+                        background-color: #c62828;
+                    }
+                """)
+                main_widget.is_playing = True
+            pass
+
+        play_button.clicked.connect(toggle_playback)
+
+        # Auto-stop when finished
+        def on_playback_finished():
+            play_button.setText("▶ Play")
+            play_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    font-size: 11px;
+                }
+                QPushButton:hover {
+                    background-color: #45a049;
+                }
+                QPushButton:pressed {
+                    background-color: #3e8e41;
+                }
+            """)
+            main_widget.is_playing = False
+            pass
+
+        def _media_status_changed(status):
+            if status == QtMultimedia.QMediaPlayer.EndOfMedia:
+                on_playback_finished()
+            pass
+
+        audio_player.mediaStatusChanged.connect(
+            _media_status_changed
+        )
+
+        return main_widget
+
     def show_packet(self, packet, msg):
         packet_type = packet['type']
         if packet_type == 31:  # Audio
-            # scroll_area = self.ui.scrollAreaWDAudio
-            # scroll_content = self.ui.scrollAreaWidgetContentsWDAudio
-            # scroll_layout = self.ui.verticalLayout_23
+            scroll_area = self.ui.scrollAreaWDAudio
+            scroll_content = self.ui.scrollAreaWidgetContentsWDAudio
+            scroll_layout = self.ui.verticalLayout_23
             self.pack_count["audio"] += 1
+            self._add_audio_to_scroll(
+                scroll_area, scroll_content, scroll_layout, packet
+            )
         elif packet_type == 34:  # Text
             self.pack_count["text"] += 1
             scroll_area = self.ui.scrollAreaWDText

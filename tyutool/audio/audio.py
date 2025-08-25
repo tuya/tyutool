@@ -9,6 +9,8 @@ from tyutool.util.util import get_logger
 
 # 屏蔽import pygame 时的 pkg_resources警告
 warnings.filterwarnings("ignore", category=UserWarning, module="pygame")
+# hide [import pygame ] hello
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 import pygame
 
 logger = get_logger()
