@@ -9,7 +9,13 @@ from typing import (
     List
 )
 
-_here = os.path.dirname(__file__)
+# PyInstaller compatibility: detect if running from frozen executable
+if getattr(sys, 'frozen', False):
+    # Running from PyInstaller bundle, libs directory copied to resource/libs
+    _here = os.path.join(os.path.dirname(sys.executable), 'resource')
+else:
+    # Running from source
+    _here = os.path.dirname(__file__)
 
 class ExternalLibraryError(Exception):
     pass

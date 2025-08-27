@@ -5,7 +5,8 @@ cd ..
 
 rm -rf ./dist
 mkdir -p dist
-cp -a ./resource ./dist
+cp -r ./resource ./dist
+cp -r ./tyutool/ai_debug/web/libs/PyOgg/pyogg/libs ./dist/resource
 
 if [ "$(uname -s)" = "Darwin" ]; then
     ICO=icns
@@ -13,8 +14,8 @@ else
     ICO=ico
 fi
 
-pyinstaller -F --workpath build --specpath dist ./tyutool_cli.py
-pyinstaller -F --workpath build --specpath dist --windowed --icon ./resource/logo.${ICO} ./tyutool_gui.py
+pyinstaller -F --workpath build --specpath dist --add-data "./resource/libs:./resource/libs" ./tyutool_cli.py
+pyinstaller -F --workpath build --specpath dist --windowed --icon ./resource/logo.${ICO} --add-data "./resource/libs:./resource/libs" ./tyutool_gui.py
 
 sleep 1
 
