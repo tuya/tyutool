@@ -11,16 +11,17 @@ from .web.protocol import ProtocolParser
 from .web.socket_connect import SocketConnector
 from .web.show import DataDisplay
 from .web.save_db import SaveDatabase
+from .web.save_audio_stream import SaveAudioStream
 
 
 class WebAIDebugMonitor(object):
     def __init__(self,
-                 host="localhost", port=5055, monitor_types=[],
-                 save_dir="ai_debug_db", logger=None):
+                 host="localhost", port=5055, monitor_types=['a'],
+                 save_dir="web_ai_debug", logger=None,
+                 display_hook=None):
         now = datetime.now().strftime("%Y%m%d-%H%M%S")
-        save_db = ""
-        if save_dir:
-            save_db = os.path.join(save_dir, now, "ai.db")
+        save_dir_now = os.path.join(save_dir, now)
+        save_db = os.path.join(save_dir_now, "ai.db")
 
         self.host = host
         self.port = port
@@ -29,8 +30,9 @@ class WebAIDebugMonitor(object):
 
         self.connector = SocketConnector(host, port, logger)
         self.parser = ProtocolParser()
-        self.display = DataDisplay(logger)
-        self.save = SaveDatabase(save_db, logger) if save_db else None
+        self.save = SaveDatabase(save_db, logger)
+        self.save_audio = SaveAudioStream(save_dir_now, logger)
+        self.display = DataDisplay(logger, display_hook)
         pass
 
     def connect(self, timeout=10):
@@ -125,7 +127,7 @@ class WebAIDebugMonitor(object):
                 break
 
         if should_monitor:
+            self.save.save(packet)
+            self.save_audio.save(packet)
             self.display.display_packet(packet)
-            if self.save:
-                self.save.save(packet)
         pass

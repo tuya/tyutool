@@ -41,8 +41,8 @@ class Ui_MainWindow(object):
         self.actionVersion.setObjectName(u"actionVersion")
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
-        self.verticalLayout_10 = QVBoxLayout(self.centralwidget)
-        self.verticalLayout_10.setObjectName(u"verticalLayout_10")
+        self.verticalLayout_16 = QVBoxLayout(self.centralwidget)
+        self.verticalLayout_16.setObjectName(u"verticalLayout_16")
         self.tabWidget = QTabWidget(self.centralwidget)
         self.tabWidget.setObjectName(u"tabWidget")
         self.tabFlash = QWidget()
@@ -831,8 +831,278 @@ class Ui_MainWindow(object):
         self.verticalLayout_12.addLayout(self.horizontalLayout_9)
 
         self.tabWidget.addTab(self.tabSerDebug, "")
+        self.tabWebDebug = QWidget()
+        self.tabWebDebug.setObjectName(u"tabWebDebug")
+        self.verticalLayout_15 = QVBoxLayout(self.tabWebDebug)
+        self.verticalLayout_15.setObjectName(u"verticalLayout_15")
+        self.verticalLayout_17 = QVBoxLayout()
+        self.verticalLayout_17.setObjectName(u"verticalLayout_17")
+        self.horizontalLayout_31 = QHBoxLayout()
+        self.horizontalLayout_31.setObjectName(u"horizontalLayout_31")
+        self.scrollArea_2 = QScrollArea(self.tabWebDebug)
+        self.scrollArea_2.setObjectName(u"scrollArea_2")
+        sizePolicy6.setHeightForWidth(self.scrollArea_2.sizePolicy().hasHeightForWidth())
+        self.scrollArea_2.setSizePolicy(sizePolicy6)
+        self.scrollArea_2.setMinimumSize(QSize(200, 0))
+        self.scrollArea_2.setMaximumSize(QSize(16777215, 16777215))
+        self.scrollArea_2.setWidgetResizable(True)
+        self.scrollAreaWidgetContents_2 = QWidget()
+        self.scrollAreaWidgetContents_2.setObjectName(u"scrollAreaWidgetContents_2")
+        self.scrollAreaWidgetContents_2.setGeometry(QRect(0, 0, 203, 524))
+        self.verticalLayout_18 = QVBoxLayout(self.scrollAreaWidgetContents_2)
+        self.verticalLayout_18.setObjectName(u"verticalLayout_18")
+        self.horizontalLayout_32 = QHBoxLayout()
+        self.horizontalLayout_32.setObjectName(u"horizontalLayout_32")
+        self.label = QLabel(self.scrollAreaWidgetContents_2)
+        self.label.setObjectName(u"label")
 
-        self.verticalLayout_10.addWidget(self.tabWidget)
+        self.horizontalLayout_32.addWidget(self.label)
+
+        self.lineEditWDIP = QLineEdit(self.scrollAreaWidgetContents_2)
+        self.lineEditWDIP.setObjectName(u"lineEditWDIP")
+
+        self.horizontalLayout_32.addWidget(self.lineEditWDIP)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_32)
+
+        self.horizontalLayout_33 = QHBoxLayout()
+        self.horizontalLayout_33.setObjectName(u"horizontalLayout_33")
+        self.label_2 = QLabel(self.scrollAreaWidgetContents_2)
+        self.label_2.setObjectName(u"label_2")
+
+        self.horizontalLayout_33.addWidget(self.label_2)
+
+        self.lineEditWDPort = QLineEdit(self.scrollAreaWidgetContents_2)
+        self.lineEditWDPort.setObjectName(u"lineEditWDPort")
+
+        self.horizontalLayout_33.addWidget(self.lineEditWDPort)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_33)
+
+        self.horizontalLayout_39 = QHBoxLayout()
+        self.horizontalLayout_39.setObjectName(u"horizontalLayout_39")
+        self.label_4 = QLabel(self.scrollAreaWidgetContents_2)
+        self.label_4.setObjectName(u"label_4")
+
+        self.horizontalLayout_39.addWidget(self.label_4)
+
+        self.lineEditWDSave = QLineEdit(self.scrollAreaWidgetContents_2)
+        self.lineEditWDSave.setObjectName(u"lineEditWDSave")
+
+        self.horizontalLayout_39.addWidget(self.lineEditWDSave)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_39)
+
+        self.horizontalLayout_34 = QHBoxLayout()
+        self.horizontalLayout_34.setObjectName(u"horizontalLayout_34")
+        self.checkBoxWDText = QCheckBox(self.scrollAreaWidgetContents_2)
+        self.checkBoxWDText.setObjectName(u"checkBoxWDText")
+        sizePolicy2.setHeightForWidth(self.checkBoxWDText.sizePolicy().hasHeightForWidth())
+        self.checkBoxWDText.setSizePolicy(sizePolicy2)
+
+        self.horizontalLayout_34.addWidget(self.checkBoxWDText)
+
+        self.labelWDTextCount = QLabel(self.scrollAreaWidgetContents_2)
+        self.labelWDTextCount.setObjectName(u"labelWDTextCount")
+
+        self.horizontalLayout_34.addWidget(self.labelWDTextCount)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_34)
+
+        self.horizontalLayout_35 = QHBoxLayout()
+        self.horizontalLayout_35.setObjectName(u"horizontalLayout_35")
+        self.checkBoxWDAudio = QCheckBox(self.scrollAreaWidgetContents_2)
+        self.checkBoxWDAudio.setObjectName(u"checkBoxWDAudio")
+        sizePolicy2.setHeightForWidth(self.checkBoxWDAudio.sizePolicy().hasHeightForWidth())
+        self.checkBoxWDAudio.setSizePolicy(sizePolicy2)
+
+        self.horizontalLayout_35.addWidget(self.checkBoxWDAudio)
+
+        self.labelWDAudioCount = QLabel(self.scrollAreaWidgetContents_2)
+        self.labelWDAudioCount.setObjectName(u"labelWDAudioCount")
+
+        self.horizontalLayout_35.addWidget(self.labelWDAudioCount)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_35)
+
+        self.horizontalLayout_36 = QHBoxLayout()
+        self.horizontalLayout_36.setObjectName(u"horizontalLayout_36")
+        self.checkBoxWDPicture = QCheckBox(self.scrollAreaWidgetContents_2)
+        self.checkBoxWDPicture.setObjectName(u"checkBoxWDPicture")
+        sizePolicy2.setHeightForWidth(self.checkBoxWDPicture.sizePolicy().hasHeightForWidth())
+        self.checkBoxWDPicture.setSizePolicy(sizePolicy2)
+
+        self.horizontalLayout_36.addWidget(self.checkBoxWDPicture)
+
+        self.labelWDPictureCount = QLabel(self.scrollAreaWidgetContents_2)
+        self.labelWDPictureCount.setObjectName(u"labelWDPictureCount")
+
+        self.horizontalLayout_36.addWidget(self.labelWDPictureCount)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_36)
+
+        self.horizontalLayout_37 = QHBoxLayout()
+        self.horizontalLayout_37.setObjectName(u"horizontalLayout_37")
+        self.checkBoxWDVideo = QCheckBox(self.scrollAreaWidgetContents_2)
+        self.checkBoxWDVideo.setObjectName(u"checkBoxWDVideo")
+        sizePolicy2.setHeightForWidth(self.checkBoxWDVideo.sizePolicy().hasHeightForWidth())
+        self.checkBoxWDVideo.setSizePolicy(sizePolicy2)
+
+        self.horizontalLayout_37.addWidget(self.checkBoxWDVideo)
+
+        self.labelWDVideoCount = QLabel(self.scrollAreaWidgetContents_2)
+        self.labelWDVideoCount.setObjectName(u"labelWDVideoCount")
+
+        self.horizontalLayout_37.addWidget(self.labelWDVideoCount)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_37)
+
+        self.horizontalLayout_38 = QHBoxLayout()
+        self.horizontalLayout_38.setObjectName(u"horizontalLayout_38")
+        self.pushButtonWDConnect = QPushButton(self.scrollAreaWidgetContents_2)
+        self.pushButtonWDConnect.setObjectName(u"pushButtonWDConnect")
+
+        self.horizontalLayout_38.addWidget(self.pushButtonWDConnect)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_38)
+
+        self.horizontalLayout_19 = QHBoxLayout()
+        self.horizontalLayout_19.setObjectName(u"horizontalLayout_19")
+        self.pushButtonWDClear = QPushButton(self.scrollAreaWidgetContents_2)
+        self.pushButtonWDClear.setObjectName(u"pushButtonWDClear")
+
+        self.horizontalLayout_19.addWidget(self.pushButtonWDClear)
+
+        self.checkBoxWDDebug = QCheckBox(self.scrollAreaWidgetContents_2)
+        self.checkBoxWDDebug.setObjectName(u"checkBoxWDDebug")
+
+        self.horizontalLayout_19.addWidget(self.checkBoxWDDebug)
+
+
+        self.verticalLayout_18.addLayout(self.horizontalLayout_19)
+
+        self.scrollArea_2.setWidget(self.scrollAreaWidgetContents_2)
+
+        self.horizontalLayout_31.addWidget(self.scrollArea_2)
+
+        self.tabWidgetWD = QTabWidget(self.tabWebDebug)
+        self.tabWidgetWD.setObjectName(u"tabWidgetWD")
+        self.tabWDText = QWidget()
+        self.tabWDText.setObjectName(u"tabWDText")
+        self.verticalLayout_10 = QVBoxLayout(self.tabWDText)
+        self.verticalLayout_10.setObjectName(u"verticalLayout_10")
+        self.scrollAreaWDText = QScrollArea(self.tabWDText)
+        self.scrollAreaWDText.setObjectName(u"scrollAreaWDText")
+        self.scrollAreaWDText.setWidgetResizable(True)
+        self.scrollAreaWidgetContentsWDText = QWidget()
+        self.scrollAreaWidgetContentsWDText.setObjectName(u"scrollAreaWidgetContentsWDText")
+        self.scrollAreaWidgetContentsWDText.setGeometry(QRect(0, 0, 521, 474))
+        self.verticalLayout_22 = QVBoxLayout(self.scrollAreaWidgetContentsWDText)
+        self.verticalLayout_22.setObjectName(u"verticalLayout_22")
+        self.scrollAreaWDText.setWidget(self.scrollAreaWidgetContentsWDText)
+
+        self.verticalLayout_10.addWidget(self.scrollAreaWDText)
+
+        self.tabWidgetWD.addTab(self.tabWDText, "")
+        self.tabWDAudio = QWidget()
+        self.tabWDAudio.setObjectName(u"tabWDAudio")
+        self.verticalLayout_19 = QVBoxLayout(self.tabWDAudio)
+        self.verticalLayout_19.setObjectName(u"verticalLayout_19")
+        self.scrollAreaWDAudio = QScrollArea(self.tabWDAudio)
+        self.scrollAreaWDAudio.setObjectName(u"scrollAreaWDAudio")
+        self.scrollAreaWDAudio.setWidgetResizable(True)
+        self.scrollAreaWidgetContentsWDAudio = QWidget()
+        self.scrollAreaWidgetContentsWDAudio.setObjectName(u"scrollAreaWidgetContentsWDAudio")
+        self.scrollAreaWidgetContentsWDAudio.setGeometry(QRect(0, 0, 521, 474))
+        self.verticalLayout_23 = QVBoxLayout(self.scrollAreaWidgetContentsWDAudio)
+        self.verticalLayout_23.setObjectName(u"verticalLayout_23")
+        self.scrollAreaWDAudio.setWidget(self.scrollAreaWidgetContentsWDAudio)
+
+        self.verticalLayout_19.addWidget(self.scrollAreaWDAudio)
+
+        self.tabWidgetWD.addTab(self.tabWDAudio, "")
+        self.tabWDPicture = QWidget()
+        self.tabWDPicture.setObjectName(u"tabWDPicture")
+        self.verticalLayout_20 = QVBoxLayout(self.tabWDPicture)
+        self.verticalLayout_20.setObjectName(u"verticalLayout_20")
+        self.scrollAreaWDPicture = QScrollArea(self.tabWDPicture)
+        self.scrollAreaWDPicture.setObjectName(u"scrollAreaWDPicture")
+        self.scrollAreaWDPicture.setWidgetResizable(True)
+        self.scrollAreaWidgetContentsWDPicture = QWidget()
+        self.scrollAreaWidgetContentsWDPicture.setObjectName(u"scrollAreaWidgetContentsWDPicture")
+        self.scrollAreaWidgetContentsWDPicture.setGeometry(QRect(0, 0, 521, 474))
+        self.verticalLayout_24 = QVBoxLayout(self.scrollAreaWidgetContentsWDPicture)
+        self.verticalLayout_24.setObjectName(u"verticalLayout_24")
+        self.scrollAreaWDPicture.setWidget(self.scrollAreaWidgetContentsWDPicture)
+
+        self.verticalLayout_20.addWidget(self.scrollAreaWDPicture)
+
+        self.tabWidgetWD.addTab(self.tabWDPicture, "")
+        self.tabWDVideo = QWidget()
+        self.tabWDVideo.setObjectName(u"tabWDVideo")
+        self.verticalLayout_21 = QVBoxLayout(self.tabWDVideo)
+        self.verticalLayout_21.setObjectName(u"verticalLayout_21")
+        self.scrollAreaWDVideo = QScrollArea(self.tabWDVideo)
+        self.scrollAreaWDVideo.setObjectName(u"scrollAreaWDVideo")
+        self.scrollAreaWDVideo.setWidgetResizable(True)
+        self.scrollAreaWidgetContentsWDVideo = QWidget()
+        self.scrollAreaWidgetContentsWDVideo.setObjectName(u"scrollAreaWidgetContentsWDVideo")
+        self.scrollAreaWidgetContentsWDVideo.setGeometry(QRect(0, 0, 521, 474))
+        self.verticalLayout_25 = QVBoxLayout(self.scrollAreaWidgetContentsWDVideo)
+        self.verticalLayout_25.setObjectName(u"verticalLayout_25")
+        self.scrollAreaWDVideo.setWidget(self.scrollAreaWidgetContentsWDVideo)
+
+        self.verticalLayout_21.addWidget(self.scrollAreaWDVideo)
+
+        self.tabWidgetWD.addTab(self.tabWDVideo, "")
+        self.tabWDMsg = QWidget()
+        self.tabWDMsg.setObjectName(u"tabWDMsg")
+        self.verticalLayout_26 = QVBoxLayout(self.tabWDMsg)
+        self.verticalLayout_26.setObjectName(u"verticalLayout_26")
+        self.scrollAreaWDMsg = QScrollArea(self.tabWDMsg)
+        self.scrollAreaWDMsg.setObjectName(u"scrollAreaWDMsg")
+        self.scrollAreaWDMsg.setWidgetResizable(True)
+        self.scrollAreaWidgetContentsWDMsg = QWidget()
+        self.scrollAreaWidgetContentsWDMsg.setObjectName(u"scrollAreaWidgetContentsWDMsg")
+        self.scrollAreaWidgetContentsWDMsg.setGeometry(QRect(0, 0, 521, 474))
+        self.verticalLayout_27 = QVBoxLayout(self.scrollAreaWidgetContentsWDMsg)
+        self.verticalLayout_27.setObjectName(u"verticalLayout_27")
+        self.scrollAreaWDMsg.setWidget(self.scrollAreaWidgetContentsWDMsg)
+
+        self.verticalLayout_26.addWidget(self.scrollAreaWDMsg)
+
+        self.tabWidgetWD.addTab(self.tabWDMsg, "")
+
+        self.horizontalLayout_31.addWidget(self.tabWidgetWD)
+
+
+        self.verticalLayout_17.addLayout(self.horizontalLayout_31)
+
+        self.textBrowserWD = QTextBrowser(self.tabWebDebug)
+        self.textBrowserWD.setObjectName(u"textBrowserWD")
+        sizePolicy7 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        sizePolicy7.setHorizontalStretch(0)
+        sizePolicy7.setVerticalStretch(0)
+        sizePolicy7.setHeightForWidth(self.textBrowserWD.sizePolicy().hasHeightForWidth())
+        self.textBrowserWD.setSizePolicy(sizePolicy7)
+        self.textBrowserWD.setMaximumSize(QSize(16777215, 150))
+
+        self.verticalLayout_17.addWidget(self.textBrowserWD)
+
+
+        self.verticalLayout_15.addLayout(self.verticalLayout_17)
+
+        self.tabWidget.addTab(self.tabWebDebug, "")
+
+        self.verticalLayout_16.addWidget(self.tabWidget)
 
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
@@ -858,6 +1128,7 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
 
         self.tabWidget.setCurrentIndex(0)
+        self.tabWidgetWD.setCurrentIndex(4)
 
 
         QMetaObject.connectSlotsByName(MainWindow)
@@ -938,6 +1209,29 @@ class Ui_MainWindow(object):
         self.pushButtonSDAlgDump.setText(QCoreApplication.translate("MainWindow", u"alg dump", None))
         self.pushButtonAutoTest.setText(QCoreApplication.translate("MainWindow", u"Auto test and gen reports", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabSerDebug), QCoreApplication.translate("MainWindow", u"SerDebug", None))
+        self.label.setText(QCoreApplication.translate("MainWindow", u"IP:", None))
+        self.lineEditWDIP.setText(QCoreApplication.translate("MainWindow", u"localhost", None))
+        self.label_2.setText(QCoreApplication.translate("MainWindow", u"Port:", None))
+        self.lineEditWDPort.setText(QCoreApplication.translate("MainWindow", u"5055", None))
+        self.label_4.setText(QCoreApplication.translate("MainWindow", u"Save:", None))
+        self.lineEditWDSave.setText(QCoreApplication.translate("MainWindow", u"web_ai_debug", None))
+        self.checkBoxWDText.setText(QCoreApplication.translate("MainWindow", u"Text  ->", None))
+        self.labelWDTextCount.setText(QCoreApplication.translate("MainWindow", u"0", None))
+        self.checkBoxWDAudio.setText(QCoreApplication.translate("MainWindow", u"Audio  ->", None))
+        self.labelWDAudioCount.setText(QCoreApplication.translate("MainWindow", u"0", None))
+        self.checkBoxWDPicture.setText(QCoreApplication.translate("MainWindow", u"Picture  ->", None))
+        self.labelWDPictureCount.setText(QCoreApplication.translate("MainWindow", u"0", None))
+        self.checkBoxWDVideo.setText(QCoreApplication.translate("MainWindow", u"Video  ->", None))
+        self.labelWDVideoCount.setText(QCoreApplication.translate("MainWindow", u"0", None))
+        self.pushButtonWDConnect.setText(QCoreApplication.translate("MainWindow", u"Connect", None))
+        self.pushButtonWDClear.setText(QCoreApplication.translate("MainWindow", u"Clear", None))
+        self.checkBoxWDDebug.setText(QCoreApplication.translate("MainWindow", u"Debug", None))
+        self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDText), QCoreApplication.translate("MainWindow", u"Text", None))
+        self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDAudio), QCoreApplication.translate("MainWindow", u"Audio", None))
+        self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDPicture), QCoreApplication.translate("MainWindow", u"Picture", None))
+        self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDVideo), QCoreApplication.translate("MainWindow", u"Video", None))
+        self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDMsg), QCoreApplication.translate("MainWindow", u"msg", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabWebDebug), QCoreApplication.translate("MainWindow", u"WebDebug", None))
         self.menuMain.setTitle(QCoreApplication.translate("MainWindow", u"Main", None))
         self.menuDebug.setTitle(QCoreApplication.translate("MainWindow", u"Debug", None))
     # retranslateUi

@@ -88,7 +88,8 @@ class SerAIDebugMonitor(object):
         # 非dump模式下显示接收数据
         if not self.current_dump_channel:
             try:
-                self.logger.info(data.decode('utf-8', errors='replace'))
+                rec_str = data.decode('utf-8', errors='replace')
+                self.logger.info(f"-->{rec_str}")
             except Exception as e:
                 self.logger.debug(f"decode error: {e}")
                 pass  # 忽略非文本数据

@@ -13,6 +13,13 @@ TYPE_MAPPING = {
 }
 
 
+AUDIO_PACK_STATIC = {
+    "stream_count": 0,
+    "stream_id": "init",
+    "size_sum": 0,
+}
+
+
 def _get_logger():
     """延迟初始化logger"""
     return get_logger()
@@ -109,7 +116,8 @@ actual 0x{magic:08x}")
         iv_flag = byte7 & 0x01  # 0x00000001
 
         if security_level != 0 or iv_flag != 0:
-            _get_logger().debug(f"Unsupported security level: {security_level}")
+            _get_logger().debug(f"Unsupported security level: \
+{security_level}")
             return ProtocolParser._find_frame_sync(data[4:])
 
         reserve = data[9]
@@ -221,6 +229,14 @@ actual 0x{magic:08x}")
         if len(payload) >= 23+length:
             media_payload = payload[23:(23+length)]
 
+        # 针对流开始的包，更新流唯一标识，方便后续保存文件
+        if stream_flag == 1:
+            AUDIO_PACK_STATIC["stream_count"] += 1
+            id = f"{AUDIO_PACK_STATIC['stream_count']}_date{data_id}"
+            AUDIO_PACK_STATIC["stream_id"] = id
+            AUDIO_PACK_STATIC["size_sum"] = 0
+
+        AUDIO_PACK_STATIC["size_sum"] += length
         return {
             'data_id': data_id,
             'stream_flag': stream_flag,
@@ -229,6 +245,8 @@ actual 0x{magic:08x}")
             'pts': pts,
             'media_payload': media_payload,
             'size': length,
+            'size_sum': AUDIO_PACK_STATIC["size_sum"],  # 工具自定义字段
+            'stream_id': AUDIO_PACK_STATIC["stream_id"],  # 工具自定义字段
         }
 
     @staticmethod

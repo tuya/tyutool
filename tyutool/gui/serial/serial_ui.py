@@ -63,7 +63,9 @@ class SerialGUI(QtWidgets.QMainWindow):
         self.ui.pushButtonAuth.clicked.connect(self.btnAuthClicked)
         self.ui.pushButtonSend.setEnabled(False)
         self.ui.pushButtonAuth.setEnabled(False)
-        self.ui.textBrowserRx.setStyleSheet("background-color: black; color: white;")
+        self.ui.textBrowserRx.setStyleSheet(
+            "background-color: black; color: white;"
+        )
         pass
 
     def btnComClicked(self):
@@ -215,6 +217,8 @@ non-hexadecimal data")
                 self.logger.error("Failed to convert hexadecimal data")
                 return False
         else:
+            if self.ui.checkBoxTxReturn.isChecked():
+                send_data += "\n"
             txbuf = send_data.encode('utf-8')
 
         self._send_data(txbuf)
@@ -262,7 +266,8 @@ non-hexadecimal data")
                                 '36': 'cyan',
                                 '37': 'white'
                             }
-                            style += f"color: {color_map.get(code, 'inherit')};"
+                            color = color_map.get(code, 'inherit')
+                            style += f"color: {color};"
                         elif code.startswith('4'):
                             bg_color_map = {
                                 '40': 'black',
@@ -274,7 +279,8 @@ non-hexadecimal data")
                                 '46': 'cyan',
                                 '47': 'white'
                             }
-                            style += f"background-color: {bg_color_map.get(code, 'inherit')};"
+                            b_color = bg_color_map.get(code, 'inherit')
+                            style += f"background-color: {b_color};"
                     if style:
                         html_data += f'<span style="{style}">'
                 else:

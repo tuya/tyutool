@@ -3,12 +3,12 @@
 
 from datetime import datetime
 
-logger = None
-
 
 class DataDisplay:
-    def __init__(self, logger):
+    def __init__(self, logger, display_hook=None):
         self.logger = logger
+        self.hook = display_hook
+        pass
 
     def _display_audio(self, packet, msg):
         data_id = packet.get('data_id', 0)
@@ -25,7 +25,11 @@ class DataDisplay:
 '''
 
         msg += audio_msg
-        self.logger.info(msg)
+        if self.hook is not None:
+            self.hook.hook(packet, msg)
+        else:
+            self.logger.info(msg)
+
         pass
 
     def _display_text(self, packet, msg):
@@ -40,7 +44,11 @@ class DataDisplay:
    - Content: {text_content}
 '''
         msg += text_msg
-        self.logger.info(msg)
+        if self.hook is not None:
+            self.hook.hook(packet, msg)
+        else:
+            self.logger.info(msg)
+
         pass
 
     def _display_video(self, packet, msg):
@@ -89,7 +97,7 @@ class DataDisplay:
         # Display packet information
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         msg = f'''
-{"="*60}
+{"="*30}
 📅 Time: {timestamp}
 📦 Type: {packet['type_name']} ({packet['type']})
 '''
