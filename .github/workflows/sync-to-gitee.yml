@@ -1,8 +1,8 @@
 name: Sync to Gitee
 
 on:
-  push:
-    branches: [ master ]  # 监听 master 分支的推送
+  - push
+  - delete
 
 jobs:
   sync:
