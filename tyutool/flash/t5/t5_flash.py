@@ -368,7 +368,7 @@ class T5FlashSerial(object):
                                        flash_size: int):
         erase_addr = int(addr/0x1000)*0x1000
         baudrate_backup = self.ser.baudrate
-        if not self.set_baudrate(500000):
+        if not self.set_baudrate(115200):
             return False
         time.sleep(0.1)
         ret = self.read_sector(erase_addr, flash_size)
