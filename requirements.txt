@@ -1,14 +1,6 @@
 click
-pyinstaller<=6.15.0
 pyserial
 PyYAML
 requests
 rich
 tqdm
-
-PySide6
-
-numpy
-scipy
-matplotlib
-pygame
