@@ -25,5 +25,5 @@ jobs:
 
       - name: Push to Gitee
         run: |
-          git push gitee master:master --force
+          git push gitee --all --force
           git push gitee --tags --force
