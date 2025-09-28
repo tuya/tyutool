@@ -218,7 +218,7 @@ non-hexadecimal data")
                 return False
         else:
             if self.ui.checkBoxTxReturn.isChecked():
-                send_data += "\n"
+                send_data += "\r\n"
             txbuf = send_data.encode('utf-8')
 
         self._send_data(txbuf)
@@ -290,7 +290,7 @@ non-hexadecimal data")
             self.ui.textBrowserRx.append(prefix + html_data)
 
     def auth_function(self, uuid, authkey):
-        send_data = f"auth {uuid} {authkey}\n"
+        send_data = f"auth {uuid} {authkey}\r\n"
         txbuf = send_data.encode('utf-8')
         self._send_data(txbuf)
         pass
