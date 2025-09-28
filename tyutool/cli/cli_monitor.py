@@ -108,6 +108,7 @@ def send_data(ser, stop_event, logger):
     try:
         while not stop_event.is_set():
             input_data = sys.stdin.readline()
+            input_data += "\r\n"
             ser.write(input_data.encode('utf-8'))
     except Exception as e:
         logger.error(f"Send error: {e}")
