@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import time
 import click
 import threading
 
@@ -134,9 +135,52 @@ def ser_auto_cli(port, baud, save):
     pass
 
 
+@click.command()
+@click.option('-p', '--port',
+              type=str, required=False,
+              help="Target port")
+@click.option('-b', '--baud',
+              type=int, default=460800,
+              help="Uart baud rate")
+@click.option('-w', '--wait',
+              type=int, default=5,
+              help="wait for recvice uart dump.")
+@click.option('-s', '--save',
+              type=str, default="ser_ai_debug",
+              help="Save assets to catalog.")
+@click.argument('cmd_args', nargs=-1, required=True)
+
+def ser_cli_cmd(port, baud, save, wait, cmd_args):
+    logger = get_logger()
+    logger.debug(f"port: {port}")
+    logger.debug(f"baud: {baud}")
+    logger.debug(f"save: {save}")
+    logger.debug(f"wait: {wait}")
+    logger.debug(f"cmd: {cmd_args}")
+
+    monitor = SerAIDebugMonitor(port, baud, save, logger, gui_mode=False)
+
+    if not monitor.open_port():
+        return
+
+    # 启动读取线程
+    monitor.start_reading()
+
+    # 输入命令，
+    cmd = " ".join(cmd_args)
+    print(cmd)
+    monitor.process_input_cmd("".join(cmd))
+    if cmd in ['dump 0', 'dump 1', 'dump 2', 'dump 3', 'dump 4']:
+        time.sleep(wait)
+    monitor.stop_reading()
+    monitor.close_port()
+    pass
+
+
 CLIS = {
     "web": web_cli,
     "ser": ser_cli,
+    "ser_cmd": ser_cli_cmd,
     "ser_auto": ser_auto_cli,
 }
 

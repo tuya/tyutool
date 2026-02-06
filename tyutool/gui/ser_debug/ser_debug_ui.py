@@ -115,6 +115,12 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         self.ui.pushButtonSDDump2.clicked.connect(
             lambda: self.pushButtonSDCmdClicked("dump 2")
         )
+        self.ui.pushButtonSDDump3.clicked.connect(
+            lambda: self.pushButtonSDCmdClicked("dump 3")
+        )
+        self.ui.pushButtonSDDump4.clicked.connect(
+            lambda: self.pushButtonSDCmdClicked("dump 4")
+        )
         self.ui.pushButtonSDBg0.clicked.connect(
             lambda: self.pushButtonSDCmdClicked("bg 0")
         )

@@ -33,6 +33,10 @@ class SerAIDebugMonitor(object):
             '1': {'name': 'dump_ref.pcm',
                   'file': None, 'active': False, 'length': 0},
             '2': {'name': 'dump_aec.pcm',
+                  'file': None, 'active': False, 'length': 0},
+            '3': {'name': 'dump_kws.pcm',
+                  'file': None, 'active': False, 'length': 0},
+            '4': {'name': 'dump_vad.pcm',
                   'file': None, 'active': False, 'length': 0}
         }
         self.current_dump_channel = None
@@ -133,6 +137,13 @@ class SerAIDebugMonitor(object):
             return False
         return True
 
+    def send_echo(self, message):
+        if not message:
+            self.logger.warning(f"Invalid message")
+            return
+
+        self.send_command(f"echo {message}")
+
     def start_dump(self, channel, prefix=""):
         if channel not in self.dump_files:
             self.logger.warning(f"Invalid channel: {channel}")
@@ -195,6 +206,8 @@ class SerAIDebugMonitor(object):
         print("dump 0      - Dump microphone channel")
         print("dump 1      - Dump reference channel")
         print("dump 2      - Dump AEC channel")
+        print("dump 3      - Dump KWS channel")
+        print("dump 4      - Dump VAD channel")
         print("bg 0        - white noise")
         print("bg 1        - 1K-0dB (bg 1 1000)")
         print("bg 2        - sweep frequency constantly")
@@ -210,6 +223,7 @@ class SerAIDebugMonitor(object):
         print("alg get <para> \
 - Get audio algorithm parameters (e.g.: alg get aec_ec_depth)")
         print("alg dump    - Dump audio algorithm parameters")
+        print("echo <info>    - Send message")
         print("quit        - Exit the program")
         pass
 
@@ -224,9 +238,14 @@ class SerAIDebugMonitor(object):
             return True
 
         # Dump
-        if cmd in ['dump 0', 'dump 1', 'dump 2']:
+        if cmd in ['dump 0', 'dump 1', 'dump 2', 'dump 3', 'dump 4']:
             channel = cmd.split()[1]
             self.start_dump(channel)
+            return True
+
+        elif cmd.startswith('echo'):
+            message = cmd.split()[1]
+            self.send_echo(message)
             return True
 
         # Check [alg set] params
