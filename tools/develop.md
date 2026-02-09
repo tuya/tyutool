@@ -23,7 +23,7 @@ ui文件转py文件：`pyside6-uic ./tyutool/gui/ui_main.ui -o ./tyutool/gui/ui_
 
 ## 生成可执行文件
 
-执行脚本： `./tools/build_execute.sh`
+执行脚本： `./tools/build_package.sh`
 
 会生成目录`dist`，其中`tyutool_cli`和`tyutool_gui`，为可执行文件。
 
