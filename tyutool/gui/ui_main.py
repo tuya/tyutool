@@ -560,6 +560,34 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_11.addLayout(self.horizontalLayout_17)
 
+        self.horizontalLayout_50 = QHBoxLayout()
+        self.horizontalLayout_50.setObjectName(u"horizontalLayout_50")
+        self.pushButtonSDDump3 = QPushButton(self.scrollAreaWidgetContents)
+        self.pushButtonSDDump3.setObjectName(u"pushButtonSDDump3")
+        self.pushButtonSDDump3.setStyleSheet(u"text-align: left;\n"
+"padding-left: 10px;\n"
+"padding-top: 4px;\n"
+"padding-bottom: 4px;")
+
+        self.horizontalLayout_50.addWidget(self.pushButtonSDDump3)
+
+
+        self.verticalLayout_11.addLayout(self.horizontalLayout_50)
+
+        self.horizontalLayout_51 = QHBoxLayout()
+        self.horizontalLayout_51.setObjectName(u"horizontalLayout_51")
+        self.pushButtonSDDump4 = QPushButton(self.scrollAreaWidgetContents)
+        self.pushButtonSDDump4.setObjectName(u"pushButtonSDDump4")
+        self.pushButtonSDDump4.setStyleSheet(u"text-align: left;\n"
+"padding-left: 10px;\n"
+"padding-top: 4px;\n"
+"padding-bottom: 4px;")
+
+        self.horizontalLayout_51.addWidget(self.pushButtonSDDump4)
+
+
+        self.verticalLayout_11.addLayout(self.horizontalLayout_51)
+
         self.horizontalLayout_18 = QHBoxLayout()
         self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
         self.pushButtonSDBg0 = QPushButton(self.scrollAreaWidgetContents)
@@ -1187,6 +1215,8 @@ class Ui_MainWindow(object):
         self.pushButtonSDDump0.setText(QCoreApplication.translate("MainWindow", u"dump: microphone channel", None))
         self.pushButtonSDDump1.setText(QCoreApplication.translate("MainWindow", u"dump: reference channel", None))
         self.pushButtonSDDump2.setText(QCoreApplication.translate("MainWindow", u"dump: AEC channel", None))
+        self.pushButtonSDDump3.setText(QCoreApplication.translate("MainWindow", u"dump: KWS channel", None))
+        self.pushButtonSDDump4.setText(QCoreApplication.translate("MainWindow", u"dump: VAD channel", None))
         self.pushButtonSDBg0.setText(QCoreApplication.translate("MainWindow", u"play: white noise", None))
         self.pushButtonSDBg1.setText(QCoreApplication.translate("MainWindow", u"play: 1K-0dB", None))
         self.pushButtonSDBg2.setText(QCoreApplication.translate("MainWindow", u"play: sweep frequency constantly", None))
