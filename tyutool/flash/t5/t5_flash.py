@@ -621,7 +621,7 @@ class T5FlashHandler(FlashHandler):
             if not self.ser_handle.align_sector_address_for_write(
                                 end_addr, False, wbuf,
                                 flash_size):
-                self.logger.error(f"Align end address {end_addr:08x} fail.")
+                self.logger.error(f"Failed to perform alignment write for end address {end_addr:08x}.")
                 self.progress.close()
                 return False
             wbuf = wbuf[:len(wbuf)-(end_addr & 0xfff)]
