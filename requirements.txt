@@ -1,6 +1,7 @@
 click
 pyinstaller<=6.15.0
 pyserial
+usbx
 PyYAML
 requests
 rich

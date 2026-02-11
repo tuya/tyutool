@@ -42,7 +42,7 @@ class GuiProgressHandler(QThread, ProgressHandler):
 
     def update(self, size=1):
         self.value += size
-        # self.pg.setValue(self.value)  # 操作父类中UI控件，代码崩溃
+        # self.pg.setValue(self.value)  # Accessing parent UI control here causes crash
         self.update_signal.emit(self.value)
         pass
 
@@ -114,7 +114,7 @@ class FlashGUI(QtWidgets.QMainWindow):
             self.ui.lineEditLength.setText(length)
 
     def flashUiSetup(self):
-        # 一些校验规则
+        # Validation rules
         self.ui.comboBoxOperate.addItems(['Write', 'Read'])
         self.default_baudrates = ["115200", "230400", "460800",
                                   "921600", "1500000", "2000000"]
@@ -126,7 +126,7 @@ class FlashGUI(QtWidgets.QMainWindow):
         self.ui.lineEditStart.setValidator(validator_addr)
         self.ui.lineEditLength.setValidator(validator_addr)
         self.ui.lineEditLength.setText("0x1000")
-        # 一些默认值
+        # Default values
         self.gui_flash_cache = os.path.join(self.cache_dir, "gui_flash.cache")
         self.file_in = ""
         self.file_out = ""
@@ -152,7 +152,7 @@ class FlashGUI(QtWidgets.QMainWindow):
         self.ui.labelModuleUrl.setText(
             '<a style="color: black;" href=\"https://iot.tuya.com\">Tuya</a>')
         self.cacheUse()
-        # 一些绑定触发
+        # Bindings and triggers
         self.progress = GuiProgressHandler(self.ui.progressBarShow)
         self.progress.update_signal.connect(self.updateProgressValue)
         self.ui.comboBoxOperate.currentTextChanged[str].connect(
@@ -204,7 +204,7 @@ class FlashGUI(QtWidgets.QMainWindow):
         try:
             pic_context = urlopen(pic, timeout=2).read()
         except Exception as e:
-            # 这里不用return，显示空白图片合理
+            # Do not return here; showing a blank image is acceptable
             self.logger.error(e)
             self.logger.error(f'Network connection failure [{pic}]')
         self.pixmap.loadFromData(pic_context)
@@ -263,18 +263,66 @@ class FlashGUI(QtWidgets.QMainWindow):
         self.ui.lineEditFile.setText(binfile)
         pass
 
+    def _log_usbx_devices(self):
+        """Enumerate USB devices via usbx and log details (cross-platform, no libusb required)."""
+        try:
+            from usbx import usb
+        except ImportError:
+            self.logger.debug("usbx 未安装，跳过 USB 设备枚举。可安装: pip install usbx")
+            return
+        try:
+            devices = list(usb.get_devices())
+            if not devices:
+                self.logger.debug("usbx: 未发现 USB 设备")
+                return
+            self.logger.debug(f"usbx: 共发现 {len(devices)} 个 USB 设备")
+            self.logger.debug(f"====== usbx devices start ====== ")
+            for dev in devices:
+                vid = getattr(dev, 'vid', None)
+                pid = getattr(dev, 'pid', None)
+                bcd = getattr(dev, 'device_version', None)
+                bcd_str = f"{bcd}" if bcd is not None else "n/a"
+                self.logger.debug(
+                    f"  USB device id={getattr(dev, 'identifier', '')} "
+                    f"VID:PID={(vid or 0):04X}:{(pid or 0):04X} device_version={bcd_str}"
+                )
+                manufacturer = getattr(dev, 'manufacturer', None) or ""
+                product = getattr(dev, 'product', None) or ""
+                serial = getattr(dev, 'serial', None) or ""
+                if manufacturer or product or serial:
+                    self.logger.debug(
+                        f"    manufacturer={manufacturer} product={product} serial={serial}"
+                    )
+            self.logger.debug(f"====== usbx devices end ====== ")
+        except Exception as e:
+            self.logger.debug(f"usbx: 枚举 USB 设备失败: {e}")
+
     def btnRescanClicked(self):
         self.logger.debug(sys._getframe().f_code.co_name)
+        self._log_usbx_devices()
         port_items = []
         self.ui.comboBoxPort.clear()
         port_list = list(list_ports.comports())
         if len(port_list) > 0:
             for port in port_list:
-                pl = list(port)
-                if pl[0].startswith("/dev/ttyS"):
+                device = port.device if hasattr(port, 'device') else port[0]
+                if device.startswith("/dev/ttyS"):
                     continue
-                self.logger.debug(f'port info: {pl}')
-                port_items.append(pl[0])
+                # Log extra USB info from ListPortInfo (cross-platform)
+                self.logger.debug(
+                    f'port: {device} | desc: {getattr(port, "description", "n/a")} | '
+                    f'hwid: {getattr(port, "hwid", "n/a")}'
+                )
+                vid = getattr(port, 'vid', None)
+                pid = getattr(port, 'pid', None)
+                if vid is not None or pid is not None:
+                    self.logger.debug(
+                        f'  USB VID:PID={(vid or 0):04X}:{(pid or 0):04X} '
+                        f'serial={getattr(port, "serial_number", "") or ""} '
+                        f'manufacturer={getattr(port, "manufacturer", "") or ""} '
+                        f'product={getattr(port, "product", "") or ""}'
+                    )
+                port_items.append(device)
         port_items.sort()
         self.ui.comboBoxPort.addItems(port_items)
         pass
@@ -313,7 +361,7 @@ class FlashGUI(QtWidgets.QMainWindow):
                                   progress=self.progress)
         self.flash_do.config(soc_handler, operate, read_length,
                              self.ui.pushButtonStart)
-        self.flash_do.start()  # 启动线程
+        self.flash_do.start()  # Start worker thread
         self.ui.pushButtonStart.setEnabled(False)
 
         self.logger.info(f'{operate} Start.')
