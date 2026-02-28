@@ -155,6 +155,18 @@ class FlashInterface(object):
                 },
             },
         },
+        "ESP32C6": {
+            "handler": ESPFlashHandler,
+            "baudrate": 921600,
+            "monitor_baudrate": 115200,
+            "start_addr": 0x00,
+            "modules": {
+                "ESP32-C6-DevKitC-1": {
+                    "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitc-1/user_guide.html",
+                    "pic": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/_images/esp32-c6-devkitc-1-isometric_v1.2.png",
+                },
+            },
+        },
         "ESP32S3": {
             "handler": ESPFlashHandler,
             "baudrate": 921600,
