@@ -124,6 +124,7 @@ class ESPFlashHandler(FlashHandler):
         flash_id = self.esp.flash_id()
         self.logger.debug(f"flash_id: {flash_id}")
         if flash_id is None:
+            self.logger.warning("flash_id read failed (None), cannot detect flash size from JEDEC ID")
             return "4MB"
         size_id = flash_id >> 16
         self.logger.debug(f"size_id: {size_id}")
@@ -146,7 +147,7 @@ class ESPFlashHandler(FlashHandler):
         if self.start_addr + binfile_size > flash_size:
             self.logger.error(
                 f"File {self.binfile} (length {binfile_size}) \
-at offset {self.start_arrd} "
+at offset {self.start_addr} "
                 f"will not fit in {flash_size} bytes of flash. "
             )
             return False
