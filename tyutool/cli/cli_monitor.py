@@ -102,7 +102,7 @@ def receive_data(ser, stop_event, logger, log_file=None):
                 if log_file:
                     try:
                         log_file.write(data + '\n')
-                        # 不要每次 flush
+                        log_file.flush()
                     except Exception as e:
                         logger.error(f"Write log error: {e}")
 
