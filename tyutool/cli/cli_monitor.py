@@ -90,18 +90,24 @@ def cli(device, port, baud, save):
 def receive_data(ser, stop_event, logger, log_file=None):
     try:
         while not stop_event.is_set():
-            if ser.in_waiting:
-                data = ser.readline().decode('utf-8', errors='ignore').strip()
-                if data:
-                    print(data)
-                    if log_file:
-                        try:
-                            log_file.write(data + '\n')
-                            log_file.flush()
-                        except Exception as e:
-                            logger.error(f"Write log error: {e}")
+            data = ser.readline()   # 阻塞
+
+            if not data:
+                continue
+
+            data = data.decode('utf-8', errors='ignore').strip()
+            if data:
+                print(data)
+
+                if log_file:
+                    try:
+                        log_file.write(data + '\n')
+                        log_file.flush()
+                    except Exception as e:
+                        logger.error(f"Write log error: {e}")
+
     except Exception as e:
-        logger.error(f"Recive error: {e}")
+        logger.error(f"Receive error: {e}")
 
 
 def send_data(ser, stop_event, logger):
