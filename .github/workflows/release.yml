@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要发布的已有标签（须为 v* 且已存在于仓库）'
-        required: true
+        description: 'Tag to release, or leave empty for build-only (no sync/releases).'
+        required: false
+        default: ''
         type: string
 
 env:
@@ -31,9 +32,11 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Validate tag version
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
         run: python tools/check_tag.py ${{ env.RELEASE_TAG }}
 
   sync:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
     runs-on: ubuntu-latest
     needs: [check-tagname]
     steps:
@@ -160,6 +163,7 @@ jobs:
             dist/windows_tyutool_gui.zip
 
   release:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
     runs-on: ubuntu-latest
     needs: [sync, build-linux, build-macos, build-windows]
     permissions:
