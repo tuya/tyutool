@@ -23,9 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: ./.github/actions/checkout-python
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
-          checkout-ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Match version with tag
@@ -62,9 +67,14 @@ jobs:
     needs: [check-tagname]
     timeout-minutes: 120
     steps:
-      - uses: ./.github/actions/checkout-python
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
-          checkout-ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
@@ -86,7 +96,6 @@ jobs:
             dist/linux_tyutool_gui.tar.gz
 
   build-macos:
-    name: Build macOS (${{ matrix.id }})
     needs: [check-tagname]
     strategy:
       fail-fast: false
@@ -105,11 +114,17 @@ jobs:
               dist/darwin_arm64_tyutool_cli.tar.gz
               dist/darwin_arm64_tyutool_gui.tar.gz
     runs-on: ${{ matrix.runner }}
+    name: Build macOS (${{ matrix.id }})
     timeout-minutes: 120
     steps:
-      - uses: ./.github/actions/checkout-python
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
-          checkout-ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
@@ -134,9 +149,14 @@ jobs:
     needs: [check-tagname]
     timeout-minutes: 120
     steps:
-      - uses: ./.github/actions/checkout-python
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
-          checkout-ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
