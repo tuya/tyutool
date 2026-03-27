@@ -98,7 +98,7 @@ tyutool/                    # repository root
 ├── tyutool_gui.py          # GUI entry
 ├── tyutool_cli.py          # CLI entry
 ├── requirements.txt        # Python dependencies
-├── export.sh / export.bat  # create venv and pip install
+├── export.sh / export.bat  # create venv, activate, and pip install (see "Development environment setup")
 ├── README.md / README_zh.md
 ├── AGENT.md                # this file
 ├── .github/workflows/      # GitHub Actions (release, sync-to-gitee, etc.)
@@ -116,6 +116,28 @@ tyutool/                    # repository root
     ├── audio/              # audio-related CLI support
     └── util/               # logging, version, upgrade, shared utils
 ```
+
+---
+
+## Development environment setup
+
+Use the **export** scripts at the project root to create and activate the virtual environment. Choose the script matching your terminal:
+
+| Terminal | Command |
+|----------|---------|
+| **Bash / Zsh** (Linux / macOS) | `. ./export.sh` |
+| **Windows CMD** | `export.bat` |
+
+The script will:
+1. Locate the project root and verify key files exist.
+2. Find a suitable Python (≥ 3.6) — on Unix it prefers `python3`, falls back to `python`.
+3. Create a `.venv` virtual environment if it does not already exist.
+4. Activate the virtual environment and add the project root to `PATH`.
+5. Install all dependencies from `requirements.txt` via `pip`.
+
+To deactivate: run `deactivate` (Bash/Zsh) or `exit` (Windows CMD).
+
+> **Note:** Always source the script (`. ./export.sh`), do not execute it (`bash export.sh`), otherwise the virtual environment will not persist in your current shell.
 
 ---
 
