@@ -6,9 +6,6 @@ import os
 import traceback
 import faulthandler
 
-# Enable faulthandler to get native crash tracebacks (SIGSEGV, SIGABRT, etc.)
-faulthandler.enable()
-
 # Debug log file next to the executable
 _debug_log = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
                           "tyutool_debug.log")
@@ -16,6 +13,13 @@ try:
     _debug_f = open(_debug_log, 'w')
 except Exception:
     _debug_f = None
+
+# Enable faulthandler — write crash tracebacks to debug log (or stderr if available)
+# sys.stderr is None in PyInstaller --windowed mode, so use the log file as fallback
+try:
+    faulthandler.enable(file=_debug_f or sys.stderr)
+except Exception:
+    pass
 
 
 def _dbg(msg):
