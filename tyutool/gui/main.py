@@ -6,6 +6,7 @@ import sys
 import base64
 import logging
 import logging.handlers
+import threading
 
 # Debug log helper — writes to tyutool_debug.log next to the executable
 _debug_log_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
@@ -52,56 +53,55 @@ class EmittingStr(QtCore.QObject):
         pass
 
 
-class AskUpgradeThread(QThread):
-    """Check for upgrades in background to avoid blocking the GUI."""
-    should_upgrade = Signal(bool, str)  # (should_upgrade, server_version)
+class _AskUpgradeSignal(QtCore.QObject):
+    """Helper QObject to safely deliver results from a background thread to the main thread."""
+    should_upgrade = Signal(bool, str)
 
-    def __init__(self):
-        super().__init__()
 
-    def run(self):
+def _ask_upgrade_worker(signal_obj):
+    """Run upgrade check in a plain thread (avoids QThread GC issues)."""
+    try:
+        is_script = '.py' in sys.argv[0]
+        print(f"[DEBUG] AskUpgrade: is_script={is_script}", flush=True)
+        if is_script:
+            signal_obj.should_upgrade.emit(False, "")
+            return
+
+        if not network_available():
+            print(f"[DEBUG] AskUpgrade: network not available", flush=True)
+            signal_obj.should_upgrade.emit(False, "")
+            return
+
+        print(f"[DEBUG] AskUpgrade: getting country code...", flush=True)
+        country = get_country_code()
+        print(f"[DEBUG] AskUpgrade: country={country}", flush=True)
+        if country == "China":
+            api_url = "https://gitee.com/api/v5/repos/tuya-open/tyutool/releases/latest"
+        else:
+            api_url = "https://api.github.com/repos/tuya/tyutool/releases/latest"
+
         try:
-            is_script = '.py' in sys.argv[0]
-            print(f"[DEBUG] AskUpgradeThread: is_script={is_script}", flush=True)
-            if is_script:
-                self.should_upgrade.emit(False, "")
-                return
+            response = requests.get(api_url, timeout=5)
+            data = response.json()
+        except Exception:
+            signal_obj.should_upgrade.emit(False, "")
+            return
 
-            if not network_available():
-                print(f"[DEBUG] AskUpgradeThread: network not available", flush=True)
-                self.should_upgrade.emit(False, "")
-                return
+        server_version = data.get('tag_name', "").lstrip('v')
+        if not server_version:
+            signal_obj.should_upgrade.emit(False, "")
+            return
 
-            print(f"[DEBUG] AskUpgradeThread: getting country code...", flush=True)
-            country = get_country_code()
-            print(f"[DEBUG] AskUpgradeThread: country={country}", flush=True)
-            if country == "China":
-                api_url = "https://gitee.com/api/v5/repos/tuya-open/tyutool/releases/latest"
-            else:
-                api_url = "https://api.github.com/repos/tuya/tyutool/releases/latest"
+        current_version = tyutool_version()
+        if server_version <= current_version:
+            signal_obj.should_upgrade.emit(False, "")
+            return
 
-            try:
-                response = requests.get(api_url, timeout=2)
-                data = response.json()
-            except Exception:
-                self.should_upgrade.emit(False, "")
-                return
-
-            server_version = data.get('tag_name', "").lstrip('v')
-            if not server_version:
-                self.should_upgrade.emit(False, "")
-                return
-
-            current_version = tyutool_version()
-            if server_version <= current_version:
-                self.should_upgrade.emit(False, "")
-                return
-
-            self.should_upgrade.emit(True, server_version)
-            print(f"[DEBUG] AskUpgradeThread: should upgrade to {server_version}", flush=True)
-        except Exception as e:
-            print(f"[DEBUG] AskUpgradeThread: exception {e}", flush=True)
-            self.should_upgrade.emit(False, "")
+        signal_obj.should_upgrade.emit(True, server_version)
+        print(f"[DEBUG] AskUpgrade: should upgrade to {server_version}", flush=True)
+    except Exception as e:
+        print(f"[DEBUG] AskUpgrade: exception {e}", flush=True)
+        signal_obj.should_upgrade.emit(False, "")
 
 
 class UpgradeThread(QThread):
@@ -153,8 +153,13 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
 
         # cache
         self.cache_dir = os.path.join(tyutool_root(), "cache")
-        if not os.path.exists(self.cache_dir):
-            os.mkdir(self.cache_dir)
+        try:
+            os.makedirs(self.cache_dir, exist_ok=True)
+        except OSError:
+            # Fallback to temp directory if the executable directory is not writable
+            import tempfile
+            self.cache_dir = os.path.join(tempfile.gettempdir(), "tyutool_cache")
+            os.makedirs(self.cache_dir, exist_ok=True)
 
         # ico
         logo_icon = base64.b64decode(LOGO_ICON_BYTES)
@@ -180,7 +185,8 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.ui.actionVersion.triggered.connect(self.showVersion)
 
         self.upgrade_thread = None
-        self.ask_upgrade_thread = None
+        self._ask_upgrade_signal = None
+        self._ask_upgrade_thread = None
 
         QTimer.singleShot(500, self.guiAskUpgrade)
 
@@ -194,16 +200,29 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.ui.textBrowserShow.ensureCursorVisible()
         pass
 
-    def closeEvent(self, event):
-        print(f"[DEBUG] closeEvent: cleaning up threads...", flush=True)
-        for attr in ('ask_upgrade_thread', 'upgrade_thread', 'pic_loader'):
+    def _wait_threads(self):
+        """Wait for all background threads to finish."""
+        for attr in ('upgrade_thread', 'pic_loader'):
             thread = getattr(self, attr, None)
             if thread and thread.isRunning():
-                print(f"[DEBUG] closeEvent: waiting for {attr}", flush=True)
+                print(f"[DEBUG] _wait_threads: waiting for {attr}", flush=True)
+                thread.requestInterruption()
+                thread.quit()
                 thread.wait(5000)
+        # Wait for the plain threading.Thread used by upgrade check
+        t = getattr(self, '_ask_upgrade_thread', None)
+        if t and t.is_alive():
+            print("[DEBUG] _wait_threads: waiting for _ask_upgrade_thread", flush=True)
+            t.join(timeout=5)
         for t in getattr(self, '_old_pic_loaders', []):
             if t.isRunning():
+                t.requestInterruption()
+                t.quit()
                 t.wait(3000)
+
+    def closeEvent(self, event):
+        print(f"[DEBUG] closeEvent: cleaning up threads...", flush=True)
+        self._wait_threads()
         print(f"[DEBUG] closeEvent: done", flush=True)
         super().closeEvent(event)
 
@@ -240,19 +259,22 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.upgrade_thread = None
 
     def guiAskUpgrade(self):
-        self.ask_upgrade_thread = AskUpgradeThread()
-        self.ask_upgrade_thread.should_upgrade.connect(self._onAskUpgradeResult)
-        self.ask_upgrade_thread.start()
+        self._ask_upgrade_signal = _AskUpgradeSignal()
+        self._ask_upgrade_signal.should_upgrade.connect(self._onAskUpgradeResult)
+        self._ask_upgrade_thread = threading.Thread(
+            target=_ask_upgrade_worker,
+            args=(self._ask_upgrade_signal,),
+            daemon=True
+        )
+        self._ask_upgrade_thread.start()
 
     def _onAskUpgradeResult(self, should_upgrade, server_version):
-        self.ask_upgrade_thread = None
+        self._ask_upgrade_signal = None
+        self._ask_upgrade_thread = None
         if not should_upgrade:
             return
 
-        skip_version_file = os.path.join(
-            os.path.dirname(os.path.abspath(sys.argv[0])),
-            "cache", "skip_version.cache"
-        )
+        skip_version_file = os.path.join(tyutool_root(), "cache", "skip_version.cache")
         skip_version = "0.0.0"
         if os.path.exists(skip_version_file):
             import json
@@ -309,10 +331,25 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
 
 def show():
     _dbg("show() called, creating QApplication...")
+    print("[MAIN] Creating QApplication...", flush=True)
     app = QtWidgets.QApplication([])
+    print("[MAIN] Creating MyWidget...", flush=True)
     _dbg("creating MyWidget...")
     widget = MyWidget()
+
+    def _cleanup():
+        print("[MAIN] aboutToQuit: cleaning up threads...", flush=True)
+        _dbg("aboutToQuit: cleaning up threads...")
+        widget._wait_threads()
+        print("[MAIN] aboutToQuit: cleanup done", flush=True)
+
+    app.aboutToQuit.connect(_cleanup)
     _dbg("widget.show()...")
+    print("[MAIN] widget.show()...", flush=True)
     widget.show()
     _dbg("entering event loop (app.exec)...")
-    sys.exit(app.exec())
+    print("[MAIN] Entering event loop...", flush=True)
+    ret = app.exec()
+    print(f"[MAIN] Event loop exited with ret={ret}", flush=True)
+    _dbg(f"event loop exited with {ret}")
+    sys.exit(ret)

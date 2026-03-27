@@ -34,6 +34,9 @@ def tyutool_version():
 
 
 def tyutool_root():
+    if getattr(sys, 'frozen', False):
+        # PyInstaller: use the directory containing the executable
+        return os.path.dirname(os.path.abspath(sys.executable))
     return os.getcwd()
 
 

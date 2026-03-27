@@ -4,16 +4,27 @@
 import sys
 import os
 import traceback
+import faulthandler
+
+# Enable faulthandler to get native crash tracebacks (SIGSEGV, SIGABRT, etc.)
+faulthandler.enable()
 
 # Debug log file next to the executable
 _debug_log = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
                           "tyutool_debug.log")
-_debug_f = open(_debug_log, 'w')
+try:
+    _debug_f = open(_debug_log, 'w')
+except Exception:
+    _debug_f = None
 
 
 def _dbg(msg):
-    _debug_f.write(msg + '\n')
-    _debug_f.flush()
+    if _debug_f:
+        try:
+            _debug_f.write(msg + '\n')
+            _debug_f.flush()
+        except Exception:
+            pass
 
 
 _dbg(f"=== tyutool_gui starting ===")
@@ -31,4 +42,5 @@ except Exception as e:
     _dbg(traceback.format_exc())
 finally:
     _dbg("=== tyutool_gui exiting ===")
-    _debug_f.close()
+    if _debug_f:
+        _debug_f.close()
