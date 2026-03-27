@@ -44,11 +44,20 @@ EXCLUDES="$EXCLUDES --exclude-module PySide6.QtRemoteObjects --exclude-module Py
 EXCLUDES="$EXCLUDES --exclude-module PySide6.QtWebChannel --exclude-module PySide6.QtWebSockets --exclude-module PySide6.QtSvgWidgets"
 
 pyinstaller -F --workpath build --specpath dist --add-data "./resource/libs:./resource/libs" $EXCLUDES -n "tyutool_cli${SUFFIX}" ./tyutool_cli.py
-pyinstaller -F --workpath build --specpath dist $WINDOWED --icon ./resource/logo.${ICO} --add-data "./resource/libs:./resource/libs" $EXCLUDES -n "tyutool_gui${SUFFIX}" ./tyutool_gui.py
+# On macOS release: don't pass --windowed to PyInstaller (avoids deprecated -F+--windowed combo
+# that creates a conflicting .app bundle). Instead, build a plain onefile executable and wrap it
+# in a .app bundle manually afterward.
+if [ "$(uname -s)" = "Darwin" ] && [ "$DEBUG_MODE" != "1" ]; then
+    GUI_WINDOWED=""
+else
+    GUI_WINDOWED="$WINDOWED"
+fi
+
+pyinstaller -F --workpath build --specpath dist $GUI_WINDOWED --icon ./resource/logo.${ICO} --add-data "./resource/libs:./resource/libs" $EXCLUDES -n "tyutool_gui${SUFFIX}" ./tyutool_gui.py
 
 sleep 1
 
-# On macOS, wrap GUI executable in a .app bundle to avoid Terminal window
+# On macOS, wrap GUI executable in a .app bundle to avoid Terminal window on launch
 if [ "$(uname -s)" = "Darwin" ] && [ "$DEBUG_MODE" != "1" ]; then
     APP_NAME="tyutool_gui${SUFFIX}"
     APP_BUNDLE="./dist/${APP_NAME}.app"
@@ -82,6 +91,8 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$DEBUG_MODE" != "1" ]; then
     <string>10.13</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>LSUIElement</key>
+    <false/>
 </dict>
 </plist>
 PLIST
