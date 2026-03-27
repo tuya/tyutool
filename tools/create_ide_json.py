@@ -15,13 +15,22 @@ def pack_file(file_path, archive_path):
     if not os.path.exists(file_path):
         print(f"Error: can't find {file_path}")
         return
+    is_dir = os.path.isdir(file_path)
     if archive_path.endswith('.zip'):
         with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            zipf.write(file_path, os.path.basename(file_path))
+            if is_dir:
+                for root, dirs, files in os.walk(file_path):
+                    for f in files:
+                        abs_path = os.path.join(root, f)
+                        arc_name = os.path.join(
+                            os.path.basename(file_path),
+                            os.path.relpath(abs_path, file_path))
+                        zipf.write(abs_path, arc_name)
+            else:
+                zipf.write(file_path, os.path.basename(file_path))
     else:
         with tarfile.open(archive_path, "w:gz") as tar:
-            tar.add(file_path, arcname=os.path.basename(file_path),
-                    recursive=False)
+            tar.add(file_path, arcname=os.path.basename(file_path))
 
 
 def tyutool_env():
@@ -52,9 +61,15 @@ if __name__ == '__main__':
         gui_tar_path = os.path.join(output_dir, "windows_tyutool_gui.zip")
     else:
         cli_path = os.path.join(output_dir, "tyutool_cli")
-        gui_path = os.path.join(output_dir, "tyutool_gui")
         cli_tar_path = os.path.join(output_dir, f"{env}_tyutool_cli.tar.gz")
         gui_tar_path = os.path.join(output_dir, f"{env}_tyutool_gui.tar.gz")
+
+        # On macOS, prefer .app bundle for GUI (no Terminal window on launch)
+        gui_app_path = os.path.join(output_dir, "tyutool_gui.app")
+        if "darwin" in env and os.path.isdir(gui_app_path):
+            gui_path = gui_app_path
+        else:
+            gui_path = os.path.join(output_dir, "tyutool_gui")
 
     pack_file(cli_path, cli_tar_path)
     pack_file(gui_path, gui_tar_path)

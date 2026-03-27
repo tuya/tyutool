@@ -48,4 +48,44 @@ pyinstaller -F --workpath build --specpath dist $WINDOWED --icon ./resource/logo
 
 sleep 1
 
+# On macOS, wrap GUI executable in a .app bundle to avoid Terminal window
+if [ "$(uname -s)" = "Darwin" ] && [ "$DEBUG_MODE" != "1" ]; then
+    APP_NAME="tyutool_gui${SUFFIX}"
+    APP_BUNDLE="./dist/${APP_NAME}.app"
+    rm -rf "$APP_BUNDLE"
+    mkdir -p "$APP_BUNDLE/Contents/MacOS"
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    mv "./dist/${APP_NAME}" "$APP_BUNDLE/Contents/MacOS/${APP_NAME}"
+    cp "./resource/logo.icns" "$APP_BUNDLE/Contents/Resources/logo.icns"
+    cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>${APP_NAME}</string>
+    <key>CFBundleName</key>
+    <string>tyuTool</string>
+    <key>CFBundleDisplayName</key>
+    <string>tyuTool</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.tuya.tyutool</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleIconFile</key>
+    <string>logo</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.13</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+    echo "Created macOS app bundle: $APP_BUNDLE"
+fi
+
 python ./tools/create_ide_json.py
