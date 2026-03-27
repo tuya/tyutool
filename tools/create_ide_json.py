@@ -13,7 +13,7 @@ import zipfile
 
 def pack_file(file_path, archive_path):
     if not os.path.exists(file_path):
-        print(f"Erorr: can't found {file_path}")
+        print(f"Error: can't find {file_path}")
         return
     if archive_path.endswith('.zip'):
         with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
