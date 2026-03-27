@@ -18,3 +18,5 @@ tyutool_gui
 /web_ai_debug
 /ser_ai_debug
 /.venv
+
+.claude
