@@ -1,19 +1,27 @@
 import os
 import json
-import numpy as np
-from scipy.signal import coherence
-from scipy.fft import rfft, rfftfreq
-import matplotlib.pyplot as plt
+
+
+def _import_deps():
+    import numpy as np
+    from scipy.signal import coherence
+    from scipy.fft import rfft, rfftfreq
+    import matplotlib.pyplot as plt
+    return np, coherence, rfft, rfftfreq, plt
 
 
 class AudioTestTools():
     def __init__(self, save_path, logger):
         self.save_path = save_path
         self.logger = logger
+        self.np, self.coherence, self.rfft, self.rfftfreq, self.plt = \
+            _import_deps()
         pass
 
     def load_signals(self, mic1_path, mic2_path, ref_path,
                      sr=16000, dtype='int16'):
+        np = self.np
+
         def read_pcm(path):
             data = np.fromfile(path, dtype=dtype)
             return data.astype(np.float32) / np.iinfo(dtype).max
@@ -41,7 +49,7 @@ class AudioTestTools():
         if signal is None:
             return 0
         else:
-            dc = np.mean(signal)
+            dc = self.np.mean(signal)
             if dc > 0.01:
                 ans = False
             else:
@@ -49,6 +57,9 @@ class AudioTestTools():
             return ans, dc
 
     def mic_coherence(self, mic1, mic2, ref, sr):
+        np = self.np
+        plt = self.plt
+        coherence = self.coherence
         plt.figure(figsize=(8, 4))
         # 对齐信号（以ref为基准，mic1/mic2与ref做互相关，找到最大相关位置进行对齐）
         mic1_aligned, ref1 = self.align_signal(mic1, ref)
@@ -90,6 +101,7 @@ class AudioTestTools():
 
     # 对齐信号
     def align_signal(self, sig, ref):
+        np = self.np
         # Downsample for faster cross-correlation
         ds_factor = 8
         sig_ds = sig[::ds_factor]
@@ -111,7 +123,7 @@ class AudioTestTools():
 
     # 底噪
     def noise_floor(self, signal):
-        # 计算RMS噪声的dB值（相对于满刻度，FS）
+        np = self.np
         rms = np.sqrt(np.mean(np.abs(signal)**2))
         db = 20 * np.log10(rms + 1e-12)  # 防止log(0)
         self.logger.debug(f"Noise floor: {db:.2f} dBFS")
@@ -123,7 +135,7 @@ class AudioTestTools():
 
     # 削波检测
     def clip_detect(self, signal):
-        # Return the number of clipped samples (>= 99% of full scale)
+        np = self.np
         threshold = 0.99
         clipped_samples = np.sum(np.abs(signal) >= threshold)
         if clipped_samples > 0:
@@ -134,7 +146,9 @@ class AudioTestTools():
 
     # 总谐波失真
     def thd(self, signal, sr, freq):
-        # Calculate THD at given fundamental frequency
+        np = self.np
+        rfft = self.rfft
+        rfftfreq = self.rfftfreq
         N = len(signal)
         yf = np.abs(rfft(signal))
         xf = rfftfreq(N, 1/sr)
@@ -157,9 +171,8 @@ class AudioTestTools():
                                        window_ms=300, hop_ms=100,
                                        save_file='delay_stability.png',
                                        need_show=False):
-        """
-        每window_ms毫秒计算一次延时,窗移hop_ms毫秒,画出延时随时间变化的曲线,并保存图片。
-        """
+        np = self.np
+        plt = self.plt
         window_size = int((window_ms / 1000) * sr)
         hop_size = int((hop_ms / 1000) * sr)
         num_windows = (len(mic1) - window_size) // hop_size + 1

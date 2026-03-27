@@ -14,12 +14,14 @@ from PySide6.QtWidgets import (
     QTextEdit, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QFrame
 )
 
-from tyutool.ai_debug import WebAIDebugMonitor
 
-# 屏蔽import QtMultimedia 时的警告
-os.environ["QT_LOGGING_RULES"] = "qt.multimedia.symbolsresolver.warning=false;\
-qt.multimedia.ffmpeg*=false"
-from PySide6 import QtMultimedia
+def _get_QtMultimedia():
+    import os
+    os.environ["QT_LOGGING_RULES"] = \
+        "qt.multimedia.symbolsresolver.warning=false;" \
+        "qt.multimedia.ffmpeg*=false"
+    from PySide6 import QtMultimedia
+    return QtMultimedia
 
 
 class WebDisplayHookSignal(QObject):
@@ -213,6 +215,7 @@ font-weight: bold; font-size: 14px; }")
         main_layout.addWidget(frame)
 
         # Setup audio player
+        QtMultimedia = _get_QtMultimedia()
         audio_player = QtMultimedia.QMediaPlayer()
         audio_output = QtMultimedia.QAudioOutput()
         audio_player.setAudioOutput(audio_output)
@@ -460,6 +463,7 @@ class WebDebugGUI(QtWidgets.QMainWindow):
         pass
 
     def pushButtonWDConnectClicked(self):
+        from tyutool.ai_debug import WebAIDebugMonitor
         event = []
         if self.ui.checkBoxWDText.isChecked():
             event.append('t')

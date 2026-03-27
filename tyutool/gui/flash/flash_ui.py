@@ -51,9 +51,27 @@ class GuiProgressHandler(QThread, ProgressHandler):
         self.pg.reset()
 
 
+class PicLoaderThread(QThread):
+    """Download module picture in background to avoid blocking GUI."""
+    pic_loaded = Signal(bytes)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        try:
+            data = urlopen(self.url, timeout=3).read()
+            self.pic_loaded.emit(data)
+        except Exception:
+            self.pic_loaded.emit(b'')
+
+
 class FlashGUI(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.pic_loader = None
+        self._old_pic_loaders = []  # keep refs to prevent GC while running
         pass
 
     def cacheSave(self):
@@ -174,10 +192,12 @@ class FlashGUI(QtWidgets.QMainWindow):
         pass
 
     def cmbChipTextChanged(self, chip):
+        print(f"[DEBUG] cmbChipTextChanged: chip={chip}", flush=True)
         self.ui.comboBoxModule.clear()
         if not chip:
             return False
         self.modules = FlashInterface.get_modules(chip)
+        print(f"[DEBUG] modules keys: {list(self.modules.keys())}", flush=True)
         self.ui.comboBoxModule.addItems(list(self.modules.keys()))
 
         baudrate = FlashInterface.get_baudrate(chip)
@@ -187,29 +207,44 @@ class FlashGUI(QtWidgets.QMainWindow):
         self.ui.comboBoxBaud.addItems(baudrate_item)
         start_addr = FlashInterface.get_start_addr(chip)
         self.ui.lineEditStart.setText(f'{start_addr:#04x}')
+        print(f"[DEBUG] cmbChipTextChanged done", flush=True)
         pass
 
     def cmbModuleTextChanged(self, mod):
+        print(f"[DEBUG] cmbModuleTextChanged: mod='{mod}'", flush=True)
         if not mod:
             return False
         url = self.modules[mod]['url']
         pic = self.modules[mod]['pic']
         url_string = f'<a style="color: black;" href=\"{url}\">Details</a>'
         self.ui.labelModuleUrl.setText(url_string)
-        self.logger.debug(f'url: {url}')
-        self.logger.debug(f'pic: {pic}')
+        print(f"[DEBUG] pic url: {pic}", flush=True)
 
-        # pic
-        pic_context = b''
-        try:
-            pic_context = urlopen(pic, timeout=2).read()
-        except Exception as e:
-            # 这里不用return，显示空白图片合理
-            self.logger.error(e)
-            self.logger.error(f'Network connection failure [{pic}]')
-        self.pixmap.loadFromData(pic_context)
-        self.ui.labelModulePic.setPixmap(self.pixmap)
+        # pic — load in background to avoid blocking GUI
+        if self.pic_loader and self.pic_loader.isRunning():
+            print(f"[DEBUG] retiring previous pic_loader", flush=True)
+            self.pic_loader.pic_loaded.disconnect(self._onPicLoaded)
+            self.pic_loader.finished.connect(self._cleanupOldPicLoaders)
+            self._old_pic_loaders.append(self.pic_loader)
+        self.pic_loader = PicLoaderThread(pic)
+        self.pic_loader.pic_loaded.connect(self._onPicLoaded)
+        self.pic_loader.start()
+        print(f"[DEBUG] pic_loader started", flush=True)
         pass
+
+    def _onPicLoaded(self, data):
+        print(f"[DEBUG] _onPicLoaded: data_len={len(data)}", flush=True)
+        if data:
+            self.pixmap.loadFromData(data)
+        else:
+            logo_png = base64.b64decode(LOGO_PNG_BYTES)
+            self.pixmap.loadFromData(logo_png)
+        self.ui.labelModulePic.setPixmap(self.pixmap)
+        self.pic_loader = None
+
+    def _cleanupOldPicLoaders(self):
+        self._old_pic_loaders = [t for t in self._old_pic_loaders
+                                 if t.isRunning()]
 
     def btnFileInputClicked(self):
         self.logger.debug(sys._getframe().f_code.co_name)

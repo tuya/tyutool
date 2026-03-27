@@ -8,8 +8,6 @@ from PySide6 import QtWidgets
 from PySide6.QtCore import QRegularExpression, QObject, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 
-from tyutool.ai_debug import SerAIDebugMonitor
-
 
 def _check_sd_monitor(func):
     def wrapper(self, *args, **kwargs):
@@ -184,6 +182,7 @@ class SerDebugGUI(QtWidgets.QMainWindow):
         pass
 
     def pushButtonSDConnectClicked(self):
+        from tyutool.ai_debug import SerAIDebugMonitor
         port = self.ui.comboBoxSDPort.currentText()
         baudrate = int(self.ui.comboBoxSDBaud.currentText())
         sd_monitor = SerAIDebugMonitor(

@@ -7,10 +7,26 @@ import base64
 import logging
 import logging.handlers
 
+# Debug log helper — writes to tyutool_debug.log next to the executable
+_debug_log_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
+                               "tyutool_debug.log")
+
+
+def _dbg(msg):
+    try:
+        with open(_debug_log_path, 'a') as f:
+            f.write(f"[main] {msg}\n")
+            f.flush()
+    except Exception:
+        pass
+
+
+_dbg("main.py module loading...")
+
 from PySide6 import QtCore, QtWidgets, QtGui
 # from PySide6.QtWidgets import QFileDialog
 from PySide6.QtGui import QAction, QIcon, QPixmap
-from PySide6.QtCore import QEventLoop, QTimer, QThread, Signal
+from PySide6.QtCore import QTimer, QThread, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .ui_main import Ui_MainWindow
@@ -20,22 +36,72 @@ from tyutool.gui.flash import FlashGUI
 from tyutool.gui.serial import SerialGUI
 from tyutool.gui.ser_debug import SerDebugGUI
 from tyutool.gui.web_debug import WebDebugGUI
+import requests
 from tyutool.util import TyutoolUpgrade
-from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION
+from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION, tyutool_version, network_available, get_country_code
 
 
 class EmittingStr(QtCore.QObject):
     textWritten = QtCore.Signal(str)
 
     def write(self, text):
+        # Use QMetaObject.invokeMethod to safely emit from any thread
         self.textWritten.emit(str(text))
-        loop = QEventLoop()
-        QTimer.singleShot(100, loop.quit)
-        loop.exec_()
-        QApplication.processEvents()
 
     def flush(self):
         pass
+
+
+class AskUpgradeThread(QThread):
+    """Check for upgrades in background to avoid blocking the GUI."""
+    should_upgrade = Signal(bool, str)  # (should_upgrade, server_version)
+
+    def __init__(self):
+        super().__init__()
+
+    def run(self):
+        try:
+            is_script = '.py' in sys.argv[0]
+            print(f"[DEBUG] AskUpgradeThread: is_script={is_script}", flush=True)
+            if is_script:
+                self.should_upgrade.emit(False, "")
+                return
+
+            if not network_available():
+                print(f"[DEBUG] AskUpgradeThread: network not available", flush=True)
+                self.should_upgrade.emit(False, "")
+                return
+
+            print(f"[DEBUG] AskUpgradeThread: getting country code...", flush=True)
+            country = get_country_code()
+            print(f"[DEBUG] AskUpgradeThread: country={country}", flush=True)
+            if country == "China":
+                api_url = "https://gitee.com/api/v5/repos/tuya-open/tyutool/releases/latest"
+            else:
+                api_url = "https://api.github.com/repos/tuya/tyutool/releases/latest"
+
+            try:
+                response = requests.get(api_url, timeout=2)
+                data = response.json()
+            except Exception:
+                self.should_upgrade.emit(False, "")
+                return
+
+            server_version = data.get('tag_name', "").lstrip('v')
+            if not server_version:
+                self.should_upgrade.emit(False, "")
+                return
+
+            current_version = tyutool_version()
+            if server_version <= current_version:
+                self.should_upgrade.emit(False, "")
+                return
+
+            self.should_upgrade.emit(True, server_version)
+            print(f"[DEBUG] AskUpgradeThread: should upgrade to {server_version}", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] AskUpgradeThread: exception {e}", flush=True)
+            self.should_upgrade.emit(False, "")
 
 
 class UpgradeThread(QThread):
@@ -74,6 +140,7 @@ class UpgradeThread(QThread):
 
 class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
     def __init__(self):
+        _dbg("MyWidget.__init__ start")
         super().__init__()
 
         # log to textBrowser or to terminal
@@ -98,16 +165,22 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.logger = set_logger(logging.INFO)
         self.logger.info("Show Tuya Uart Tool.")
 
+        _dbg("flashUiSetup...")
         self.flashUiSetup()
+        _dbg("serialUiSetup...")
         self.serialUiSetup()
+        _dbg("serDebugUiSetup...")
         self.serDebugUiSetup()
+        _dbg("webDebugUiSetup...")
         self.webDebugUiSetup()
+        _dbg("UI setup done")
 
         self.ui.menuDebug.triggered[QAction].connect(self.LogDebugSwitch)
         self.ui.actionUpgrade.triggered.connect(self.guiUpgrade)
         self.ui.actionVersion.triggered.connect(self.showVersion)
 
         self.upgrade_thread = None
+        self.ask_upgrade_thread = None
 
         QTimer.singleShot(500, self.guiAskUpgrade)
 
@@ -120,6 +193,19 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.ui.textBrowserShow.setTextCursor(cursor)
         self.ui.textBrowserShow.ensureCursorVisible()
         pass
+
+    def closeEvent(self, event):
+        print(f"[DEBUG] closeEvent: cleaning up threads...", flush=True)
+        for attr in ('ask_upgrade_thread', 'upgrade_thread', 'pic_loader'):
+            thread = getattr(self, attr, None)
+            if thread and thread.isRunning():
+                print(f"[DEBUG] closeEvent: waiting for {attr}", flush=True)
+                thread.wait(5000)
+        for t in getattr(self, '_old_pic_loaders', []):
+            if t.isRunning():
+                t.wait(3000)
+        print(f"[DEBUG] closeEvent: done", flush=True)
+        super().closeEvent(event)
 
     def LogDebugSwitch(self, q):
         log_level = logging.DEBUG
@@ -154,29 +240,44 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.upgrade_thread = None
 
     def guiAskUpgrade(self):
-        def ask(server_version=""):
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Upgrade")
-            msg.setText(f"Upgrade Tyutool to [{server_version}] ?")
+        self.ask_upgrade_thread = AskUpgradeThread()
+        self.ask_upgrade_thread.should_upgrade.connect(self._onAskUpgradeResult)
+        self.ask_upgrade_thread.start()
 
-            confirm_button = msg.addButton("Ok", QMessageBox.ActionRole)
-            skip_button = msg.addButton("Skip", QMessageBox.ActionRole)
-            cancel_button = msg.addButton("Cancel", QMessageBox.RejectRole)
-            msg.exec()
-            if msg.clickedButton() == confirm_button:
-                result = 0
-            elif msg.clickedButton() == cancel_button:
-                result = 1
-            elif msg.clickedButton() == skip_button:
-                result = 2
-            return result
+    def _onAskUpgradeResult(self, should_upgrade, server_version):
+        self.ask_upgrade_thread = None
+        if not should_upgrade:
+            return
 
-        up_handle = TyutoolUpgrade(self.logger, "gui")
-        should_upgrade = up_handle.ask_upgrade(ask, auto_upgrade=False)
+        skip_version_file = os.path.join(
+            os.path.dirname(os.path.abspath(sys.argv[0])),
+            "cache", "skip_version.cache"
+        )
+        skip_version = "0.0.0"
+        if os.path.exists(skip_version_file):
+            import json
+            with open(skip_version_file, 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+                skip_version = json_data.get("version", "0.0.0")
+        if skip_version >= server_version:
+            return
 
-        if should_upgrade:
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Upgrade")
+        msg.setText(f"Upgrade Tyutool to [{server_version}] ?")
+        confirm_button = msg.addButton("Ok", QMessageBox.ActionRole)
+        skip_button = msg.addButton("Skip", QMessageBox.ActionRole)
+        cancel_button = msg.addButton("Cancel", QMessageBox.RejectRole)
+        msg.exec()
+
+        if msg.clickedButton() == confirm_button:
             QTimer.singleShot(100, self.startUpgradeWithProgress)
-        pass
+        elif msg.clickedButton() == skip_button:
+            import json
+            skip_version_data = {"version": server_version}
+            os.makedirs(os.path.dirname(skip_version_file), exist_ok=True)
+            with open(skip_version_file, 'w', encoding='utf-8') as f:
+                json.dump(skip_version_data, f, indent=4, ensure_ascii=False)
 
     def startUpgradeWithProgress(self):
         if self.upgrade_thread and self.upgrade_thread.isRunning():
@@ -207,7 +308,11 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
 
 
 def show():
+    _dbg("show() called, creating QApplication...")
     app = QtWidgets.QApplication([])
+    _dbg("creating MyWidget...")
     widget = MyWidget()
+    _dbg("widget.show()...")
     widget.show()
+    _dbg("entering event loop (app.exec)...")
     sys.exit(app.exec())
