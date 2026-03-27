@@ -16,10 +16,12 @@ except Exception:
 
 # Enable faulthandler — write crash tracebacks to debug log (or stderr if available)
 # sys.stderr is None in PyInstaller --windowed mode, so use the log file as fallback
-try:
-    faulthandler.enable(file=_debug_f or sys.stderr)
-except Exception:
-    pass
+_fault_file = _debug_f if _debug_f else sys.stderr
+if _fault_file is not None:
+    try:
+        faulthandler.enable(file=_fault_file)
+    except Exception:
+        pass
 
 
 def _dbg(msg):
