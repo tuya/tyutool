@@ -1,6 +1,6 @@
-# tyuTool — AGENT Guide
+# AGENTS.md — tyuTool
 
-This document is for AI assistants and contributors. It summarizes **tyuTool** purpose, architecture, tech stack, directory layout, and coding conventions. The project is **Python**-based and does **not** include `package.json`, `tsconfig.json`, or other Node/TypeScript config; dependencies and versions follow the root `requirements.txt` and the “Tech stack” section below.
+This document is for AI coding agents and contributors. It summarizes **tyuTool** purpose, architecture, tech stack, directory layout, coding conventions, and behavioral guidelines. The project is **Python**-based and does **not** include `package.json`, `tsconfig.json`, or other Node/TypeScript config; dependencies and versions follow the root `requirements.txt` and the "Tech stack" section below. `CLAUDE.md` imports this file via `@AGENTS.md`.
 
 ---
 
@@ -100,7 +100,8 @@ tyutool/                    # repository root
 ├── requirements.txt        # Python dependencies
 ├── export.sh / export.bat  # create venv, activate, and pip install (see "Development environment setup")
 ├── README.md / README_zh.md
-├── AGENT.md                # this file
+├── AGENTS.md               # this file
+├── CLAUDE.md               # imports AGENTS.md via @AGENTS.md
 ├── .github/workflows/      # GitHub Actions (release, sync-to-gitee, etc.)
 ├── docs/                   # docs and images (zh/en)
 ├── resource/               # icons, assets bundled with PyInstaller
@@ -179,8 +180,80 @@ To deactivate: run `deactivate` (Bash/Zsh) or `exit` (Windows CMD).
 
 ---
 
-## Notes for agents
+## AI behavioral guidelines
 
-- Before version bumps or releases, align `TYUTOOL_VERSION`, `tools/check_tag.py`, and tag naming rules.
-- When adding dependencies, update `requirements.txt` and note PyInstaller footprint or hidden-import needs.
-- This repo is Python-centric; do not assume a Node/TypeScript toolchain unless explicitly stated.
+These principles reduce common LLM coding mistakes. They apply to all AI agents working on this codebase.
+
+### 1. Think before coding
+
+- State assumptions explicitly. If uncertain about the user's intent, ask before implementing.
+- If multiple interpretations exist, present them — do not pick silently.
+- If a simpler approach exists than what was requested, say so. Push back when warranted.
+- When a task touches multiple files, state a brief plan before making changes.
+
+### 2. Simplicity first
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No speculative "flexibility" or "configurability" that was not requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+The test: would a senior engineer say this is overcomplicated? If yes, simplify.
+
+### 3. Surgical changes
+
+When editing existing code:
+
+- Do not "improve" adjacent code, comments, or formatting.
+- Do not refactor things that are not broken.
+- Match existing style, even if you would do it differently.
+- If you notice unrelated dead code or issues, mention them — do not fix them silently.
+
+When your changes create orphans:
+
+- Remove imports, variables, or functions that YOUR changes made unused.
+- Do not remove pre-existing dead code unless asked.
+
+The test: every changed line should trace directly to the user's request.
+
+### 4. Goal-driven execution
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → write tests for invalid inputs, then make them pass.
+- "Fix the bug" → write a test that reproduces it, then make it pass.
+- "Refactor X" → ensure tests pass before and after.
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+> **Note:** There is no formal test suite (pytest) in this project. The `tests/` directory contains helper scripts and sample `.bin` files for manual serial/ESP testing. Verify changes by running the CLI/GUI and checking output.
+
+### Change checklist
+
+Before submitting changes, verify:
+
+| Check | Details |
+|-------|---------|
+| **Version alignment** | If bumping version, align `TYUTOOL_VERSION` in `tyutool/util/util.py`, `tools/check_tag.py`, and tag naming rules |
+| **Generated files** | Never hand-edit `ui_main.py`; edit `ui_main.ui` in Designer, then run `pyside6-uic` |
+| **SoC naming** | SoC keys in `FlashInterface.SocList` must be **UPPERCASE** (e.g. `BK7231N`, not `bk7231n`) |
+| **Dependencies** | When adding deps, update `requirements.txt` and check PyInstaller hidden-import needs |
+| **No Node/TS** | This is a Python-only project — do not introduce Node/TypeScript tooling |
+
+---
+
+## Common pitfalls
+
+- **Version bumps**: before releases, align `TYUTOOL_VERSION`, `tools/check_tag.py`, and tag naming rules. Mismatches break the CI release workflow.
+- **Adding dependencies**: update `requirements.txt` and check whether PyInstaller needs `--hidden-import` for the new package. Large deps also increase binary size.
+- **Python-only repo**: do not assume a Node/TypeScript toolchain exists. There is no `package.json`, `tsconfig.json`, or npm.
+- **GUI changes**: always edit `tyutool/gui/ui_main.ui` in Qt Designer, then regenerate `ui_main.py` via `pyside6-uic ./tyutool/gui/ui_main.ui -o ./tyutool/gui/ui_main.py`. Never hand-edit `ui_main.py`.
+- **Adding a new chip**: follow the full procedure in `tools/develop.md` — create a subpackage under `tyutool/flash/`, implement `FlashHandler`, and register in `flash_interface.py` with uppercase SoC key.
+- **Sensitive data in logs**: do not log complete auth keys, tokens, or user privacy data. Use partial masking (e.g. first 8 chars + `****`).
