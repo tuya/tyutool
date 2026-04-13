@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import sys
 from serial.tools import list_ports
 
 from PySide6 import QtWidgets
@@ -9,7 +8,6 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from tyutool.auth import AuthHandler, AuthExcelParser
-from tyutool.auth.auth_handler import mask_authkey
 
 SUPPORTED_CHIPS = ["ESP32", "ESP32-C3", "ESP32-C6", "ESP32-S3"]
 
@@ -17,7 +15,6 @@ SUPPORTED_CHIPS = ["ESP32", "ESP32-C3", "ESP32-C6", "ESP32-S3"]
 class AuthWorker(QThread):
     """Background thread that runs single-device authorization."""
     log_signal = Signal(str, str)
-    progress_signal = Signal(int, int)
     device_info_signal = Signal(str, str, str)
     stats_signal = Signal(int, int, int)
     finished_signal = Signal(bool)
@@ -31,11 +28,14 @@ class AuthWorker(QThread):
 
     def run(self):
         self.handler.on_log = lambda level, line: self.log_signal.emit(level, line)
-        self.handler.on_progress = lambda cur, tot: self.progress_signal.emit(cur, tot)
         self.handler.on_device_info = lambda mac, uuid, st: self.device_info_signal.emit(mac, uuid, st)
         self.handler.on_stats = lambda t, u, r: self.stats_signal.emit(t, u, r)
-        result = self.handler.authorize_single(
-            self.port, self.baudrate, self.excel_path)
+        try:
+            result = self.handler.authorize_single(
+                self.port, self.baudrate, self.excel_path)
+        except Exception as e:
+            self.log_signal.emit("ERROR", f"[ERROR] 授权异常: {e}")
+            result = False
         self.finished_signal.emit(result)
 
 
@@ -116,7 +116,7 @@ class AuthGUI(QtWidgets.QMainWindow):
             total, used, remain = parser.get_stats()
             parser.close()
         except Exception as e:
-            self.logger.error(f"加载 Excel 失败: {e}")
+            self._authAppendLog("ERROR", f"[ERROR] 加载 Excel 失败: {e}")
             self._auth_excel_path = ""
             self.ui.lineEditAuthExcel.clear()
             return
@@ -169,7 +169,8 @@ class AuthGUI(QtWidgets.QMainWindow):
         self.ui.pushButtonAuthStart.setEnabled(False)
         self.ui.pushButtonAuthStop.setEnabled(True)
         self.ui.labelAuthStatus.setText("State: authorizing")
-        self.ui.progressBarAuth.setValue(0)
+        self.ui.labelAuthStatus.setStyleSheet("")
+        self.ui.progressBarAuth.setRange(0, 0)
 
         self._auth_handler = AuthHandler()
         self._auth_worker = AuthWorker(
@@ -189,6 +190,7 @@ class AuthGUI(QtWidgets.QMainWindow):
         self._authSetConfigEnabled(True)
         self.ui.pushButtonAuthStop.setEnabled(False)
         self._authUpdateButtons()
+        self.ui.progressBarAuth.setRange(0, 100)
         self.ui.progressBarAuth.setValue(100 if success else 0)
 
         if success:
@@ -252,11 +254,9 @@ class AuthGUI(QtWidgets.QMainWindow):
     def _authOnMACRead(self, mac):
         if mac:
             self.ui.labelAuthMAC.setText(f"MAC: {mac}")
-            self._authAppendLog("INFO",
-                                f"[INFO] 设备 MAC: {mac}")
+            self._authAppendLog("INFO", f"[INFO] 设备 MAC: {mac}")
         else:
             self.ui.labelAuthMAC.setText("MAC: --")
-            self._authAppendLog("ERROR",
-                                f"[ERROR] 读取 MAC 失败: 设备无响应")
+            self._authAppendLog("ERROR", f"[ERROR] 读取 MAC 失败: 设备无响应")
         self.ui.pushButtonAuthReadMAC.setEnabled(True)
         self._mac_worker = None

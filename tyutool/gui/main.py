@@ -205,7 +205,7 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, AuthGUI):
 
     def _wait_threads(self):
         """Wait for all background threads to finish."""
-        for attr in ('upgrade_thread', 'pic_loader'):
+        for attr in ('upgrade_thread', 'pic_loader', '_auth_worker', '_mac_worker'):
             thread = getattr(self, attr, None)
             if thread and thread.isRunning():
                 print(f"[DEBUG] _wait_threads: waiting for {attr}", flush=True)
