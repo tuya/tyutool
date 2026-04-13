@@ -109,7 +109,6 @@ class AuthGUI(QtWidgets.QMainWindow):
             return
         self.ui.lineEditAuthExcel.setText(filepath)
         self._auth_excel_path = filepath
-
         try:
             parser = AuthExcelParser()
             parser.load(filepath)
@@ -137,6 +136,18 @@ class AuthGUI(QtWidgets.QMainWindow):
             self.ui.labelAuthUsed.setText("Used: 0")
             self.ui.labelAuthRemain.setText("Remain: 0")
             self._authUpdateButtons()
+        else:
+            import os
+            import shutil
+            bak_path = filepath + ".bak"
+            if not os.path.exists(bak_path):
+                try:
+                    shutil.copy2(filepath, bak_path)
+                    self._authAppendLog("INFO", f"[INFO] 已备份 Excel: {bak_path}")
+                except Exception as e:
+                    self._authAppendLog("ERROR", f"[ERROR] 备份 Excel 失败: {e}")
+            else:
+                self._authAppendLog("INFO", f"[INFO] 备份已存在, 跳过: {bak_path}")
 
     def _authAppendLog(self, level, line):
         color_map = {
