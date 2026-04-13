@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'ui_main.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.9.1
+## Created by: Qt User Interface Compiler version 6.10.2
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -1129,6 +1129,168 @@ class Ui_MainWindow(object):
         self.verticalLayout_15.addLayout(self.verticalLayout_17)
 
         self.tabWidget.addTab(self.tabWebDebug, "")
+        self.tabAuth = QWidget()
+        self.tabAuth.setObjectName(u"tabAuth")
+        self.verticalLayout_auth_root = QVBoxLayout(self.tabAuth)
+        self.verticalLayout_auth_root.setObjectName(u"verticalLayout_auth_root")
+        self.horizontalLayout_auth_top = QHBoxLayout()
+        self.horizontalLayout_auth_top.setObjectName(u"horizontalLayout_auth_top")
+        self.groupBoxAuthConfig = QGroupBox(self.tabAuth)
+        self.groupBoxAuthConfig.setObjectName(u"groupBoxAuthConfig")
+        self.verticalLayout_auth_cfg = QVBoxLayout(self.groupBoxAuthConfig)
+        self.verticalLayout_auth_cfg.setObjectName(u"verticalLayout_auth_cfg")
+        self.horizontalLayout_auth_port = QHBoxLayout()
+        self.horizontalLayout_auth_port.setObjectName(u"horizontalLayout_auth_port")
+        self.labelAuthPort = QLabel(self.groupBoxAuthConfig)
+        self.labelAuthPort.setObjectName(u"labelAuthPort")
+
+        self.horizontalLayout_auth_port.addWidget(self.labelAuthPort)
+
+        self.comboBoxAuthPort = QComboBox(self.groupBoxAuthConfig)
+        self.comboBoxAuthPort.setObjectName(u"comboBoxAuthPort")
+        sizePolicy8 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy8.setHorizontalStretch(1)
+        sizePolicy8.setVerticalStretch(0)
+        sizePolicy8.setHeightForWidth(self.comboBoxAuthPort.sizePolicy().hasHeightForWidth())
+        self.comboBoxAuthPort.setSizePolicy(sizePolicy8)
+
+        self.horizontalLayout_auth_port.addWidget(self.comboBoxAuthPort)
+
+        self.pushButtonAuthRescan = QPushButton(self.groupBoxAuthConfig)
+        self.pushButtonAuthRescan.setObjectName(u"pushButtonAuthRescan")
+
+        self.horizontalLayout_auth_port.addWidget(self.pushButtonAuthRescan)
+
+
+        self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_port)
+
+        self.horizontalLayout_auth_chip = QHBoxLayout()
+        self.horizontalLayout_auth_chip.setObjectName(u"horizontalLayout_auth_chip")
+        self.labelAuthChip = QLabel(self.groupBoxAuthConfig)
+        self.labelAuthChip.setObjectName(u"labelAuthChip")
+
+        self.horizontalLayout_auth_chip.addWidget(self.labelAuthChip)
+
+        self.comboBoxAuthChip = QComboBox(self.groupBoxAuthConfig)
+        self.comboBoxAuthChip.setObjectName(u"comboBoxAuthChip")
+
+        self.horizontalLayout_auth_chip.addWidget(self.comboBoxAuthChip)
+
+
+        self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_chip)
+
+        self.horizontalLayout_auth_baud = QHBoxLayout()
+        self.horizontalLayout_auth_baud.setObjectName(u"horizontalLayout_auth_baud")
+        self.labelAuthBaud = QLabel(self.groupBoxAuthConfig)
+        self.labelAuthBaud.setObjectName(u"labelAuthBaud")
+
+        self.horizontalLayout_auth_baud.addWidget(self.labelAuthBaud)
+
+        self.comboBoxAuthBaud = QComboBox(self.groupBoxAuthConfig)
+        self.comboBoxAuthBaud.setObjectName(u"comboBoxAuthBaud")
+
+        self.horizontalLayout_auth_baud.addWidget(self.comboBoxAuthBaud)
+
+
+        self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_baud)
+
+        self.horizontalLayout_auth_excel = QHBoxLayout()
+        self.horizontalLayout_auth_excel.setObjectName(u"horizontalLayout_auth_excel")
+        self.labelAuthExcel = QLabel(self.groupBoxAuthConfig)
+        self.labelAuthExcel.setObjectName(u"labelAuthExcel")
+
+        self.horizontalLayout_auth_excel.addWidget(self.labelAuthExcel)
+
+        self.lineEditAuthExcel = QLineEdit(self.groupBoxAuthConfig)
+        self.lineEditAuthExcel.setObjectName(u"lineEditAuthExcel")
+        self.lineEditAuthExcel.setReadOnly(True)
+
+        self.horizontalLayout_auth_excel.addWidget(self.lineEditAuthExcel)
+
+        self.pushButtonAuthBrowse = QPushButton(self.groupBoxAuthConfig)
+        self.pushButtonAuthBrowse.setObjectName(u"pushButtonAuthBrowse")
+
+        self.horizontalLayout_auth_excel.addWidget(self.pushButtonAuthBrowse)
+
+
+        self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_excel)
+
+        self.horizontalLayout_auth_btns = QHBoxLayout()
+        self.horizontalLayout_auth_btns.setObjectName(u"horizontalLayout_auth_btns")
+        self.pushButtonAuthStart = QPushButton(self.groupBoxAuthConfig)
+        self.pushButtonAuthStart.setObjectName(u"pushButtonAuthStart")
+
+        self.horizontalLayout_auth_btns.addWidget(self.pushButtonAuthStart)
+
+        self.pushButtonAuthStop = QPushButton(self.groupBoxAuthConfig)
+        self.pushButtonAuthStop.setObjectName(u"pushButtonAuthStop")
+
+        self.horizontalLayout_auth_btns.addWidget(self.pushButtonAuthStop)
+
+        self.pushButtonAuthReadMAC = QPushButton(self.groupBoxAuthConfig)
+        self.pushButtonAuthReadMAC.setObjectName(u"pushButtonAuthReadMAC")
+
+        self.horizontalLayout_auth_btns.addWidget(self.pushButtonAuthReadMAC)
+
+
+        self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_btns)
+
+
+        self.horizontalLayout_auth_top.addWidget(self.groupBoxAuthConfig)
+
+        self.groupBoxAuthInfo = QGroupBox(self.tabAuth)
+        self.groupBoxAuthInfo.setObjectName(u"groupBoxAuthInfo")
+        self.verticalLayout_auth_info = QVBoxLayout(self.groupBoxAuthInfo)
+        self.verticalLayout_auth_info.setObjectName(u"verticalLayout_auth_info")
+        self.labelAuthTotal = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthTotal.setObjectName(u"labelAuthTotal")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthTotal)
+
+        self.labelAuthUsed = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthUsed.setObjectName(u"labelAuthUsed")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthUsed)
+
+        self.labelAuthRemain = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthRemain.setObjectName(u"labelAuthRemain")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthRemain)
+
+        self.labelAuthMAC = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthMAC.setObjectName(u"labelAuthMAC")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthMAC)
+
+        self.labelAuthUUID = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthUUID.setObjectName(u"labelAuthUUID")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthUUID)
+
+        self.labelAuthStatus = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthStatus.setObjectName(u"labelAuthStatus")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthStatus)
+
+
+        self.horizontalLayout_auth_top.addWidget(self.groupBoxAuthInfo)
+
+
+        self.verticalLayout_auth_root.addLayout(self.horizontalLayout_auth_top)
+
+        self.progressBarAuth = QProgressBar(self.tabAuth)
+        self.progressBarAuth.setObjectName(u"progressBarAuth")
+        self.progressBarAuth.setValue(0)
+
+        self.verticalLayout_auth_root.addWidget(self.progressBarAuth)
+
+        self.textBrowserAuthLog = QTextBrowser(self.tabAuth)
+        self.textBrowserAuthLog.setObjectName(u"textBrowserAuthLog")
+        self.textBrowserAuthLog.setStyleSheet(u"background-color: rgb(35, 35, 35); color: rgb(255, 255, 255);")
+
+        self.verticalLayout_auth_root.addWidget(self.textBrowserAuthLog)
+
+        self.tabWidget.addTab(self.tabAuth, "")
 
         self.verticalLayout_16.addWidget(self.tabWidget)
 
@@ -1215,8 +1377,8 @@ class Ui_MainWindow(object):
         self.pushButtonSDDump0.setText(QCoreApplication.translate("MainWindow", u"dump: microphone channel", None))
         self.pushButtonSDDump1.setText(QCoreApplication.translate("MainWindow", u"dump: reference channel", None))
         self.pushButtonSDDump2.setText(QCoreApplication.translate("MainWindow", u"dump: AEC channel", None))
-        self.pushButtonSDDump3.setText(QCoreApplication.translate("MainWindow", u"dump: KWS channel", None))
-        self.pushButtonSDDump4.setText(QCoreApplication.translate("MainWindow", u"dump: VAD channel", None))
+        self.pushButtonSDDump3.setText(QCoreApplication.translate("MainWindow", u"dump: cleaned channel", None))
+        self.pushButtonSDDump4.setText(QCoreApplication.translate("MainWindow", u"dump: extra channel", None))
         self.pushButtonSDBg0.setText(QCoreApplication.translate("MainWindow", u"play: white noise", None))
         self.pushButtonSDBg1.setText(QCoreApplication.translate("MainWindow", u"play: 1K-0dB", None))
         self.pushButtonSDBg2.setText(QCoreApplication.translate("MainWindow", u"play: sweep frequency constantly", None))
@@ -1262,6 +1424,24 @@ class Ui_MainWindow(object):
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDVideo), QCoreApplication.translate("MainWindow", u"Video", None))
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDMsg), QCoreApplication.translate("MainWindow", u"msg", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabWebDebug), QCoreApplication.translate("MainWindow", u"WebDebug", None))
+        self.groupBoxAuthConfig.setTitle(QCoreApplication.translate("MainWindow", u"Auth config", None))
+        self.labelAuthPort.setText(QCoreApplication.translate("MainWindow", u"Port", None))
+        self.pushButtonAuthRescan.setText(QCoreApplication.translate("MainWindow", u"Rescan", None))
+        self.labelAuthChip.setText(QCoreApplication.translate("MainWindow", u"Chip", None))
+        self.labelAuthBaud.setText(QCoreApplication.translate("MainWindow", u"Baud", None))
+        self.labelAuthExcel.setText(QCoreApplication.translate("MainWindow", u"Excel", None))
+        self.pushButtonAuthBrowse.setText(QCoreApplication.translate("MainWindow", u"Browse", None))
+        self.pushButtonAuthStart.setText(QCoreApplication.translate("MainWindow", u"Start", None))
+        self.pushButtonAuthStop.setText(QCoreApplication.translate("MainWindow", u"Stop", None))
+        self.pushButtonAuthReadMAC.setText(QCoreApplication.translate("MainWindow", u"Read MAC", None))
+        self.groupBoxAuthInfo.setTitle(QCoreApplication.translate("MainWindow", u"Status", None))
+        self.labelAuthTotal.setText(QCoreApplication.translate("MainWindow", u"Total: 0", None))
+        self.labelAuthUsed.setText(QCoreApplication.translate("MainWindow", u"Used: 0", None))
+        self.labelAuthRemain.setText(QCoreApplication.translate("MainWindow", u"Remain: 0", None))
+        self.labelAuthMAC.setText(QCoreApplication.translate("MainWindow", u"MAC: --", None))
+        self.labelAuthUUID.setText(QCoreApplication.translate("MainWindow", u"UUID: --", None))
+        self.labelAuthStatus.setText(QCoreApplication.translate("MainWindow", u"State: idle", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabAuth), QCoreApplication.translate("MainWindow", u"Auth", None))
         self.menuMain.setTitle(QCoreApplication.translate("MainWindow", u"Main", None))
         self.menuDebug.setTitle(QCoreApplication.translate("MainWindow", u"Debug", None))
     # retranslateUi

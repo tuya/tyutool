@@ -648,6 +648,40 @@ padding-bottom: 4px;</string>
                </layout>
               </item>
               <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_50">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDDump3">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>dump: cleaned channel</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_51">
+                <item>
+                 <widget class="QPushButton" name="pushButtonSDDump4">
+                  <property name="styleSheet">
+                   <string notr="true">text-align: left;
+padding-left: 10px;
+padding-top: 4px;
+padding-bottom: 4px;</string>
+                  </property>
+                  <property name="text">
+                   <string>dump: extra channel</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
                <layout class="QHBoxLayout" name="horizontalLayout_18">
                 <item>
                  <widget class="QPushButton" name="pushButtonSDBg0">
@@ -1410,6 +1444,197 @@ padding-bottom: 4px;</string>
            </widget>
           </item>
          </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tabAuth">
+       <attribute name="title">
+        <string>Auth</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_auth_root">
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_auth_top">
+          <item>
+           <widget class="QGroupBox" name="groupBoxAuthConfig">
+            <property name="title">
+             <string>Auth config</string>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_auth_cfg">
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_port">
+               <item>
+                <widget class="QLabel" name="labelAuthPort">
+                 <property name="text">
+                  <string>Port</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="comboBoxAuthPort">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                   <horstretch>1</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="pushButtonAuthRescan">
+                 <property name="text">
+                  <string>Rescan</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_chip">
+               <item>
+                <widget class="QLabel" name="labelAuthChip">
+                 <property name="text">
+                  <string>Chip</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="comboBoxAuthChip"/>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_baud">
+               <item>
+                <widget class="QLabel" name="labelAuthBaud">
+                 <property name="text">
+                  <string>Baud</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="comboBoxAuthBaud"/>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_excel">
+               <item>
+                <widget class="QLabel" name="labelAuthExcel">
+                 <property name="text">
+                  <string>Excel</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="lineEditAuthExcel">
+                 <property name="readOnly">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="pushButtonAuthBrowse">
+                 <property name="text">
+                  <string>Browse</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_btns">
+               <item>
+                <widget class="QPushButton" name="pushButtonAuthStart">
+                 <property name="text">
+                  <string>Start</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="pushButtonAuthStop">
+                 <property name="text">
+                  <string>Stop</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="pushButtonAuthReadMAC">
+                 <property name="text">
+                  <string>Read MAC</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
+           <widget class="QGroupBox" name="groupBoxAuthInfo">
+            <property name="title">
+             <string>Status</string>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_auth_info">
+             <item>
+              <widget class="QLabel" name="labelAuthTotal">
+               <property name="text">
+                <string>Total: 0</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelAuthUsed">
+               <property name="text">
+                <string>Used: 0</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelAuthRemain">
+               <property name="text">
+                <string>Remain: 0</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelAuthMAC">
+               <property name="text">
+                <string>MAC: --</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelAuthUUID">
+               <property name="text">
+                <string>UUID: --</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelAuthStatus">
+               <property name="text">
+                <string>State: idle</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QProgressBar" name="progressBarAuth">
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QTextBrowser" name="textBrowserAuthLog">
+          <property name="styleSheet">
+           <string notr="true">background-color: rgb(35, 35, 35); color: rgb(255, 255, 255);</string>
+          </property>
+         </widget>
         </item>
        </layout>
       </widget>
