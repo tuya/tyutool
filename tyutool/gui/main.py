@@ -37,6 +37,7 @@ from tyutool.gui.flash import FlashGUI
 from tyutool.gui.serial import SerialGUI
 from tyutool.gui.ser_debug import SerDebugGUI
 from tyutool.gui.web_debug import WebDebugGUI
+from tyutool.gui.auth import AuthGUI
 import requests
 from tyutool.util import TyutoolUpgrade
 from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION, tyutool_version, network_available, get_country_code
@@ -138,7 +139,7 @@ class UpgradeThread(QThread):
             self.upgrade_finished.emit(False, str(e))
 
 
-class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
+class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, AuthGUI):
     def __init__(self):
         _dbg("MyWidget.__init__ start")
         super().__init__()
@@ -178,6 +179,8 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI):
         self.serDebugUiSetup()
         _dbg("webDebugUiSetup...")
         self.webDebugUiSetup()
+        _dbg("authUiSetup...")
+        self.authUiSetup()
         _dbg("UI setup done")
 
         self.ui.menuDebug.triggered[QAction].connect(self.LogDebugSwitch)
