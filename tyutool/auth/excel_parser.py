@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
-import fcntl
+import sys
 from datetime import datetime
 from openpyxl import load_workbook
 
@@ -82,7 +82,12 @@ class AuthExcelParser:
         lock_path = self.filepath + ".lock"
         self._lock_fd = open(lock_path, 'w')
         try:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if sys.platform == 'win32':
+                import msvcrt
+                msvcrt.locking(self._lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
         except (IOError, OSError):
             self._lock_fd.close()
@@ -93,7 +98,12 @@ class AuthExcelParser:
         """Release the advisory file lock."""
         if self._lock_fd:
             try:
-                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                if sys.platform == 'win32':
+                    import msvcrt
+                    msvcrt.locking(self._lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
                 self._lock_fd.close()
             except Exception:
                 pass

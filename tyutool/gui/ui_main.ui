@@ -658,7 +658,7 @@ padding-top: 4px;
 padding-bottom: 4px;</string>
                   </property>
                   <property name="text">
-                   <string>dump: cleaned channel</string>
+                   <string>dump: KWS channel</string>
                   </property>
                  </widget>
                 </item>
@@ -675,7 +675,7 @@ padding-top: 4px;
 padding-bottom: 4px;</string>
                   </property>
                   <property name="text">
-                   <string>dump: extra channel</string>
+                   <string>dump: VAD channel</string>
                   </property>
                  </widget>
                 </item>

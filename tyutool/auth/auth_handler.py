@@ -15,9 +15,9 @@ DEFAULT_BAUD = 115200
 
 
 def mask_authkey(authkey):
-    """Return first 8 chars + **** for log output."""
-    if len(authkey) <= 8:
-        return authkey
+    """Return masked authkey for log output."""
+    if len(authkey) <= 4:
+        return "****"
     return authkey[:8] + "****"
 
 
@@ -39,6 +39,8 @@ class AuthLogger:
         self._f = open(log_path, 'a', encoding='utf-8')
 
     def log(self, level, msg):
+        if not self._f:
+            return
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{ts}] [{level}] {msg}"
         self._f.write(line + "\n")
@@ -63,7 +65,6 @@ class AuthHandler:
 
     Callbacks (all optional, set as attributes):
         on_log(level, line)       — log message
-        on_progress(current, total) — progress update
         on_device_info(mac, uuid, status) — current device info update
         on_stats(total, used, remain) — stats update
     """
@@ -76,7 +77,6 @@ class AuthHandler:
         self._stop = False
 
         self.on_log = None
-        self.on_progress = None
         self.on_device_info = None
         self.on_stats = None
 
@@ -100,38 +100,37 @@ class AuthHandler:
         return os.path.join(directory, f"{basename}_auth_{ts}.log")
 
     def authorize_single(self, port, baudrate, excel_path):
-        """Run single-device authorization. Returns True on success.
-
-        This method is meant to be called from a worker thread.
-        """
+        """Run single-device authorization. Returns True on success."""
         self._stop = False
         log_path = self._build_log_path(excel_path)
         self.auth_log = AuthLogger(log_path, callback=self._log_callback)
 
-        if not self.excel:
-            self.load_excel(excel_path)
-
-        total, used, remain = self.excel.get_stats()
-        self.auth_log.info(
-            f"加载 Excel: {excel_path}, 总计: {total}, 可用: {remain}")
-        if self.on_stats:
-            self.on_stats(total, used, remain)
-
-        if not self.excel.lock():
-            self.auth_log.error("无法获取 Excel 文件锁，可能有其他实例正在运行")
-            return False
-
         try:
-            return self._do_authorize(port, baudrate)
+            if not self.excel:
+                self.load_excel(excel_path)
+
+            total, used, remain = self.excel.get_stats()
+            self.auth_log.info(
+                f"加载 Excel: {excel_path}, 总计: {total}, 可用: {remain}")
+            if self.on_stats:
+                self.on_stats(total, used, remain)
+
+            if not self.excel.lock():
+                self.auth_log.error("无法获取 Excel 文件锁，可能有其他实例正在运行")
+                return False
+
+            try:
+                return self._do_authorize(port, baudrate)
+            finally:
+                self.excel.unlock()
+                self._close_serial()
         finally:
-            self.excel.unlock()
-            self._close_serial()
             if self.auth_log:
                 self.auth_log.close()
                 self.auth_log = None
 
     def _open_serial(self, port, baudrate):
-        self.auth_log.info(f"正在打开串口: {port}, 波特率: {baudrate}")
+        self.auth_log.info(f"打开串口: {port}, 波特率: {baudrate}")
         self.ser = serial.Serial()
         self.ser.port = port
         self.ser.baudrate = baudrate
@@ -139,16 +138,11 @@ class AuthHandler:
         self.ser.dtr = False
         self.ser.rts = False
         self.ser.open()
-        self.auth_log.info(
-            f"串口已打开: is_open={self.ser.is_open}, "
-            f"dtr={self.ser.dtr}, rts={self.ser.rts}, "
-            f"timeout={self.ser.timeout}")
         time.sleep(0.3)
         pending = self.ser.in_waiting
         if pending > 0:
-            garbage = self.ser.read(pending)
-            self.auth_log.info(
-                f"清空启动残留数据: {pending} 字节, 内容: {garbage!r:.200}")
+            self.ser.read(pending)
+            self.auth_log.info(f"清空启动残留数据: {pending} 字节")
         self.ser.reset_input_buffer()
         self.protocol = AuthProtocol(self.ser, logger=self.auth_log)
         self.auth_log.info("串口就绪")
@@ -165,8 +159,6 @@ class AuthHandler:
         if self._stop:
             return False
 
-        # Step 1: read MAC
-        self.auth_log.info(">> read_mac")
         mac = self.protocol.read_mac()
         if not mac:
             self.auth_log.error("读取 MAC 失败: 设备无响应")
@@ -180,8 +172,6 @@ class AuthHandler:
         if self._stop:
             return False
 
-        # Step 2: check auth status
-        self.auth_log.info(">> auth-read")
         existing = self.protocol.auth_read()
         if existing:
             uuid_e, authkey_e = existing
@@ -196,7 +186,6 @@ class AuthHandler:
         if self._stop:
             return False
 
-        # Step 3: get next available code
         entry = self.excel.get_next_available()
         if not entry:
             self.auth_log.error("授权码已用完")
@@ -210,16 +199,12 @@ class AuthHandler:
         if self.on_device_info:
             self.on_device_info(mac, uuid, "writing")
 
-        # Step 4: write with retries
         write_ok = False
         for attempt in range(1, MAX_RETRIES + 1):
             if self._stop:
                 return False
-            self.auth_log.info(
-                f">> auth {uuid} {mask_authkey(authkey)} (尝试 {attempt}/{MAX_RETRIES})")
             if self.protocol.auth_write(uuid, authkey):
                 write_ok = True
-                self.auth_log.info("<< Authorization write succeeds.")
                 break
             self.auth_log.error(f"写入失败 (尝试 {attempt}/{MAX_RETRIES})")
             time.sleep(0.5)
@@ -233,13 +218,11 @@ class AuthHandler:
         if self._stop:
             return False
 
-        # Step 5: read-back verify
-        self.auth_log.info(">> auth-read (回读校验)")
         readback = self.protocol.auth_read()
         if readback:
             rb_uuid, rb_authkey = readback
             self.auth_log.info(
-                f"<< {rb_uuid} / {mask_authkey(rb_authkey)}")
+                f"回读校验: {rb_uuid} / {mask_authkey(rb_authkey)}")
             if rb_uuid == uuid and rb_authkey == authkey:
                 self.auth_log.info("回读校验通过")
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

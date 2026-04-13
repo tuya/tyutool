@@ -5,6 +5,7 @@ import re
 import time
 
 CMD_TIMEOUT = 3.0
+IDLE_TIMEOUT = 0.3
 AUTH_WRITE_SUCCESS = "Authorization write succeeds."
 MAC_PATTERN = re.compile(r'([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})')
 
@@ -30,15 +31,21 @@ class AuthProtocol:
         self.ser.flush()
         self._log("info", f">> {cmd}")
 
-    def _read_response(self, timeout=CMD_TIMEOUT):
-        """Read serial response lines within timeout."""
+    def _read_response(self, timeout=CMD_TIMEOUT, idle_timeout=IDLE_TIMEOUT):
+        """Read serial response lines within timeout.
+
+        Returns early if no new data arrives for idle_timeout seconds
+        after the first data is received.
+        """
         buf = b''
         lines = []
+        last_data_time = None
         end_time = time.time() + timeout
         while time.time() < end_time:
             n = self.ser.in_waiting
             if n > 0:
                 buf += self.ser.read(n)
+                last_data_time = time.time()
                 while b'\n' in buf:
                     raw_line, buf = buf.split(b'\n', 1)
                     try:
@@ -49,6 +56,8 @@ class AuthProtocol:
                         lines.append(line)
                         self._log("info", f"<< {line}")
             else:
+                if last_data_time and (time.time() - last_data_time > idle_timeout):
+                    break
                 time.sleep(0.05)
         if buf:
             trailing = buf.decode('utf-8', errors='replace').strip()
