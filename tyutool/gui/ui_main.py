@@ -1133,8 +1133,66 @@ class Ui_MainWindow(object):
         self.tabAuth.setObjectName(u"tabAuth")
         self.verticalLayout_auth_root = QVBoxLayout(self.tabAuth)
         self.verticalLayout_auth_root.setObjectName(u"verticalLayout_auth_root")
-        self.horizontalLayout_auth_top = QHBoxLayout()
-        self.horizontalLayout_auth_top.setObjectName(u"horizontalLayout_auth_top")
+        self.verticalLayout_auth_top = QVBoxLayout()
+        self.verticalLayout_auth_top.setObjectName(u"verticalLayout_auth_top")
+        self.groupBoxAuthInfo = QGroupBox(self.tabAuth)
+        self.groupBoxAuthInfo.setObjectName(u"groupBoxAuthInfo")
+        self.verticalLayout_auth_info = QVBoxLayout(self.groupBoxAuthInfo)
+        self.verticalLayout_auth_info.setObjectName(u"verticalLayout_auth_info")
+        self.horizontalLayout_auth_stats = QHBoxLayout()
+        self.horizontalLayout_auth_stats.setObjectName(u"horizontalLayout_auth_stats")
+        self.labelAuthTotal = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthTotal.setObjectName(u"labelAuthTotal")
+        font1 = QFont()
+        font1.setPointSize(14)
+        font1.setBold(True)
+        self.labelAuthTotal.setFont(font1)
+
+        self.horizontalLayout_auth_stats.addWidget(self.labelAuthTotal)
+
+        self.labelAuthUsed = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthUsed.setObjectName(u"labelAuthUsed")
+        self.labelAuthUsed.setFont(font1)
+
+        self.horizontalLayout_auth_stats.addWidget(self.labelAuthUsed)
+
+        self.labelAuthRemain = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthRemain.setObjectName(u"labelAuthRemain")
+        self.labelAuthRemain.setFont(font1)
+
+        self.horizontalLayout_auth_stats.addWidget(self.labelAuthRemain)
+
+
+        self.verticalLayout_auth_info.addLayout(self.horizontalLayout_auth_stats)
+
+        self.labelAuthDeviceHeader = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthDeviceHeader.setObjectName(u"labelAuthDeviceHeader")
+
+        self.verticalLayout_auth_info.addWidget(self.labelAuthDeviceHeader)
+
+        self.horizontalLayout_auth_device = QHBoxLayout()
+        self.horizontalLayout_auth_device.setObjectName(u"horizontalLayout_auth_device")
+        self.labelAuthMAC = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthMAC.setObjectName(u"labelAuthMAC")
+
+        self.horizontalLayout_auth_device.addWidget(self.labelAuthMAC)
+
+        self.labelAuthUUID = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthUUID.setObjectName(u"labelAuthUUID")
+
+        self.horizontalLayout_auth_device.addWidget(self.labelAuthUUID)
+
+        self.labelAuthStatus = QLabel(self.groupBoxAuthInfo)
+        self.labelAuthStatus.setObjectName(u"labelAuthStatus")
+
+        self.horizontalLayout_auth_device.addWidget(self.labelAuthStatus)
+
+
+        self.verticalLayout_auth_info.addLayout(self.horizontalLayout_auth_device)
+
+
+        self.verticalLayout_auth_top.addWidget(self.groupBoxAuthInfo)
+
         self.groupBoxAuthConfig = QGroupBox(self.tabAuth)
         self.groupBoxAuthConfig.setObjectName(u"groupBoxAuthConfig")
         self.verticalLayout_auth_cfg = QVBoxLayout(self.groupBoxAuthConfig)
@@ -1173,11 +1231,34 @@ class Ui_MainWindow(object):
 
         self.comboBoxAuthChip = QComboBox(self.groupBoxAuthConfig)
         self.comboBoxAuthChip.setObjectName(u"comboBoxAuthChip")
+        sizePolicy8.setHeightForWidth(self.comboBoxAuthChip.sizePolicy().hasHeightForWidth())
+        self.comboBoxAuthChip.setSizePolicy(sizePolicy8)
 
         self.horizontalLayout_auth_chip.addWidget(self.comboBoxAuthChip)
 
 
         self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_chip)
+
+        self.horizontalLayout_auth_firmware = QHBoxLayout()
+        self.horizontalLayout_auth_firmware.setObjectName(u"horizontalLayout_auth_firmware")
+        self.labelAuthFirmware = QLabel(self.groupBoxAuthConfig)
+        self.labelAuthFirmware.setObjectName(u"labelAuthFirmware")
+
+        self.horizontalLayout_auth_firmware.addWidget(self.labelAuthFirmware)
+
+        self.lineEditAuthFirmware = QLineEdit(self.groupBoxAuthConfig)
+        self.lineEditAuthFirmware.setObjectName(u"lineEditAuthFirmware")
+        self.lineEditAuthFirmware.setReadOnly(True)
+
+        self.horizontalLayout_auth_firmware.addWidget(self.lineEditAuthFirmware)
+
+        self.pushButtonAuthBrowseFirmware = QPushButton(self.groupBoxAuthConfig)
+        self.pushButtonAuthBrowseFirmware.setObjectName(u"pushButtonAuthBrowseFirmware")
+
+        self.horizontalLayout_auth_firmware.addWidget(self.pushButtonAuthBrowseFirmware)
+
+
+        self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_firmware)
 
         self.horizontalLayout_auth_baud = QHBoxLayout()
         self.horizontalLayout_auth_baud.setObjectName(u"horizontalLayout_auth_baud")
@@ -1236,51 +1317,16 @@ class Ui_MainWindow(object):
         self.verticalLayout_auth_cfg.addLayout(self.horizontalLayout_auth_btns)
 
 
-        self.horizontalLayout_auth_top.addWidget(self.groupBoxAuthConfig)
-
-        self.groupBoxAuthInfo = QGroupBox(self.tabAuth)
-        self.groupBoxAuthInfo.setObjectName(u"groupBoxAuthInfo")
-        self.verticalLayout_auth_info = QVBoxLayout(self.groupBoxAuthInfo)
-        self.verticalLayout_auth_info.setObjectName(u"verticalLayout_auth_info")
-        self.labelAuthTotal = QLabel(self.groupBoxAuthInfo)
-        self.labelAuthTotal.setObjectName(u"labelAuthTotal")
-
-        self.verticalLayout_auth_info.addWidget(self.labelAuthTotal)
-
-        self.labelAuthUsed = QLabel(self.groupBoxAuthInfo)
-        self.labelAuthUsed.setObjectName(u"labelAuthUsed")
-
-        self.verticalLayout_auth_info.addWidget(self.labelAuthUsed)
-
-        self.labelAuthRemain = QLabel(self.groupBoxAuthInfo)
-        self.labelAuthRemain.setObjectName(u"labelAuthRemain")
-
-        self.verticalLayout_auth_info.addWidget(self.labelAuthRemain)
-
-        self.labelAuthMAC = QLabel(self.groupBoxAuthInfo)
-        self.labelAuthMAC.setObjectName(u"labelAuthMAC")
-
-        self.verticalLayout_auth_info.addWidget(self.labelAuthMAC)
-
-        self.labelAuthUUID = QLabel(self.groupBoxAuthInfo)
-        self.labelAuthUUID.setObjectName(u"labelAuthUUID")
-
-        self.verticalLayout_auth_info.addWidget(self.labelAuthUUID)
-
-        self.labelAuthStatus = QLabel(self.groupBoxAuthInfo)
-        self.labelAuthStatus.setObjectName(u"labelAuthStatus")
-
-        self.verticalLayout_auth_info.addWidget(self.labelAuthStatus)
+        self.verticalLayout_auth_top.addWidget(self.groupBoxAuthConfig)
 
 
-        self.horizontalLayout_auth_top.addWidget(self.groupBoxAuthInfo)
-
-
-        self.verticalLayout_auth_root.addLayout(self.horizontalLayout_auth_top)
+        self.verticalLayout_auth_root.addLayout(self.verticalLayout_auth_top)
 
         self.progressBarAuth = QProgressBar(self.tabAuth)
         self.progressBarAuth.setObjectName(u"progressBarAuth")
+        self.progressBarAuth.setMaximumSize(QSize(16777215, 10))
         self.progressBarAuth.setValue(0)
+        self.progressBarAuth.setTextVisible(False)
 
         self.verticalLayout_auth_root.addWidget(self.progressBarAuth)
 
@@ -1424,24 +1470,28 @@ class Ui_MainWindow(object):
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDVideo), QCoreApplication.translate("MainWindow", u"Video", None))
         self.tabWidgetWD.setTabText(self.tabWidgetWD.indexOf(self.tabWDMsg), QCoreApplication.translate("MainWindow", u"msg", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabWebDebug), QCoreApplication.translate("MainWindow", u"WebDebug", None))
+        self.groupBoxAuthInfo.setTitle(QCoreApplication.translate("MainWindow", u"Auth summary", None))
+        self.labelAuthTotal.setText(QCoreApplication.translate("MainWindow", u"Total: 0", None))
+        self.labelAuthUsed.setText(QCoreApplication.translate("MainWindow", u"Used: 0", None))
+        self.labelAuthRemain.setText(QCoreApplication.translate("MainWindow", u"Remain: 0", None))
+        self.labelAuthDeviceHeader.setText(QCoreApplication.translate("MainWindow", u"Current device", None))
+        self.labelAuthMAC.setText(QCoreApplication.translate("MainWindow", u"MAC: --", None))
+        self.labelAuthUUID.setText(QCoreApplication.translate("MainWindow", u"UUID: --", None))
+        self.labelAuthStatus.setText(QCoreApplication.translate("MainWindow", u"State: idle", None))
         self.groupBoxAuthConfig.setTitle(QCoreApplication.translate("MainWindow", u"Auth config", None))
         self.labelAuthPort.setText(QCoreApplication.translate("MainWindow", u"Port", None))
         self.pushButtonAuthRescan.setText(QCoreApplication.translate("MainWindow", u"Rescan", None))
         self.labelAuthChip.setText(QCoreApplication.translate("MainWindow", u"Chip", None))
+        self.labelAuthFirmware.setText(QCoreApplication.translate("MainWindow", u"Firmware", None))
+        self.lineEditAuthFirmware.setPlaceholderText(QCoreApplication.translate("MainWindow", u"(Optional) Select firmware to flash before auth", None))
+        self.pushButtonAuthBrowseFirmware.setText(QCoreApplication.translate("MainWindow", u"Browse", None))
         self.labelAuthBaud.setText(QCoreApplication.translate("MainWindow", u"Baud", None))
-        self.labelAuthExcel.setText(QCoreApplication.translate("MainWindow", u"Excel", None))
+        self.labelAuthExcel.setText(QCoreApplication.translate("MainWindow", u"License List", None))
         self.pushButtonAuthBrowse.setText(QCoreApplication.translate("MainWindow", u"Browse", None))
         self.pushButtonAuthStart.setText(QCoreApplication.translate("MainWindow", u"Start", None))
         self.pushButtonAuthStop.setText(QCoreApplication.translate("MainWindow", u"Stop", None))
         self.pushButtonAuthReadMAC.setText(QCoreApplication.translate("MainWindow", u"Read MAC", None))
-        self.groupBoxAuthInfo.setTitle(QCoreApplication.translate("MainWindow", u"Status", None))
-        self.labelAuthTotal.setText(QCoreApplication.translate("MainWindow", u"Total: 0", None))
-        self.labelAuthUsed.setText(QCoreApplication.translate("MainWindow", u"Used: 0", None))
-        self.labelAuthRemain.setText(QCoreApplication.translate("MainWindow", u"Remain: 0", None))
-        self.labelAuthMAC.setText(QCoreApplication.translate("MainWindow", u"MAC: --", None))
-        self.labelAuthUUID.setText(QCoreApplication.translate("MainWindow", u"UUID: --", None))
-        self.labelAuthStatus.setText(QCoreApplication.translate("MainWindow", u"State: idle", None))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabAuth), QCoreApplication.translate("MainWindow", u"Auth", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabAuth), QCoreApplication.translate("MainWindow", u"Batch Auth", None))
         self.menuMain.setTitle(QCoreApplication.translate("MainWindow", u"Main", None))
         self.menuDebug.setTitle(QCoreApplication.translate("MainWindow", u"Debug", None))
     # retranslateUi

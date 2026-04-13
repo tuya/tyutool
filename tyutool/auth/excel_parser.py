@@ -57,7 +57,7 @@ class AuthExcelParser:
 
         if "uuid" not in self._col or "authkey" not in self._col:
             raise ValueError(
-                "Excel 表头缺少必需列: 需要 UUID 和 AUTHKEY(或 key) 列"
+                "Missing required columns in Excel header: UUID and AUTHKEY (or key) columns are needed"
             )
 
         next_col = self.ws.max_column + 1
@@ -115,6 +115,15 @@ class AuthExcelParser:
             if status and str(status).strip().upper() == self.STATUS_USED:
                 continue
             return (row, str(uuid_val).strip(), str(authkey_val).strip())
+        return None
+
+    def find_by_uuid(self, uuid):
+        """Return row number for the given UUID, or None if not found."""
+        col_uuid = self._col["uuid"]
+        for row in range(2, self.ws.max_row + 1):
+            val = self.ws.cell(row=row, column=col_uuid).value
+            if val and str(val).strip() == uuid:
+                return row
         return None
 
     def mark_used(self, row, mac, timestamp=None):
