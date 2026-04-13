@@ -48,6 +48,10 @@ class AuthLogger:
         if self.callback:
             self.callback(level, line)
 
+    def debug(self, msg):
+        """Discard device serial noise — not written to file or UI."""
+        pass
+
     def info(self, msg):
         self.log("INFO", msg)
 
