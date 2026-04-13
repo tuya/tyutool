@@ -83,7 +83,16 @@ class AuthProtocol:
         """Send read_mac command and return MAC address string or None."""
         self._send_cmd("read_mac")
         lines = self._read_response()
-        for line in lines:
+        echo_idx = -1
+        for i, line in enumerate(lines):
+            if "read_mac" in line:
+                echo_idx = i
+                break
+        if echo_idx < 0:
+            return None
+        for line in lines[echo_idx + 1:]:
+            if _SHELL_PROMPT_RE.match(line):
+                continue
             m = MAC_PATTERN.search(line)
             if m:
                 return m.group(1).upper()

@@ -1449,11 +1449,95 @@ padding-bottom: 4px;</string>
       </widget>
       <widget class="QWidget" name="tabAuth">
        <attribute name="title">
-        <string>Auth</string>
+        <string>Batch Auth</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_auth_root">
         <item>
-         <layout class="QHBoxLayout" name="horizontalLayout_auth_top">
+         <layout class="QVBoxLayout" name="verticalLayout_auth_top">
+          <item>
+           <widget class="QGroupBox" name="groupBoxAuthInfo">
+            <property name="title">
+             <string>Auth summary</string>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_auth_info">
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_stats">
+               <item>
+                <widget class="QLabel" name="labelAuthTotal">
+                 <property name="font">
+                  <font>
+                   <pointsize>14</pointsize>
+                   <bold>true</bold>
+                  </font>
+                 </property>
+                 <property name="text">
+                  <string>Total: 0</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelAuthUsed">
+                 <property name="font">
+                  <font>
+                   <pointsize>14</pointsize>
+                   <bold>true</bold>
+                  </font>
+                 </property>
+                 <property name="text">
+                  <string>Used: 0</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelAuthRemain">
+                 <property name="font">
+                  <font>
+                   <pointsize>14</pointsize>
+                   <bold>true</bold>
+                  </font>
+                 </property>
+                 <property name="text">
+                  <string>Remain: 0</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelAuthDeviceHeader">
+               <property name="text">
+                <string>Current device</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_device">
+               <item>
+                <widget class="QLabel" name="labelAuthMAC">
+                 <property name="text">
+                  <string>MAC: --</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelAuthUUID">
+                 <property name="text">
+                  <string>UUID: --</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelAuthStatus">
+                 <property name="text">
+                  <string>State: idle</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
+          </item>
           <item>
            <widget class="QGroupBox" name="groupBoxAuthConfig">
             <property name="title">
@@ -1498,7 +1582,42 @@ padding-bottom: 4px;</string>
                 </widget>
                </item>
                <item>
-                <widget class="QComboBox" name="comboBoxAuthChip"/>
+                <widget class="QComboBox" name="comboBoxAuthChip">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                   <horstretch>1</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_auth_firmware">
+               <item>
+                <widget class="QLabel" name="labelAuthFirmware">
+                 <property name="text">
+                  <string>Firmware</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="lineEditAuthFirmware">
+                 <property name="readOnly">
+                  <bool>true</bool>
+                 </property>
+                 <property name="placeholderText">
+                  <string>(Optional) Select firmware to flash before auth</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="pushButtonAuthBrowseFirmware">
+                 <property name="text">
+                  <string>Browse</string>
+                 </property>
+                </widget>
                </item>
               </layout>
              </item>
@@ -1521,7 +1640,7 @@ padding-bottom: 4px;</string>
                <item>
                 <widget class="QLabel" name="labelAuthExcel">
                  <property name="text">
-                  <string>Excel</string>
+                  <string>License List</string>
                  </property>
                 </widget>
                </item>
@@ -1569,63 +1688,21 @@ padding-bottom: 4px;</string>
             </layout>
            </widget>
           </item>
-          <item>
-           <widget class="QGroupBox" name="groupBoxAuthInfo">
-            <property name="title">
-             <string>Status</string>
-            </property>
-            <layout class="QVBoxLayout" name="verticalLayout_auth_info">
-             <item>
-              <widget class="QLabel" name="labelAuthTotal">
-               <property name="text">
-                <string>Total: 0</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLabel" name="labelAuthUsed">
-               <property name="text">
-                <string>Used: 0</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLabel" name="labelAuthRemain">
-               <property name="text">
-                <string>Remain: 0</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLabel" name="labelAuthMAC">
-               <property name="text">
-                <string>MAC: --</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLabel" name="labelAuthUUID">
-               <property name="text">
-                <string>UUID: --</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLabel" name="labelAuthStatus">
-               <property name="text">
-                <string>State: idle</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </widget>
-          </item>
          </layout>
         </item>
         <item>
          <widget class="QProgressBar" name="progressBarAuth">
+          <property name="maximumSize">
+           <size>
+            <width>16777215</width>
+            <height>10</height>
+           </size>
+          </property>
           <property name="value">
            <number>0</number>
+          </property>
+          <property name="textVisible">
+           <bool>false</bool>
           </property>
          </widget>
         </item>

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from .auth_ui import AuthGUI
+from .batch_auth import BatchAuthGUI
 
 __all__ = [
-    "AuthGUI"
+    "BatchAuthGUI"
 ]

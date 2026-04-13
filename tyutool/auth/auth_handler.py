@@ -12,6 +12,7 @@ from .excel_parser import AuthExcelParser
 
 MAX_RETRIES = 3
 DEFAULT_BAUD = 115200
+_PLACEHOLDER_UUID = "uuidxxxxxxxxxxxxxxxx"
 
 
 def mask_authkey(authkey):
@@ -71,7 +72,16 @@ class AuthHandler:
         on_log(level, line)       — log message
         on_device_info(mac, uuid, status) — current device info update
         on_stats(total, used, remain) — stats update
+        on_step(step_id, state, detail) — workflow step state change
     """
+
+    STEP_OPEN = "open_serial"
+    STEP_FLASH = "flash_firmware"
+    STEP_RESET = "device_reset"
+    STEP_READ_MAC = "read_mac"
+    STEP_AUTH = "auth_write"
+    STEP_VERIFY = "auth_verify"
+    STEP_CLOSE = "close_serial"
 
     def __init__(self):
         self.excel = None
@@ -83,6 +93,7 @@ class AuthHandler:
         self.on_log = None
         self.on_device_info = None
         self.on_stats = None
+        self.on_step = None
 
     def stop(self):
         self._stop = True
@@ -90,6 +101,10 @@ class AuthHandler:
     def _log_callback(self, level, line):
         if self.on_log:
             self.on_log(level, line)
+
+    def _emit_step(self, step_id, state, detail=""):
+        if self.on_step:
+            self.on_step(step_id, state, detail)
 
     def load_excel(self, filepath):
         """Load Excel file and return (total, used, remain)."""
@@ -103,11 +118,25 @@ class AuthHandler:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(directory, f"{basename}_auth_{ts}.log")
 
-    def authorize_single(self, port, baudrate, excel_path):
-        """Run single-device authorization. Returns True on success."""
-        self._stop = False
+    def init_log(self, excel_path):
+        """Create the session log file early (e.g. before flash).
+        Returns the log file path."""
         log_path = self._build_log_path(excel_path)
         self.auth_log = AuthLogger(log_path, callback=self._log_callback)
+        return log_path
+
+    def authorize_single(self, port, baudrate, excel_path, skip_open=False):
+        """Run single-device authorization. Returns True on success.
+
+        Args:
+            skip_open: When True, skip the STEP_OPEN emission (caller already
+                       verified the port, e.g. before firmware flash).
+        """
+        self._stop = False
+        own_log = False
+        if not self.auth_log:
+            self.init_log(excel_path)
+            own_log = True
 
         try:
             if not self.excel:
@@ -115,26 +144,26 @@ class AuthHandler:
 
             total, used, remain = self.excel.get_stats()
             self.auth_log.info(
-                f"加载 Excel: {excel_path}, 总计: {total}, 可用: {remain}")
+                f"Loaded Excel: {excel_path}, total: {total}, available: {remain}")
             if self.on_stats:
                 self.on_stats(total, used, remain)
 
             if not self.excel.lock():
-                self.auth_log.error("无法获取 Excel 文件锁，可能有其他实例正在运行")
+                self.auth_log.error("Failed to acquire Excel file lock, another instance may be running")
                 return False
 
             try:
-                return self._do_authorize(port, baudrate)
+                return self._do_authorize(port, baudrate, skip_open=skip_open)
             finally:
                 self.excel.unlock()
                 self._close_serial()
         finally:
-            if self.auth_log:
+            if own_log and self.auth_log:
                 self.auth_log.close()
                 self.auth_log = None
 
     def _open_serial(self, port, baudrate):
-        self.auth_log.info(f"打开串口: {port}, 波特率: {baudrate}")
+        self.auth_log.info(f"Opening serial: {port}, baudrate: {baudrate}")
         self.ser = serial.Serial()
         self.ser.port = port
         self.ser.baudrate = baudrate
@@ -142,34 +171,69 @@ class AuthHandler:
         self.ser.dtr = False
         self.ser.rts = False
         self.ser.open()
-        time.sleep(0.3)
-        pending = self.ser.in_waiting
-        if pending > 0:
-            self.ser.read(pending)
-            self.auth_log.info(f"清空启动残留数据: {pending} 字节")
+        self._drain_boot_output()
         self.ser.reset_input_buffer()
         self.protocol = AuthProtocol(self.ser, logger=self.auth_log)
-        self.auth_log.info("串口就绪")
+        self.auth_log.info("Serial port ready")
+
+    def _drain_boot_output(self, quiet_period=0.8, max_wait=5.0):
+        """Read and discard data until the serial line is quiet, indicating
+        that device boot is complete and the CLI shell is ready."""
+        total_drained = 0
+        last_data_time = time.time()
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            n = self.ser.in_waiting
+            if n > 0:
+                self.ser.read(n)
+                total_drained += n
+                last_data_time = time.time()
+            else:
+                if time.time() - last_data_time >= quiet_period:
+                    break
+                time.sleep(0.05)
+        if total_drained > 0:
+            self.auth_log.info(
+                f"Drained {total_drained} bytes of boot output")
 
     def _close_serial(self):
+        self._emit_step(self.STEP_CLOSE, "running")
         if self.ser and self.ser.is_open:
             self.ser.close()
         self.ser = None
         self.protocol = None
+        self._emit_step(self.STEP_CLOSE, "done")
 
-    def _do_authorize(self, port, baudrate):
-        self._open_serial(port, baudrate)
+    def _do_authorize(self, port, baudrate, skip_open=False):
+        # Step: open serial
+        if not skip_open:
+            self._emit_step(self.STEP_OPEN, "running")
+        try:
+            self._open_serial(port, baudrate)
+        except Exception as e:
+            self.auth_log.error(f"Failed to open serial: {e}")
+            if not skip_open:
+                self._emit_step(self.STEP_OPEN, "failed", str(e))
+            if self.on_device_info:
+                self.on_device_info("--", "--", "failed")
+            return False
+        if not skip_open:
+            self._emit_step(self.STEP_OPEN, "done")
 
         if self._stop:
             return False
 
+        # Step: read MAC
+        self._emit_step(self.STEP_READ_MAC, "running")
         mac = self.protocol.read_mac()
         if not mac:
-            self.auth_log.error("读取 MAC 失败: 设备无响应")
+            self.auth_log.error("Failed to read MAC: device not responding")
+            self._emit_step(self.STEP_READ_MAC, "failed", "Device not responding")
             if self.on_device_info:
                 self.on_device_info("--", "--", "failed")
             return False
-        self.auth_log.info(f"设备 MAC: {mac}")
+        self.auth_log.info(f"Device MAC: {mac}")
+        self._emit_step(self.STEP_READ_MAC, "done", mac)
         if self.on_device_info:
             self.on_device_info(mac, "--", "reading")
 
@@ -179,30 +243,53 @@ class AuthHandler:
         existing = self.protocol.auth_read()
         if existing:
             uuid_e, authkey_e = existing
+            if uuid_e == _PLACEHOLDER_UUID:
+                self.auth_log.info(
+                    f"Found placeholder UUID={uuid_e}, treating as unauthorized")
+                existing = None
+
+        if existing:
+            uuid_e, authkey_e = existing
             self.auth_log.info(
-                f"设备已授权, UUID={uuid_e}, AUTHKEY={mask_authkey(authkey_e)}")
+                f"Device already authorized, UUID={uuid_e}, AUTHKEY={mask_authkey(authkey_e)}")
+            self._emit_step(self.STEP_AUTH, "done", "Already authorized")
+            self._emit_step(self.STEP_VERIFY, "done", "Skipped")
             if self.on_device_info:
                 self.on_device_info(mac, uuid_e, "already_authorized")
+            row = self.excel.find_by_uuid(uuid_e)
+            if row:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.excel.mark_used(row, mac, ts)
+                self.auth_log.info(
+                    f"Excel marked: UUID={uuid_e}, MAC={mac}")
+                if self.on_stats:
+                    self.on_stats(*self.excel.get_stats())
+            else:
+                self.auth_log.info(
+                    f"UUID={uuid_e} not found in Excel, skipping mark")
             return True
 
-        self.auth_log.info("设备未授权, 开始写入")
+        self.auth_log.info("Device not authorized, starting write")
 
         if self._stop:
             return False
 
         entry = self.excel.get_next_available()
         if not entry:
-            self.auth_log.error("授权码已用完")
+            self.auth_log.error("No authorization codes left")
+            self._emit_step(self.STEP_AUTH, "failed", "No codes left")
             if self.on_device_info:
                 self.on_device_info(mac, "--", "no_codes")
             return False
 
         row, uuid, authkey = entry
         self.auth_log.info(
-            f"分配授权码: UUID={uuid}, AUTHKEY={mask_authkey(authkey)}")
+            f"Assigning auth code: UUID={uuid}, AUTHKEY={mask_authkey(authkey)}")
         if self.on_device_info:
             self.on_device_info(mac, uuid, "writing")
 
+        # Step: auth write
+        self._emit_step(self.STEP_AUTH, "running")
         write_ok = False
         for attempt in range(1, MAX_RETRIES + 1):
             if self._stop:
@@ -210,29 +297,34 @@ class AuthHandler:
             if self.protocol.auth_write(uuid, authkey):
                 write_ok = True
                 break
-            self.auth_log.error(f"写入失败 (尝试 {attempt}/{MAX_RETRIES})")
+            self.auth_log.error(f"Write failed (attempt {attempt}/{MAX_RETRIES})")
             time.sleep(0.5)
 
         if not write_ok:
-            self.auth_log.error("写入授权码失败，已达最大重试次数")
+            self.auth_log.error("Write auth code failed, max retries reached")
+            self._emit_step(self.STEP_AUTH, "failed", "Max retries reached")
             if self.on_device_info:
                 self.on_device_info(mac, uuid, "write_failed")
             return False
+        self._emit_step(self.STEP_AUTH, "done")
 
         if self._stop:
             return False
 
+        # Step: auth verify
+        self._emit_step(self.STEP_VERIFY, "running")
         readback = self.protocol.auth_read()
         if readback:
             rb_uuid, rb_authkey = readback
             self.auth_log.info(
-                f"回读校验: {rb_uuid} / {mask_authkey(rb_authkey)}")
+                f"Readback verify: {rb_uuid} / {mask_authkey(rb_authkey)}")
             if rb_uuid == uuid and rb_authkey == authkey:
-                self.auth_log.info("回读校验通过")
+                self.auth_log.info("Readback verification passed")
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.excel.mark_used(row, mac, ts)
                 self.auth_log.info(
-                    f"授权成功: MAC={mac}, UUID={uuid}")
+                    f"Authorization success: MAC={mac}, UUID={uuid}")
+                self._emit_step(self.STEP_VERIFY, "done", "Passed")
                 if self.on_device_info:
                     self.on_device_info(mac, uuid, "success")
                 if self.on_stats:
@@ -240,13 +332,15 @@ class AuthHandler:
                 return True
             else:
                 self.auth_log.error(
-                    f"回读校验失败: 写入={uuid}/{mask_authkey(authkey)}, "
-                    f"回读={rb_uuid}/{mask_authkey(rb_authkey)}")
+                    f"Readback verification failed: wrote={uuid}/{mask_authkey(authkey)}, "
+                    f"read={rb_uuid}/{mask_authkey(rb_authkey)}")
+                self._emit_step(self.STEP_VERIFY, "failed", "Mismatch")
                 if self.on_device_info:
                     self.on_device_info(mac, uuid, "verify_failed")
                 return False
         else:
-            self.auth_log.error("回读失败: 无响应")
+            self.auth_log.error("Readback failed: no response")
+            self._emit_step(self.STEP_VERIFY, "failed", "No response")
             if self.on_device_info:
                 self.on_device_info(mac, uuid, "verify_failed")
             return False
@@ -263,7 +357,7 @@ class AuthHandler:
             mac = self.protocol.read_mac()
             return mac
         except Exception as e:
-            self.auth_log.error(f"读取 MAC 异常: {e}")
+            self.auth_log.error(f"Read MAC exception: {e}")
             return None
         finally:
             self._close_serial()
