@@ -193,11 +193,12 @@ class AuthGUI(QtWidgets.QMainWindow):
         self.ui.progressBarAuth.setRange(0, 100)
         self.ui.progressBarAuth.setValue(100 if success else 0)
 
+        status_text = self.ui.labelAuthStatus.text()
         if success:
-            self.ui.labelAuthStatus.setText("State: success")
-            self.ui.labelAuthStatus.setStyleSheet("color: #55FF55;")
+            if "already authorized" not in status_text:
+                self.ui.labelAuthStatus.setText("State: success")
+                self.ui.labelAuthStatus.setStyleSheet("color: #55FF55;")
         else:
-            status_text = self.ui.labelAuthStatus.text()
             if "stopping" in status_text:
                 self.ui.labelAuthStatus.setText("State: stopped")
                 self.ui.labelAuthStatus.setStyleSheet("")
