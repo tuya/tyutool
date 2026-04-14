@@ -126,6 +126,21 @@ class AuthExcelParser:
                 return row
         return None
 
+    def find_by_mac(self, mac):
+        """Return (row, uuid, authkey) for the given MAC, or None if not found."""
+        col_mac = self._col.get("mac")
+        if col_mac is None:
+            return None
+        col_uuid = self._col["uuid"]
+        col_authkey = self._col["authkey"]
+        for row in range(2, self.ws.max_row + 1):
+            val = self.ws.cell(row=row, column=col_mac).value
+            if val and str(val).strip().upper() == mac.upper():
+                uuid_val = str(self.ws.cell(row=row, column=col_uuid).value or "").strip()
+                authkey_val = str(self.ws.cell(row=row, column=col_authkey).value or "").strip()
+                return (row, uuid_val, authkey_val)
+        return None
+
     def mark_used(self, row, mac, timestamp=None):
         """Mark a row as USED with MAC and timestamp, then save."""
         if timestamp is None:

@@ -94,6 +94,7 @@ class AuthHandler:
         self.on_device_info = None
         self.on_stats = None
         self.on_step = None
+        self.on_confirm = None
 
     def stop(self):
         self._stop = True
@@ -223,11 +224,21 @@ class AuthHandler:
         if self._stop:
             return False
 
-        # Step: read MAC
+        # Step: read MAC (retry up to MAX_RETRIES times)
         self._emit_step(self.STEP_READ_MAC, "running")
-        mac = self.protocol.read_mac()
+        mac = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            if self._stop:
+                return False
+            mac = self.protocol.read_mac()
+            if mac:
+                break
+            self.auth_log.error(
+                f"Read MAC failed (attempt {attempt}/{MAX_RETRIES})")
+            if attempt < MAX_RETRIES:
+                time.sleep(0.5)
         if not mac:
-            self.auth_log.error("Failed to read MAC: device not responding")
+            self.auth_log.error("Failed to read MAC: device not responding (retries exhausted)")
             self._emit_step(self.STEP_READ_MAC, "failed", "Device not responding")
             if self.on_device_info:
                 self.on_device_info("--", "--", "failed")
@@ -248,41 +259,93 @@ class AuthHandler:
                     f"Found placeholder UUID={uuid_e}, treating as unauthorized")
                 existing = None
 
+        reuse_entry = None
+
         if existing:
             uuid_e, authkey_e = existing
             self.auth_log.info(
                 f"Device already authorized, UUID={uuid_e}, AUTHKEY={mask_authkey(authkey_e)}")
-            self._emit_step(self.STEP_AUTH, "done", "Already authorized")
-            self._emit_step(self.STEP_VERIFY, "done", "Skipped")
-            if self.on_device_info:
-                self.on_device_info(mac, uuid_e, "already_authorized")
-            row = self.excel.find_by_uuid(uuid_e)
-            if row:
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.excel.mark_used(row, mac, ts)
-                self.auth_log.info(
-                    f"Excel marked: UUID={uuid_e}, MAC={mac}")
-                if self.on_stats:
-                    self.on_stats(*self.excel.get_stats())
+
+            mac_row_info = self.excel.find_by_mac(mac)
+            if mac_row_info:
+                row, excel_uuid, excel_authkey = mac_row_info
+                if excel_uuid == uuid_e and excel_authkey == authkey_e:
+                    self.auth_log.info(
+                        f"MAC={mac} found in Excel, auth info matches — skipping")
+                    self._emit_step(self.STEP_AUTH, "done", "Already authorized")
+                    self._emit_step(self.STEP_VERIFY, "done", "Skipped")
+                    if self.on_device_info:
+                        self.on_device_info(mac, uuid_e, "already_authorized")
+                    return True
+                else:
+                    self.auth_log.info(
+                        f"MAC={mac} found in Excel, but auth info mismatch: "
+                        f"device=({uuid_e}/{mask_authkey(authkey_e)}), "
+                        f"excel=({excel_uuid}/{mask_authkey(excel_authkey)})")
+                    if self.on_confirm:
+                        msg = (
+                            f"Device already authorized (MAC: {mac})\n\n"
+                            f"Current device auth:\n"
+                            f"  UUID: {uuid_e}\n"
+                            f"  AUTHKEY: {authkey_e}\n\n"
+                            f"Excel record for this MAC:\n"
+                            f"  UUID: {excel_uuid}\n"
+                            f"  AUTHKEY: {excel_authkey}\n\n"
+                            f"Auth info does not match Excel record.\n"
+                            f"Overwrite current device auth?"
+                        )
+                        if not self.on_confirm("Auth Mismatch", msg):
+                            self.auth_log.info("User chose to skip (auth mismatch)")
+                            self._emit_step(self.STEP_AUTH, "done", "Skipped by user")
+                            self._emit_step(self.STEP_VERIFY, "done", "Skipped")
+                            if self.on_device_info:
+                                self.on_device_info(mac, uuid_e, "skipped")
+                            return True
+                    self.auth_log.info(
+                        f"Proceeding to overwrite with Excel entry: row={row}, UUID={excel_uuid}")
+                    reuse_entry = (row, excel_uuid, excel_authkey)
+                    if self.on_device_info:
+                        self.on_device_info(mac, excel_uuid, "auth_mismatch")
             else:
                 self.auth_log.info(
-                    f"UUID={uuid_e} not found in Excel, skipping mark")
-            return True
-
-        self.auth_log.info("Device not authorized, starting write")
+                    f"MAC={mac} not found in Excel — device authorized with unknown batch")
+                if self.on_confirm:
+                    msg = (
+                        f"Device already authorized (MAC: {mac})\n\n"
+                        f"Current device auth:\n"
+                        f"  UUID: {uuid_e}\n"
+                        f"  AUTHKEY: {authkey_e}\n\n"
+                        f"No matching MAC found in the Excel file.\n"
+                        f"The device may be authorized from a different batch.\n\n"
+                        f"Overwrite current device auth?"
+                    )
+                    if not self.on_confirm("MAC Not Found", msg):
+                        self.auth_log.info("User chose to skip (MAC not in Excel)")
+                        self._emit_step(self.STEP_AUTH, "done", "Skipped by user")
+                        self._emit_step(self.STEP_VERIFY, "done", "Skipped")
+                        if self.on_device_info:
+                            self.on_device_info(mac, uuid_e, "skipped")
+                        return True
+                self.auth_log.info("Proceeding to overwrite authorization")
+                if self.on_device_info:
+                    self.on_device_info(mac, uuid_e, "auth_mismatch")
+        else:
+            self.auth_log.info("Device not authorized, starting write")
 
         if self._stop:
             return False
 
-        entry = self.excel.get_next_available()
-        if not entry:
-            self.auth_log.error("No authorization codes left")
-            self._emit_step(self.STEP_AUTH, "failed", "No codes left")
-            if self.on_device_info:
-                self.on_device_info(mac, "--", "no_codes")
-            return False
-
-        row, uuid, authkey = entry
+        if reuse_entry:
+            row, uuid, authkey = reuse_entry
+        else:
+            entry = self.excel.get_next_available()
+            if not entry:
+                self.auth_log.error("No authorization codes left")
+                self._emit_step(self.STEP_AUTH, "failed", "No codes left")
+                if self.on_device_info:
+                    self.on_device_info(mac, "--", "no_codes")
+                return False
+            row, uuid, authkey = entry
         self.auth_log.info(
             f"Assigning auth code: UUID={uuid}, AUTHKEY={mask_authkey(authkey)}")
         if self.on_device_info:
