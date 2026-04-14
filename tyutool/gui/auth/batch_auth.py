@@ -4,6 +4,7 @@
 import os
 import time
 import logging
+import threading
 
 import serial
 from serial.tools import list_ports
@@ -165,6 +166,7 @@ class AuthWorker(QThread):
     device_info_signal = Signal(str, str, str)
     stats_signal = Signal(int, int, int)
     finished_signal = Signal(bool)
+    confirm_signal = Signal(str, str)
 
     def __init__(self, handler, port, baudrate, excel_path,
                  firmware_path="", chip=""):
@@ -175,6 +177,21 @@ class AuthWorker(QThread):
         self.excel_path = excel_path
         self.firmware_path = firmware_path
         self.chip = chip
+        self._confirm_event = threading.Event()
+        self._confirm_result = False
+
+    def _on_confirm(self, title, message):
+        """Block worker thread until the main thread answers the dialog."""
+        self._confirm_event.clear()
+        self._confirm_result = False
+        self.confirm_signal.emit(title, message)
+        self._confirm_event.wait()
+        return self._confirm_result
+
+    def set_confirm_result(self, result):
+        """Called from the main thread after user responds to the dialog."""
+        self._confirm_result = result
+        self._confirm_event.set()
 
     def _flash_firmware(self):
         """Flash firmware before authorization. Returns True on success."""
@@ -241,6 +258,7 @@ class AuthWorker(QThread):
         self.handler.on_device_info = lambda mac, uuid, st: self.device_info_signal.emit(mac, uuid, st)
         self.handler.on_stats = lambda t, u, r: self.stats_signal.emit(t, u, r)
         self.handler.on_step = lambda sid, st, det: self.step_signal.emit(sid, st, det)
+        self.handler.on_confirm = self._on_confirm
 
         try:
             log_path = self.handler.init_log(self.excel_path)
@@ -594,6 +612,7 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self._auth_worker.log_path_signal.connect(self._authOnLogPath)
         self._auth_worker.device_info_signal.connect(self._authUpdateDeviceInfo)
         self._auth_worker.stats_signal.connect(self._authUpdateStats)
+        self._auth_worker.confirm_signal.connect(self._authOnConfirm)
         self._auth_worker.finished_signal.connect(self._authFinished)
         self._auth_worker.start()
 
@@ -601,6 +620,29 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         if self._auth_handler:
             self._auth_handler.stop()
         self.ui.labelAuthStatus.setText("State: stopping")
+
+    def _authOnConfirm(self, title, message):
+        """Show a Yes/No/Copy dialog on the main thread, then unblock the worker."""
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+
+        yes_btn = msg_box.addButton(QMessageBox.StandardButton.Yes)
+        no_btn = msg_box.addButton(QMessageBox.StandardButton.No)
+        copy_btn = msg_box.addButton("Copy", QMessageBox.ButtonRole.ActionRole)
+        msg_box.setDefaultButton(no_btn)
+
+        while True:
+            msg_box.exec()
+            if msg_box.clickedButton() == copy_btn:
+                QtWidgets.QApplication.clipboard().setText(message)
+                continue
+            break
+
+        result = msg_box.clickedButton() == yes_btn
+        if self._auth_worker:
+            self._auth_worker.set_confirm_result(result)
 
     def _authFinished(self, success):
         self._authSetConfigEnabled(True)
@@ -614,10 +656,12 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
 
         status_text = self.ui.labelAuthStatus.text()
         if success:
-            if "already authorized" not in status_text:
-                self.ui.labelAuthStatus.setText("State: success")
+            if "already authorized" in status_text:
                 self.ui.labelAuthStatus.setStyleSheet("color: #16a34a;")
+            elif "skipped" in status_text:
+                self.ui.labelAuthStatus.setStyleSheet("color: #d97706;")
             else:
+                self.ui.labelAuthStatus.setText("State: success")
                 self.ui.labelAuthStatus.setStyleSheet("color: #16a34a;")
         else:
             if "stopping" in status_text:
@@ -642,6 +686,8 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
             "writing": "State: writing",
             "success": "State: success",
             "already_authorized": "State: already authorized",
+            "skipped": "State: skipped (user chose to skip)",
+            "auth_mismatch": "State: auth mismatch",
             "failed": "State: failed",
             "write_failed": "State: write failed",
             "verify_failed": "State: verify failed",
@@ -651,6 +697,8 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self.ui.labelAuthStatus.setText(display)
         if status in ("success", "already_authorized"):
             self.ui.labelAuthStatus.setStyleSheet("color: #16a34a;")
+        elif status in ("skipped", "auth_mismatch"):
+            self.ui.labelAuthStatus.setStyleSheet("color: #d97706;")
         elif "fail" in status or status == "no_codes":
             self.ui.labelAuthStatus.setStyleSheet("color: #dc2626;")
         else:
