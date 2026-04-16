@@ -357,7 +357,6 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self.ui.comboBoxAuthBaud.addItems(["115200", "230400", "460800", "921600"])
 
         self.ui.pushButtonAuthStart.setEnabled(False)
-        self.ui.pushButtonAuthStop.setEnabled(False)
         self.ui.pushButtonAuthReadMAC.setEnabled(False)
 
         self.ui.labelAuthDeviceHeader.hide()
@@ -399,7 +398,6 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self.ui.pushButtonAuthBrowseFirmware.clicked.connect(self._authBrowseFirmware)
         self.ui.pushButtonAuthBrowse.clicked.connect(self._authBrowseExcel)
         self.ui.pushButtonAuthStart.clicked.connect(self._authStart)
-        self.ui.pushButtonAuthStop.clicked.connect(self._authStop)
         self.ui.pushButtonAuthReadMAC.clicked.connect(self._authReadMAC)
         self.ui.comboBoxAuthPort.currentTextChanged.connect(self._authUpdateButtons)
 
@@ -581,7 +579,7 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self.ui.pushButtonAuthRescan.setEnabled(enabled)
         self.ui.pushButtonAuthReadMAC.setEnabled(enabled)
 
-    # ── Start / Stop / Finished ───────────────────────────────────
+    # ── Start / Finished ───────────────────────────────────────────
 
     def _authStart(self):
         port = self.ui.comboBoxAuthPort.currentText()
@@ -598,7 +596,6 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
 
         self._authSetConfigEnabled(False)
         self.ui.pushButtonAuthStart.setEnabled(False)
-        self.ui.pushButtonAuthStop.setEnabled(True)
         self.ui.labelAuthStatus.setText("State: authorizing")
         self.ui.labelAuthStatus.setStyleSheet("")
 
@@ -615,11 +612,6 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self._auth_worker.confirm_signal.connect(self._authOnConfirm)
         self._auth_worker.finished_signal.connect(self._authFinished)
         self._auth_worker.start()
-
-    def _authStop(self):
-        if self._auth_handler:
-            self._auth_handler.stop()
-        self.ui.labelAuthStatus.setText("State: stopping")
 
     def _authOnConfirm(self, title, message):
         """Show a Yes/No/Copy dialog on the main thread, then unblock the worker."""
@@ -646,7 +638,6 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
 
     def _authFinished(self, success):
         self._authSetConfigEnabled(True)
-        self.ui.pushButtonAuthStop.setEnabled(False)
         self._authUpdateButtons()
 
         total = len(self._auth_steps)
@@ -664,12 +655,8 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
                 self.ui.labelAuthStatus.setText("State: success")
                 self.ui.labelAuthStatus.setStyleSheet("color: #16a34a;")
         else:
-            if "stopping" in status_text:
-                self.ui.labelAuthStatus.setText("State: stopped")
-                self.ui.labelAuthStatus.setStyleSheet("")
-            else:
-                self.ui.labelAuthStatus.setText("State: failed")
-                self.ui.labelAuthStatus.setStyleSheet("color: #dc2626;")
+            self.ui.labelAuthStatus.setText("State: failed")
+            self.ui.labelAuthStatus.setStyleSheet("color: #dc2626;")
 
         if self._auth_handler:
             self._auth_handler.cleanup()

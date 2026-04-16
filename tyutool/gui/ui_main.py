@@ -1303,11 +1303,6 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout_auth_btns.addWidget(self.pushButtonAuthStart)
 
-        self.pushButtonAuthStop = QPushButton(self.groupBoxAuthConfig)
-        self.pushButtonAuthStop.setObjectName(u"pushButtonAuthStop")
-
-        self.horizontalLayout_auth_btns.addWidget(self.pushButtonAuthStop)
-
         self.pushButtonAuthReadMAC = QPushButton(self.groupBoxAuthConfig)
         self.pushButtonAuthReadMAC.setObjectName(u"pushButtonAuthReadMAC")
 
@@ -1489,7 +1484,6 @@ class Ui_MainWindow(object):
         self.labelAuthExcel.setText(QCoreApplication.translate("MainWindow", u"License List", None))
         self.pushButtonAuthBrowse.setText(QCoreApplication.translate("MainWindow", u"Browse", None))
         self.pushButtonAuthStart.setText(QCoreApplication.translate("MainWindow", u"Start", None))
-        self.pushButtonAuthStop.setText(QCoreApplication.translate("MainWindow", u"Stop", None))
         self.pushButtonAuthReadMAC.setText(QCoreApplication.translate("MainWindow", u"Read MAC", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tabAuth), QCoreApplication.translate("MainWindow", u"Batch Auth", None))
         self.menuMain.setTitle(QCoreApplication.translate("MainWindow", u"Main", None))

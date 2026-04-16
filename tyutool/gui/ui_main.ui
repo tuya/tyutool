@@ -1670,13 +1670,6 @@ padding-bottom: 4px;</string>
                 </widget>
                </item>
                <item>
-                <widget class="QPushButton" name="pushButtonAuthStop">
-                 <property name="text">
-                  <string>Stop</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
                 <widget class="QPushButton" name="pushButtonAuthReadMAC">
                  <property name="text">
                   <string>Read MAC</string>
