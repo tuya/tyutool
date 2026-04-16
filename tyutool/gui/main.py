@@ -42,10 +42,9 @@ import requests
 from tyutool.util import TyutoolUpgrade
 from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION, tyutool_version, network_available, get_country_code
 
-# README disclaimer anchor (Batch Auth / open-source notice)
-_ABOUT_README_URL = (
-    "https://github.com/tuya/tyutool/tree/feat/tuyaopen-auth"
-    "?tab=readme-ov-file#disclaimer--%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"
+# Terms & agreements (Batch Auth / open-source notice)
+_ABOUT_TERMS_URL = (
+    "https://github.com/tuya/tyutool/blob/feat/tuyaopen-auth/Terms_And_Agreements.md"
 )
 
 
@@ -174,7 +173,7 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, BatchAuthGUI):
             "QToolButton { color: palette(link); border: none; padding: 0 8px; }"
             "QToolButton:hover { text-decoration: underline; }"
         )
-        self._about_tool_btn.clicked.connect(self._open_about_readme_url)
+        self._about_tool_btn.clicked.connect(self._open_about_terms_url)
 
         # cache
         self.cache_dir = os.path.join(tyutool_root(), "cache")
@@ -219,8 +218,8 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, BatchAuthGUI):
 
         pass
 
-    def _open_about_readme_url(self):
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl(_ABOUT_README_URL))
+    def _open_about_terms_url(self):
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(_ABOUT_TERMS_URL))
 
     def _apply_about_menubar_corner(self):
         btn = getattr(self, "_about_tool_btn", None)
