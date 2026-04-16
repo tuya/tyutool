@@ -42,6 +42,12 @@ import requests
 from tyutool.util import TyutoolUpgrade
 from tyutool.util.util import tyutool_root, set_logger, TYUTOOL_VERSION, tyutool_version, network_available, get_country_code
 
+# README disclaimer anchor (Batch Auth / open-source notice)
+_ABOUT_README_URL = (
+    "https://github.com/tuya/tyutool/tree/feat/tuyaopen-auth"
+    "?tab=readme-ov-file#disclaimer--%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E"
+)
+
 
 class EmittingStr(QtCore.QObject):
     textWritten = QtCore.Signal(str)
@@ -152,6 +158,24 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, BatchAuthGUI):
         ui.setupUi(self)
         self.ui = ui
 
+        # About → README disclaimer: menu bar top-right (QWidgetAction is often
+        # hidden when the OS/global menu exports menus; corner widget + in-window bar is reliable)
+        mb = self.ui.menubar
+        self._about_tool_btn = QtWidgets.QToolButton(mb)
+        self._about_tool_btn.setObjectName("toolButtonAbout")
+        self._about_tool_btn.setText("About")
+        self._about_tool_btn.setAutoRaise(True)
+        self._about_tool_btn.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextOnly
+        )
+        self._about_tool_btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._about_tool_btn.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
+        self._about_tool_btn.setStyleSheet(
+            "QToolButton { color: palette(link); border: none; padding: 0 8px; }"
+            "QToolButton:hover { text-decoration: underline; }"
+        )
+        self._about_tool_btn.clicked.connect(self._open_about_readme_url)
+
         # cache
         self.cache_dir = os.path.join(tyutool_root(), "cache")
         try:
@@ -194,6 +218,27 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, BatchAuthGUI):
         QTimer.singleShot(500, self.guiAskUpgrade)
 
         pass
+
+    def _open_about_readme_url(self):
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(_ABOUT_README_URL))
+
+    def _apply_about_menubar_corner(self):
+        btn = getattr(self, "_about_tool_btn", None)
+        if btn is None:
+            return
+        mb = self.ui.menubar
+        h = max(24, mb.height(), mb.sizeHint().height())
+        btn.setFixedHeight(h)
+        btn.setMinimumWidth(48)
+        mb.setCornerWidget(btn, QtCore.Qt.Corner.TopRightCorner)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_about_menubar_corner()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_about_menubar_corner()
 
     def outputWritten(self, text):
         cursor = self.ui.textBrowserShow.textCursor()
@@ -335,6 +380,12 @@ class MyWidget(FlashGUI, SerialGUI, SerDebugGUI, WebDebugGUI, BatchAuthGUI):
 def show():
     _dbg("show() called, creating QApplication...")
     print("[MAIN] Creating QApplication...", flush=True)
+    # Linux: global/D-Bus menu bar exports only normal menus; custom widgets vanish.
+    if sys.platform.startswith("linux"):
+        QtCore.QCoreApplication.setAttribute(
+            QtCore.Qt.ApplicationAttribute.AA_DontUseNativeMenuBar,
+            True,
+        )
     app = QtWidgets.QApplication([])
     print("[MAIN] Creating MyWidget...", flush=True)
     _dbg("creating MyWidget...")
