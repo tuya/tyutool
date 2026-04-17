@@ -119,10 +119,18 @@ class AuthHandler:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(directory, f"{basename}_auth_{ts}.log")
 
-    def init_log(self, excel_path):
-        """Create the session log file early (e.g. before flash).
-        Returns the log file path."""
-        log_path = self._build_log_path(excel_path)
+    def init_log(self, excel_path, reuse_log_path=None):
+        """Create the session log file early (e.g. before flash), or reopen it.
+
+        When reuse_log_path is set (same application session, subsequent runs),
+        append to that file instead of creating a new timestamped name.
+
+        Returns the log file path.
+        """
+        if reuse_log_path:
+            log_path = reuse_log_path
+        else:
+            log_path = self._build_log_path(excel_path)
         self.auth_log = AuthLogger(log_path, callback=self._log_callback)
         return log_path
 
