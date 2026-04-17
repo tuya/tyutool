@@ -179,7 +179,7 @@ class ESPLoader(object):
         self._port = port
         self.logger = logger
         self.stub = None
-        pass
+        self.sync_stub_detected = False
 
     def read(self):
         return next(self._slip_reader)

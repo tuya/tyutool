@@ -94,6 +94,7 @@ class ESPFlashHandler(FlashHandler):
         self.logger.info("Connecting ...")
         if not self.esp.connect(self.check_stop):
             self.logger.error("Shake failed.")
+            return False
 
         self.logger.info("Shake success.")
         return True
