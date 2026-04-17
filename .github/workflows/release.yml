@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -71,6 +72,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -121,6 +123,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -153,6 +156,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -219,6 +223,8 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
+          # Gitee standard repos: Release attachment max 100MiB per file (see Gitee help). Skip oversize assets; GitHub Release has the full set.
+          GITEE_MAX_BYTES=$((100 * 1024 * 1024))
           RELEASE_INFO=$(curl -sfS -X POST \
             "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases" \
             -H 'Content-Type: application/json' \
@@ -232,10 +238,23 @@ jobs:
             exit 1
           fi
           while IFS= read -r -d '' file_path; do
-            echo "Uploading: ${file_path}"
-            curl -sfS -X POST \
+            file_size=$(stat -c '%s' "$file_path")
+            if [[ "${file_size}" -gt "${GITEE_MAX_BYTES}" ]]; then
+              echo "::warning::Skipping Gitee upload for ${file_path} (${file_size} bytes): exceeds 100MiB Gitee per-file limit. Download this asset from the GitHub Release page."
+              continue
+            fi
+            echo "Uploading: ${file_path} (${file_size} bytes)"
+            resp_file=$(mktemp)
+            http_code=$(curl -sS -o "${resp_file}" -w '%{http_code}' \
+              --retry 3 --retry-delay 5 --connect-timeout 30 \
+              -X POST \
               "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/${RELEASE_ID}/attach_files" \
               -H "Authorization: token ${GITEE_TOKEN}" \
-              -F "file=@${file_path}" \
-              || { echo "::error::Failed to upload ${file_path}"; exit 1; }
+              -F "file=@${file_path}")
+            if [[ "${http_code}" != "200" && "${http_code}" != "201" ]]; then
+              echo "::error::Failed to upload ${file_path} (HTTP ${http_code}): $(cat "${resp_file}")"
+              rm -f "${resp_file}"
+              exit 1
+            fi
+            rm -f "${resp_file}"
           done < <(find artifacts -type f -print0)
