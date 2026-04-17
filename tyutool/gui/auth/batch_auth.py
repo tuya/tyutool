@@ -169,7 +169,7 @@ class AuthWorker(QThread):
     confirm_signal = Signal(str, str)
 
     def __init__(self, handler, port, baudrate, excel_path,
-                 firmware_path="", chip=""):
+                 firmware_path="", chip="", reuse_log_path=None):
         super().__init__()
         self.handler = handler
         self.port = port
@@ -177,6 +177,7 @@ class AuthWorker(QThread):
         self.excel_path = excel_path
         self.firmware_path = firmware_path
         self.chip = chip
+        self.reuse_log_path = reuse_log_path
         self._confirm_event = threading.Event()
         self._confirm_result = False
 
@@ -261,7 +262,9 @@ class AuthWorker(QThread):
         self.handler.on_confirm = self._on_confirm
 
         try:
-            log_path = self.handler.init_log(self.excel_path)
+            log_path = self.handler.init_log(
+                self.excel_path, reuse_log_path=self.reuse_log_path)
+            self.handler.auth_log.info("--- Authorization run started ---")
             self.log_path_signal.emit(log_path)
         except Exception as e:
             self.log_signal.emit("ERROR", f"Failed to create log: {e}")
@@ -351,6 +354,7 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self._auth_steps = []
         self._auth_step_items = []
         self._auth_log_path = ""
+        self._auth_session_log_path = ""
 
     def authUiSetup(self):
         self.ui.comboBoxAuthChip.addItems(self._AUTH_CHIPS)
@@ -469,6 +473,8 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
 
     def _authOnLogPath(self, path):
         self._auth_log_path = path
+        if not self._auth_session_log_path:
+            self._auth_session_log_path = path
         self._auth_log_label.setText(f"Full log: {path}")
         self._auth_log_label.show()
 
@@ -602,9 +608,10 @@ class BatchAuthGUI(QtWidgets.QMainWindow):
         self._authResetSteps()
 
         self._auth_handler = AuthHandler()
+        reuse_log = self._auth_session_log_path or None
         self._auth_worker = AuthWorker(
             self._auth_handler, port, baud, self._auth_excel_path,
-            firmware_path=firmware, chip=chip)
+            firmware_path=firmware, chip=chip, reuse_log_path=reuse_log)
         self._auth_worker.step_signal.connect(self._authOnStep)
         self._auth_worker.log_path_signal.connect(self._authOnLogPath)
         self._auth_worker.device_info_signal.connect(self._authUpdateDeviceInfo)
