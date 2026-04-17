@@ -13,6 +13,7 @@ from .excel_parser import AuthExcelParser
 MAX_RETRIES = 10
 READ_MAC_MAX_ATTEMPTS = 10
 DEFAULT_BAUD = 115200
+POST_DEVICE_RESET_WAIT_SEC = 3.0
 _PLACEHOLDER_UUID = "uuidxxxxxxxxxxxxxxxx"
 
 
@@ -206,6 +207,16 @@ class AuthHandler:
             self.auth_log.info(
                 f"Drained {total_drained} bytes of boot output")
 
+    def _hardware_reset_via_rts(self):
+        """Pulse RTS/DTR to reset the device (same pattern as batch flash flow)."""
+        self.auth_log.info("Resetting device via DTR/RTS...")
+        self.ser.dtr = False
+        self.ser.rts = True
+        time.sleep(0.1)
+        self.ser.rts = False
+        time.sleep(0.1)
+        self.auth_log.info("Device reset signal sent")
+
     def _close_serial(self):
         self._emit_step(self.STEP_CLOSE, "running")
         if self.ser and self.ser.is_open:
@@ -233,6 +244,26 @@ class AuthHandler:
         if self._stop:
             return False
 
+        # Hardware reset, then wait for boot before read MAC
+        self._emit_step(self.STEP_RESET, "running")
+        try:
+            self._hardware_reset_via_rts()
+        except Exception as e:
+            self.auth_log.error(f"Device reset failed: {e}")
+            self._emit_step(self.STEP_RESET, "failed", str(e))
+            if self.on_device_info:
+                self.on_device_info("--", "--", "failed")
+            return False
+        self.auth_log.info(
+            f"Waiting {POST_DEVICE_RESET_WAIT_SEC:g}s after reset...")
+        time.sleep(POST_DEVICE_RESET_WAIT_SEC)
+        self._drain_boot_output()
+        self.ser.reset_input_buffer()
+        self._emit_step(self.STEP_RESET, "done")
+
+        if self._stop:
+            return False
+
         # Step: read MAC (retry up to READ_MAC_MAX_ATTEMPTS times)
         self._emit_step(self.STEP_READ_MAC, "running")
         mac = None
@@ -245,7 +276,7 @@ class AuthHandler:
             self.auth_log.error(
                 f"Read MAC failed (attempt {attempt}/{READ_MAC_MAX_ATTEMPTS})")
             if attempt < READ_MAC_MAX_ATTEMPTS:
-                time.sleep(0.5)
+                time.sleep(1.0)
         if not mac:
             self.auth_log.error("Failed to read MAC: device not responding (retries exhausted)")
             self._emit_step(self.STEP_READ_MAC, "failed", "Device not responding")
