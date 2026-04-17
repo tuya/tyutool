@@ -10,7 +10,8 @@ import serial
 from .auth_protocol import AuthProtocol
 from .excel_parser import AuthExcelParser
 
-MAX_RETRIES = 3
+MAX_RETRIES = 10
+READ_MAC_MAX_ATTEMPTS = 10
 DEFAULT_BAUD = 115200
 _PLACEHOLDER_UUID = "uuidxxxxxxxxxxxxxxxx"
 
@@ -232,18 +233,18 @@ class AuthHandler:
         if self._stop:
             return False
 
-        # Step: read MAC (retry up to MAX_RETRIES times)
+        # Step: read MAC (retry up to READ_MAC_MAX_ATTEMPTS times)
         self._emit_step(self.STEP_READ_MAC, "running")
         mac = None
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, READ_MAC_MAX_ATTEMPTS + 1):
             if self._stop:
                 return False
             mac = self.protocol.read_mac()
             if mac:
                 break
             self.auth_log.error(
-                f"Read MAC failed (attempt {attempt}/{MAX_RETRIES})")
-            if attempt < MAX_RETRIES:
+                f"Read MAC failed (attempt {attempt}/{READ_MAC_MAX_ATTEMPTS})")
+            if attempt < READ_MAC_MAX_ATTEMPTS:
                 time.sleep(0.5)
         if not mac:
             self.auth_log.error("Failed to read MAC: device not responding (retries exhausted)")
@@ -369,7 +370,7 @@ class AuthHandler:
                 write_ok = True
                 break
             self.auth_log.error(f"Write failed (attempt {attempt}/{MAX_RETRIES})")
-            time.sleep(0.5)
+            time.sleep(0.8)
 
         if not write_ok:
             self.auth_log.error("Write auth code failed, max retries reached")
@@ -425,7 +426,15 @@ class AuthHandler:
             _cleanup_log = False
         try:
             self._open_serial(port, baudrate)
-            mac = self.protocol.read_mac()
+            mac = None
+            for attempt in range(1, READ_MAC_MAX_ATTEMPTS + 1):
+                mac = self.protocol.read_mac()
+                if mac:
+                    break
+                self.auth_log.error(
+                    f"Read MAC failed (attempt {attempt}/{READ_MAC_MAX_ATTEMPTS})")
+                if attempt < READ_MAC_MAX_ATTEMPTS:
+                    time.sleep(1.0)
             return mac
         except Exception as e:
             self.auth_log.error(f"Read MAC exception: {e}")

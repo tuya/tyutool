@@ -48,6 +48,9 @@ _STEP_ICONS = {
     _STATE_FAILED: "✘",
 }
 
+# Flash can fail transiently on serial/sync; retry before giving up.
+_FLASH_MAX_ATTEMPTS = 10
+
 _STEP_BG = {
     _STATE_PENDING: "#f3f4f6",
     _STATE_RUNNING: "#eff6ff",
@@ -212,32 +215,55 @@ class AuthWorker(QThread):
             if self.handler.auth_log:
                 self.handler.auth_log.log(lvl, line)
 
-        progress = _LogProgressHandler(
-            _log_to_file,
-            step_callback=lambda sid, st, det: self.step_signal.emit(sid, st, det))
-        logger = logging.getLogger("auth_flash")
-        soc_handler = handler_cls(argv, logger=logger, progress=progress)
-        soc_handler.start()
+        for attempt in range(1, _FLASH_MAX_ATTEMPTS + 1):
+            if attempt > 1:
+                self.handler.auth_log.info(
+                    f"Flash retry {attempt}/{_FLASH_MAX_ATTEMPTS}...")
+                time.sleep(0.5)
 
-        try:
-            if not soc_handler.shake():
-                self.handler.auth_log.error("Flash handshake failed")
-                return False
-            if not soc_handler.erase():
-                self.handler.auth_log.error("Flash erase failed")
-                return False
-            if not soc_handler.write():
-                self.handler.auth_log.error("Flash write failed")
-                return False
-            soc_handler.crc_check()
-            soc_handler.reboot()
-            self.handler.auth_log.info("Flash completed, waiting for device boot...")
-            return True
-        except Exception as e:
-            self.handler.auth_log.error(f"Flash error: {e}")
-            return False
-        finally:
-            soc_handler.serial_close()
+            progress = _LogProgressHandler(
+                _log_to_file,
+                step_callback=lambda sid, st, det: self.step_signal.emit(sid, st, det))
+            logger = logging.getLogger("auth_flash")
+            soc_handler = handler_cls(argv, logger=logger, progress=progress)
+            soc_handler.start()
+
+            try:
+                if not soc_handler.shake():
+                    self.handler.auth_log.error(
+                        f"Flash handshake failed "
+                        f"(attempt {attempt}/{_FLASH_MAX_ATTEMPTS})")
+                    if attempt >= _FLASH_MAX_ATTEMPTS:
+                        return False
+                    continue
+                if not soc_handler.erase():
+                    self.handler.auth_log.error(
+                        f"Flash erase failed "
+                        f"(attempt {attempt}/{_FLASH_MAX_ATTEMPTS})")
+                    if attempt >= _FLASH_MAX_ATTEMPTS:
+                        return False
+                    continue
+                if not soc_handler.write():
+                    self.handler.auth_log.error(
+                        f"Flash write failed "
+                        f"(attempt {attempt}/{_FLASH_MAX_ATTEMPTS})")
+                    if attempt >= _FLASH_MAX_ATTEMPTS:
+                        return False
+                    continue
+                soc_handler.crc_check()
+                soc_handler.reboot()
+                self.handler.auth_log.info(
+                    "Flash completed, waiting for device boot...")
+                return True
+            except Exception as e:
+                self.handler.auth_log.error(
+                    f"Flash error: {e} "
+                    f"(attempt {attempt}/{_FLASH_MAX_ATTEMPTS})")
+                if attempt >= _FLASH_MAX_ATTEMPTS:
+                    return False
+            finally:
+                soc_handler.serial_close()
+        return False
 
     def _reset_device(self):
         """Reset device via DTR/RTS toggle after firmware flash."""
