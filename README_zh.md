@@ -160,6 +160,7 @@ python tyutool_cli.py --help
 ## 📁 其他文档
 
 - [T5音频调试指南](docs/zh/T5音频调试指南.md)
+- [Batch Auth 批量授权使用指南](docs/zh/Batch_Auth使用指南.md)
 
 ## 📄 许可证 (License)
 

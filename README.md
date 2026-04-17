@@ -160,6 +160,7 @@ For more details on the project's build process, packaging, and code structure, 
 ## 📁 Other Documents
 
 - [T5-Audio-Debug-Guide](docs/en/T5-Audio-Debug-Guide.md)
+- [Batch Auth User Guide](docs/en/Batch-Auth-Guide.md)
 - [Terms and Agreements](Terms_And_Agreements.md)
 
 ## 📄 License
