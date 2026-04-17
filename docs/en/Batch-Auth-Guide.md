@@ -14,7 +14,7 @@ Before you start authorization or use the license file in a batch task, confirm:
 
 | Topic | Details |
 | --- | --- |
-| **Back up Excel** | **Back up the `.xlsx` yourself** before you click Start or load the sheet for batch work (separate folder, version control, team storage, etc.). A successful run **directly modifies** rows (status, MAC, timestamp, etc.). The app may create `<filename>.xlsx.bak` in the same folder or copy once when you first confirm, but **that does not replace** a backup you control. **Verify your backup is recoverable before production use.** |
+| **Back up the authorization code list Excel sheet** | **Back up the `.xlsx` yourself** before you click Start or load the sheet for batch work (separate folder, version control, team storage, etc.). A successful run **directly modifies** rows (status, MAC, timestamp, etc.). The app may create `<filename>.xlsx.bak` in the same folder or copy once when you first confirm, but **that does not replace** a backup you control. **Verify your backup is recoverable before production use.** |
 | **Unique MACs** | The tool correlates rows using the **MAC** reported by each module; it **does not verify** that MACs are unique across devices. You must ensure—at manufacturing and material level—that every module has a **unique MAC** within your operational scope, or authorization records may be wrong or ambiguous. |
 | **Firmware and commands** | The device must enable **TAL CLI** and register **`auth`**, **`auth-read`**, and **`read_mac`** (see **Firmware and protocol requirements** below). |
 
@@ -34,7 +34,7 @@ Before you start authorization or use the license file in a batch task, confirm:
 
 1. Run the **tyuTool GUI** (`tyutool_gui.py` or the packaged binary).
 2. USB serial adapter connected with working drivers (on Linux, often `/dev/ttyUSB*`, `/dev/ttyACM*`, etc.).
-3. Have a **license `.xlsx`** from your process, and satisfy **Back up Excel** in the table above.
+3. Have a **license `.xlsx`** from your process, and satisfy **Back up the authorization code list Excel sheet** in the table above.
 4. Excel handling requires **openpyxl** (see `requirements.txt`).
 
 ### 2. Excel format
