@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "tyutool",
+  "version": "3.0.0",
+  "identifier": "com.tyutool.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "tyutool",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFBQzlBMjA2QkU0NUE1OTcKUldTWHBVVytCcUxKcW9XN2ZFUkxiMkFTNlhJSmVkakRpOUxjbGwyMUhicXB2MTFQcTVHNlQ3cUEK",
+      "endpoints": [
+        "https://github.com/tuya/tyutool/releases/latest/download/latest.json",
+        "https://gitee.com/tuya-open/tyutool/releases/download/latest/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Firmware flash and embedded tooling for Tuya-class devices.",
+    "longDescription": "tyutool is a cross-platform desktop app for firmware flashing, erase, and authorization workflows. Core logic runs in Rust (tyutool-core); the GUI uses Tauri 2 and Vue 3.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

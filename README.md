@@ -1,185 +1,158 @@
-[简体中文](README_zh.md)
+# tyutool
 
-# tyuTool - A Universal Serial Port Tool for Tuya
+[![Release](https://img.shields.io/github/v/release/tuya/tyutool?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/tuya/tyutool/release.yml?style=flat-square&label=build)](https://github.com/tuya/tyutool/actions/workflows/release.yml)
+[![License](https://img.shields.io/github/license/tuya/tyutool?style=flat-square)](LICENSE.txt)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
-`tyuTool` is a cross-platform serial port utility designed for Internet of Things (IoT) developers to flash and read firmware for various mainstream chips. It provides both a simple Graphical User Interface (GUI) and a powerful Command-Line Interface (CLI) to streamline development and debugging workflows.
-
----
-
-## ✨ Features
-
-- **Dual-Mode Operation**: Offers both an intuitive **GUI** and a flexible **CLI** to meet the needs of different scenarios.
-- **Core Serial Functions**: Supports **firmware flashing** (writing to Flash) and **firmware reading** (reading from Flash).
-- **Cross-Platform Support**: Fully compatible with **Windows, Linux, and macOS** (x86 & ARM64).
-- **Multi-Chip Support**: Built-in flashing protocols for a variety of chips, easily handling different projects.
-- **User-Friendly**: Clean user interface, with the CLI providing detailed progress bars and status feedback.
-- **Standalone Executables**: Provides portable executables that run without needing a Python environment.
+Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary.
 
 ## Supported Chips
 
-This tool currently supports (but is not limited to) the following chip platforms:
+| Family | Chips |
+|--------|-------|
+| Tuya   | T1, T2, T3, T5 |
+| Beken  | BK7231N |
+| Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-S3 |
 
-- BK7231N / BK7231T
-- RTL8720CF
-- ESP32 / ESP32-C3 / ESP32-S3
-- LN882H
-- T5
-- ...
+## Download
 
-## 🚀 Quick Start
+Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/releases/latest) or the [Gitee mirror](https://gitee.com/tuya-open/tyutool/releases).
 
-We offer two ways to use the tool. Please choose the one that suits your needs.
+### GUI
 
-### Method 1: Run from Source (Recommended for Developers)
+| Platform | Package |
+|----------|---------|
+| Linux x86\_64 | `.deb`, `.rpm`, `.AppImage`, portable tar.gz |
+| Linux aarch64 | `.deb`, `.AppImage`, portable tar.gz |
+| macOS (Universal) | `.dmg`, portable tar.gz |
+| Windows x86\_64 | NSIS installer (`.exe`), portable `.zip` |
 
-Follow these steps if you want to do secondary development or run directly from the source code.
+The GUI supports automatic in-app updates.
 
-1.  **Prerequisites**:
-    - Ensure you have Python 3.8+ installed.
-    - Install Git.
+### CLI
 
-2.  **Clone the Repository**:
-    ```bash
-    git clone https://github.com/your-repo/tyutool.git
-    cd tyutool
-    ```
+| Platform | File |
+|----------|------|
+| Linux x86\_64 | `tyutool-cli_linux_x86_64_<ver>.tar.gz` |
+| Linux aarch64 | `tyutool-cli_linux_aarch64_<ver>.tar.gz` |
+| macOS x86\_64 | `tyutool-cli_macos_x86_64_<ver>.tar.gz` |
+| macOS aarch64 | `tyutool-cli_macos_aarch64_<ver>.tar.gz` |
+| Windows x86\_64 | `tyutool-cli_windows_x86_64_<ver>.zip` |
 
-3.  **Create a Virtual Environment and Install Dependencies**:
-    We provide automated scripts for this step.
-    - **Linux / macOS**:
-      ```bash
-      . ./export.sh
-      ```
-    - **Windows**:
-      ```bash
-      .\export.bat
-      ```
-    This script will automatically create a `venv` virtual environment and install all dependencies from `requirements.txt` using `pip`.
+Extract and run `tyutool_cli` (or `tyutool_cli.exe` on Windows).
 
-4.  **(Important) Linux Serial Port Permissions**:
-    On Linux systems, the default user may not have permission to access serial ports. Please execute the following command to add the current user to the `dialout` group:
-    ```bash
-    sudo usermod -aG dialout $USER
-    ```
-    **You must restart or log out and log back in for the permissions to take effect!**
+## CLI Usage
 
-### Method 2: Use Pre-compiled Executables
-
-This is the simplest and fastest way, requiring no installation of Python or any dependencies.
-
-1.  **Download**: Choose the latest version for your operating system from the links below.
-
-    > - [github](https://github.com/tuya/tyutool/releases)
-
-    > - [gitee](https://gitee.com/tuya-open/tyutool/releases)
-
-2.  **Extract**: Unzip the downloaded archive to any directory.
-3.  **Run**:
-    - **Linux/macOS**: Run the extracted file directly from your terminal, e.g., `./tyutool_gui`.
-    - **Windows**: Double-click `tyutool_gui.exe` to run.
-4.  **(Important) Install Drivers**: Ensure you have the correct USB to UART driver (e.g., CP210x, CH340) for your target chip installed on your computer, otherwise the tool will not be able to find the serial port.
-
-## 📖 Usage Guide
-
-### Graphical User Interface (GUI)
-
-Start the GUI by running `tyutool_gui.py` or the corresponding executable.
-
-```bash
-# Start from source
-python tyutool_gui.py
+```
+tyutool <COMMAND>
 ```
 
-**Steps**:
-1.  **Select Chip (Device)**: Choose your target chip model from the dropdown menu.
-2.  **Select Port**: Click the refresh button, then select the serial port your device is connected to from the dropdown menu.
-3.  **Set Baud Rate**: Enter the flashing baud rate according to your hardware requirements (default is `115200`).
-4.  **Select File**: Click the "..." button next to "File" to select the `.bin` firmware file to be flashed.
-5.  **Execute Action**: Click the "Write" or "Read" button to start the task. The progress bar will show the current status.
-
-### Command-Line Interface (CLI)
-
-Run `tyutool_cli.py` or the corresponding executable and control its behavior with arguments.
+### Flash firmware
 
 ```bash
-# Start from source
-python tyutool_cli.py --help
+# Auto-detect port, default baud 921600
+tyutool write -d bk7231n -f firmware.bin
+
+# Specify port
+tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
+
+# Full options
+tyutool write -d <DEVICE> -p <PORT> -b <BAUD> -s <START_ADDR> --end <END_ADDR> -f <FILE>
 ```
 
-**Common Command Examples**:
+Supported `-d` values: `bk7231n`, `t2`, `t5`
 
-- **Flash Firmware (Write)**
-  Flash the `bk.bin` file to a `BK7231N` chip on port `/dev/ttyACM0` with a baud rate of `2000000`.
-  ```bash
-  # Syntax: tyutool_cli.py write -d <chip> -p <port> -b <baudrate> -f <filepath>
-  python tyutool_cli.py write -d BK7231N -p /dev/ttyACM0 -b 2000000 -f ./bk.bin
-  ```
+### Read flash
 
-- **Read Firmware (Read)**
-  Read `0x200000` bytes of data starting from address `0x11000` from a `BK7231N` chip and save it as `read.bin`.
-  ```bash
-  # Syntax: tyutool_cli.py read -d <chip> -p <port> -b <baudrate> -s <start_address> -l <length> -f <save_path>
-  python tyutool_cli.py read -d BK7231N -p /dev/ttyACM0 -b 2000000 -s 0x11000 -l 0x200000 -f read.bin
-  ```
+```bash
+# Read 2 MB from address 0x0 (default)
+tyutool read -d bk7231n -p /dev/ttyUSB0 -f dump.bin
 
-- **AI Debug (Debug)**
-  Provides AI debug tools that support collecting and analyzing various data types such as audio, video, images, and text through network or serial connections.
+# Custom range
+tyutool read -d t5 -p /dev/ttyUSB0 -s 0x0 -l 0x100000 -f dump.bin
+```
 
-  1. **Web Mode (web)**: Connect to a debug server over the network to monitor specified data types in real-time.
-     ```bash
-     # Syntax: tyutool_cli.py debug web -i <server_ip> -p <port> -e <event_type> -s <save_dir>
-     # Monitor text data, connecting to localhost on port 5055
-     python tyutool_cli.py debug web -i localhost -p 5055 -e t -s web_ai_debug
+### List serial ports
 
-     # Monitor both audio and video data
-     python tyutool_cli.py debug web -i 192.168.1.100 -p 5055 -e a -e v -s debug_output
-     ```
-     Event type parameters (-e):
-     - `a`: Audio data
-     - `t`: Text data
-     - `v`: Video data
-     - `p`: Image data
+```bash
+tyutool list-ports
+```
 
-  2. **Serial Mode (ser)**: Connect to devices via serial port for AI debugging with interactive commands.
-     ```bash
-     # Syntax: tyutool_cli.py debug ser -p <port> -b <baudrate> -s <save_dir>
-     python tyutool_cli.py debug ser -p /dev/ttyUSB0 -b 460800 -s ser_ai_debug
-     ```
-     After entering interactive mode, you can use built-in commands to control the debugging process.
+### Device authorization
 
-  3. **Serial Auto Mode (ser_auto)**: Automated serial debugging test without manual interaction.
-     ```bash
-     # Syntax: tyutool_cli.py debug ser_auto -p <port> -b <baudrate> -s <save_dir>
-     python tyutool_cli.py debug ser_auto -p /dev/ttyUSB0 -b 460800 -s auto_debug
-     ```
+```bash
+# Read current auth state
+tyutool authorize -p /dev/ttyUSB0
 
-## 📝 Development Notes
+# Write UUID and AuthKey
+tyutool authorize -p /dev/ttyUSB0 --uuid <UUID> --authkey <AUTHKEY>
+```
 
-For more details on the project's build process, packaging, and code structure, please refer to the [Development Documentation](tools/develop.md).
+### Reset device
 
-## 📁 Other Documents
+```bash
+tyutool reset -p /dev/ttyUSB0 -d bk7231n
+```
 
-- [T5-Audio-Debug-Guide](docs/en/T5-Audio-Debug-Guide.md)
-- [Batch Auth User Guide](docs/en/Batch-Auth-Guide.md)
-- [Terms and Agreements](Terms_And_Agreements.md)
+### Self-update
 
-## 📄 License
+```bash
+# Check latest version
+tyutool update --check
 
-This project is licensed under the [Apache-2.0](LICENSE) License.
+# Update from GitHub (default)
+tyutool update
 
-## FAQ (Frequently Asked Questions)
+# Update from Gitee mirror
+tyutool update --source gitee
+```
 
-### 1. Driver Downloads
+### Verbose logging
 
-If your computer cannot recognize the serial port, it is usually because the USB to UART driver is missing.
+```bash
+RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
+```
 
-Here are the download links for common **CH34x** series chip drivers:
+## Build from Source
 
-- **Windows**: [CH343SER_EXE](https://www.wch.cn/downloads/ch343ser_exe.html)
+**Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+
 
-- **macOS**: [CH34XSER_MAC_ZIP](https://www.wch.cn/downloads/CH34XSER_MAC_ZIP.html)
+### CLI only
 
-Here are the download links for common **CP210x** series chip drivers:
+```bash
+cargo build -p tyutool-cli --release
+# Output: target/release/tyutool_cli
+```
 
-- **Windows**: [CP210x_Windows_Drivers](https://www.silabs.com/documents/public/software/CP210x_Windows_Drivers.zip)
-- **macOS**: [CP210x_Mac_Drivers](https://www.silabs.com/documents/public/software/Mac_OSX_VCP_Driver.zip)
+### Desktop GUI
+
+```bash
+pnpm install
+pnpm run tauri:build
+```
+
+### Development
+
+```bash
+pnpm install
+pnpm run tauri:dev   # GUI dev server with hot-reload
+pnpm run dev:web     # Frontend-only dev server (no Tauri)
+```
+
+## Architecture
+
+```
+tyutool/
+├── crates/
+│   ├── tyutool-core/   # Rust library — all flash logic, chip plugins, serial utils
+│   └── tyutool-cli/    # Standalone CLI binary (depends on tyutool-core only)
+├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
+└── src/                # Vue 3 frontend (Vite, Pinia, Tailwind CSS, DaisyUI)
+```
+
+`tyutool-core` is shared by both the GUI and CLI. Flash logic lives there and is never duplicated.
+
+## License
+
+Apache-2.0 — see [LICENSE.txt](LICENSE.txt).

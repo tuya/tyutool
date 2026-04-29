@@ -2,259 +2,398 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*.*.*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release, or leave empty for build-only (no sync/releases).'
-        required: false
-        default: ''
-        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  PYTHON_VERSION: '3.12'
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-  CHECKOUT_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  check-tagname:
-    name: Validate tag
+  # ── 版本号提取 + 同步到默认分支 ──────────────────────────────────────────────
+  prepare:
+    name: Prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ env.CHECKOUT_REF }}
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Match version with tag
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '') }}
-        run: python tools/check_tag.py ${{ env.RELEASE_TAG }}
-
-  sync:
-    name: Mirror tags to Gitee
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '') }}
-    runs-on: ubuntu-latest
-    needs: [check-tagname]
-    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      is_beta: ${{ steps.v.outputs.is_beta }}
+      file_label: ${{ steps.v.outputs.file_label }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ env.CHECKOUT_REF }}
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: Get default branch
+        id: default-branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config --global user.name "Github Action"
-          git config --global user.email "action@github.com"
+          DEFAULT_BRANCH=$(gh api repos/${{ github.repository }} --jq '.default_branch')
+          echo "branch=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "Default branch: ${DEFAULT_BRANCH}"
 
-      - name: Add Gitee remote
+      - id: v
         run: |
-          git remote add gitee https://flyingcys:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_REPO }}.git
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"
+            echo "is_beta=false" >> "$GITHUB_OUTPUT"
+            echo "file_label=${VER}" >> "$GITHUB_OUTPUT"
+          else
+            VER="beta"
+            echo "is_beta=true" >> "$GITHUB_OUTPUT"
+          fi
+          node scripts/bump-version.mjs "$VER"
+          RESOLVED=$(jq -r .version package.json)
+          echo "version=${RESOLVED}" >> "$GITHUB_OUTPUT"
+          # For beta: file names use "version.beta" to distinguish from release
+          if [[ "$VER" == "beta" ]]; then
+            echo "file_label=${RESOLVED}.beta" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Push tags to Gitee
-        run: git push gitee --tags --force
+      - name: Sync version to default branch
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          DEFAULT_BRANCH: ${{ steps.default-branch.outputs.branch }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
-    needs: [check-tagname]
-    timeout-minutes: 120
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ env.CHECKOUT_REF }}
-          fetch-depth: 0
+          # Switch to default branch, apply version bump, push
+          git stash
+          git checkout "${DEFAULT_BRANCH}"
+          node scripts/bump-version.mjs "$VERSION"
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          if git diff --quiet; then
+            echo "Version already up to date, skipping commit."
+            exit 0
+          fi
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
+                 crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml
+          git commit -m "chore: bump version to ${VERSION} [skip ci]"
+          git push origin "${DEFAULT_BRANCH}"
 
-      - name: Make build script executable
-        run: chmod +x ./tools/build_package.sh
-
-      - name: Build package
-        run: ./tools/build_package.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-artifacts
-          if-no-files-found: error
-          path: |
-            dist/linux_tyutool_cli.tar.gz
-            dist/linux_tyutool_gui.tar.gz
-
-  build-macos:
-    needs: [check-tagname]
+  # ── CLI（5 平台）──────────────────────────────────────────────────────────
+  # 纯 Rust 二进制，musl 静态链接（Linux），无 Tauri / Node 依赖
+  # 产物：tyutool-cli_{platform}_{arch}_{ver}.tar.gz / .zip
+  build-cli:
+    name: CLI · ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - id: x86
-            runner: ${{ vars.MACOS_INTEL_RUNNER || 'macos-15-intel' }}
-            artifact: macos-x86-artifacts
-            dist: |
-              dist/darwin_x86_tyutool_cli.tar.gz
-              dist/darwin_x86_tyutool_gui.tar.gz
-          - id: arm
-            runner: macos-latest
-            artifact: macos-arm-artifacts
-            dist: |
-              dist/darwin_arm64_tyutool_cli.tar.gz
-              dist/darwin_arm64_tyutool_gui.tar.gz
-    runs-on: ${{ matrix.runner }}
-    name: Build macOS (${{ matrix.id }})
-    timeout-minutes: 120
+          - { os: ubuntu-22.04,   target: x86_64-unknown-linux-musl,  platform: linux,   arch: x86_64,  use_cross: false }
+          - { os: ubuntu-22.04,   target: aarch64-unknown-linux-musl, platform: linux,   arch: aarch64, use_cross: true  }
+          - { os: macos-15-intel, target: x86_64-apple-darwin,        platform: macos,   arch: x86_64,  use_cross: false }
+          - { os: macos-latest,   target: aarch64-apple-darwin,       platform: macos,   arch: aarch64, use_cross: false }
+          - { os: windows-2022,   target: x86_64-pc-windows-msvc,     platform: windows, arch: x86_64,  use_cross: false }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+
+      - name: Sync version
+        run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "cli-${{ matrix.target }}" }
+
+      - name: Install cross
+        if: matrix.use_cross
+        run: |
+          CROSS_VERSION="v0.2.5"
+          curl -fsSL "https://github.com/cross-rs/cross/releases/download/${CROSS_VERSION}/cross-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz -C "$HOME/.cargo/bin"
+          cross --version
+
+      - name: Install musl-tools
+        if: runner.os == 'Linux' && !matrix.use_cross
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        env: { SERIALPORT_SKIP_LIBUDEV: "1" }
+        run: ${{ matrix.use_cross && 'cross' || 'cargo' }} build --release -p tyutool-cli --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          V="${{ needs.prepare.outputs.file_label }}"
+          mkdir -p dist
+          tar -czf "dist/tyutool-cli_${{ matrix.platform }}_${{ matrix.arch }}_${V}.tar.gz" \
+              -C "target/${{ matrix.target }}/release" tyutool_cli
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $V = "${{ needs.prepare.outputs.file_label }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "target/${{ matrix.target }}/release/tyutool_cli.exe" `
+            -DestinationPath "dist/tyutool-cli_${{ matrix.platform }}_${{ matrix.arch }}_${V}.zip"
+
+      - uses: actions/upload-artifact@v7
         with:
-          ref: ${{ env.CHECKOUT_REF }}
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Make build script executable
-        run: chmod +x ./tools/build_package.sh
-
-      - name: Build package
-        run: ./tools/build_package.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.artifact }}
+          name: tyutool-cli_${{ matrix.platform }}_${{ matrix.arch }}
+          path: dist/
           if-no-files-found: error
-          path: ${{ matrix.dist }}
 
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
-    needs: [check-tagname]
-    timeout-minutes: 120
+  # ── GUI（7 安装包 + 4 便携版）─────────────────────────────────────────────
+  # Tauri 2 桌面应用，每种分发类型独立 artifact
+  # 二进制名 = tyutool_gui（由 src-tauri/Cargo.toml [package].name 决定）
+  # 产物：tyutool-gui_{platform}_{arch}_{type}_{ver}.ext
+  build-gui:
+    name: GUI · ${{ matrix.platform }}-${{ matrix.arch }} · ${{ matrix.install_type }}
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: deb,       install_type: deb,      with_portable: true  }
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: appimage,  install_type: appimage, with_portable: false }
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: rpm,       install_type: rpm,      with_portable: false }
+          # Linux aarch64 (native ARM runner — no cross-compilation needed)
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, platform: linux,   arch: aarch64,  bundles: deb,       install_type: deb,      with_portable: true  }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, platform: linux,   arch: aarch64,  bundles: appimage,  install_type: appimage, with_portable: false }
+          # macOS Universal Binary (single build covers Intel + Apple Silicon)
+          # bundle_prefix: Tauri places universal artifacts under target/universal-apple-darwin/release/
+          # tauri_args:    passed verbatim to `npx @tauri-apps/cli build`
+          - { os: macos-latest, target: universal-apple-darwin, platform: macos, arch: universal, bundles: "dmg,app", install_type: dmg, with_portable: true, with_updater: true, bundle_prefix: "target/universal-apple-darwin/release", tauri_args: "--target universal-apple-darwin" }
+          # Windows x86_64 — NSIS installer + portable (MSI removed; NSIS is simpler and matches sftool-gui)
+          - { os: windows-2022,     target: x86_64-pc-windows-msvc,    platform: windows, arch: x86_64,   bundles: nsis,      install_type: nsis,     with_portable: true  }
+    env:
+      PREFIX: tyutool-gui_${{ matrix.platform }}_${{ matrix.arch }}
+      VERSION: ${{ needs.prepare.outputs.file_label }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+
+      - name: Sync version
+        run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      # ── 系统依赖 ──
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev libudev-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf \
+            xdg-utils
+
+      # ── 工具链 ──
+      - uses: pnpm/action-setup@v5
+        with: { version: 10 }
+      - uses: actions/setup-node@v6
+        with: { node-version: "22", cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          ref: ${{ env.CHECKOUT_REF }}
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+          # universal-apple-darwin is not a real Rust target; install both arches instead.
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+      - uses: Swatinem/rust-cache@v2
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          key: "gui-${{ matrix.target }}"
+          shared-key: "gui-${{ matrix.target }}"
+          save-if: ${{ matrix.install_type == 'deb' || matrix.platform != 'linux' }}
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      # ── 前端 + Tauri 构建 ──
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Build Tauri app
+        shell: bash
+        # tauri_args is set in the matrix (e.g. "--target universal-apple-darwin"); empty for other platforms.
+        run: npx @tauri-apps/cli build --bundles "${{ matrix.bundles }}" ${{ matrix.tauri_args }} --ci
 
-      - name: Build package
-        run: .\tools\build_package.bat
+      # ── 安装包：找到 Tauri 产物并统一重命名 ──
+      # 注意：使用 release-pkg/ 而非 dist/，避免与 Vite 构建产物目录冲突
+      # bundle_prefix is set in the matrix for non-default layouts (e.g. universal-apple-darwin).
+      - name: Package installer (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release-pkg
+          BUNDLE_BASE="${{ matrix.bundle_prefix || 'target/release' }}"
+          BUNDLE_DIR="${BUNDLE_BASE}/bundle/${{ matrix.install_type }}"
+          case "${{ matrix.install_type }}" in
+            deb)      GLOB="*.deb" ;;
+            rpm)      GLOB="*.rpm" ;;
+            appimage) GLOB="*.AppImage" ;;
+            dmg)      GLOB="*.dmg" ;;
+            *)        GLOB="*" ;;
+          esac
+          SRC=$(find "$BUNDLE_DIR" -maxdepth 1 -name "$GLOB" -type f | head -1)
+          EXT="${SRC##*.}"
+          DEST="${PREFIX}_${{ matrix.install_type }}_${VERSION}.${EXT}"
+          cp "$SRC" "release-pkg/${DEST}"
+          # Copy .sig file if it exists (needed by generate-manifest.ts for GUI updater)
+          SIG="${SRC}.sig"
+          if [ -f "$SIG" ]; then
+            cp "$SIG" "release-pkg/${DEST}.sig"
+          fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
+      - name: Package installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-pkg | Out-Null
+          $src = Get-ChildItem "target/release/bundle/${{ matrix.install_type }}" -File |
+            Where-Object { $_.Extension -ne '.sig' } | Select-Object -First 1
+          $dest = "${env:PREFIX}_${{ matrix.install_type }}_${env:VERSION}$($src.Extension)"
+          Copy-Item $src.FullName "release-pkg/$dest"
+          # Copy .sig file if it exists
+          $sig = "$($src.FullName).sig"
+          if (Test-Path $sig) {
+            Copy-Item $sig "release-pkg/$dest.sig"
+          }
+
+      # ── Updater artifact（macOS .app.tar.gz + .sig）──
+      # Tauri updater on macOS uses .app.tar.gz (not .dmg).
+      # For universal builds the tarball is under target/universal-apple-darwin/release/bundle/macos/.
+      - name: Package updater artifact (macOS)
+        if: matrix.with_updater && runner.os == 'macOS'
+        run: |
+          mkdir -p release-pkg
+          BUNDLE_BASE="${{ matrix.bundle_prefix || 'target/release' }}"
+          UPDATER_DIR="${BUNDLE_BASE}/bundle/macos"
+          UPDATER_SRC=$(find "$UPDATER_DIR" -maxdepth 1 -name "*.app.tar.gz" -type f | head -1)
+          if [ -n "$UPDATER_SRC" ]; then
+            UPDATER_DEST="${PREFIX}_update_${VERSION}.app.tar.gz"
+            cp "$UPDATER_SRC" "release-pkg/${UPDATER_DEST}"
+            UPDATER_SIG="${UPDATER_SRC}.sig"
+            if [ -f "$UPDATER_SIG" ]; then
+              cp "$UPDATER_SIG" "release-pkg/${UPDATER_DEST}.sig"
+            fi
+          fi
+
+      # Also upload the .sig file alongside the installer so generate-manifest.ts
+      # can read the signature for the Tauri updater platforms field.
+      - uses: actions/upload-artifact@v7
         with:
-          name: windows-artifacts
+          name: ${{ env.PREFIX }}_${{ matrix.install_type }}
+          path: release-pkg/
           if-no-files-found: error
-          path: |
-            dist/windows_tyutool_cli.zip
-            dist/windows_tyutool_gui.zip
 
-  release:
-    name: Publish GitHub Release
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '') }}
+      # ── 便携版 ──
+      # Tauri 二进制名由 src-tauri/Cargo.toml [package].name 决定 = tyutool_gui
+      - name: Package portable (Unix)
+        if: matrix.with_portable && runner.os != 'Windows'
+        run: |
+          mkdir -p release-portable
+          BUNDLE_BASE="${{ matrix.bundle_prefix || 'target/release' }}"
+          tar -czf "release-portable/${PREFIX}_portable_${VERSION}.tar.gz" \
+              -C "${BUNDLE_BASE}" tyutool_gui
+
+      - name: Package portable (Windows)
+        if: matrix.with_portable && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-portable | Out-Null
+          Compress-Archive -Path "target/release/tyutool_gui.exe" `
+            -DestinationPath "release-portable/${env:PREFIX}_portable_${env:VERSION}.zip"
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.with_portable
+        with:
+          name: ${{ env.PREFIX }}_portable
+          path: release-portable/
+          if-no-files-found: error
+
+  # ── GitHub Release（仅 tag 触发）─────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [prepare, build-cli, build-gui]
     runs-on: ubuntu-latest
-    needs: [sync, build-linux, build-macos, build-windows]
-    timeout-minutes: 30
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-      actions: read
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
+      - uses: actions/download-artifact@v8
+        with: { path: artifacts/ }
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: |
-            artifacts/linux-artifacts/*
-            artifacts/macos-x86-artifacts/*
-            artifacts/macos-arm-artifacts/*
-            artifacts/windows-artifacts/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: find artifacts/ -type f | sort
 
-  sync-release-to-gitee:
-    name: Publish Gitee Release
-    runs-on: ubuntu-latest
-    needs: [release]
-    timeout-minutes: 30
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-
-      - name: Create Gitee release and upload assets
-        env:
-          GITEE_REPO: ${{ secrets.GITEE_REPO }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+      - name: Collect release assets
         run: |
-          set -euo pipefail
-          # Gitee standard repos: Release attachment max 100MiB per file (see Gitee help). Skip oversize assets; GitHub Release has the full set.
-          GITEE_MAX_BYTES=$((100 * 1024 * 1024))
-          RELEASE_INFO=$(curl -sfS -X POST \
-            "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases" \
-            -H 'Content-Type: application/json' \
-            -H "Authorization: token ${GITEE_TOKEN}" \
-            -d "$(jq -n \
-              --arg tag "${RELEASE_TAG}" \
-              '{tag_name: $tag, target_commitish: "master", name: ("Release " + $tag), body: $tag, draft: false, prerelease: false}')")
-          RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id')
-          if [[ -z "$RELEASE_ID" || "$RELEASE_ID" == "null" ]]; then
-            echo "::error::Gitee create release failed: ${RELEASE_INFO}"
-            exit 1
-          fi
-          while IFS= read -r -d '' file_path; do
-            file_size=$(stat -c '%s' "$file_path")
-            if [[ "${file_size}" -gt "${GITEE_MAX_BYTES}" ]]; then
-              echo "::warning::Skipping Gitee upload for ${file_path} (${file_size} bytes): exceeds 100MiB Gitee per-file limit. Download this asset from the GitHub Release page."
-              continue
-            fi
-            echo "Uploading: ${file_path} (${file_size} bytes)"
-            resp_file=$(mktemp)
-            http_code=$(curl -sS -o "${resp_file}" -w '%{http_code}' \
-              --retry 3 --retry-delay 5 --connect-timeout 30 \
-              -X POST \
-              "https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/${RELEASE_ID}/attach_files" \
-              -H "Authorization: token ${GITEE_TOKEN}" \
-              -F "file=@${file_path}")
-            if [[ "${http_code}" != "200" && "${http_code}" != "201" ]]; then
-              echo "::error::Failed to upload ${file_path} (HTTP ${http_code}): $(cat "${resp_file}")"
-              rm -f "${resp_file}"
-              exit 1
-            fi
-            rm -f "${resp_file}"
-          done < <(find artifacts -type f -print0)
+          mkdir -p release-assets
+          find artifacts/ -type f -exec cp {} release-assets/ \;
+          echo "── Release assets ──────────────────────────────"
+          ls -lh release-assets/
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: tyutool ${{ github.ref_name }}
+          draft: true
+          generate_release_notes: true
+          files: release-assets/*
+
+  # ── 生成 latest.json 更新清单 ──────────────────────────────────────────────
+  generate-manifest:
+    name: Generate latest.json
+    needs: [prepare, create-release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with: { path: artifacts/ }
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate manifest
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GITHUB_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: pnpm exec tsx scripts/generate-manifest.ts
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: latest.json
+
+  # ── Gitee 同步（允许失败，不阻塞发布）─────────────────────────────────────
+  sync-gitee:
+    name: Sync to Gitee
+    needs: [generate-manifest]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    continue-on-error: true
+    steps:
+      - name: Sync release to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          echo "Gitee sync: TAG=${TAG}, VERSION=${VERSION}"
+          echo "Configure GITEE_OWNER and GITEE_REPO secrets to enable full sync."
+          # Full implementation: use Gitee API to create release and upload assets
+          # See: https://gitee.com/api/v5/swagger#/postV5ReposOwnerRepoReleases

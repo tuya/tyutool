@@ -1,0 +1,17 @@
+[package]
+name = "tyutool-core"
+version = "3.0.0"
+edition = "2021"
+description = "Shared flash/erase plugin registry and serial helpers for tyutool CLI and GUI"
+
+[dev-dependencies]
+serde_json = "1"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+serialport = { version = "4", features = ["usbportinfo-interface"] }
+crc32fast = "1"
+log = "0.4"
+espflash = { version = "4.3", default-features = false, features = ["serialport"] }
+md-5 = "0.10"

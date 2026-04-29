@@ -1,0 +1,9 @@
+pre-commit:
+  parallel: true
+  commands:
+    frontend:
+      glob: 'src/**/*.{ts,vue}'
+      run: npx prettier --write {staged_files}
+    backend:
+      glob: 'src-tauri/**/*.rs'
+      run: cargo fmt --manifest-path src-tauri/Cargo.toml
