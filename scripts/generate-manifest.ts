@@ -10,13 +10,16 @@ import { findFilesUnderArtifacts } from './lib/artifacts-glob.js';
 const VERSION = process.env.VERSION;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const TAG = process.env.TAG;
+const MANIFEST_BASE_URL = process.env.MANIFEST_BASE_URL?.replace(/\/$/, '');
 
 if (!VERSION || !GITHUB_REPO || !TAG) {
   console.error('ERROR: VERSION, GITHUB_REPO, and TAG must be set.');
   process.exit(1);
 }
 
-const BASE_URL = `https://github.com/${GITHUB_REPO}/releases/download/${TAG}`;
+const BASE_URL =
+  MANIFEST_BASE_URL ??
+  `https://github.com/${GITHUB_REPO}/releases/download/${TAG}`;
 
 function sha256File(path: string): string {
   const h = createHash('sha256');

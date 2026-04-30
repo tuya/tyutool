@@ -369,21 +369,96 @@ jobs:
           files: latest.json
 
   # ── Sync to Gitee (non-blocking) ────────────────────────────────────────────
+  # Requires repo secrets: GITEE_TOKEN, GITEE_USER (namespace), GITEE_REPO (path or owner/repo).
+  # Optional repo variable: GITEE_TARGET_COMMITISH. Script: scripts/sync-gitee-release.sh
   sync-gitee:
     name: Sync to Gitee
-    needs: [generate-manifest]
+    needs: [generate-manifest, prepare]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     continue-on-error: true
     steps:
-      - name: Sync release to Gitee
+      - uses: actions/checkout@v6
+
+      - id: gate
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [[ -z "${GITEE_TOKEN}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::GITEE_TOKEN not set — skipping Gitee sync."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v8
+        if: steps.gate.outputs.skip != 'true'
+        with: { path: artifacts/ }
+
+      - uses: pnpm/action-setup@v5
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Gitee latest.json
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
           GITHUB_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-          VERSION: ${{ needs.prepare.outputs.version }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
         run: |
-          echo "Gitee sync: TAG=${TAG}, VERSION=${VERSION}"
-          echo "Configure GITEE_OWNER and GITEE_REPO secrets to enable full sync."
-          # Full implementation: use Gitee API to create release and upload assets
-          # See: https://gitee.com/api/v5/swagger#/postV5ReposOwnerRepoReleases
+          set -euo pipefail
+          if [[ "${GITEE_REPO}" == */* ]]; then
+            GO="${GITEE_REPO%%/*}"
+            GR="${GITEE_REPO#*/}"
+          else
+            GO="${GITEE_USER}"
+            GR="${GITEE_REPO}"
+          fi
+          if [[ -z "${GO}" || -z "${GR}" ]]; then
+            echo "::error::Invalid Gitee coordinates: use GITEE_USER + repo-only GITEE_REPO, or set GITEE_REPO to owner/repo."
+            exit 1
+          fi
+          export MANIFEST_BASE_URL="https://gitee.com/${GO}/${GR}/releases/download/${TAG}"
+          pnpm exec tsx scripts/generate-manifest.ts
+
+      - name: Flatten assets for Gitee upload
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p gitee-assets
+          declare -A seen
+          while IFS= read -r -d '' fpath; do
+            fname="$(basename "$fpath")"
+            if [[ -n "${seen[$fname]:-}" ]]; then
+              echo "::error::Duplicate release asset name '${fname}' from '${seen[$fname]}' and '${fpath}'."
+              exit 1
+            fi
+            seen[$fname]="$fpath"
+            cp "$fpath" "gitee-assets/$fname"
+          done < <(find artifacts/ -type f -print0)
+          cp -f latest.json gitee-assets/
+          ls -lh gitee-assets/
+
+      - name: Sync release to Gitee
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          TAG: ${{ github.ref_name }}
+          GITEE_ASSETS_DIR: ${{ github.workspace }}/gitee-assets
+          GITEE_TARGET_COMMITISH: ${{ vars.GITEE_TARGET_COMMITISH }}
+        run: bash scripts/sync-gitee-release.sh
