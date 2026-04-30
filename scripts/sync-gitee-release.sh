@@ -59,17 +59,14 @@ HTTP_CODE="$(gitee_curl -o "$tmp_get" -w "%{http_code}" "$REL_URL")"
 if [[ "$HTTP_CODE" == "200" ]]; then
   RELEASE_ID="$(jq -r '.id // empty' "$tmp_get")"
   if [[ -z "$RELEASE_ID" || "$RELEASE_ID" == "null" ]]; then
-    echo "::error::Existing release response had no release id"
-    cat "$tmp_get"
-    exit 1
+    echo "Gitee release lookup returned no id for tag ${TAG}; creating release."
+    HTTP_CODE="404"
+  else
+    echo "Reusing existing Gitee release id=${RELEASE_ID} for tag ${TAG}"
   fi
-  echo "Reusing existing Gitee release id=${RELEASE_ID} for tag ${TAG}"
-elif [[ "$HTTP_CODE" != "404" ]]; then
-  echo "::error::GET release by tag failed: HTTP ${HTTP_CODE}"
-  jq . "$tmp_get" 2>/dev/null || cat "$tmp_get"
-  exit 1
+fi
 
-else
+if [[ "$HTTP_CODE" == "404" ]]; then
   TGT="${GITEE_TARGET_COMMITISH:-$TAG}"
   CREATE_URL="${API_BASE}/repos/${ENC_OWNER}/${ENC_REPO}/releases"
   CREATE_CODE="$(
@@ -99,6 +96,10 @@ else
   fi
 
   echo "Created Gitee release id=${RELEASE_ID}"
+elif [[ "$HTTP_CODE" != "200" ]]; then
+  echo "::error::GET release by tag failed: HTTP ${HTTP_CODE}"
+  jq . "$tmp_get" 2>/dev/null || cat "$tmp_get"
+  exit 1
 fi
 
 ATTACH_URL="${API_BASE}/repos/${ENC_OWNER}/${ENC_REPO}/releases/${RELEASE_ID}/attach_files"
