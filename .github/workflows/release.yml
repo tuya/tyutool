@@ -374,7 +374,7 @@ jobs:
   sync-gitee:
     name: Sync to Gitee
     needs: [generate-manifest, prepare]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/')
     continue-on-error: true
     steps:
