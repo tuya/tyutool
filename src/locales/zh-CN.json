@@ -67,9 +67,9 @@
       "toastAction": "查看详情",
       "sourceGithub": "GitHub Releases",
       "sourceGitee": "Gitee Releases",
-      "portableHint": "检测到便携版运行模式，自动更新不支持便携版。",
-      "portableDownload": "下载新版本",
-      "toastPortable": "发现新版本 v{version}，便携版请手动下载更新"
+      "portableHint": "当前安装方式不支持应用内更新，请到发行页下载与系统匹配的安装包（如 .deb / 便携版等）。",
+      "portableDownload": "打开发行页",
+      "toastPortable": "发现新版本 v{version}。当前方式无法应用内更新，请打开发行页下载安装包。"
     }
   },
   "flash": {

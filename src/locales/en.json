@@ -67,9 +67,9 @@
       "toastAction": "View Details",
       "sourceGithub": "GitHub Releases",
       "sourceGitee": "Gitee Releases",
-      "portableHint": "Portable mode detected. Auto-update is not available for portable installations.",
-      "portableDownload": "Download New Version",
-      "toastPortable": "New version v{version} available. Please download manually for portable mode."
+      "portableHint": "This installation does not support in-app updates. Download a matching package from the releases page.",
+      "portableDownload": "Open Releases Page",
+      "toastPortable": "New version v{version} available. This install type cannot auto-update—open the releases page to download."
     }
   },
   "flash": {

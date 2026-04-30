@@ -3,7 +3,7 @@ import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { APP_VERSION } from '@/config/app';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { isPortableInstall } from '@/utils/install-type';
+import { canUseInAppUpdater, getManualUpdateFlags } from '@/utils/install-type';
 import { UPDATE_SOURCES, fetchLatestJson, isNewerVersion, type LatestJson } from './update-sources';
 
 const props = defineProps<{ open: boolean }>();
@@ -45,9 +45,12 @@ const installing = ref(false);
 // Hold the Update object so we can call install() later after user confirms
 let pendingUpdate: Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>> = null;
 
-// ── Portable detection ───────────────────────────────────────────────────────
+// ── Install types without Tauri in-app updater (portable, .deb/.rpm) ─────────
 
-const isPortable = ref(false);
+const manualUpdateOnly = ref(false);
+/** Linux distro package: open releases page, not portable tarball from manifest. */
+const debRpmInstall = ref(false);
+const installTypeReady = ref(false);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -68,7 +71,9 @@ function resetState(): void {
   downloadingVersion.value = '';
   installing.value = false;
   pendingUpdate = null;
-  // isPortable is cached globally, no need to reset
+  installTypeReady.value = false;
+  manualUpdateOnly.value = false;
+  debRpmInstall.value = false;
 }
 
 // ── Check updates (parallel) ──────────────────────────────────────────────────
@@ -114,8 +119,10 @@ watch(
   (val, prev) => {
     if (val && !prev) {
       resetState();
-      void isPortableInstall().then(v => {
-        isPortable.value = v;
+      void getManualUpdateFlags().then(({ manualOnly, debRpm }) => {
+        manualUpdateOnly.value = manualOnly;
+        debRpmInstall.value = debRpm;
+        installTypeReady.value = true;
       });
       void runChecks();
     }
@@ -126,6 +133,9 @@ watch(
 
 async function startDownload(srcState: SourceState): Promise<void> {
   if (!isTauriRuntime()) return;
+  if (!canUseInAppUpdater(installTypeReady.value, { manualOnly: manualUpdateOnly.value, debRpm: debRpmInstall.value })) {
+    return;
+  }
   downloading.value = true;
   downloadReady.value = false;
   downloadPercent.value = 0;
@@ -230,15 +240,19 @@ function getPortablePlatformKey(): string {
   return 'linux-x86_64';
 }
 
-async function openPortableDownload(srcState: SourceState): Promise<void> {
+async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
   if (!isTauriRuntime()) return;
 
-  // Try to get direct portable URL from manifest
-  const platformKey = getPortablePlatformKey();
-  const portableUrl = srcState.manifest?.portable?.[platformKey]?.url;
-
-  // Fallback to GitHub releases page
-  const url = portableUrl || 'https://github.com/tuya/tyutool/releases/latest';
+  let url: string;
+  if (debRpmInstall.value) {
+    const releasePageUrl = UPDATE_SOURCES.find(s => s.id === srcState.id)?.releasePageUrl;
+    url = releasePageUrl || 'https://github.com/tuya/tyutool/releases/latest';
+  } else {
+    const platformKey = getPortablePlatformKey();
+    const portableUrl = srcState.manifest?.portable?.[platformKey]?.url;
+    const releasePageUrl = UPDATE_SOURCES.find(s => s.id === srcState.id)?.releasePageUrl;
+    url = portableUrl || releasePageUrl || 'https://github.com/tuya/tyutool/releases/latest';
+  }
 
   try {
     const { openUrl } = await import('@tauri-apps/plugin-opener');
@@ -308,7 +322,11 @@ async function openPortableDownload(srcState: SourceState): Promise<void> {
                   <!-- Update button (available state, Tauri only, NOT portable) -->
                   <button
                     v-if="
-                      src.status === 'available' && isTauriRuntime() && !isPortable && !downloading && !downloadReady
+                      src.status === 'available' &&
+                      isTauriRuntime() &&
+                      canUseInAppUpdater(installTypeReady, { manualOnly: manualUpdateOnly, debRpm: debRpmInstall }) &&
+                      !downloading &&
+                      !downloadReady
                     "
                     type="button"
                     class="ud-update-btn"
@@ -316,14 +334,19 @@ async function openPortableDownload(srcState: SourceState): Promise<void> {
                   >
                     {{ t('settings.update.btnUpdate') }}
                   </button>
-                  <!-- Portable: download button instead of in-app update -->
+                  <!-- Portable / .deb / .rpm: releases page (or portable asset) instead of plugin-updater -->
                   <button
                     v-if="
-                      src.status === 'available' && isTauriRuntime() && isPortable && !downloading && !downloadReady
+                      src.status === 'available' &&
+                      isTauriRuntime() &&
+                      installTypeReady &&
+                      manualUpdateOnly &&
+                      !downloading &&
+                      !downloadReady
                     "
                     type="button"
                     class="ud-update-btn"
-                    @click="openPortableDownload(src)"
+                    @click="openManualReleaseDownload(src)"
                   >
                     {{ t('settings.update.portableDownload') }}
                   </button>
@@ -350,8 +373,11 @@ async function openPortableDownload(srcState: SourceState): Promise<void> {
               </div>
             </div>
 
-            <!-- Portable mode hint -->
-            <div v-if="isPortable && sourceStates.some(s => s.status === 'available')" class="ud-portable-hint">
+            <!-- Manual update hint (portable or distro package) -->
+            <div
+              v-if="manualUpdateOnly && sourceStates.some(s => s.status === 'available')"
+              class="ud-portable-hint"
+            >
               <div class="ud-portable-icon" aria-hidden="true">
                 <FontAwesomeIcon :icon="['fas', 'circle-info']" class="size-4" />
               </div>

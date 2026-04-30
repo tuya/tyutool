@@ -3,7 +3,7 @@ import { APP_VERSION } from '@/config/app';
 import { fetchLatestJson, isNewerVersion, UPDATE_SOURCES } from '@/features/settings/update-sources';
 import { toastState } from '@/composables/toastState';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { isPortableInstall } from '@/utils/install-type';
+import { getManualUpdateFlags } from '@/utils/install-type';
 import { rLog } from '@/utils/log';
 
 /** Detect current platform key for portable manifest lookup */
@@ -31,9 +31,9 @@ export function useAutoUpdate(): void {
 
 async function checkForUpdate(): Promise<void> {
   rLog.info(`[Update] Auto-check starting (current: v${APP_VERSION})`);
-  const portable = await isPortableInstall();
-  if (portable) {
-    rLog.info('[Update] Portable mode detected, toast will use portable message');
+  const flags = await getManualUpdateFlags();
+  if (flags.manualOnly) {
+    rLog.info('[Update] Manual update install (portable or deb/rpm), toast will use releases-page flow');
   }
   // Try sources in order (GitHub first, then Gitee).
   // If a source succeeds (whether update found or not), stop.
@@ -44,11 +44,15 @@ async function checkForUpdate(): Promise<void> {
       if (isNewerVersion(manifest.version, APP_VERSION)) {
         rLog.info(`[Update] New version found: v${manifest.version} (source: ${source.id})`);
         toastState.version = manifest.version;
-        toastState.isPortable = portable;
-        if (portable) {
-          const platformKey = getPortablePlatformKey();
-          toastState.portableUrl =
-            manifest.portable?.[platformKey]?.url || 'https://github.com/tuya/tyutool/releases/latest';
+        toastState.isPortable = flags.manualOnly;
+        if (flags.manualOnly) {
+          if (flags.debRpm) {
+            toastState.portableUrl = source.releasePageUrl;
+          } else {
+            const platformKey = getPortablePlatformKey();
+            toastState.portableUrl =
+              manifest.portable?.[platformKey]?.url || source.releasePageUrl;
+          }
         }
         toastState.visible = true;
       } else {

@@ -52,6 +52,7 @@ describe('UPDATE_SOURCES', () => {
       expect(source.id).toEqual(expect.any(String));
       expect(source.labelKey).toEqual(expect.any(String));
       expect(source.url).toMatch(/^https:\/\//);
+      expect(source.releasePageUrl).toMatch(/^https:\/\//);
     }
   });
 
@@ -59,6 +60,14 @@ describe('UPDATE_SOURCES', () => {
     const ids = UPDATE_SOURCES.map(s => s.id);
     expect(ids).toContain('github');
     expect(ids).toContain('gitee');
+  });
+
+  it('uses source-specific release pages', () => {
+    const github = UPDATE_SOURCES.find(s => s.id === 'github');
+    const gitee = UPDATE_SOURCES.find(s => s.id === 'gitee');
+
+    expect(github?.releasePageUrl).toBe('https://github.com/tuya/tyutool/releases/latest');
+    expect(gitee?.releasePageUrl).toBe('https://gitee.com/tuya-open/tyutool/releases');
   });
 });
 

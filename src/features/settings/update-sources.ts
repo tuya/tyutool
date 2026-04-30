@@ -27,6 +27,7 @@ export interface UpdateSource {
   id: 'github' | 'gitee';
   labelKey: string;
   url: string;
+  releasePageUrl: string;
 }
 
 export const UPDATE_SOURCES: UpdateSource[] = [
@@ -34,11 +35,13 @@ export const UPDATE_SOURCES: UpdateSource[] = [
     id: 'github',
     labelKey: 'settings.update.sourceGithub',
     url: 'https://github.com/tuya/tyutool/releases/latest/download/latest.json',
+    releasePageUrl: 'https://github.com/tuya/tyutool/releases/latest',
   },
   {
     id: 'gitee',
     labelKey: 'settings.update.sourceGitee',
     url: 'https://gitee.com/tuya-open/tyutool/releases/download/latest/latest.json',
+    releasePageUrl: 'https://gitee.com/tuya-open/tyutool/releases',
   },
 ];
 
