@@ -1,7 +1,6 @@
 # tyutool
 
 [![Release](https://img.shields.io/github/v/release/tuya/tyutool?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/tuya/tyutool/release.yml?style=flat-square&label=build)](https://github.com/tuya/tyutool/actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/tuya/tyutool?style=flat-square)](LICENSE.txt)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
@@ -23,12 +22,32 @@ Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/r
 
 | Platform | Package |
 |----------|---------|
-| Linux x86\_64 | `.deb`, `.rpm`, `.AppImage`, portable tar.gz |
-| Linux aarch64 | `.deb`, `.AppImage`, portable tar.gz |
+| Linux x86\_64 | `.AppImage`, `.deb`, `.rpm`, portable tar.gz |
+| Linux aarch64 | `.AppImage`, `.deb`, portable tar.gz |
 | macOS (Universal) | `.dmg`, portable tar.gz |
 | Windows x86\_64 | NSIS installer (`.exe`), portable `.zip` |
 
-The GUI supports automatic in-app updates.
+**Recommended downloads by platform** (`x.x.x` = version number — get the latest from [Releases](https://github.com/tuya/tyutool/releases/latest))
+
+| Platform | Recommended file | Auto-update | Notes |
+|----------|------------------|:-----------:|-------|
+| Windows x86\_64 | ★ [`tyutool-gui_windows_x86_64_nsis_x.x.x.exe`](https://github.com/tuya/tyutool/releases/latest) | ✅ | NSIS installer |
+| Windows x86\_64 | [`tyutool-gui_windows_x86_64_portable_x.x.x.zip`](https://github.com/tuya/tyutool/releases/latest) | ❌ | No-install portable |
+| macOS Universal | ★ [`tyutool-gui_macos_universal_dmg_x.x.x.dmg`](https://github.com/tuya/tyutool/releases/latest) | ✅ | DMG installer |
+| macOS Universal | [`tyutool-gui_macos_universal_portable_x.x.x.tar.gz`](https://github.com/tuya/tyutool/releases/latest) | ❌ | Extract and run |
+| Linux x86\_64 | ★ [`tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage`](https://github.com/tuya/tyutool/releases/latest) | ✅ | `chmod +x` then run; cross-distro |
+| Linux aarch64 | ★ [`tyutool-gui_linux_aarch64_appimage_x.x.x.AppImage`](https://github.com/tuya/tyutool/releases/latest) | ✅ | `chmod +x` then run; cross-distro |
+| Linux x86\_64 | `tyutool-gui_linux_x86_64_deb_x.x.x.deb` / `_rpm_x.x.x.rpm` | ❌ | Debian-family / Fedora·RHEL-family |
+| Linux aarch64 | `tyutool-gui_linux_aarch64_deb_x.x.x.deb` | ❌ | Debian-family |
+| Linux x86\_64 / aarch64 | `tyutool-gui_linux_*_portable_x.x.x.tar.gz` | ❌ | Unpack and run |
+
+**Troubleshooting**
+
+| Issue | Platform | Fix |
+|-------|----------|-----|
+| "cannot be opened because the developer cannot be verified" / Gatekeeper block | macOS | Builds are not Apple-signed — this is expected. **System Settings → Privacy & Security → Open Anyway**; or Control-click `tyutool.app` in Finder → **Open** |
+| No serial port listed | macOS | **System Settings → Privacy & Security → Accessories** (label varies by macOS version) |
+| Blank / white window (common in VMs) | Linux | WebKit2GTK GPU compositing failure. Set `WEBKIT_DISABLE_COMPOSITING_MODE=1` before launching: `WEBKIT_DISABLE_COMPOSITING_MODE=1 ./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
 ### CLI
 

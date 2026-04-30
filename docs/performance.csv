@@ -1,0 +1,5 @@
+date,chip,version,dist,file_size,baudrate,adapter_chip,time_s,speed_kbps,notes
+2026-04-30,T5,2.1.12.2,factory_win,2444704,2000000,CH342,34.501,553.6
+2026-04-30,T5,v3.0.0,tyutool_win_gui,2444704,2000000,CH342,35.1,544.14
+2026-04-30,ESP32S3,v3.9.8,factory_win_FLASH_DOWNLOAD_TOOL,1211792,1152000,CH340C,14.83,638.38
+2026-04-30,ESP32S3,v3.0.0,tyutool_win_gui,1211792,1152000,CH340C,16.6,570.31

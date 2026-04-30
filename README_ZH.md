@@ -1,7 +1,6 @@
 # tyutool
 
 [![Release](https://img.shields.io/github/v/release/tuya/tyutool?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/tuya/tyutool/release.yml?style=flat-square&label=构建)](https://github.com/tuya/tyutool/actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/tuya/tyutool?style=flat-square)](LICENSE.txt)
 [![Platform](https://img.shields.io/badge/平台-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
@@ -23,12 +22,32 @@
 
 | 平台 | 安装包 |
 |------|--------|
-| Linux x86\_64 | `.deb`、`.rpm`、`.AppImage`、便携版 tar.gz |
-| Linux aarch64 | `.deb`、`.AppImage`、便携版 tar.gz |
+| Linux x86\_64 | `.AppImage`、`.deb`、`.rpm`、便携版 tar.gz |
+| Linux aarch64 | `.AppImage`、`.deb`、便携版 tar.gz |
 | macOS（Universal） | `.dmg`、便携版 tar.gz |
 | Windows x86\_64 | NSIS 安装包（`.exe`）、便携版 `.zip` |
 
-GUI 支持应用内自动更新。
+**各平台推荐下载**（文件名中 `x.x.x` 为版本号，从 [Releases](https://github.com/tuya/tyutool/releases/latest) 获取最新版）
+
+| 平台 | 推荐文件 | 自动更新 | 备注 |
+|------|----------|:--------:|------|
+| Windows x86\_64 | ★ [`tyutool-gui_windows_x86_64_nsis_x.x.x.exe`](https://github.com/tuya/tyutool/releases/latest) | ✅ | NSIS 安装包 |
+| Windows x86\_64 | [`tyutool-gui_windows_x86_64_portable_x.x.x.zip`](https://github.com/tuya/tyutool/releases/latest) | ❌ | 免安装便携版 |
+| macOS Universal | ★ [`tyutool-gui_macos_universal_dmg_x.x.x.dmg`](https://github.com/tuya/tyutool/releases/latest) | ✅ | DMG 安装包 |
+| macOS Universal | [`tyutool-gui_macos_universal_portable_x.x.x.tar.gz`](https://github.com/tuya/tyutool/releases/latest) | ❌ | 解压即用便携版 |
+| Linux x86\_64 | ★ [`tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage`](https://github.com/tuya/tyutool/releases/latest) | ✅ | `chmod +x` 后运行，跨发行版 |
+| Linux aarch64 | ★ [`tyutool-gui_linux_aarch64_appimage_x.x.x.AppImage`](https://github.com/tuya/tyutool/releases/latest) | ✅ | `chmod +x` 后运行，跨发行版 |
+| Linux x86\_64 | `tyutool-gui_linux_x86_64_deb_x.x.x.deb` / `_rpm_x.x.x.rpm` | ❌ | Debian 系 / Fedora·RHEL 系 |
+| Linux aarch64 | `tyutool-gui_linux_aarch64_deb_x.x.x.deb` | ❌ | Debian 系 |
+| Linux x86\_64 / aarch64 | `tyutool-gui_linux_*_portable_x.x.x.tar.gz` | ❌ | 解压后运行目录内程序 |
+
+**常见问题**
+
+| 问题 | 平台 | 处理方式 |
+|------|------|----------|
+| 「无法验证开发者」或被 Gatekeeper 拦截 | macOS | 安装包未做 Apple 代码签名，属正常安全策略。**系统设置 → 隐私与安全性 → 仍要打开**；或在 Finder 中右键 `tyutool.app` → **打开** |
+| 串口不出现 | macOS | **系统设置 → 隐私与安全性 → 配件**（或「允许配件连接」等，文案随系统版本而异） |
+| 窗口全白 / 空白（虚拟机常见） | Linux | WebKit2GTK GPU 合成失败所致，启动前设置环境变量：`WEBKIT_DISABLE_COMPOSITING_MODE=1 ./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
 ### CLI 命令行版
 
