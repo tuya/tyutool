@@ -1,6 +1,6 @@
 [package]
 name = "tyutool-core"
-version = "3.0.0"
+version = "3.0.1"
 edition = "2021"
 description = "Shared flash/erase plugin registry and serial helpers for tyutool CLI and GUI"
 
