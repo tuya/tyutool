@@ -34,8 +34,7 @@ pub fn shake<T: IoTransport>(
 
     if chip.uses_extended_reset_sequence() {
         // T5: loop reset + link_check, matching Python get_bus() pattern
-        // Python does: for _ in range(100): do_reset() → sleep(4ms) → do_link_check_ex(60)
-        let max_reset_retries: u32 = 100;
+        let max_reset_retries: u32 = 10;
         let mut connected = false;
         for attempt in 0..max_reset_retries {
             transport.check_cancel()?;
