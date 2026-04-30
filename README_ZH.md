@@ -1,7 +1,7 @@
 # tyutool
 
 [![Release](https://img.shields.io/github/v/release/tuya/tyutool?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
-[![License](https://img.shields.io/github/license/tuya/tyutool?style=flat-square)](LICENSE.txt)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE.txt)
 [![Platform](https://img.shields.io/badge/平台-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
 涂鸦 IoT 设备固件烧录工具，提供跨平台桌面 GUI（Tauri 2 + Vue 3）和独立命令行（CLI）两种使用方式。
@@ -47,7 +47,7 @@
 |------|------|----------|
 | 「无法验证开发者」或被 Gatekeeper 拦截 | macOS | 安装包未做 Apple 代码签名，属正常安全策略。**系统设置 → 隐私与安全性 → 仍要打开**；或在 Finder 中右键 `tyutool.app` → **打开** |
 | 串口不出现 | macOS | **系统设置 → 隐私与安全性 → 配件**（或「允许配件连接」等，文案随系统版本而异） |
-| 窗口全白 / 空白（虚拟机常见） | Linux | WebKit2GTK GPU 合成失败所致，启动前设置环境变量：`WEBKIT_DISABLE_COMPOSITING_MODE=1 ./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
+| 窗口异常 / 空白（虚拟机常见） | Linux | WebKit2GTK GPU 合成失败所致，启动前设置环境变量：`export WEBKIT_DISABLE_COMPOSITING_MODE=1`，然后运行 `./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
 ### CLI 命令行版
 

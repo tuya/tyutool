@@ -1,7 +1,7 @@
 # tyutool
 
 [![Release](https://img.shields.io/github/v/release/tuya/tyutool?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
-[![License](https://img.shields.io/github/license/tuya/tyutool?style=flat-square)](LICENSE.txt)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE.txt)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
 Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary.
@@ -47,7 +47,7 @@ Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/r
 |-------|----------|-----|
 | "cannot be opened because the developer cannot be verified" / Gatekeeper block | macOS | Builds are not Apple-signed — this is expected. **System Settings → Privacy & Security → Open Anyway**; or Control-click `tyutool.app` in Finder → **Open** |
 | No serial port listed | macOS | **System Settings → Privacy & Security → Accessories** (label varies by macOS version) |
-| Blank / white window (common in VMs) | Linux | WebKit2GTK GPU compositing failure. Set `WEBKIT_DISABLE_COMPOSITING_MODE=1` before launching: `WEBKIT_DISABLE_COMPOSITING_MODE=1 ./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
+| Blank / white window (common in VMs) | Linux | WebKit2GTK GPU compositing failure. Set the environment variable before launching: `export WEBKIT_DISABLE_COMPOSITING_MODE=1`, then run `./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
 ### CLI
 
