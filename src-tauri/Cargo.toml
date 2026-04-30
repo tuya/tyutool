@@ -1,6 +1,6 @@
 [package]
 name = "tyutool_gui"
-version = "3.0.3"
+version = "3.0.4"
 description = "tyutool — Tauri shell for tyutool-core (firmware / serial tooling)"
 authors = ["tyutool contributors"]
 edition = "2021"
