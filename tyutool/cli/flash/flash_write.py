@@ -6,13 +6,47 @@ import click
 from .progress import CliProgressHandler, CliProgressHandlerTqdm
 from .choose_port import choose_port
 from tyutool.flash import FlashArgv, FlashInterface, flash_params_check
+from tyutool.flash.gd32 import try_flash_gd32_device
 from tyutool.util.util import get_logger
+
+
+UNKNOWN_DEVICE_FLASH_HANDLERS = [
+    ("GD32VW553H", try_flash_gd32_device),
+]
+
+
+def _normalize_device(ctx, param, value):
+    if value is None:
+        return value
+
+    supported_map = {
+        soc_name.upper(): soc_name for soc_name in FlashInterface.get_soc_names()
+    }
+    return supported_map.get(value.upper(), value)
+
+def _handle_unknown_device(device, port, baud, start, binfile, progress, logger):
+    device_upper = str(device).upper()
+    for supported_device, try_flash_func in UNKNOWN_DEVICE_FLASH_HANDLERS:
+        if device_upper == str(supported_device).upper():
+            handled, result = try_flash_func(
+                device=device,
+                port=port,
+                baud=baud,
+                start=start,
+                binfile=binfile,
+                logger=logger,
+            )
+            if handled:
+                return result
+
+    logger.warning(f'Unknown device [{device}], fallback flow is used.')
+    return False
 
 
 @click.command()
 @click.option('-d', '--device',
-              type=click.Choice(FlashInterface.get_soc_names(),
-                                case_sensitive=False),
+              type=str,
+              callback=_normalize_device,
               required=True,
               help="Soc name")
 @click.option('-p', '--port',
@@ -42,6 +76,14 @@ def cli(device, port, baud, start, binfile, tqdm):
     else:
         progress = CliProgressHandler()
 
+    if not port:
+        port = choose_port()
+
+    handler_obj = FlashInterface.get_flash_handler(device)
+    if not handler_obj:
+        return _handle_unknown_device(device, port, baud, start, binfile,
+                                      progress, logger)
+
     # use defaule param
     if not baud:
         baud = FlashInterface.get_baudrate(device)
@@ -49,8 +91,6 @@ def cli(device, port, baud, start, binfile, tqdm):
     if not start:
         start = FlashInterface.get_start_addr(device)
         logger.info(f'Use default start address: [{start:#04x}]')
-    if not port:
-        port = choose_port()
 
     # check params
     argv = FlashArgv("write", device, port, baud, start, binfile)
@@ -58,7 +98,6 @@ def cli(device, port, baud, start, binfile, tqdm):
         logger.error("Parameter check failure.")
         return False
 
-    handler_obj = FlashInterface.get_flash_handler(device)
     soc_handler = handler_obj(argv,
                               logger=logger,
                               progress=progress)
