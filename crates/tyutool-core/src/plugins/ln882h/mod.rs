@@ -90,9 +90,19 @@ fn boot(
         let cmd = format!("download [rambin] [0x20000000] [{}]", RAM_BIN.len());
         send_command(port, &cmd)?;
         XmodemSend::new(port, RAM_BIN, 1024).send("ram.bin", cancel, &|_, _| {})?;
-        // Drain post-transfer noise
+        // Drain post-transfer noise, then wait for RAM code to boot up (reference uses 5 s)
         let _ = read_response(port, 300, 1);
-        if !check_ram_mode(port)? {
+        std::thread::sleep(Duration::from_secs(5));
+        // Retry: RAM code takes a few seconds to start responding
+        let mut in_ram = false;
+        for _ in 0..10 {
+            if check_ram_mode(port)? {
+                in_ram = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        if !in_ram {
             return Err(FlashError::Plugin(
                 "LN882H: RAM code upload failed — device did not enter RAM mode".into(),
             ));
@@ -109,7 +119,8 @@ fn boot(
         send_command(port, "baudrate 921600")?;
         let _ = read_response(port, 128, 1);
         port.set_baud_rate(921600)?;
-        std::thread::sleep(Duration::from_secs(1));
+        // Reference implementation uses 5 s to let the device stabilize after baud change
+        std::thread::sleep(Duration::from_secs(5));
         if check_ram_mode(port)? {
             return Ok(());
         }

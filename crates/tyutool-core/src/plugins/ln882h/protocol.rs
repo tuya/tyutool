@@ -206,18 +206,19 @@ impl<'a> XmodemSend<'a> {
 
     /// Send filename/size header packet (SOH seq=0), wait for ACK+CRC from device.
     fn receive_response(&mut self, file_name: &str, file_size: usize) -> Result<(), FlashError> {
-        // Build filename/size payload matching Python reference:
-        // name + b'\x00' + size_digits + b'\x20', ljust(128, b'\x00')
+        // Build filename/size payload: name\x00size_digits\x00\x00...\x00 (128 bytes total)
+        // Matches Python reference: data_name + '\x00' + data_size + '\x00', ljust(128, '\x00')
         let mut payload = vec![0u8; 128];
         let name_bytes = file_name.as_bytes();
-        let name_len = name_bytes.len().min(116); // cap to leave room for \0 + size + \x20
+        let name_len = name_bytes.len().min(116); // cap to leave room for \0 + size + trailing \0
         payload[..name_len].copy_from_slice(&name_bytes[..name_len]);
+        // payload[name_len] = 0x00 (null terminator for name — already zero-initialized)
         let size_str = file_size.to_string();
         let sz_bytes = size_str.as_bytes();
         let sz_start = name_len + 1;
         let sz_end = (sz_start + sz_bytes.len()).min(127);
         payload[sz_start..sz_end].copy_from_slice(&sz_bytes[..sz_end - sz_start]);
-        payload[sz_end] = 0x20;
+        // payload[sz_end] = 0x00 (null terminator for size — already zero-initialized)
 
         let crc = crc16(&payload);
         let packet = {
@@ -279,7 +280,8 @@ impl<'a> XmodemSend<'a> {
             let end = (offset + self.packet_size).min(total);
             let chunk = &self.data[offset..end];
 
-            let mut data = vec![0u8; self.packet_size];
+            // Pad to full packet size with 0x1A (standard XMODEM fill byte / CTRL-Z)
+            let mut data = vec![0x1au8; self.packet_size];
             data[..chunk.len()].copy_from_slice(chunk);
 
             let crc = crc16(&data);
@@ -320,15 +322,24 @@ impl<'a> XmodemSend<'a> {
         Ok(())
     }
 
-    /// Send EOT, wait for ACK, then send empty YModem terminator packet.
+    /// Send EOT, handle NAK/ACK/CRC handshake, then send empty YModem terminator packet.
     fn send_eot(&mut self) -> Result<(), FlashError> {
-        // Phase 1: EOT → ACK
         const MAX_ERRORS: usize = 20;
+        const NAK: u8 = 0x15;
+
+        // YModem EOT handshake:
+        //   sender → EOT  |  device → NAK  (first EOT)
+        //   sender → EOT  |  device → ACK + CRC  (second EOT; CRC requests null terminator)
         let mut errors = 0usize;
         loop {
             self.port.write_all(&[EOT])?;
             match self.read_byte() {
-                Ok(ACK) => break,
+                Ok(ACK) => {
+                    // Consume the CRC byte the device sends after ACKing the second EOT
+                    let _ = self.read_byte();
+                    break;
+                }
+                Ok(NAK) => {}  // Expected for the first EOT; send another EOT
                 Ok(_) | Err(_) => {
                     errors += 1;
                     if errors > MAX_ERRORS {
@@ -339,7 +350,7 @@ impl<'a> XmodemSend<'a> {
             }
         }
 
-        // Phase 2: empty 128-byte null packet (YModem batch terminator)
+        // YModem batch terminator: null SOH packet (seq=0, 128 zero bytes)
         let data = [0u8; 128];
         let crc = crc16(&data);
         let packet = {
