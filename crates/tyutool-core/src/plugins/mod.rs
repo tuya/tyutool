@@ -16,6 +16,7 @@ pub use esp32::Esp32Plugin;
 pub use esp32c3::Esp32c3Plugin;
 pub use esp32c6::Esp32c6Plugin;
 pub use esp32s3::Esp32s3Plugin;
+pub use ln882h::Ln882hPlugin;
 pub use t1::T1Plugin;
 pub use t2::T2Plugin;
 pub use t3::T3Plugin;
