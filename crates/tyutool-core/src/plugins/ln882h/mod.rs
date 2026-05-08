@@ -1,5 +1,6 @@
 mod protocol;
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use serialport::SerialPort;
@@ -10,7 +11,8 @@ use crate::plugin::FlashPlugin;
 use crate::progress::FlashProgress;
 
 use protocol::{
-    flush_buffers, send_command, read_response, wait_for_response_containing, XmodemSend,
+    flush_buffers, send_command, read_response, read_flash_chunk, wait_for_response_containing,
+    XmodemSend,
 };
 
 const RAM_BIN: &[u8] = include_bytes!("ram.bin");
@@ -31,9 +33,7 @@ impl FlashPlugin for Ln882hPlugin {
         match job.mode {
             FlashMode::Flash => run_flash(job, cancel, progress),
             FlashMode::Erase => run_erase(job, cancel, progress),
-            FlashMode::Read => Err(FlashError::Plugin(
-                "LN882H: read is not yet supported".into(),
-            )),
+            FlashMode::Read => run_read(job, cancel, progress),
             FlashMode::Authorize => Err(FlashError::Plugin(
                 "LN882H: authorize mode not supported".into(),
             )),
@@ -256,6 +256,89 @@ fn run_flash(
             line: format!("Segment {}/{} written ({total_bytes} bytes).", idx + 1, total_segs),
         });
     }
+
+    progress(FlashProgress::Phase { name: "rebooting".into() });
+    send_command(&mut port, "reboot")?;
+    let _ = read_response(&mut port, 128, 1);
+
+    progress(FlashProgress::Percent { value: 100 });
+    Ok(())
+}
+
+fn run_read(
+    job: &FlashJob,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(FlashProgress),
+) -> Result<(), FlashError> {
+    let start_hex = job.read_start_hex.as_deref().unwrap_or("0x00000000");
+    let end_hex = job.read_end_hex.as_deref().unwrap_or("0x00200000");
+    let out_path = job
+        .read_file_path
+        .as_deref()
+        .ok_or_else(|| FlashError::InvalidJob("missing read_file_path".into()))?;
+
+    let start = parse_hex_addr(start_hex)
+        .map_err(|_| FlashError::InvalidJob(format!("invalid read_start_hex: {start_hex}")))?;
+    let end = parse_hex_addr(end_hex)
+        .map_err(|_| FlashError::InvalidJob(format!("invalid read_end_hex: {end_hex}")))?;
+
+    if end <= start {
+        return Err(FlashError::InvalidJob(
+            "read_end_hex must be greater than read_start_hex".into(),
+        ));
+    }
+
+    // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
+    let mut port = open_port(&job.port, 115200)?;
+    boot(&mut port, cancel, progress)?;
+
+    progress(FlashProgress::Phase { name: "reading".into() });
+    progress(FlashProgress::LogLine {
+        line: format!("Reading 0x{start:08x}..0x{end:08x} to {out_path}"),
+    });
+
+    let mut file = std::fs::File::create(out_path)
+        .map_err(|e| FlashError::Plugin(format!("cannot create output file '{out_path}': {e}")))?;
+
+    const CHUNK: u32 = 0x100; // flash_read reads 256 bytes per call
+    let total = (end - start) as usize;
+    let num_chunks = total.div_ceil(CHUNK as usize);
+    let mut chunks_done = 0usize;
+
+    let mut addr = start;
+    while addr < end {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(FlashError::Cancelled);
+        }
+
+        // Retry up to 3 times on CRC mismatch or parse error
+        let chunk_data = (0..3)
+            .find_map(|attempt| {
+                match read_flash_chunk(&mut port, addr) {
+                    Ok(d) => Some(Ok(d)),
+                    Err(e) if attempt < 2 => {
+                        log::warn!("flash_read retry {attempt} at 0x{addr:08x}: {e}");
+                        None
+                    }
+                    Err(e) => Some(Err(e)),
+                }
+            })
+            .unwrap()?;
+
+        // Last chunk may be partial
+        let to_write = ((end - addr) as usize).min(CHUNK as usize);
+        file.write_all(&chunk_data[..to_write])
+            .map_err(|e| FlashError::Plugin(format!("write error: {e}")))?;
+
+        addr += CHUNK;
+        chunks_done += 1;
+        let pct = (chunks_done as u64 * 100 / num_chunks as u64).min(99) as u8;
+        progress(FlashProgress::Percent { value: pct });
+    }
+
+    progress(FlashProgress::LogLine {
+        line: format!("Read complete: {total} bytes saved to {out_path}"),
+    });
 
     progress(FlashProgress::Phase { name: "rebooting".into() });
     send_command(&mut port, "reboot")?;

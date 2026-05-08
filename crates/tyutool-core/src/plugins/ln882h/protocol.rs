@@ -114,8 +114,84 @@ pub fn read_response(
     }
     Ok(result)
 }
+/// Read bytes until `\n` (inclusive) with a per-line `timeout_secs` deadline.
+/// Used for parsing `flash_read` responses.
+pub fn read_line(port: &mut Box<dyn SerialPort>, timeout_secs: u64) -> Result<String, FlashError> {
+    port.set_timeout(Duration::from_millis(100))?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    let mut buf = Vec::with_capacity(600);
+    let mut byte = [0u8; 1];
+    loop {
+        if Instant::now() >= deadline {
+            return Err(FlashError::Plugin("flash_read: line read timeout".into()));
+        }
+        match port.read(&mut byte) {
+            Ok(1) => {
+                buf.push(byte[0]);
+                if byte[0] == b'\n' {
+                    break;
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(FlashError::Io(e)),
+            _ => {}
+        }
+    }
+    String::from_utf8(buf)
+        .map_err(|_| FlashError::Plugin("flash_read: non-UTF8 response line".into()))
+}
 
-/// Wait for `needle` to appear in a response within `timeout_secs`.
+/// Read 256 bytes from flash at `addr` using `flash_read 0x<addr> 0x100`.
+///
+/// Response format (reference: LN882Loader/YModem.py `read_flash`):
+///   Line 1: command echo
+///   Line 2: 512 hex chars (256 bytes, may have spaces) + 4 CRC16 hex chars + `\r\n`
+///
+/// Returns `Err` if the response length is wrong or CRC does not match.
+pub fn read_flash_chunk(
+    port: &mut Box<dyn SerialPort>,
+    addr: u32,
+) -> Result<[u8; 256], FlashError> {
+    flush_buffers(port)?;
+    send_command(port, &format!("flash_read 0x{addr:x} 0x100"))?;
+
+    let _echo = read_line(port, 5)?;
+    let data_line = read_line(port, 5)?;
+
+    // Strip all whitespace — device may insert spaces between hex pairs
+    let hex_str: String = data_line.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+
+    const EXPECTED: usize = 256 * 2 + 4; // 512 data hex + 4 CRC hex
+    if hex_str.len() != EXPECTED {
+        return Err(FlashError::Plugin(format!(
+            "flash_read 0x{addr:08x}: response length {} ≠ {EXPECTED}",
+            hex_str.len()
+        )));
+    }
+
+    let (data_hex, crc_hex) = hex_str.split_at(512);
+
+    let mut data = [0u8; 256];
+    for (i, pair) in data_hex.as_bytes().chunks(2).enumerate() {
+        let s = std::str::from_utf8(pair)
+            .map_err(|_| FlashError::Plugin("flash_read: non-UTF8 hex pair".into()))?;
+        data[i] = u8::from_str_radix(s, 16)
+            .map_err(|_| FlashError::Plugin(format!("flash_read: invalid hex '{s}'")))?;
+    }
+
+    let expected_crc = u16::from_str_radix(crc_hex, 16)
+        .map_err(|_| FlashError::Plugin("flash_read: invalid CRC hex".into()))?;
+    let actual_crc = crc16(&data);
+    if expected_crc != actual_crc {
+        return Err(FlashError::Plugin(format!(
+            "flash_read: CRC mismatch at 0x{addr:08x} (got 0x{actual_crc:04x}, expected 0x{expected_crc:04x})"
+        )));
+    }
+
+    Ok(data)
+}
+
+
 /// Returns `Err(FlashError::Plugin)` on timeout.
 pub fn wait_for_response_containing(
     port: &mut Box<dyn SerialPort>,
