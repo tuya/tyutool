@@ -33,7 +33,9 @@ describe('CHIP_MANIFEST', () => {
   });
 
   it('Beken chips have authInfo and fullChipNoRf presets', () => {
-    const bekenIds = CHIP_IDS.filter(id => !id.startsWith('esp'));
+    const bekenIds = (['bk7231n', 't1', 't2', 't3', 't5'] as const).filter(id =>
+      CHIP_IDS.includes(id),
+    );
     for (const id of bekenIds) {
       const m = CHIP_MANIFEST[id];
       expect(m.erasePresets.authInfo).toBeDefined();

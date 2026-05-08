@@ -105,6 +105,15 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
       fullChipNoRf: { start: '0x00000000', end: '0x001EDFFF' },
     },
   },
+  ln882h: {
+    rustPluginId: 'LN882H',
+    defaultBaudRate: 115200,
+    flashSize: '0x00200000', // 2 MiB
+    eraseRequires4KAlignment: true,
+    erasePresets: {
+      fullChip: { start: '0x00000000', end: '0x00200000' },
+    },
+  },
 };
 
 /** Get manifest for a chip id; throws if unknown. */
