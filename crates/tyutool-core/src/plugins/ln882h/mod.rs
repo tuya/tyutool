@@ -101,7 +101,7 @@ fn boot(
 
     // Step 3: set_baudrate — switch to 921600 for faster flash operations
     progress(FlashProgress::Phase { name: "switching_baud".into() });
-    for attempt in 0..3 {
+    for _ in 0..3 {
         if cancel.load(Ordering::Relaxed) {
             return Err(FlashError::Cancelled);
         }
@@ -113,11 +113,8 @@ fn boot(
         if check_ram_mode(port)? {
             return Ok(());
         }
-        if attempt == 2 {
-            return Err(FlashError::Plugin("LN882H: baud rate switch to 921600 failed".into()));
-        }
     }
-    Ok(())
+    Err(FlashError::Plugin("LN882H: baud rate switch to 921600 failed".into()))
 }
 
 fn run_erase(
@@ -140,6 +137,15 @@ fn run_erase(
     }
     let length = end - start;
 
+    // LN882H requires 4 KiB-aligned erase regions
+    const SECTOR: u32 = 0x1000;
+    if start % SECTOR != 0 || length % SECTOR != 0 {
+        return Err(FlashError::InvalidJob(
+            "LN882H: erase start and length must be 4 KiB aligned".into(),
+        ));
+    }
+
+    // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
     boot(&mut port, cancel, progress)?;
 
@@ -149,7 +155,7 @@ fn run_erase(
     });
 
     send_command(&mut port, &format!("ferase 0x{start:x} 0x{length:x}"))?;
-    wait_for_response_containing(&mut port, b"pppp", 5)?;
+    wait_for_response_containing(&mut port, b"pppp", 120)?;
 
     progress(FlashProgress::LogLine { line: "Erase complete.".into() });
 
@@ -166,6 +172,7 @@ fn run_flash(
 ) -> Result<(), FlashError> {
     let segments = resolve_segments(job)?;
 
+    // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
     boot(&mut port, cancel, progress)?;
 
@@ -182,6 +189,13 @@ fn run_flash(
         let data = std::fs::read(&seg.firmware_path).map_err(|e| {
             FlashError::Plugin(format!("cannot read firmware '{}': {e}", seg.firmware_path))
         })?;
+
+        if data.is_empty() {
+            return Err(FlashError::InvalidJob(format!(
+                "firmware file '{}' is empty",
+                seg.firmware_path
+            )));
+        }
 
         // Align erase length to 4 KiB sector
         const SECTOR: u32 = 0x1000;
@@ -200,7 +214,7 @@ fn run_flash(
         });
 
         send_command(&mut port, &format!("ferase 0x{start:x} 0x{erase_len:x}"))?;
-        wait_for_response_containing(&mut port, b"pppp", 5)?;
+        wait_for_response_containing(&mut port, b"pppp", 120)?;
 
         send_command(&mut port, &format!("startaddr 0x{start:x}"))?;
         wait_for_response_containing(&mut port, b"pppp", 5)?;

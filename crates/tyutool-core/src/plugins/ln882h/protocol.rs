@@ -9,7 +9,6 @@ pub const SOH: u8 = 0x01;  // 128-byte packet header
 pub const STX: u8 = 0x02;  // 1024+ byte packet header
 pub const EOT: u8 = 0x04;  // end of transmission
 pub const ACK: u8 = 0x06;  // acknowledge
-pub const NAK: u8 = 0x15;  // negative acknowledge
 pub const CAN: u8 = 0x18;  // cancel
 pub const CRC_BYTE: u8 = b'C'; // device requests CRC mode
 
