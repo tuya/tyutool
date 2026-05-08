@@ -57,11 +57,13 @@ fn check_ram_mode(port: &mut Box<dyn SerialPort>) -> Result<bool, FlashError> {
 }
 
 /// Full boot sequence: wait for device ready, optionally load RAM code, switch to flash baud.
+/// `switch_baud`: true for flash/erase (921600), false for read (stays at 115200).
 /// The user must reset the device before invoking the tool.
 fn boot(
     port: &mut Box<dyn SerialPort>,
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashProgress),
+    switch_baud: bool,
 ) -> Result<(), FlashError> {
     // Step 1: show_version — wait up to 20 s for device to respond
     progress(FlashProgress::Phase { name: "connecting".into() });
@@ -109,7 +111,10 @@ fn boot(
         }
     }
 
-    // Step 3: set_baudrate — switch to 921600 for faster flash operations
+    // Step 3: set_baudrate — switch to 921600 for flash/erase (not needed for read)
+    if !switch_baud {
+        return Ok(());
+    }
     progress(FlashProgress::Phase { name: "switching_baud".into() });
     for _ in 0..3 {
         if cancel.load(Ordering::Relaxed) {
@@ -158,7 +163,7 @@ fn run_erase(
 
     // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress)?;
+    boot(&mut port, cancel, progress, true)?;
 
     progress(FlashProgress::Phase { name: "erasing".into() });
     progress(FlashProgress::LogLine {
@@ -185,7 +190,7 @@ fn run_flash(
 
     // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress)?;
+    boot(&mut port, cancel, progress, true)?;
 
     let total_segs = segments.len();
     for (idx, seg) in segments.iter().enumerate() {
@@ -290,7 +295,7 @@ fn run_read(
 
     // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress)?;
+    boot(&mut port, cancel, progress, false)?;
 
     progress(FlashProgress::Phase { name: "reading".into() });
     progress(FlashProgress::LogLine {
