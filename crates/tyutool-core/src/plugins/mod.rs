@@ -5,6 +5,7 @@ pub mod esp32;
 pub mod esp32c3;
 pub mod esp32c6;
 pub mod esp32s3;
+pub mod ln882h;
 pub mod t1;
 pub mod t2;
 pub mod t3;
