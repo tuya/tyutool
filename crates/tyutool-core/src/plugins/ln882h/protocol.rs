@@ -59,10 +59,12 @@ mod tests {
     }
 
     #[test]
-    fn crc16_single_byte() {
-        // index 1 in table = 0x1021
-        assert_eq!(CRC_TABLE[1], 0x1021);
+    fn crc16_table_spot_check() {
+        // Verify compile-time table generation is correct
         assert_eq!(CRC_TABLE[0], 0x0000);
+        assert_eq!(CRC_TABLE[1], 0x1021);
+        // Verify function uses the table correctly for a single byte
+        assert_eq!(crc16(&[0x01]), 0x1021);
     }
 }
 
@@ -80,7 +82,8 @@ pub fn send_command(port: &mut Box<dyn SerialPort>, cmd: &str) -> Result<(), Fla
 }
 
 /// Read up to `max_bytes` for up to `timeout_secs`, return collected bytes.
-/// Uses a 100 ms read timeout on the port; caller must reset port timeout if needed.
+/// Sets port read timeout to 100 ms. Stops at two `\n` bytes or `max_bytes`.
+/// Caller is responsible for resetting the port timeout afterward if needed.
 pub fn read_response(
     port: &mut Box<dyn SerialPort>,
     max_bytes: usize,
@@ -204,25 +207,23 @@ impl<'a> XmodemSend<'a> {
 
     /// Send filename/size header packet (SOH seq=0), wait for ACK+CRC from device.
     fn receive_response(&mut self, file_name: &str, file_size: usize) -> Result<(), FlashError> {
-        let mut data = [0u8; 128];
-        let name = file_name.as_bytes();
-        let name_end = name.len().min(127);
-        data[..name_end].copy_from_slice(&name[..name_end]);
-        data[name_end] = 0;
+        // Build filename/size payload matching Python reference:
+        // name + b'\x00' + size_digits + b'\x20', ljust(128, b'\x00')
+        let mut payload = vec![0u8; 128];
+        let name_bytes = file_name.as_bytes();
+        let name_len = name_bytes.len().min(116); // cap to leave room for \0 + size + \x20
+        payload[..name_len].copy_from_slice(&name_bytes[..name_len]);
         let size_str = file_size.to_string();
-        let sb = size_str.as_bytes();
-        let sz_start = name_end + 1;
-        let sz_end = (sz_start + sb.len()).min(128);
-        if sz_start < 128 {
-            data[sz_start..sz_end].copy_from_slice(&sb[..sz_end - sz_start]);
-        }
-        if sz_end < 128 {
-            data[sz_end] = 0x20; // space separator (matches Python reference)
-        }
-        let crc = crc16(&data);
+        let sz_bytes = size_str.as_bytes();
+        let sz_start = name_len + 1;
+        let sz_end = (sz_start + sz_bytes.len()).min(127);
+        payload[sz_start..sz_end].copy_from_slice(&sz_bytes[..sz_end - sz_start]);
+        payload[sz_end] = 0x20;
+
+        let crc = crc16(&payload);
         let packet = {
             let mut p = vec![SOH, 0x00, 0xFF];
-            p.extend_from_slice(&data);
+            p.extend_from_slice(&payload);
             p.push((crc >> 8) as u8);
             p.push((crc & 0xFF) as u8);
             p
@@ -235,7 +236,11 @@ impl<'a> XmodemSend<'a> {
         loop {
             match self.read_byte() {
                 Ok(ACK) => {
-                    let _ = self.read_byte(); // consume the CRC byte that follows ACK
+                    match self.read_byte() {
+                        Ok(CRC_BYTE) => {}
+                        Ok(b) => log::warn!("xmodem: expected CRC_BYTE after ACK, got 0x{b:02x}"),
+                        Err(_) => {}
+                    }
                     return Ok(());
                 }
                 Ok(CAN) => {
@@ -296,6 +301,10 @@ impl<'a> XmodemSend<'a> {
                 match self.read_byte() {
                     Ok(ACK) => break,
                     Ok(_) | Err(_) => {
+                        if cancel.load(Ordering::Relaxed) {
+                            self.abort();
+                            return Err(FlashError::Cancelled);
+                        }
                         errors += 1;
                         if errors > MAX_ERRORS {
                             self.abort();
