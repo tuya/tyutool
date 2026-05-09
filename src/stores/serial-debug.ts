@@ -84,9 +84,23 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   }
 
   function pushLine(direction: DebugLogLine['direction'], tsMs: number, text: string, rawBytes?: Uint8Array): void {
-    lines.value.push({ id: nextLineId++, direction, tsMs, text, rawBytes });
+    const line: DebugLogLine = { id: nextLineId++, direction, tsMs, text, rawBytes };
+    lines.value.push(line);
     if (lines.value.length > MAX_LOG_LINES) {
       lines.value.splice(0, lines.value.length - MAX_LOG_LINES);
+    }
+    if (filterWindowOpen.value) {
+      void maybeEmitFeedLine(line);
+    }
+  }
+
+  async function maybeEmitFeedLine(line: DebugLogLine): Promise<void> {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const w = await WebviewWindow.getByLabel('serial-debug-filter');
+      if (w) await w.emit('serial-debug-filter-feed', { line });
+    } catch {
+      // window closed or not Tauri — nothing to do
     }
   }
 
@@ -116,6 +130,15 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     lines.value = [];
     pending.tx = '';
     pending.rx = '';
+    if (filterWindowOpen.value) {
+      void (async () => {
+        try {
+          const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+          const w = await WebviewWindow.getByLabel('serial-debug-filter');
+          if (w) await w.emit('serial-debug-filter-clear', {});
+        } catch { /* ignore */ }
+      })();
+    }
   }
 
   async function stopBackendSession(): Promise<void> {
@@ -234,6 +257,24 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   async function openFilterWindow(): Promise<'native' | 'inline'> {
     const kind = await transport.openFilterWindow();
     filterWindowOpen.value = true;
+    if (kind === 'native') {
+      // Wait briefly for the child window to attach its listeners, then send snapshot.
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const tries = 10;
+      for (let i = 0; i < tries; i++) {
+        const w = await WebviewWindow.getByLabel('serial-debug-filter');
+        if (w) {
+          await new Promise((r) => setTimeout(r, 200));
+          await w.emit('serial-debug-filter-init', {
+            lines: lines.value,
+            filterText: filterText.value,
+            filterMode: filterMode.value,
+          });
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
     return kind;
   }
 
