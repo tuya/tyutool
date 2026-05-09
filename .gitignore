@@ -40,3 +40,4 @@ tmp/
 # ── Claude Code ───────────────────────────────────────────────────────────────
 .claude/
 docs/superpowers/
+.superpowers/
