@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serialport::SerialPort;
 use crate::error::FlashError;
 
+const CHUNK_SIZE: usize = 0xFF; // 255 bytes per flash_read (device limit: < 0x100)
+
 // XMODEM control bytes
 pub const SOH: u8 = 0x01;  // 128-byte packet header
 pub const STX: u8 = 0x02;  // 1024+ byte packet header
@@ -114,82 +116,6 @@ pub fn read_response(
     }
     Ok(result)
 }
-/// Read bytes until `\n` (inclusive) with a per-line `timeout_secs` deadline.
-/// Used for parsing `flash_read` responses.
-pub fn read_line(port: &mut Box<dyn SerialPort>, timeout_secs: u64) -> Result<String, FlashError> {
-    port.set_timeout(Duration::from_millis(100))?;
-    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
-    let mut buf = Vec::with_capacity(600);
-    let mut byte = [0u8; 1];
-    loop {
-        if Instant::now() >= deadline {
-            return Err(FlashError::Plugin("flash_read: line read timeout".into()));
-        }
-        match port.read(&mut byte) {
-            Ok(1) => {
-                buf.push(byte[0]);
-                if byte[0] == b'\n' {
-                    break;
-                }
-            }
-            Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
-            Err(e) => return Err(FlashError::Io(e)),
-            _ => {}
-        }
-    }
-    String::from_utf8(buf)
-        .map_err(|_| FlashError::Plugin("flash_read: non-UTF8 response line".into()))
-}
-
-/// Read 256 bytes from flash at `addr` using `flash_read 0x<addr> 0x100`.
-///
-/// Response format (reference: LN882Loader/YModem.py `read_flash`):
-///   Line 1: command echo
-///   Line 2: 512 hex chars (256 bytes, may have spaces) + 4 CRC16 hex chars + `\r\n`
-///
-/// Returns `Err` if the response length is wrong or CRC does not match.
-pub fn read_flash_chunk(
-    port: &mut Box<dyn SerialPort>,
-    addr: u32,
-) -> Result<[u8; 256], FlashError> {
-    flush_buffers(port)?;
-    send_command(port, &format!("flash_read 0x{addr:x} 0x100"))?;
-
-    let _echo = read_line(port, 5)?;
-    let data_line = read_line(port, 5)?;
-
-    // Strip all whitespace — device may insert spaces between hex pairs
-    let hex_str: String = data_line.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-
-    const EXPECTED: usize = 256 * 2 + 4; // 512 data hex + 4 CRC hex
-    if hex_str.len() != EXPECTED {
-        return Err(FlashError::Plugin(format!(
-            "flash_read 0x{addr:08x}: response length {} ≠ {EXPECTED}",
-            hex_str.len()
-        )));
-    }
-
-    let (data_hex, crc_hex) = hex_str.split_at(512);
-
-    let mut data = [0u8; 256];
-    for (i, pair) in data_hex.as_bytes().chunks(2).enumerate() {
-        let s = std::str::from_utf8(pair)
-            .map_err(|_| FlashError::Plugin("flash_read: non-UTF8 hex pair".into()))?;
-        data[i] = u8::from_str_radix(s, 16)
-            .map_err(|_| FlashError::Plugin(format!("flash_read: invalid hex '{s}'")))?;
-    }
-
-    let expected_crc = u16::from_str_radix(crc_hex, 16)
-        .map_err(|_| FlashError::Plugin("flash_read: invalid CRC hex".into()))?;
-    let actual_crc = crc16(&data);
-    if expected_crc != actual_crc {
-        return Err(FlashError::Plugin(format!(
-            "flash_read: CRC mismatch at 0x{addr:08x} (got 0x{actual_crc:04x}, expected 0x{expected_crc:04x})"
-        )));
-    }
-
-    Ok(data)
-}
 
 
 /// Returns `Err(FlashError::Plugin)` on timeout.
@@ -208,6 +134,71 @@ pub fn wait_for_response_containing(
             std::str::from_utf8(&data).unwrap_or("(binary)")
         )))
     }
+}
+
+fn hex_nibble(b: u8) -> Result<u8, FlashError> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'A'..=b'F' => Ok(b - b'A' + 10),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        _ => Err(FlashError::Plugin(format!("flash_read: invalid hex byte 0x{b:02x}"))),
+    }
+}
+
+/// Read one CHUNK_SIZE-byte chunk from flash at `addr` using the RAM code `flash_read` command.
+///
+/// Protocol: send `flash_read 0x{addr:x} 0x{CHUNK_SIZE:x}\r\n`, receive:
+///   - Echo: the command string
+///   - Data: CHUNK_SIZE bytes each as `"HH "` (2 uppercase hex + space)
+///   - CRC:  CRC16 high byte as `"HH "` then low byte as `"HH "` (6 chars total)
+pub fn read_flash_chunk(
+    port: &mut Box<dyn SerialPort>,
+    addr: u32,
+) -> Result<[u8; CHUNK_SIZE], FlashError> {
+    let cmd = format!("flash_read 0x{addr:x} 0x{CHUNK_SIZE:x}\r\n");
+    port.write_all(cmd.as_bytes())?;
+
+    // echo (cmd.len()) + (CHUNK_SIZE + 2 CRC bytes) × 3 chars each ("HH ")
+    let expected = cmd.len() + (CHUNK_SIZE + 2) * 3;
+    let mut buf = vec![0u8; expected];
+    let mut received = 0usize;
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    port.set_timeout(Duration::from_millis(500))?;
+    while received < expected {
+        if Instant::now() >= deadline {
+            return Err(FlashError::Plugin(format!(
+                "flash_read 0x{addr:x}: timeout ({received}/{expected} bytes)"
+            )));
+        }
+        match port.read(&mut buf[received..]) {
+            Ok(n) if n > 0 => received += n,
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(FlashError::Io(e)),
+            _ => {}
+        }
+    }
+
+    // Parse (CHUNK_SIZE + 2) hex pairs starting after the echo
+    let data_crc = &buf[cmd.len()..];
+    let mut parsed = [0u8; CHUNK_SIZE + 2];
+    for (i, out) in parsed.iter_mut().enumerate() {
+        let off = i * 3;
+        *out = (hex_nibble(data_crc[off])? << 4) | hex_nibble(data_crc[off + 1])?;
+        // data_crc[off + 2] == b' '
+    }
+
+    let expected_crc = ((parsed[CHUNK_SIZE] as u16) << 8) | (parsed[CHUNK_SIZE + 1] as u16);
+    let actual_crc = crc16(&parsed[..CHUNK_SIZE]);
+    if actual_crc != expected_crc {
+        return Err(FlashError::Plugin(format!(
+            "flash_read 0x{addr:x}: CRC mismatch (expected 0x{expected_crc:04x}, got 0x{actual_crc:04x})"
+        )));
+    }
+
+    let mut result = [0u8; CHUNK_SIZE];
+    result.copy_from_slice(&parsed[..CHUNK_SIZE]);
+    Ok(result)
 }
 
 /// XMODEM-CRC16 sender. Implements the YModem-style protocol used by the LN882H bootloader.

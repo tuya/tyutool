@@ -1,6 +1,5 @@
 mod protocol;
 
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use serialport::SerialPort;
@@ -11,8 +10,8 @@ use crate::plugin::FlashPlugin;
 use crate::progress::FlashProgress;
 
 use protocol::{
-    flush_buffers, send_command, read_response, read_flash_chunk, wait_for_response_containing,
-    XmodemSend,
+    flush_buffers, send_command, read_response, wait_for_response_containing,
+    XmodemSend, read_flash_chunk,
 };
 
 const RAM_BIN: &[u8] = include_bytes!("ram.bin");
@@ -42,15 +41,29 @@ impl FlashPlugin for Ln882hPlugin {
 }
 
 fn open_port(port_name: &str, baud: u32) -> Result<Box<dyn SerialPort>, FlashError> {
-    serialport::new(port_name, baud)
-        .timeout(Duration::from_millis(100))
-        .open()
-        .map_err(FlashError::Serial)
+    // Retry up to 10 times with 1 s delay: CH340 briefly disconnects after device reboot,
+    // and the kernel ioctl inside serialport::open() can block for several seconds on the
+    // transition.  Retrying lets us ride out the reconnect window gracefully.
+    let mut last_err = None;
+    for attempt in 0..10 {
+        match serialport::new(port_name, baud)
+            .timeout(Duration::from_millis(100))
+            .open()
+        {
+            Ok(port) => return Ok(port),
+            Err(e) => {
+                log::warn!("open_port attempt {attempt}: {e}");
+                last_err = Some(FlashError::Serial(e));
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    }
+    Err(last_err.unwrap())
 }
 
 /// Send "version\r\n" and return true if response contains "RAMCODE" (device in RAM mode).
 fn check_ram_mode(port: &mut Box<dyn SerialPort>) -> Result<bool, FlashError> {
-    flush_buffers(port)?;
+    let _ = flush_buffers(port);
     send_command(port, "version")?;
     let resp = read_response(port, 256, 1)?;
     Ok(resp.windows(7).any(|w| w == b"RAMCODE"))
@@ -58,40 +71,70 @@ fn check_ram_mode(port: &mut Box<dyn SerialPort>) -> Result<bool, FlashError> {
 
 /// Full boot sequence: wait for device ready, optionally load RAM code, switch to flash baud.
 /// `switch_baud`: true for flash/erase (921600), false for read (stays at 115200).
-/// The user must reset the device before invoking the tool.
+/// The user must reset the device with the BOOT/A9 pin held LOW before invoking the tool.
 fn boot(
     port: &mut Box<dyn SerialPort>,
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashProgress),
     switch_baud: bool,
 ) -> Result<(), FlashError> {
-    // Step 1: show_version — wait up to 20 s for device to respond
-    progress(FlashProgress::Phase { name: "connecting".into() });
-    let mut connected = false;
-    for _ in 0..20 {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(FlashError::Cancelled);
+    // Steps 1+2: connect and load RAM code.  Retried up to 3 times when XMODEM fails —
+    // this happens when the device boots into firmware mode instead of ROM download mode
+    // (BOOT/A9 pin was not held LOW).  After each failure we ask the user to retry with
+    // the pin held, then wait for the device to respond again.
+    let mut ram_ready = false;
+    for boot_attempt in 0..3u8 {
+        if boot_attempt > 0 {
+            progress(FlashProgress::LogLine {
+                line: "Device not in ROM download mode — hold BOOT/A9 pin LOW, then power-cycle the device".into(),
+            });
         }
-        flush_buffers(port)?;
-        send_command(port, "version")?;
-        let resp = read_response(port, 256, 1)?;
-        if resp.windows(7).any(|w| w == b"RAMCODE") || resp.len() > 5 {
-            connected = true;
+
+        // Step 1: show_version — wait up to 20 s for device to respond.
+        // flush/write/read errors are ignored: CH340 briefly disconnects during device reset
+        // (EIO from tcflush), so we keep retrying until the device responds or time runs out.
+        progress(FlashProgress::Phase { name: "connecting".into() });
+        let mut connected = false;
+        for _ in 0..20 {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            let _ = flush_buffers(port);
+            if send_command(port, "version").is_err() {
+                std::thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+            let resp = match read_response(port, 256, 1) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            if resp.windows(7).any(|w| w == b"RAMCODE") || resp.len() > 5 {
+                connected = true;
+                break;
+            }
+        }
+        if !connected {
+            return Err(FlashError::Plugin(
+                "LN882H: device did not respond — reset the device and retry".into(),
+            ));
+        }
+
+        // Step 2: load RAM code if not already in RAM mode.
+        if check_ram_mode(port)? {
+            ram_ready = true;
             break;
         }
-    }
-    if !connected {
-        return Err(FlashError::Plugin(
-            "LN882H: device did not respond — reset the device and retry".into(),
-        ));
-    }
 
-    // Step 2: check_boot_version — load RAM code if not already in RAM mode
-    if !check_ram_mode(port)? {
         progress(FlashProgress::Phase { name: "loading_ram".into() });
         let cmd = format!("download [rambin] [0x20000000] [{}]", RAM_BIN.len());
         send_command(port, &cmd)?;
-        XmodemSend::new(port, RAM_BIN, 1024).send("ram.bin", cancel, &|_, _| {})?;
+
+        match XmodemSend::new(port, RAM_BIN, 1024).send("ram.bin", cancel, &|_, _| {}) {
+            Ok(()) => {}
+            Err(FlashError::Cancelled) => return Err(FlashError::Cancelled),
+            Err(_) => continue, // XMODEM failed: retry outer loop with BOOT pin message
+        }
+
         // Drain post-transfer noise, then wait for RAM code to boot up (reference uses 5 s)
         let _ = read_response(port, 300, 1);
         std::thread::sleep(Duration::from_secs(5));
@@ -109,6 +152,14 @@ fn boot(
                 "LN882H: RAM code upload failed — device did not enter RAM mode".into(),
             ));
         }
+        ram_ready = true;
+        break;
+    }
+
+    if !ram_ready {
+        return Err(FlashError::Plugin(
+            "LN882H: could not enter download mode after 3 attempts — ensure BOOT/A9 pin is held LOW during power-on".into(),
+        ));
     }
 
     // Step 3: set_baudrate — switch to 921600 for flash/erase (not needed for read)
@@ -120,7 +171,7 @@ fn boot(
         if cancel.load(Ordering::Relaxed) {
             return Err(FlashError::Cancelled);
         }
-        flush_buffers(port)?;
+        let _ = flush_buffers(port);
         send_command(port, "baudrate 921600")?;
         let _ = read_response(port, 128, 1);
         port.set_baud_rate(921600)?;
@@ -131,6 +182,92 @@ fn boot(
         }
     }
     Err(FlashError::Plugin("LN882H: baud rate switch to 921600 failed".into()))
+}
+
+fn run_read(
+    job: &FlashJob,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(FlashProgress),
+) -> Result<(), FlashError> {
+    const CHUNK: u32 = 0xFF; // device limit: < 0x100 per flash_read
+
+    let start = parse_hex_addr(job.read_start_hex.as_deref().unwrap_or("0x00000000"))
+        .map_err(|_| FlashError::InvalidJob("invalid read_start_hex".into()))?;
+    let end = parse_hex_addr(job.read_end_hex.as_deref().unwrap_or("0x00200000"))
+        .map_err(|_| FlashError::InvalidJob("invalid read_end_hex".into()))?;
+
+    if end <= start {
+        return Err(FlashError::InvalidJob(
+            "read_end_hex must be greater than read_start_hex".into(),
+        ));
+    }
+    let length = end - start;
+
+    let file_path = job
+        .read_file_path
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| FlashError::InvalidJob("missing read_file_path".into()))?;
+
+    let mut port = open_port(&job.port, 115200)?;
+    // Boot stays at 115200; read protocol switches to 1 Mbaud itself
+    boot(&mut port, cancel, progress, false)?;
+
+    // Switch to 1 Mbaud for reads (matches LN882H_CMD_Tool reference)
+    progress(FlashProgress::Phase { name: "switching_baud".into() });
+    send_command(&mut port, "baudrate 1000000")?;
+    let _ = read_response(&mut port, 64, 1);
+    port.set_baud_rate(1000000)?;
+    std::thread::sleep(Duration::from_millis(200));
+    // Flush any garbage and verify RAM code is alive at new baud
+    let _ = flush_buffers(&mut port);
+    send_command(&mut port, "version")?;
+    wait_for_response_containing(&mut port, b"RAMCODE", 3)?;
+
+    progress(FlashProgress::Phase { name: "reading".into() });
+    progress(FlashProgress::LogLine {
+        line: format!("Reading 0x{start:08x}..0x{end:08x} ({length} bytes)"),
+    });
+
+    // Read in CHUNK-aligned passes; trim to [start, end) at byte level
+    let aligned_start = (start / CHUNK) * CHUNK;
+    let aligned_end = ((end + CHUNK - 1) / CHUNK) * CHUNK;
+    let mut buf: Vec<u8> = Vec::with_capacity(length as usize);
+    let mut addr = aligned_start;
+
+    while addr < aligned_end {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(FlashError::Cancelled);
+        }
+        let chunk = read_flash_chunk(&mut port, addr)?;
+
+        // Trim to the requested [start, end) window
+        let chunk_start = addr;
+        let chunk_end = addr + CHUNK;
+        let keep_start = start.max(chunk_start) - chunk_start;
+        let keep_end = end.min(chunk_end) - chunk_start;
+        buf.extend_from_slice(&chunk[keep_start as usize..keep_end as usize]);
+
+        addr += CHUNK;
+        let done = (addr.min(aligned_end) - aligned_start) as u64;
+        let total = (aligned_end - aligned_start) as u64;
+        progress(FlashProgress::Percent { value: (done * 90 / total) as u8 });
+    }
+
+    // Switch back to 115200 so device is in a predictable state
+    send_command(&mut port, "baudrate 115200")?;
+    let _ = read_response(&mut port, 64, 1);
+    port.set_baud_rate(115200)?;
+
+    progress(FlashProgress::Phase { name: "saving".into() });
+    std::fs::write(file_path, &buf)
+        .map_err(|e| FlashError::Plugin(format!("cannot write '{file_path}': {e}")))?;
+
+    progress(FlashProgress::LogLine {
+        line: format!("Read complete: {} bytes saved to {file_path}.", buf.len()),
+    });
+    progress(FlashProgress::Percent { value: 100 });
+    Ok(())
 }
 
 fn run_erase(
@@ -261,89 +398,6 @@ fn run_flash(
             line: format!("Segment {}/{} written ({total_bytes} bytes).", idx + 1, total_segs),
         });
     }
-
-    progress(FlashProgress::Phase { name: "rebooting".into() });
-    send_command(&mut port, "reboot")?;
-    let _ = read_response(&mut port, 128, 1);
-
-    progress(FlashProgress::Percent { value: 100 });
-    Ok(())
-}
-
-fn run_read(
-    job: &FlashJob,
-    cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
-) -> Result<(), FlashError> {
-    let start_hex = job.read_start_hex.as_deref().unwrap_or("0x00000000");
-    let end_hex = job.read_end_hex.as_deref().unwrap_or("0x00200000");
-    let out_path = job
-        .read_file_path
-        .as_deref()
-        .ok_or_else(|| FlashError::InvalidJob("missing read_file_path".into()))?;
-
-    let start = parse_hex_addr(start_hex)
-        .map_err(|_| FlashError::InvalidJob(format!("invalid read_start_hex: {start_hex}")))?;
-    let end = parse_hex_addr(end_hex)
-        .map_err(|_| FlashError::InvalidJob(format!("invalid read_end_hex: {end_hex}")))?;
-
-    if end <= start {
-        return Err(FlashError::InvalidJob(
-            "read_end_hex must be greater than read_start_hex".into(),
-        ));
-    }
-
-    // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
-    let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress, false)?;
-
-    progress(FlashProgress::Phase { name: "reading".into() });
-    progress(FlashProgress::LogLine {
-        line: format!("Reading 0x{start:08x}..0x{end:08x} to {out_path}"),
-    });
-
-    let mut file = std::fs::File::create(out_path)
-        .map_err(|e| FlashError::Plugin(format!("cannot create output file '{out_path}': {e}")))?;
-
-    const CHUNK: u32 = 0x100; // flash_read reads 256 bytes per call
-    let total = (end - start) as usize;
-    let num_chunks = total.div_ceil(CHUNK as usize);
-    let mut chunks_done = 0usize;
-
-    let mut addr = start;
-    while addr < end {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(FlashError::Cancelled);
-        }
-
-        // Retry up to 3 times on CRC mismatch or parse error
-        let chunk_data = (0..3)
-            .find_map(|attempt| {
-                match read_flash_chunk(&mut port, addr) {
-                    Ok(d) => Some(Ok(d)),
-                    Err(e) if attempt < 2 => {
-                        log::warn!("flash_read retry {attempt} at 0x{addr:08x}: {e}");
-                        None
-                    }
-                    Err(e) => Some(Err(e)),
-                }
-            })
-            .unwrap()?;
-
-        // Last chunk may be partial
-        let to_write = ((end - addr) as usize).min(CHUNK as usize);
-        file.write_all(&chunk_data[..to_write])
-            .map_err(|e| FlashError::Plugin(format!("write error: {e}")))?;
-
-        addr += CHUNK;
-        chunks_done += 1;
-        let pct = (chunks_done as u64 * 100 / num_chunks as u64).min(99) as u8;
-        progress(FlashProgress::Percent { value: pct });
-    }
-
-    progress(FlashProgress::LogLine {
-        line: format!("Read complete: {total} bytes saved to {out_path}"),
-    });
 
     progress(FlashProgress::Phase { name: "rebooting".into() });
     send_command(&mut port, "reboot")?;

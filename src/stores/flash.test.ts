@@ -302,6 +302,13 @@ describe('flash store', () => {
       expect(store.tabList.length).toBe(4);
       expect(store.tabList.map(t => t.id)).toEqual(['flash', 'erase', 'read', 'authorize']);
     });
+
+    it('has 4 tabs for ln882h (read supported)', () => {
+      const store = useFlashStore();
+      store.selectedChipId = 'ln882h';
+      expect(store.tabList.length).toBe(4);
+      expect(store.tabList.map(t => t.id)).toEqual(['flash', 'erase', 'read', 'authorize']);
+    });
   });
 
   // ── disconnect ──────────────────────────────────────────────────

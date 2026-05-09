@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
@@ -63,3 +65,78 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+## Project: tyutool
+
+Firmware flash tool for Tuya-class IoT devices. Supports a desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary. **Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+.
+
+### Commands
+
+```bash
+# Frontend
+pnpm install           # install JS deps
+pnpm run dev:web       # frontend-only dev server (no Tauri)
+pnpm run tauri:dev     # full GUI dev server with hot-reload
+pnpm run build         # type-check + vite build
+pnpm run test          # run frontend tests (vitest)
+pnpm run test:coverage # run with coverage
+pnpm run lint          # ESLint on src/
+pnpm run lint:fix      # ESLint with auto-fix
+pnpm run format        # Prettier format src/
+
+# Run a single frontend test file
+pnpm exec vitest run src/features/firmware-flash/hex.test.ts
+
+# Rust (CLI only)
+cargo build -p tyutool-cli --release
+cargo test -p tyutool-core
+cargo test -p tyutool-cli
+
+# Full GUI build
+pnpm run tauri:build
+```
+
+### Architecture
+
+```
+tyutool/
+├── crates/
+│   ├── tyutool-core/   # Rust library — all flash logic, chip plugins, serial utils
+│   └── tyutool-cli/    # Standalone CLI binary (uses tyutool-core only)
+├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
+│   └── src/lib.rs      # Tauri commands bridging the WebView to tyutool-core
+└── src/                # Vue 3 frontend (Vite, Pinia, Tailwind CSS v4, DaisyUI)
+    ├── features/firmware-flash/  # Flash feature: UI logic, chip manifests, Tauri/WS transport
+    ├── stores/          # Pinia stores (flash state, workspace persistence)
+    ├── components/      # Shared Vue components
+    ├── composables/     # Shared Vue composables
+    ├── locales/         # i18n strings (vue-i18n)
+    └── router/          # Vue Router routes
+```
+
+**`tyutool-core` is the single source of truth for flash logic** — it is shared by both the CLI and the GUI Tauri backend. Flash logic must never be duplicated into the frontend.
+
+#### Chip plugin system (Rust)
+
+Each supported chip is a `FlashPlugin` (`crates/tyutool-core/src/plugin.rs`). Plugins are registered in `FlashPluginRegistry` (`registry.rs`) by uppercase ID (e.g. `"BK7231N"`, `"T5"`). To add a chip: implement `FlashPlugin`, add the file under `crates/tyutool-core/src/plugins/`, and register it in `FlashPluginRegistry::new()`.
+
+#### Chip manifest system (Frontend)
+
+`src/features/firmware-flash/chip-manifests.ts` is the **single source of truth for per-chip UI parameters** (baud rate, flash size, erase presets, 4 KiB alignment requirement). The `rustPluginId` field maps each frontend `ChipId` to the Rust registry key. When adding a chip, update both the Rust registry and `CHIP_MANIFEST`.
+
+#### GUI ↔ Rust bridge
+
+The frontend calls Rust via Tauri commands defined in `src-tauri/src/lib.rs` (e.g. `flash_run`, `list_serial_ports_cmd`). Progress is streamed back as `flash-progress` events via `app.emit(...)`. In web-only dev mode (`dev:web`), `src/features/firmware-flash/ws-transport.ts` provides a WebSocket shim instead of real Tauri IPC.
+
+#### Frontend state
+
+All flash UI state lives in the Pinia store at `src/stores/flash.ts` (`useFlashStore`). Workspace persistence (serialized form fields) is handled by `src/stores/flash-workspace.ts` using `@tauri-apps/plugin-store`.
+
+### Key conventions
+
+- Frontend tests (`*.test.ts`) live alongside source files in `src/`. Run with vitest; `node` environment (no DOM).
+- Rust tests live alongside source in `crates/` or in `src-tauri/src/lib.rs`.
+- Pre-commit hooks (lefthook) auto-format staged `.ts`/`.vue` files with Prettier and staged `.rs` files with `cargo fmt`.
+- `@` alias resolves to `src/` in both Vite and vitest configs.

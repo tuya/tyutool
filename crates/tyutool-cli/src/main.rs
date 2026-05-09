@@ -20,7 +20,7 @@ enum Commands {
     /// Flash firmware to device
     Write {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t5"]))]
+        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t5", "ln882h"]))]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -41,7 +41,7 @@ enum Commands {
     /// Read flash from device
     Read {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t5"]))]
+        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t5", "ln882h"]))]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -102,8 +102,11 @@ enum Commands {
     },
 }
 
-fn default_baud(_device: &str) -> u32 {
-    921600
+fn default_baud(device: &str) -> u32 {
+    match device.to_ascii_lowercase().as_str() {
+        "ln882h" => 115200,
+        _ => 921600,
+    }
 }
 
 fn default_start(device: &str) -> String {
