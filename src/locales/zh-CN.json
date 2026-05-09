@@ -12,6 +12,7 @@
     "tagline": "嵌入式工具",
     "nav": {
       "flash": "固件烧录",
+      "serialDebug": "串口调试",
       "settings": "设置"
     },
     "mainNav": "主导航",
@@ -361,24 +362,66 @@
     }
   },
   "serialDebug": {
-    "err": {
-      "invalidConfig": "配置无效",
-      "openFailedWith": "打开失败: {msg}",
-      "sendFailed": "发送失败: {msg}",
-      "portDenied": "当前端口被占用，本次未打开"
+    "tool": "工具",
+    "pageTitle": "串口调试",
+    "introLead": "实时终端。",
+    "introRest": "看打印、发指令，断线自动提示。",
+    "conn": {
+      "port": "端口",
+      "refresh": "刷新端口",
+      "baud": "波特率",
+      "customBaud": "自定义",
+      "dataBits": "数据位",
+      "parity": "校验位",
+      "parityNone": "无",
+      "parityOdd": "奇",
+      "parityEven": "偶",
+      "stopBits": "停止位",
+      "autoRelease": "烧录时自动释放",
+      "autoReleaseTip": "开启后，烧录会在无提示下自动关闭本会话；烧录结束后尝试重新打开",
+      "hexView": "Hex 视图",
+      "clear": "清空",
+      "open": "打开",
+      "close": "关闭"
     },
     "send": {
+      "placeholder": "输入内容…",
+      "sendBtn": "发送",
       "hexParseIgnored": "已忽略 {n} 个不完整字节"
     },
+    "filter": {
+      "placeholder": "过滤字符串…",
+      "off": "关闭",
+      "include": "包含",
+      "exclude": "排除",
+      "openInWindow": "新窗口",
+      "openInline": "展开视图",
+      "inlineAppliedHint": "Web 模式下过滤已应用到主窗 — 不支持多窗口",
+      "hitCount": "命中 {hit} / 共 {total}"
+    },
     "log": {
+      "waitingData": "等待数据…",
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}"
+    },
+    "hexPopup": {
+      "titleHex": "十六进制视图",
+      "titleAscii": "ASCII 视图",
+      "copy": "复制",
+      "toHex": "以 Hex 查看",
+      "toAscii": "以 ASCII 查看"
     },
     "confirm": {
       "releaseForFlashTitle": "端口冲突",
       "releaseForFlashBody": "{requester} 正在请求该端口，是否让出？",
       "releaseOk": "让出",
       "releaseCancel": "取消"
+    },
+    "err": {
+      "invalidConfig": "配置无效",
+      "openFailedWith": "打开失败: {msg}",
+      "sendFailed": "发送失败: {msg}",
+      "portDenied": "当前端口被占用，本次未打开"
     }
   }
 }

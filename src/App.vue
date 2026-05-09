@@ -22,6 +22,7 @@ onMounted(() => {
 });
 
 const fullBleedMain = computed(() => route.meta.layout === 'fullBleed');
+const hideChrome = computed(() => route.meta.chrome === 'none');
 
 const nav = computed(() => [
   {
@@ -29,6 +30,12 @@ const nav = computed(() => [
     to: '/flash',
     label: t('app.nav.flash'),
     faIcon: ['fas', 'microchip'] as [string, string],
+  },
+  {
+    name: 'serial-debug' as const,
+    to: '/serial-debug',
+    label: t('app.nav.serialDebug'),
+    faIcon: ['fas', 'terminal'] as [string, string],
   },
   {
     name: 'settings' as const,
@@ -45,6 +52,7 @@ const nav = computed(() => [
     :style="{ color: 'var(--ty-text)', backgroundColor: 'var(--ty-canvas)' }"
   >
     <aside
+      v-if="!hideChrome"
       class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[15.5rem] md:max-h-none md:border-b-0 md:border-r"
       :aria-label="t('app.mainNav')"
     >

@@ -1,23 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import FirmwareFlashPage from '@/features/firmware-flash/FirmwareFlashPage.vue';
+import SerialDebugPage from '@/features/serial-debug/SerialDebugPage.vue';
+import FilterWindow from '@/features/serial-debug/FilterWindow.vue';
 import { SettingsPage } from '@/features/settings';
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', redirect: '/flash' },
-    {
-      path: '/flash',
-      name: 'flash',
-      component: FirmwareFlashPage,
-      meta: { title: '固件烧录', layout: 'fullBleed' },
-    },
-    {
-      path: '/settings',
-      name: 'settings',
-      component: SettingsPage,
-      meta: { title: '设置', layout: 'default' },
-    },
+    { path: '/flash', name: 'flash', component: FirmwareFlashPage, meta: { title: '固件烧录', layout: 'fullBleed' } },
+    { path: '/serial-debug', name: 'serial-debug', component: SerialDebugPage, meta: { title: '串口调试', layout: 'fullBleed' } },
+    { path: '/serial-debug-filter', name: 'serial-debug-filter', component: FilterWindow, meta: { layout: 'fullBleed', chrome: 'none' } },
+    { path: '/settings', name: 'settings', component: SettingsPage, meta: { title: '设置', layout: 'default' } },
   ],
 });
 

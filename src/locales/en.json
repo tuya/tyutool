@@ -12,6 +12,7 @@
     "tagline": "Embedded utilities",
     "nav": {
       "flash": "Firmware flash",
+      "serialDebug": "Serial debug",
       "settings": "Settings"
     },
     "mainNav": "Main navigation",
@@ -360,24 +361,66 @@
     }
   },
   "serialDebug": {
-    "err": {
-      "invalidConfig": "Invalid configuration",
-      "openFailedWith": "Open failed: {msg}",
-      "sendFailed": "Send failed: {msg}",
-      "portDenied": "Port is busy; open cancelled"
+    "tool": "Tool",
+    "pageTitle": "Serial Debug",
+    "introLead": "Realtime terminal.",
+    "introRest": " See prints, send commands, disconnects are surfaced.",
+    "conn": {
+      "port": "Port",
+      "refresh": "Refresh ports",
+      "baud": "Baud",
+      "customBaud": "Custom",
+      "dataBits": "Data bits",
+      "parity": "Parity",
+      "parityNone": "None",
+      "parityOdd": "Odd",
+      "parityEven": "Even",
+      "stopBits": "Stop bits",
+      "autoRelease": "Auto-release for flash",
+      "autoReleaseTip": "When on, flashing silently closes this session and re-opens it after flash finishes.",
+      "hexView": "Hex view",
+      "clear": "Clear",
+      "open": "Open",
+      "close": "Close"
     },
     "send": {
+      "placeholder": "Type to send…",
+      "sendBtn": "Send",
       "hexParseIgnored": "{n} incomplete byte(s) ignored"
     },
+    "filter": {
+      "placeholder": "Filter text…",
+      "off": "Off",
+      "include": "Include",
+      "exclude": "Exclude",
+      "openInWindow": "New window",
+      "openInline": "Expand",
+      "inlineAppliedHint": "Web mode: filter applied inline to the main pane — secondary windows unavailable",
+      "hitCount": "{hit} of {total}"
+    },
     "log": {
+      "waitingData": "Waiting for data…",
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}"
+    },
+    "hexPopup": {
+      "titleHex": "Hex view",
+      "titleAscii": "ASCII view",
+      "copy": "Copy",
+      "toHex": "View as Hex",
+      "toAscii": "View as ASCII"
     },
     "confirm": {
       "releaseForFlashTitle": "Port conflict",
       "releaseForFlashBody": "{requester} is requesting this port. Release?",
       "releaseOk": "Release",
       "releaseCancel": "Cancel"
+    },
+    "err": {
+      "invalidConfig": "Invalid configuration",
+      "openFailedWith": "Open failed: {msg}",
+      "sendFailed": "Send failed: {msg}",
+      "portDenied": "Port is busy; open cancelled"
     }
   }
 }
