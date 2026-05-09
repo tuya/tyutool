@@ -28,7 +28,7 @@ pub enum Parity {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub enum StopBits {
     One,
     OnePointFive,
@@ -305,6 +305,16 @@ mod tests {
     // port_name (it is the /dev/ptmx fd), while the slave exposes its /dev/pts/N path.
     // The session opens the slave by name (second independent fd) and we write on the
     // master handle we keep alive.
+    #[test]
+    fn stop_bits_one_point_five_serializes_in_camel_case() {
+        assert_eq!(
+            serde_json::to_string(&StopBits::OnePointFive).unwrap(),
+            "\"onePointFive\""
+        );
+        let back: StopBits = serde_json::from_str("\"onePointFive\"").unwrap();
+        assert_eq!(back, StopBits::OnePointFive);
+    }
+
     #[cfg(unix)]
     #[test]
     fn write_is_observed_on_the_paired_end_and_close_stops_reader() {
