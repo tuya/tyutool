@@ -108,7 +108,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     for (const line of parts) {
       // strip a trailing \r from CRLF
       const text = line.endsWith('\r') ? line.slice(0, -1) : line;
-      pushLine(dir, chunk.tsMs, text, rawBytes);
+      pushLine(dir, chunk.tsMs, text, rawBytes.slice());
     }
   }
 
@@ -152,8 +152,11 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
         });
       },
       onReleased: (reason) => {
-        void stopBackendSession();
+        opening.value = true;
         open.value = false;
+        void stopBackendSession().finally(() => {
+          opening.value = false;
+        });
         if (reason === 'requested' && autoRelease.value) {
           pendingResume.value = true;
           pm.registerResume(port.value, 'serial-debug');

@@ -63,6 +63,13 @@ describe('useSerialDebugStore.appendChunk', () => {
     s.appendChunk({ direction: 'rx', tsMs: 1000, bytes });
     expect(s.lines.length).toBe(20000);
   });
+
+  it('each line owns an independent rawBytes copy', () => {
+    const s = useSerialDebugStore();
+    s.appendChunk({ direction: 'rx', tsMs: 1000, bytes: [...Buffer.from('ab\ncd\n')] });
+    expect(s.lines.length).toBe(2);
+    expect(s.lines[0].rawBytes).not.toBe(s.lines[1].rawBytes);
+  });
 });
 
 describe('useSerialDebugStore.send', () => {
