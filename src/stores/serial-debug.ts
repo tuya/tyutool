@@ -69,6 +69,20 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   let unsubscribeChunk: (() => void) | null = null;
   let unsubscribeDisconnect: (() => void) | null = null;
 
+  // Auto-resume: when the port we wanted becomes free again while `pendingResume`
+  // is set, reopen our session. This closes the auto-release round-trip triggered
+  // by flash (or another owner) asking us to yield.
+  const resumePortManager = usePortManagerStore();
+  watch(
+    () => resumePortManager.currentOwner(port.value),
+    (current) => {
+      if (current === null && pendingResume.value && !open.value && !opening.value) {
+        pendingResume.value = false;
+        void openPort();
+      }
+    },
+  );
+
   function currentBaud(): number {
     return customBaudRate.value ?? baudRate.value;
   }

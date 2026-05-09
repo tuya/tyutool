@@ -159,4 +159,34 @@ describe('useSerialDebugStore port-manager integration', () => {
     s.appendChunk({ direction: 'rx', tsMs: 2000, bytes: [...Buffer.from('xy\n')] });
     expect(s.lines[0].text).toBe('xy');
   });
+
+  it('auto-resumes when the released port becomes free again', async () => {
+    const { usePortManagerStore } = await import('@/stores/port-manager');
+    const pm = usePortManagerStore();
+    const s = useSerialDebugStore();
+    s.port = '/dev/ttyUSB0';
+    s.autoRelease = true;
+    await s.openPort();
+    expect(s.open).toBe(true);
+
+    // Simulate flash preempting the port — port-manager will call serial-debug's
+    // onReleaseRequest (returns true because autoRelease) then onReleased('requested').
+    await pm.acquire({
+      id: 'flash',
+      port: '/dev/ttyUSB0',
+      onReleaseRequest: async () => false,
+      onReleased: () => {},
+    });
+    // After acquire, the flash now owns; allow microtasks for the release side-effects.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.open).toBe(false);
+    expect(s.pendingResume).toBe(true);
+
+    // Flash finishes: releases the port. Our watcher should trigger a re-open.
+    pm.release('/dev/ttyUSB0', 'flash');
+    // Wait a couple ticks for the watcher + async openPort chain.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(s.open).toBe(true);
+    expect(s.pendingResume).toBe(false);
+  });
 });

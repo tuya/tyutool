@@ -23,6 +23,7 @@ export interface WsProgressEvent {
 export class WsTransport {
   private ws: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
+  private activeSerialDebugChunkHandler: ((ev: MessageEvent) => void) | null = null;
 
   private closeCurrentConnection(): void {
     const ws = this.ws;
@@ -322,14 +323,23 @@ export class WsTransport {
           else if (m.type === 'serial_debug_disconnected') onDisconnect(m.reason ?? '');
         } catch { /* ignore */ }
       };
+      this.activeSerialDebugChunkHandler = chunkHandler;
       ws.addEventListener('message', handler);
       ws.send(JSON.stringify({ type: 'serial_debug_open', cfg }));
     });
   }
 
   async serialDebugClose(): Promise<void> {
-    const ws = await this.connect();
-    ws.send(JSON.stringify({ type: 'serial_debug_close' }));
+    // Remove the message listener BEFORE sending the close — prevents late-arriving
+    // chunks after close from reaching stale handlers.
+    if (this.ws && this.activeSerialDebugChunkHandler) {
+      this.ws.removeEventListener('message', this.activeSerialDebugChunkHandler);
+      this.activeSerialDebugChunkHandler = null;
+    }
+    // Only send close if the socket is actually open; do not force-reconnect just to close.
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'serial_debug_close' }));
+    }
   }
 
   async serialDebugSend(bytes: Uint8Array): Promise<void> {
