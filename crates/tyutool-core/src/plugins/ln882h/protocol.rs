@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serialport::SerialPort;
 use crate::error::FlashError;
 
-const CHUNK_SIZE: usize = 0xFF; // 255 bytes per flash_read (device limit: < 0x100)
+const CHUNK_SIZE: usize = 0x200; // 512 bytes per flash_read (matches reference tool; aligned to 4 KB sectors)
 
 // XMODEM control bytes
 pub const SOH: u8 = 0x01;  // 128-byte packet header
@@ -162,7 +162,7 @@ pub fn read_flash_chunk(
     let expected = cmd.len() + (CHUNK_SIZE + 2) * 3;
     let mut buf = vec![0u8; expected];
     let mut received = 0usize;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(2);
 
     port.set_timeout(Duration::from_millis(500))?;
     while received < expected {

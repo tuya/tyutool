@@ -189,7 +189,7 @@ fn run_read(
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashProgress),
 ) -> Result<(), FlashError> {
-    const CHUNK: u32 = 0xFF; // device limit: < 0x100 per flash_read
+    const CHUNK: u32 = 0x200; // 512 bytes; matches protocol.rs CHUNK_SIZE and keeps reads 4 KB-sector-aligned
 
     let start = parse_hex_addr(job.read_start_hex.as_deref().unwrap_or("0x00000000"))
         .map_err(|_| FlashError::InvalidJob("invalid read_start_hex".into()))?;
@@ -210,19 +210,7 @@ fn run_read(
         .ok_or_else(|| FlashError::InvalidJob("missing read_file_path".into()))?;
 
     let mut port = open_port(&job.port, 115200)?;
-    // Boot stays at 115200; read protocol switches to 1 Mbaud itself
     boot(&mut port, cancel, progress, false)?;
-
-    // Switch to 1 Mbaud for reads (matches LN882H_CMD_Tool reference)
-    progress(FlashProgress::Phase { name: "switching_baud".into() });
-    send_command(&mut port, "baudrate 1000000")?;
-    let _ = read_response(&mut port, 64, 1);
-    port.set_baud_rate(1000000)?;
-    std::thread::sleep(Duration::from_millis(200));
-    // Flush any garbage and verify RAM code is alive at new baud
-    let _ = flush_buffers(&mut port);
-    send_command(&mut port, "version")?;
-    wait_for_response_containing(&mut port, b"RAMCODE", 3)?;
 
     progress(FlashProgress::Phase { name: "reading".into() });
     progress(FlashProgress::LogLine {
@@ -239,7 +227,30 @@ fn run_read(
         if cancel.load(Ordering::Relaxed) {
             return Err(FlashError::Cancelled);
         }
-        let chunk = read_flash_chunk(&mut port, addr)?;
+        // Retry up to 5 times with a short 2 s per-attempt timeout: the RAM code
+        // occasionally pauses mid-response; flush serial buffers between retries.
+        let chunk = {
+            let mut last_err = None;
+            let mut data = None;
+            for attempt in 0..5u8 {
+                if attempt > 0 {
+                    let _ = flush_buffers(&mut port);
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                match read_flash_chunk(&mut port, addr) {
+                    Ok(d) => { data = Some(d); break; }
+                    Err(FlashError::Cancelled) => return Err(FlashError::Cancelled),
+                    Err(e) => {
+                        log::warn!("flash_read retry {attempt} at 0x{addr:x}: {e}");
+                        last_err = Some(e);
+                    }
+                }
+            }
+            match data {
+                Some(d) => d,
+                None => return Err(last_err.unwrap()),
+            }
+        };
 
         // Trim to the requested [start, end) window
         let chunk_start = addr;
