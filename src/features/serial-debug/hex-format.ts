@@ -22,7 +22,7 @@ export function formatHexDump(bytes: Uint8Array, bytesPerRow: 8 | 16 | 32): stri
       const b = row[j];
       ascii += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.';
     }
-    lines.push(`${hexPart}| ${ascii}`);
+    lines.push(`${hexPart} | ${ascii}`);
   }
   return lines.join('\n');
 }
