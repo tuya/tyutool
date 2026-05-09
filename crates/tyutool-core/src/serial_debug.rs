@@ -240,8 +240,7 @@ fn read_loop(
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
             Err(e)
                 if e.kind() == std::io::ErrorKind::BrokenPipe
-                    || e.kind() == std::io::ErrorKind::NotFound
-                    || e.kind() == std::io::ErrorKind::Other =>
+                    || e.kind() == std::io::ErrorKind::NotFound =>
             {
                 log::warn!(
                     "[SerialDebug] reader IO error: {} ({:?}) — disconnecting",
@@ -252,7 +251,11 @@ fn read_loop(
                 return;
             }
             Err(e) => {
-                log::error!("[SerialDebug] reader unexpected error: {}", e);
+                log::error!(
+                    "[SerialDebug] reader unexpected error: {} ({:?}) — disconnecting",
+                    e,
+                    e.kind()
+                );
                 on_disconnect(format!("{}", e));
                 return;
             }
@@ -345,11 +348,20 @@ mod tests {
         master.write_all(b"ping\n").expect("write master");
         master.flush().expect("flush master");
 
-        let got = rx_chunk
-            .recv_timeout(Duration::from_millis(1500))
-            .expect("expected chunk");
-        assert_eq!(got.direction, Direction::Rx);
-        assert_eq!(got.bytes, b"ping\n");
+        let mut accumulated: Vec<u8> = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_millis(1500);
+        while accumulated.len() < b"ping\n".len() {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                panic!("timed out waiting for full payload; got {:?}", accumulated);
+            }
+            let chunk = rx_chunk
+                .recv_timeout(remaining)
+                .expect("expected chunk within deadline");
+            assert_eq!(chunk.direction, Direction::Rx);
+            accumulated.extend_from_slice(&chunk.bytes);
+        }
+        assert_eq!(&accumulated[..b"ping\n".len()], b"ping\n");
 
         session.close();
         assert!(
