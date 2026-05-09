@@ -440,6 +440,10 @@ export const useFlashStore = defineStore('flash', () => {
         connected.value = false;
         appendLog(t('flash.log.autoDisconnected'));
       }
+      void (async () => {
+        const { usePortManagerStore } = await import('./port-manager');
+        usePortManagerStore().release(selectedSerialPort.value, 'flash');
+      })();
     }
   }
 
@@ -603,6 +607,23 @@ export const useFlashStore = defineStore('flash', () => {
     autoConnected.value = false;
     appendLog(t('flash.log.connected'));
     rLog.info(`[Flash] Connected to port: ${selectedSerialPort.value}`);
+
+    const { usePortManagerStore } = await import('./port-manager');
+    const pm = usePortManagerStore();
+    const outcome = await pm.acquire({
+      id: 'flash',
+      port: selectedSerialPort.value,
+      onReleaseRequest: async () => false, // flash never yields mid-operation
+      onReleased: () => {
+        connected.value = false;
+        autoConnected.value = false;
+      },
+    });
+    if (outcome === 'denied') {
+      connected.value = false;
+      appendLog(t('flash.log.portBusy', { port: selectedSerialPort.value }));
+      return;
+    }
   }
 
   function disconnect(): void {
@@ -620,6 +641,10 @@ export const useFlashStore = defineStore('flash', () => {
     connected.value = false;
     autoConnected.value = false;
     appendLog(t('flash.log.disconnected'));
+    void (async () => {
+      const { usePortManagerStore } = await import('./port-manager');
+      usePortManagerStore().release(selectedSerialPort.value, 'flash');
+    })();
   }
 
   async function deviceReset(): Promise<void> {
