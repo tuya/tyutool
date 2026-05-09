@@ -89,4 +89,28 @@ describe('port-manager', () => {
     await pm.acquire(makeClaim('serial-debug', '/dev/ttyUSB0'));
     expect(pm.resumeCandidate('/dev/ttyUSB0')).toBeNull();
   });
+
+  it('when two concurrent acquires pass onReleaseRequest, only the first wins', async () => {
+    const pm = usePortManagerStore();
+    let resolveDialog1: (v: boolean) => void;
+    let resolveDialog2: (v: boolean) => void;
+    const onReleaseRequest = vi.fn((requester: string) =>
+      requester === 'A'
+        ? new Promise<boolean>((r) => { resolveDialog1 = r; })
+        : new Promise<boolean>((r) => { resolveDialog2 = r; }),
+    );
+    await pm.acquire(makeClaim('current', '/dev/ttyUSB0', { onReleaseRequest }));
+
+    // Two acquires race while both dialogs are pending.
+    const a = pm.acquire(makeClaim('A', '/dev/ttyUSB0'));
+    const b = pm.acquire(makeClaim('B', '/dev/ttyUSB0'));
+    resolveDialog1!(true);
+    resolveDialog2!(true);
+    const [ra, rb] = await Promise.all([a, b]);
+
+    // Exactly one succeeds; the other must be denied.
+    const wins = [ra, rb].filter((r) => r === 'ok').length;
+    expect(wins).toBe(1);
+    expect(['A', 'B']).toContain(pm.currentOwner('/dev/ttyUSB0'));
+  });
 });

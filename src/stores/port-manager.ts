@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 
 export type PortOwnerId = 'flash' | 'serial-debug' | string;
 export type ReleaseReason = 'requested' | 'unplugged' | 'error';
@@ -25,10 +25,6 @@ export const usePortManagerStore = defineStore('port-manager', () => {
     return resume.value.get(port) ?? null;
   }
 
-  function isOwnedBy(port: string, ownerId: PortOwnerId) {
-    return computed(() => currentOwner(port) === ownerId);
-  }
-
   async function acquire(claim: PortClaim): Promise<'ok' | 'denied'> {
     const current = owners.value.get(claim.port);
     if (!current) {
@@ -47,10 +43,17 @@ export const usePortManagerStore = defineStore('port-manager', () => {
     if (!approved) {
       return 'denied';
     }
+    // Re-check: another concurrent acquire may have already swapped the owner
+    // while we were awaiting this onReleaseRequest (e.g. two dialogs in flight).
+    const stillCurrent = owners.value.get(claim.port);
+    if (!stillCurrent || stillCurrent !== current) {
+      // Owner changed during the await. Don't forcibly steal from a newcomer —
+      // treat as if we lost the race and let the caller retry if they want.
+      return 'denied';
+    }
     try {
       current.onReleased('requested');
     } catch (e) {
-      // Don't let a misbehaving callback block acquisition.
       console.warn('[port-manager] onReleased("requested") threw:', e);
     }
     owners.value.set(claim.port, claim);
@@ -60,6 +63,12 @@ export const usePortManagerStore = defineStore('port-manager', () => {
     return 'ok';
   }
 
+  /**
+   * Voluntary release by the current owner. Does NOT fire `onReleased` because
+   * the releaser is, by definition, the thing that already knows it's releasing.
+   * `onReleased` is for *involuntary* transitions (preemption via another `acquire`
+   * or a hotplug via `notifyUnplugged`). A mismatched owner id is a no-op.
+   */
   function release(port: string, ownerId: PortOwnerId): void {
     const current = owners.value.get(port);
     if (!current || current.id !== ownerId) {
@@ -92,6 +101,5 @@ export const usePortManagerStore = defineStore('port-manager', () => {
     notifyUnplugged,
     currentOwner,
     resumeCandidate,
-    isOwnedBy,
   };
 });
