@@ -291,6 +291,51 @@ export class WsTransport {
       this.ws.send(JSON.stringify({ type: 'cancel' }));
     }
   }
+
+  async serialDebugOpen(
+    cfg: import('../serial-debug/types').DebugConfig,
+    onChunk: (chunk: import('../serial-debug/types').DebugChunk) => void,
+    onDisconnect: (reason: string) => void,
+  ): Promise<void> {
+    const ws = await this.connect();
+    return new Promise((resolve, reject) => {
+      const handler = (ev: MessageEvent) => {
+        let msg: { type: string; chunk?: { direction: 'tx'|'rx'; tsMs: number; bytes: number[] }; reason?: string; message?: string };
+        try { msg = JSON.parse(ev.data as string); } catch { return; }
+        switch (msg.type) {
+          case 'serial_debug_opened':
+            ws.addEventListener('message', chunkHandler);
+            ws.removeEventListener('message', handler);
+            resolve();
+            break;
+          case 'error':
+            ws.removeEventListener('message', handler);
+            reject(new Error(msg.message ?? 'ws error'));
+            break;
+          // ignore other message types here
+        }
+      };
+      const chunkHandler = (ev: MessageEvent) => {
+        try {
+          const m = JSON.parse(ev.data as string) as { type: string; chunk?: import('../serial-debug/types').DebugChunk; reason?: string };
+          if (m.type === 'serial_debug_chunk' && m.chunk) onChunk(m.chunk);
+          else if (m.type === 'serial_debug_disconnected') onDisconnect(m.reason ?? '');
+        } catch { /* ignore */ }
+      };
+      ws.addEventListener('message', handler);
+      ws.send(JSON.stringify({ type: 'serial_debug_open', cfg }));
+    });
+  }
+
+  async serialDebugClose(): Promise<void> {
+    const ws = await this.connect();
+    ws.send(JSON.stringify({ type: 'serial_debug_close' }));
+  }
+
+  async serialDebugSend(bytes: Uint8Array): Promise<void> {
+    const ws = await this.connect();
+    ws.send(JSON.stringify({ type: 'serial_debug_send', bytes: Array.from(bytes) }));
+  }
 }
 
 function bufferToBase64(buffer: ArrayBuffer): string {
