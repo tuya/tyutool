@@ -1,13 +1,24 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
 struct FlashState {
     cancel: Arc<AtomicBool>,
+}
+
+struct DebugState {
+    session: StdMutex<Option<SerialDebugSession>>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DisconnectPayload {
+    reason: String,
 }
 
 const DEFAULT_MAIN_WINDOW_WIDTH: f64 = 1280.0;
@@ -176,6 +187,105 @@ fn authorize_probe_cmd(port: String) -> Result<Option<tyutool_core::DeviceAuthor
 fn flash_cancel(state: State<'_, FlashState>) {
     log::info!("[Flash] User cancelled operation");
     state.cancel.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn serial_debug_open(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+    cfg: DebugConfig,
+) -> Result<(), String> {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
+    if guard.is_some() {
+        return Err("already open".into());
+    }
+    let app_for_chunk = app.clone();
+    let app_for_disc = app.clone();
+    let session = SerialDebugSession::open(
+        cfg,
+        Box::new(move |chunk: DebugChunk| {
+            let _ = app_for_chunk.emit("serial-debug-chunk", &chunk);
+        }),
+        Box::new(move |reason: String| {
+            let _ = app_for_disc.emit("serial-debug-disconnected", &DisconnectPayload { reason });
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    *guard = Some(session);
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
+    if let Some(session) = guard.take() {
+        session.close();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_send(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| "serial debug not open".to_string())?;
+    session.write(&bytes).map_err(|e| e.to_string())?;
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let chunk = tyutool_core::DebugChunk {
+        direction: tyutool_core::Direction::Tx,
+        ts_ms,
+        bytes,
+    };
+    let _ = app.emit("serial-debug-chunk", &chunk);
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_state(state: State<'_, DebugState>) -> Result<Option<DebugConfig>, String> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
+    Ok(guard.as_ref().map(|s| s.config().clone()))
+}
+
+#[tauri::command]
+fn open_serial_debug_filter_window(app: AppHandle) -> Result<(), String> {
+    use tauri::WebviewUrl;
+    use tauri::WebviewWindowBuilder;
+
+    if let Some(win) = app.get_webview_window("serial-debug-filter") {
+        win.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        &app,
+        "serial-debug-filter",
+        WebviewUrl::App("index.html#/serial-debug-filter".into()),
+    )
+    .title("tyutool · 过滤视图")
+    .inner_size(900.0, 600.0)
+    .min_inner_size(500.0, 320.0)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -418,6 +528,9 @@ pub fn run() {
         .manage(FlashState {
             cancel: Arc::new(AtomicBool::new(false)),
         })
+        .manage(DebugState {
+            session: StdMutex::new(None),
+        })
         .setup(|app| {
             let version = app.package_info().version.to_string();
             let name = &app.package_info().name;
@@ -451,6 +564,11 @@ pub fn run() {
             get_install_type,
             set_log_level,
             reset_main_window_layout,
+            serial_debug_open,
+            serial_debug_close,
+            serial_debug_send,
+            serial_debug_state,
+            open_serial_debug_filter_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
