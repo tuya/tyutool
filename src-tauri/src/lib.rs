@@ -236,14 +236,16 @@ fn serial_debug_send(
     state: State<'_, DebugState>,
     bytes: Vec<u8>,
 ) -> Result<(), String> {
-    let guard = state
-        .session
-        .lock()
-        .map_err(|_| "debug state poisoned".to_string())?;
-    let session = guard
-        .as_ref()
-        .ok_or_else(|| "serial debug not open".to_string())?;
-    session.write(&bytes).map_err(|e| e.to_string())?;
+    {
+        let guard = state
+            .session
+            .lock()
+            .map_err(|_| "debug state poisoned".to_string())?;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| "serial debug not open".to_string())?;
+        session.write(&bytes).map_err(|e| e.to_string())?;
+    } // DebugState lock dropped here — emit happens unlocked
     let ts_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -278,7 +280,7 @@ fn open_serial_debug_filter_window(app: AppHandle) -> Result<(), String> {
     WebviewWindowBuilder::new(
         &app,
         "serial-debug-filter",
-        WebviewUrl::App("index.html#/serial-debug-filter".into()),
+        WebviewUrl::App("serial-debug-filter".into()),
     )
     .title("tyutool · 过滤视图")
     .inner_size(900.0, 600.0)
