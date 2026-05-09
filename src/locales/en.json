@@ -358,5 +358,26 @@
         "authorizeNotSupported": "Authorize mode not supported for this chip."
       }
     }
+  },
+  "serialDebug": {
+    "err": {
+      "invalidConfig": "Invalid configuration",
+      "openFailedWith": "Open failed: {msg}",
+      "sendFailed": "Send failed: {msg}",
+      "portDenied": "Port is busy; open cancelled"
+    },
+    "send": {
+      "hexParseIgnored": "{n} incomplete byte(s) ignored"
+    },
+    "log": {
+      "disconnected": "Port lost",
+      "disconnectedWith": "Port lost: {reason}"
+    },
+    "confirm": {
+      "releaseForFlashTitle": "Port conflict",
+      "releaseForFlashBody": "{requester} is requesting this port. Release?",
+      "releaseOk": "Release",
+      "releaseCancel": "Cancel"
+    }
   }
 }

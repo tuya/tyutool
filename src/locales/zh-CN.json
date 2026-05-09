@@ -359,5 +359,26 @@
         "authorizeNotSupported": "该芯片不支持授权操作。"
       }
     }
+  },
+  "serialDebug": {
+    "err": {
+      "invalidConfig": "配置无效",
+      "openFailedWith": "打开失败: {msg}",
+      "sendFailed": "发送失败: {msg}",
+      "portDenied": "当前端口被占用，本次未打开"
+    },
+    "send": {
+      "hexParseIgnored": "已忽略 {n} 个不完整字节"
+    },
+    "log": {
+      "disconnected": "端口丢失",
+      "disconnectedWith": "端口丢失: {reason}"
+    },
+    "confirm": {
+      "releaseForFlashTitle": "端口冲突",
+      "releaseForFlashBody": "{requester} 正在请求该端口，是否让出？",
+      "releaseOk": "让出",
+      "releaseCancel": "取消"
+    }
   }
 }
