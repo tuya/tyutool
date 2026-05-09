@@ -8,17 +8,21 @@ import { useAutoUpdate } from '@/composables/useAutoUpdate';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { APP_VERSION } from '@/config/app';
 import { rLog } from '@/utils/log';
+import { useSerialDebugStore } from '@/stores/serial-debug';
 import appLogo from '@/assets/logo.png';
 
 const route = useRoute();
 const { t } = useI18n();
 useAutoUpdate();
 
-onMounted(() => {
+onMounted(async () => {
   rLog.info(`[Frontend] tyutool v${APP_VERSION} initialized`);
   rLog.info(
     `[Frontend] Platform: ${navigator.platform}, Lang: ${navigator.language}, Tauri: ${isTauriRuntime()}`
   );
+  const sd = useSerialDebugStore();
+  await sd.loadWorkspace();
+  sd.startWorkspacePersistence();
 });
 
 const fullBleedMain = computed(() => route.meta.layout === 'fullBleed');

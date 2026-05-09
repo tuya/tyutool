@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import {
   COMMON_BAUD_RATES,
   DEFAULT_BAUD_RATE,
@@ -286,6 +286,70 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     hexPopup.value = { open: false, bytes: new Uint8Array(), initialMode: 'hex' };
   }
 
+  let persistStarted = false;
+  function debounce(fn: () => void, ms: number): () => void {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => { timer = null; fn(); }, ms);
+    };
+  }
+
+  async function loadWorkspace(): Promise<void> {
+    const { loadSerialDebugWorkspace } = await import('./serial-debug-workspace');
+    const data = await loadSerialDebugWorkspace();
+    if (!data) return;
+    port.value = data.port;
+    baudRate.value = data.baudRate;
+    customBaudRate.value = data.customBaudRate;
+    dataBits.value = data.dataBits;
+    parity.value = data.parity;
+    stopBits.value = data.stopBits;
+    autoRelease.value = data.autoRelease;
+    hexView.value = data.hexView;
+    hexBytesPerRow.value = data.hexBytesPerRow;
+    sendMode.value = data.sendMode;
+    sendAppendCrlf.value = data.sendAppendCrlf;
+    sendHistory.value = data.sendHistory;
+    filterText.value = data.filterText;
+    filterMode.value = data.filterMode;
+  }
+
+  function startWorkspacePersistence(): void {
+    if (persistStarted) return;
+    persistStarted = true;
+    void import('./serial-debug-workspace').then(({ saveSerialDebugWorkspace, SD_WORKSPACE_VERSION }) => {
+      const save = debounce(() => {
+        void saveSerialDebugWorkspace({
+          v: SD_WORKSPACE_VERSION,
+          port: port.value,
+          baudRate: baudRate.value,
+          customBaudRate: customBaudRate.value,
+          dataBits: dataBits.value,
+          parity: parity.value,
+          stopBits: stopBits.value,
+          autoRelease: autoRelease.value,
+          hexView: hexView.value,
+          hexBytesPerRow: hexBytesPerRow.value,
+          sendMode: sendMode.value,
+          sendAppendCrlf: sendAppendCrlf.value,
+          sendHistory: sendHistory.value,
+          filterText: filterText.value,
+          filterMode: filterMode.value,
+        });
+      }, 450);
+      watch(
+        () => [
+          port.value, baudRate.value, customBaudRate.value, dataBits.value, parity.value, stopBits.value,
+          autoRelease.value, hexView.value, hexBytesPerRow.value, sendMode.value, sendAppendCrlf.value,
+          [...sendHistory.value], filterText.value, filterMode.value,
+        ],
+        save,
+        { deep: true },
+      );
+    });
+  }
+
   return {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
@@ -294,6 +358,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     // actions
     openPort, closePort, send, clear, appendChunk,
     openFilterWindow, showHexPopup, closeHexPopup, appendSysLine,
+    loadWorkspace, startWorkspacePersistence,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,
   };
