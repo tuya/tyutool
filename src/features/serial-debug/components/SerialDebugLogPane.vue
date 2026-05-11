@@ -250,7 +250,7 @@ async function saveLog(): Promise<void> {
 .prefix { display: flex; align-items: baseline; gap: 0.25rem; flex-shrink: 0; white-space: nowrap; }
 .ts { color: var(--ty-text-muted); font-size: 0.625rem; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .dir-badge {
-  font-size: 0.5rem;
+  font-size: 8px;
   font-weight: 700;
   font-family: system-ui, sans-serif;
   letter-spacing: 0.05em;
@@ -258,10 +258,9 @@ async function saveLog(): Promise<void> {
   border-radius: 0.1875rem;
   width: 2rem;
   text-align: center;
-  display: inline-block;
 }
-.line[data-dir="tx"] .dir-badge { background: color-mix(in srgb, var(--ty-primary) 20%, transparent); color: color-mix(in srgb, var(--ty-primary) 80%, white); }
-.line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: color-mix(in srgb, var(--ty-success) 80%, white); }
+.line[data-dir="tx"] .dir-badge { background: color-mix(in srgb, var(--ty-primary) 20%, transparent); color: color-mix(in srgb, var(--ty-primary) 80%, var(--ty-surface)); }
+.line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: color-mix(in srgb, var(--ty-success) 80%, var(--ty-surface)); }
 .line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
