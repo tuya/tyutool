@@ -379,6 +379,8 @@
       "autoRelease": "Auto-release for flash",
       "autoReleaseTip": "When on, flashing silently closes this session and re-opens it after flash finishes.",
       "hexView": "Hex view",
+      "ansiParse": "Parse ANSI colors & styles",
+      "ansiParseTip": "Disable to strip escape codes and show plain text",
       "clear": "Clear",
       "open": "Open",
       "close": "Close",
@@ -411,7 +413,8 @@
       "connected": "Connected {port} at {baud} baud",
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
-      "saveLog": "Save log"
+      "saveLog": "Save log",
+      "closeSearch": "Close search"
     },
     "hexPopup": {
       "titleHex": "Hex view",

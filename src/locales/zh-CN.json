@@ -380,6 +380,8 @@
       "autoRelease": "烧录时自动释放",
       "autoReleaseTip": "开启后，烧录会在无提示下自动关闭本会话；烧录结束后尝试重新打开",
       "hexView": "Hex 视图",
+      "ansiParse": "解析 ANSI 颜色与样式",
+      "ansiParseTip": "关闭后剥除转义码，显示纯文本",
       "clear": "清空",
       "open": "打开",
       "close": "关闭",
@@ -412,7 +414,8 @@
       "connected": "已连接 {port}，波特率 {baud}",
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
-      "saveLog": "保存日志"
+      "saveLog": "保存日志",
+      "closeSearch": "关闭搜索"
     },
     "hexPopup": {
       "titleHex": "十六进制视图",
