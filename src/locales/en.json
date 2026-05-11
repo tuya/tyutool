@@ -408,7 +408,7 @@
       "title": "Log",
       "pausedScroll": "↑ Scroll paused",
       "filterToggle": "Filter",
-      "connected": "Connected {port} @ {baud}",
+      "connected": "Connected {port} at {baud} baud",
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
       "saveLog": "Save log"

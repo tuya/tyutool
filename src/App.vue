@@ -57,7 +57,7 @@ const nav = computed(() => [
   >
     <aside
       v-if="!hideChrome"
-      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[15.5rem] md:max-h-none md:border-b-0 md:border-r"
+      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[11rem] md:max-h-none md:border-b-0 md:border-r"
       :aria-label="t('app.mainNav')"
     >
       <div class="border-b border-[var(--ty-border)] px-4 py-3.5 md:px-4 md:py-5">

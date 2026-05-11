@@ -214,8 +214,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       pm.notifyUnplugged(port.value);
     });
     const cfg = buildConfig();
-    console.log('[SerialDebug] attempting open:', JSON.stringify(cfg));
-    appendSysLine(`[DBG] opening ${cfg.port} baud=${cfg.baudRate} data=${cfg.dataBits} parity=${cfg.parity} stop=${cfg.stopBits}`);
     try {
       await transport.open(cfg);
       open.value = true;
@@ -223,8 +221,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       rLog.info(`[SerialDebug] opened ${port.value} @ ${currentBaud()}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error('[SerialDebug] open failed:', e);
-      appendSysLine(`[DBG] open error raw: ${String(e)}`);
       appendSysLine(t('serialDebug.err.openFailedWith', { msg }));
       pm.release(port.value, 'serial-debug');
       unsubscribeChunk?.();

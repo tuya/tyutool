@@ -68,13 +68,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
           </label>
         </div>
 
-        <label class="toggle flex cursor-pointer items-center gap-2 text-sm">
+        <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
           <input type="checkbox" v-model="s.autoRelease" class="shrink-0" />
           <span class="text-[var(--ty-text)]">{{ t('serialDebug.conn.autoRelease') }}</span>
           <span class="cursor-help text-[var(--ty-text-muted)]" :title="t('serialDebug.conn.autoReleaseTip')">ⓘ</span>
         </label>
 
-        <label class="toggle flex cursor-pointer items-center gap-2 text-sm">
+        <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
           <input type="checkbox" v-model="s.hexView" class="shrink-0" />
           <span class="text-[var(--ty-text)]">{{ t('serialDebug.conn.hexView') }}</span>
         </label>

@@ -409,7 +409,7 @@
       "title": "日志",
       "pausedScroll": "↑ 已暂停滚动",
       "filterToggle": "过滤",
-      "connected": "已连接 {port} @ {baud}",
+      "connected": "已连接 {port}，波特率 {baud}",
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
       "saveLog": "保存日志"

@@ -89,7 +89,7 @@ function selectHistory(item: string): void {
       </div>
     </div>
 
-    <label class="toggle flex cursor-pointer items-center gap-1 text-xs">
+    <label class="check-row flex cursor-pointer items-center gap-1 text-xs">
       <input type="checkbox" class="shrink-0" v-model="s.sendAppendCrlf" :disabled="s.sendMode === 'hex'" />
       <span>\r\n</span>
     </label>
