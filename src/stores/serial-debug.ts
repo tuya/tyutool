@@ -337,8 +337,8 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
-    filterText.value = data.filterText;
-    filterMode.value = data.filterMode;
+    // filterText / filterMode are session-only — don't restore to avoid
+    // stale filters silently hiding data after app restart.
   }
 
   function startWorkspacePersistence(): void {
