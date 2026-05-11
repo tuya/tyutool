@@ -4,16 +4,17 @@ import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import { formatHexDump } from '@/features/serial-debug/hex-format';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
+import { parseAnsi, stripAnsi, type AnsiStyle } from '@/features/serial-debug/ansi-parse';
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
+const isNative = isTauriRuntime();
 
 const scrollRef = ref<HTMLDivElement | null>(null);
 const lockAutoScroll = ref(false);
 const ctxMenu = ref<{ x: number; y: number; selected: string } | null>(null);
-const filterOpen = ref(false);
-
-const filterExpanded = computed(() => filterOpen.value || s.filterMode !== 'off');
+const searchOpen = ref(false);
+const filterInputRef = ref<HTMLInputElement | null>(null);
 
 function formatTs(ms: number): string {
   const d = new Date(ms);
@@ -31,11 +32,6 @@ const visibleLines = computed(() => {
   return s.lines.filter((l) => l.direction === 'sys' || l.text.includes(f) === includes);
 });
 
-const hitCount = computed(() => {
-  if (s.filterMode === 'off' || !s.filterText.trim()) return null;
-  return t('serialDebug.filter.hitCount', { hit: visibleLines.value.length, total: s.lines.length });
-});
-
 const hexRendered = computed(() => {
   if (!s.hexView) return null;
   const joined: number[] = [];
@@ -44,6 +40,14 @@ const hexRendered = computed(() => {
     joined.push(0x0a);
   }
   return formatHexDump(new Uint8Array(joined), s.hexBytesPerRow);
+});
+
+const hitCount = computed(() => {
+  if (s.filterMode === 'off' || !s.filterText.trim()) return null;
+  return t('serialDebug.filter.hitCount', {
+    hit: visibleLines.value.length,
+    total: s.lines.length,
+  });
 });
 
 async function scrollToBottom(): Promise<void> {
@@ -66,6 +70,45 @@ function onScroll(): void {
 async function resumeScroll(): Promise<void> {
   lockAutoScroll.value = false;
   await scrollToBottom();
+}
+
+async function toggleSearch(): Promise<void> {
+  searchOpen.value = !searchOpen.value;
+  if (searchOpen.value) {
+    if (s.filterMode === 'off') s.filterMode = 'include';
+    await nextTick();
+    filterInputRef.value?.focus();
+  } else {
+    closeSearch();
+  }
+}
+
+function closeSearch(): void {
+  searchOpen.value = false;
+  s.filterText = '';
+  s.filterMode = 'off';
+}
+
+function toggleFilterMode(): void {
+  s.filterMode = s.filterMode === 'exclude' ? 'include' : 'exclude';
+}
+
+async function openFilterWindow(): Promise<void> {
+  await s.openFilterWindow();
+}
+
+function renderSpans(text: string): Array<{ text: string; style: AnsiStyle }> {
+  return s.ansiEnabled ? parseAnsi(text) : [{ text: stripAnsi(text), style: {} }];
+}
+
+function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
+  return {
+    color: style.fg,
+    backgroundColor: style.bg,
+    fontWeight: style.bold ? 'bold' : undefined,
+    fontStyle: style.italic ? 'italic' : undefined,
+    textDecoration: style.underline ? 'underline' : undefined,
+  };
 }
 
 function onContextMenu(ev: MouseEvent): void {
@@ -97,7 +140,7 @@ function dismissCtx(): void { ctxMenu.value = null; }
 async function saveLog(): Promise<void> {
   const content = s.lines.map((l) => {
     const dir = l.direction === 'tx' ? 'TX ' : l.direction === 'rx' ? 'RX ' : 'SYS';
-    return `[${formatTs(l.tsMs)}] [${dir}] ${l.text}`;
+    return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
   }).join('\n');
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
@@ -125,34 +168,27 @@ async function saveLog(): Promise<void> {
     <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5">
       <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
 
-      <button
-        type="button"
-        class="btn-icon"
-        :class="{ 'btn-icon-active': filterExpanded }"
-        :aria-label="t('serialDebug.log.filterToggle')"
-        @click="filterOpen = !filterOpen"
-      >
-        <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
-      </button>
-
-      <template v-if="filterExpanded">
-        <input
-          type="text"
-          class="filter-input"
-          :placeholder="t('serialDebug.filter.placeholder')"
-          v-model="s.filterText"
-        />
-        <div class="mode-group flex rounded-lg border border-[var(--ty-border)]">
-          <button type="button" :class="{ active: s.filterMode === 'off' }" class="mode-btn" @click="s.filterMode = 'off'">{{ t('serialDebug.filter.off') }}</button>
-          <button type="button" :class="{ active: s.filterMode === 'include' }" class="mode-btn" @click="s.filterMode = 'include'">{{ t('serialDebug.filter.include') }}</button>
-          <button type="button" :class="{ active: s.filterMode === 'exclude' }" class="mode-btn" @click="s.filterMode = 'exclude'">{{ t('serialDebug.filter.exclude') }}</button>
-        </div>
-        <span v-if="hitCount" class="hit-count">{{ hitCount }}</span>
-      </template>
-
       <div class="ml-auto flex items-center gap-2">
         <button v-if="lockAutoScroll" type="button" class="paused-badge" @click="resumeScroll">
           {{ t('serialDebug.log.pausedScroll') }}
+        </button>
+        <button
+          type="button"
+          class="btn-icon"
+          :class="{ 'btn-icon-active': searchOpen }"
+          :aria-label="t('serialDebug.log.filterToggle')"
+          @click="toggleSearch"
+        >
+          <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+        </button>
+        <button
+          v-if="isNative"
+          type="button"
+          class="btn-icon"
+          :aria-label="t('serialDebug.filter.openInWindow')"
+          @click="openFilterWindow"
+        >
+          <FontAwesomeIcon :icon="['fas', 'up-right-from-square']" />
         </button>
         <button type="button" class="btn-icon" :aria-label="t('serialDebug.log.saveLog')" :disabled="s.lines.length === 0" @click="saveLog">
           <FontAwesomeIcon :icon="['fas', 'download']" />
@@ -161,6 +197,30 @@ async function saveLog(): Promise<void> {
           <FontAwesomeIcon :icon="['fas', 'trash-can']" />
         </button>
       </div>
+    </div>
+
+    <!-- inline search bar (Ctrl+F style) -->
+    <div v-if="searchOpen" class="search-bar flex items-center gap-2 border-b border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-1.5">
+      <input
+        ref="filterInputRef"
+        type="text"
+        class="filter-input"
+        :placeholder="t('serialDebug.filter.placeholder')"
+        v-model="s.filterText"
+        @keydown.esc="closeSearch"
+      />
+      <button
+        type="button"
+        class="mode-toggle"
+        :class="{ 'mode-toggle-exclude': s.filterMode === 'exclude' }"
+        @click="toggleFilterMode"
+      >
+        {{ s.filterMode === 'exclude' ? t('serialDebug.filter.exclude') : t('serialDebug.filter.include') }}
+      </button>
+      <span v-if="hitCount" class="hit-count">{{ hitCount }}</span>
+      <button type="button" class="btn-icon" :aria-label="t('serialDebug.log.closeSearch')" @click="closeSearch">
+        <FontAwesomeIcon :icon="['fas', 'xmark']" />
+      </button>
     </div>
 
     <div v-if="s.hexView" class="pane flex-1 overflow-auto p-3 font-mono text-xs" ref="scrollRef" @scroll="onScroll">
@@ -172,7 +232,13 @@ async function saveLog(): Promise<void> {
           <span class="ts">{{ formatTs(line.tsMs) }}</span>
           <span class="dir-badge">{{ line.direction === 'tx' ? 'TX' : line.direction === 'rx' ? 'RX' : 'SYS' }}</span>
         </span>
-        <span class="text">{{ line.text }}</span>
+        <span class="text">
+          <span
+            v-for="(span, si) in renderSpans(line.text)"
+            :key="si"
+            :style="spanStyle(span.style)"
+          >{{ span.text }}</span>
+        </span>
       </div>
       <div v-if="visibleLines.length === 0" class="px-3 py-2 text-[var(--ty-text-muted)]">{{ t('serialDebug.log.waitingData') }}</div>
     </div>
@@ -196,15 +262,6 @@ async function saveLog(): Promise<void> {
 /* toolbar */
 .log-toolbar { background: var(--ty-surface); }
 .toolbar-title { font-size: 0.75rem; font-weight: 600; color: var(--ty-text-muted); white-space: nowrap; }
-.filter-input {
-  border: 1px solid var(--ty-border);
-  background: var(--ty-canvas);
-  border-radius: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.8125rem;
-  width: 10rem;
-}
-.hit-count { font-size: 0.75rem; color: var(--ty-text-muted); white-space: nowrap; }
 .btn-icon {
   padding: 0.375rem 0.5rem;
   border: 1px solid transparent;
@@ -217,14 +274,6 @@ async function saveLog(): Promise<void> {
 .btn-icon:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
 .btn-icon:disabled { cursor: not-allowed; opacity: 0.4; }
 .btn-icon-active { color: var(--ty-primary); border-color: var(--ty-primary); }
-.mode-btn {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.mode-btn:not(.active):hover { background: var(--ty-surface-muted); }
-.mode-btn.active { background: var(--ty-primary); color: white; font-weight: 600; }
 .paused-badge {
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
@@ -237,6 +286,37 @@ async function saveLog(): Promise<void> {
   transition: background-color 0.15s ease, opacity 0.15s ease;
 }
 .paused-badge:hover { background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent); }
+/* search bar */
+.search-bar { background: var(--ty-surface); }
+.filter-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--ty-border);
+  background: var(--ty-canvas);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  outline: none;
+}
+.filter-input:focus { border-color: var(--ty-primary); }
+.mode-toggle {
+  padding: 0.2rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--ty-primary) 15%, transparent);
+  color: var(--ty-primary);
+  border: 1px solid color-mix(in srgb, var(--ty-primary) 40%, transparent);
+  transition: background-color 0.15s ease;
+  white-space: nowrap;
+}
+.mode-toggle-exclude {
+  background: color-mix(in srgb, var(--ty-error, #ef4444) 15%, transparent);
+  color: var(--ty-error, #ef4444);
+  border-color: color-mix(in srgb, var(--ty-error, #ef4444) 40%, transparent);
+}
+.hit-count { font-size: 0.75rem; color: var(--ty-text-muted); white-space: nowrap; }
 /* log lines */
 .line {
   display: flex;
