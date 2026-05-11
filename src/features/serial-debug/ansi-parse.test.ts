@@ -21,6 +21,12 @@ describe('parseAnsi', () => {
     expect(spans[1].style).toEqual({});
   });
 
+  it('reset combined with color in one sequence (e.g. \\x1b[0;34;49m)', () => {
+    // Tuya firmware uses \x1b[0;34;49m — reset then blue fg, default bg
+    const spans = parseAnsi('\x1b[0;34;49mblue text\x1b[0m');
+    expect(spans[0].style).toEqual({ fg: '#0000ee' });
+  });
+
   it('bold + italic + underline combination', () => {
     const spans = parseAnsi('\x1b[1;3;4mbiu\x1b[0m');
     expect(spans[0].style).toEqual({ bold: true, italic: true, underline: true });

@@ -35,11 +35,11 @@ function color256(n: number): string {
 
 function applyParams(current: AnsiStyle, params: string): AnsiStyle {
   const parts = params ? params.split(';').map(Number) : [0];
-  const s: AnsiStyle = { ...current };
+  let s: AnsiStyle = { ...current };
   let i = 0;
   while (i < parts.length) {
     const p = parts[i];
-    if (p === 0) return {};
+    if (p === 0) s = {}; // reset but continue — e.g. \x1b[0;34m resets then sets blue
     else if (p === 1) s.bold = true;
     else if (p === 3) s.italic = true;
     else if (p === 4) s.underline = true;
