@@ -78,6 +78,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
           <input type="checkbox" v-model="s.hexView" class="shrink-0" />
           <span class="text-[var(--ty-text)]">{{ t('serialDebug.conn.hexView') }}</span>
         </label>
+
+        <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
+          <input type="checkbox" v-model="s.ansiEnabled" class="shrink-0" />
+          <span class="text-[var(--ty-text)]">{{ t('serialDebug.conn.ansiParse') }}</span>
+          <span class="cursor-help text-[var(--ty-text-muted)]" :title="t('serialDebug.conn.ansiParseTip')">ⓘ</span>
+        </label>
       </div>
     </div>
   </div>
