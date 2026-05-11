@@ -1,5 +1,5 @@
 import type {
-  DebugDataBits, DebugParity, DebugStopBits, FilterMode, HexBytesPerRow, SendMode,
+  DebugDataBits, DebugParity, DebugStopBits, HexBytesPerRow, SendMode,
 } from '@/features/serial-debug/types';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 
@@ -20,8 +20,6 @@ export interface SerialDebugWorkspaceSerialized {
   sendMode: SendMode;
   sendAppendCrlf: boolean;
   sendHistory: string[];
-  filterText: string;
-  filterMode: FilterMode;
   ansiEnabled?: boolean;
 }
 

@@ -12,6 +12,7 @@ import {
 } from '@/features/serial-debug/constants';
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
+import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import type {
   DebugChunk,
   DebugConfig,
@@ -46,7 +47,10 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
   const ansiEnabled = ref(true);
   let nextLineId = 1;
-  const pending = { tx: '', rx: '' } as Record<'tx' | 'rx', string>;
+  const pending = {
+    tx: { text: '', bytes: [] as number[] },
+    rx: { text: '', bytes: [] as number[] },
+  };
 
   // ── send ─────────────────────────────────────────────────────────────
   const sendMode = ref<SendMode>('ascii');
@@ -128,23 +132,28 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   }
 
   function appendChunk(chunk: DebugChunk): void {
-    const dir = chunk.direction;
-    const rawBytes = Uint8Array.from(chunk.bytes);
-    const merged = pending[dir] + decodeLossy(rawBytes);
+    const dir = chunk.direction as 'tx' | 'rx';
+    const p = pending[dir];
+    for (const b of chunk.bytes) p.bytes.push(b);
+    const merged = p.text + decodeLossy(Uint8Array.from(chunk.bytes));
     const parts = merged.split('\n');
     const tail = parts.pop() ?? '';
-    pending[dir] = tail;
-    for (const line of parts) {
-      // strip a trailing \r from CRLF
-      const text = line.endsWith('\r') ? line.slice(0, -1) : line;
-      pushLine(dir, chunk.tsMs, text, rawBytes.slice());
+    let byteOffset = 0;
+    for (const part of parts) {
+      const text = part.endsWith('\r') ? part.slice(0, -1) : part;
+      const lineByteCount = new TextEncoder().encode(part + '\n').length;
+      const lineBytes = Uint8Array.from(p.bytes.slice(byteOffset, byteOffset + lineByteCount));
+      byteOffset += lineByteCount;
+      pushLine(dir, chunk.tsMs, text, lineBytes);
     }
+    p.text = tail;
+    p.bytes = p.bytes.slice(byteOffset);
   }
 
   function clear(): void {
     lines.value = [];
-    pending.tx = '';
-    pending.rx = '';
+    pending.tx = { text: '', bytes: [] };
+    pending.rx = { text: '', bytes: [] };
     if (filterWindowOpen.value) {
       void (async () => {
         try {
@@ -272,24 +281,22 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   }
 
   async function openFilterWindow(): Promise<'native' | 'inline'> {
-    const kind = await transport.openFilterWindow();
     filterWindowOpen.value = true;
-    if (kind === 'native') {
-      // Wait for FilterWindow to signal it has registered all event listeners,
-      // then send the snapshot. This avoids the race where emit() fires before listen() runs.
+    if (isTauriRuntime()) {
+      // Register listener BEFORE opening the window to guarantee we never miss
+      // the serial-debug-filter-ready signal even if the subwindow loads instantly.
       const { listen } = await import('@tauri-apps/api/event');
-      await new Promise<void>((resolve) => {
-        let unlisten: (() => void) | undefined;
-        const timeout = setTimeout(() => {
-          unlisten?.();
-          resolve();
-        }, 5000);
+      let unlisten: (() => void) | undefined;
+      const readyPromise = new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => { unlisten?.(); resolve(); }, 5000);
         void listen('serial-debug-filter-ready', () => {
           clearTimeout(timeout);
           unlisten?.();
           resolve();
         }).then((fn) => { unlisten = fn; });
       });
+      await transport.openFilterWindow();
+      await readyPromise;
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
       const w = await WebviewWindow.getByLabel('serial-debug-filter');
       if (w) {
@@ -299,8 +306,9 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
           filterMode: filterMode.value,
         });
       }
+      return 'native';
     }
-    return kind;
+    return 'inline';
   }
 
   function showHexPopup(bytes: Uint8Array, initialMode: 'hex' | 'ascii'): void {
@@ -361,15 +369,13 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
           sendMode: sendMode.value,
           sendAppendCrlf: sendAppendCrlf.value,
           sendHistory: sendHistory.value,
-          filterText: filterText.value,
-          filterMode: filterMode.value,
         });
       }, 450);
       watch(
         () => [
           port.value, baudRate.value, customBaudRate.value, dataBits.value, parity.value, stopBits.value,
           autoRelease.value, hexView.value, hexBytesPerRow.value, ansiEnabled.value, sendMode.value, sendAppendCrlf.value,
-          [...sendHistory.value], filterText.value, filterMode.value,
+          [...sendHistory.value],
         ],
         save,
         { deep: true },
