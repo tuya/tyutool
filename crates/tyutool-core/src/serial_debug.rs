@@ -65,7 +65,10 @@ pub type DisconnectCallback = Box<dyn Fn(String) + Send + Sync>;
 
 pub struct SerialDebugSession {
     cfg: DebugConfig,
-    port: Arc<Mutex<Box<dyn serialport::SerialPort>>>,
+    /// Separate clone of the port used exclusively for writes.
+    /// The read loop owns the other half; keeping them separate avoids
+    /// holding a mutex during blocking reads, which would stall writes.
+    write_port: Arc<Mutex<Box<dyn serialport::SerialPort>>>,
     stop: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
 }
@@ -119,25 +122,31 @@ impl SerialDebugSession {
             .data_bits(map_data_bits(cfg.data_bits))
             .parity(map_parity(cfg.parity))
             .stop_bits(map_stop_bits(cfg.stop_bits))
+            .flow_control(serialport::FlowControl::None)
             .timeout(Duration::from_millis(50));
-        let port = builder.open().map_err(|e| {
+        let read_port = builder.open().map_err(|e| {
             FlashError::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("open {} failed: {}", cfg.port, e),
             ))
         })?;
+        let write_port = read_port.try_clone().map_err(|e| {
+            FlashError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("clone port handle failed: {}", e),
+            ))
+        })?;
 
-        let port = Arc::new(Mutex::new(port));
+        let write_port = Arc::new(Mutex::new(write_port));
         let stop = Arc::new(AtomicBool::new(false));
 
         let reader = {
-            let port = Arc::clone(&port);
             let stop = Arc::clone(&stop);
             thread::Builder::new()
                 .name(format!("serial-debug-read:{}", cfg.port))
                 .spawn(move || {
                     let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        read_loop(port, stop, on_chunk, on_disconnect);
+                        read_loop(read_port, stop, on_chunk, on_disconnect);
                     }));
                     if let Err(payload) = run {
                         log::error!("[SerialDebug] reader thread panicked: {:?}", payload);
@@ -162,21 +171,20 @@ impl SerialDebugSession {
 
         Ok(Self {
             cfg,
-            port,
+            write_port,
             stop,
             reader: Some(reader),
         })
     }
 
     pub fn write(&self, bytes: &[u8]) -> Result<(), FlashError> {
-        let mut guard = self.port.lock().map_err(|_| {
+        let mut guard = self.write_port.lock().map_err(|_| {
             FlashError::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "serial debug mutex poisoned",
             ))
         })?;
         guard.write_all(bytes).map_err(FlashError::Io)?;
-        guard.flush().map_err(FlashError::Io)?;
         Ok(())
     }
 
@@ -207,7 +215,7 @@ impl Drop for SerialDebugSession {
 }
 
 fn read_loop(
-    port: Arc<Mutex<Box<dyn serialport::SerialPort>>>,
+    mut port: Box<dyn serialport::SerialPort>,
     stop: Arc<AtomicBool>,
     on_chunk: ChunkCallback,
     on_disconnect: DisconnectCallback,
@@ -217,16 +225,7 @@ fn read_loop(
         if stop.load(Ordering::SeqCst) {
             return;
         }
-        let read_result = {
-            let mut guard = match port.lock() {
-                Ok(g) => g,
-                Err(_) => {
-                    on_disconnect("port mutex poisoned".into());
-                    return;
-                }
-            };
-            guard.read(&mut buf)
-        };
+        let read_result = port.read(&mut buf);
         match read_result {
             Ok(0) => continue,
             Ok(n) => {
