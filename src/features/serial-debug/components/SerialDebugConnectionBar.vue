@@ -6,6 +6,7 @@ import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { formatSerialPortLabel, type SerialPortDropdownOption, type TauriSerialPortRow } from '@/features/firmware-flash/serial-port-label';
 import { wsTransport } from '@/features/firmware-flash/ws-transport';
 import TySelect from '@/components/TySelect.vue';
+import SerialDebugSettingsModal from './SerialDebugSettingsModal.vue';
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
@@ -13,23 +14,8 @@ const { t } = useI18n();
 const serialPortOptions = ref<SerialPortDropdownOption[]>([]);
 const useCustomBaud = ref(false);
 const customBaudInput = ref('');
+const showSettings = ref(false);
 
-const dataBitsOptions = computed(() => [
-  { value: 'five', label: '5' },
-  { value: 'six', label: '6' },
-  { value: 'seven', label: '7' },
-  { value: 'eight', label: '8' },
-]);
-const parityOptions = computed(() => [
-  { value: 'none', label: t('serialDebug.conn.parityNone') },
-  { value: 'odd', label: t('serialDebug.conn.parityOdd') },
-  { value: 'even', label: t('serialDebug.conn.parityEven') },
-]);
-const stopBitsOptions = computed(() => [
-  { value: 'one', label: '1' },
-  { value: 'onePointFive', label: '1.5' },
-  { value: 'two', label: '2' },
-]);
 const baudOptions = computed(() => {
   const opts = s.commonBaudRates.map((r) => ({ value: String(r), label: String(r) }));
   opts.push({ value: 'custom', label: t('serialDebug.conn.customBaud') });
@@ -91,68 +77,103 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="conn-bar flex flex-wrap items-end gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-3">
-    <label class="field">
-      <span class="label">{{ t('serialDebug.conn.port') }}</span>
-      <TySelect v-model="s.port" :options="serialPortOptions" :disabled="s.open || s.opening" class="min-w-[14rem]" />
-    </label>
+  <section
+    class="conn-bar relative flex min-w-0 flex-wrap items-center gap-3 overflow-hidden rounded-2xl p-3 sm:gap-4 sm:p-3.5"
+    :aria-label="t('serialDebug.pageTitle')"
+  >
+    <div class="conn-bar-bg pointer-events-none absolute inset-0" aria-hidden="true" />
 
-    <button type="button" class="btn-icon" :disabled="s.open || s.opening" :aria-label="t('serialDebug.conn.refresh')" @click="refreshPorts">
-      <FontAwesomeIcon :icon="['fas', 'rotate']" />
-    </button>
+    <!-- 状态指示器 -->
+    <div class="relative flex shrink-0 items-center gap-2.5">
+      <div class="shrink-0">
+        <p class="conn-section-label">{{ t('serialDebug.conn.port') }}</p>
+        <div class="mt-0.5 flex items-center gap-1.5">
+          <span
+            class="conn-status-dot inline-block size-2 shrink-0 rounded-full"
+            :class="s.open ? 'conn-status-on' : 'conn-status-off'"
+            aria-hidden="true"
+          />
+          <span class="conn-status-text text-xs font-semibold">
+            {{ s.opening ? t('serialDebug.conn.connecting') : s.open ? t('serialDebug.conn.statusConnected') : t('serialDebug.conn.statusDisconnected') }}
+          </span>
+        </div>
+      </div>
+      <div class="conn-divider hidden h-8 w-px shrink-0 sm:block" aria-hidden="true" />
+    </div>
 
-    <label class="field">
-      <span class="label">{{ t('serialDebug.conn.baud') }}</span>
-      <TySelect :model-value="selectedBaudValue" :options="baudOptions" :disabled="s.open" @update:model-value="selectedBaudValue = $event" />
-    </label>
+    <!-- 端口 + 波特率 -->
+    <div class="relative flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+      <div class="flex min-w-0 items-center gap-1.5">
+        <label for="sd-port" class="conn-field-label shrink-0 text-xs font-semibold">{{ t('serialDebug.conn.port') }}</label>
+        <TySelect id="sd-port" v-model="s.port" :options="serialPortOptions" :disabled="s.open || s.opening" class="min-w-[12rem]" />
+      </div>
 
-    <label v-if="useCustomBaud" class="field">
-      <span class="label">{{ t('serialDebug.conn.customBaud') }}</span>
-      <input type="number" min="1" class="input" :value="customBaudInput" :disabled="s.open" @input="(e) => onCustomBaudInput((e.target as HTMLInputElement).value)" />
-    </label>
+      <div class="flex min-w-0 items-center gap-1.5">
+        <label for="sd-baud" class="conn-field-label shrink-0 text-xs font-semibold">{{ t('serialDebug.conn.baud') }}</label>
+        <TySelect id="sd-baud" :model-value="selectedBaudValue" :options="baudOptions" :disabled="s.open" @update:model-value="selectedBaudValue = $event" class="w-[8rem]" />
+        <input
+          v-if="useCustomBaud"
+          type="number"
+          min="1"
+          class="conn-select w-[6.5rem] min-w-0"
+          :value="customBaudInput"
+          :disabled="s.open"
+          @input="(e) => onCustomBaudInput((e.target as HTMLInputElement).value)"
+        />
+      </div>
+    </div>
 
-    <label class="field">
-      <span class="label">{{ t('serialDebug.conn.dataBits') }}</span>
-      <TySelect v-model="s.dataBits" :options="dataBitsOptions" :disabled="s.open" />
-    </label>
+    <!-- 操作按钮 -->
+    <div class="relative flex shrink-0 items-center gap-2">
+      <button
+        type="button"
+        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
+        :disabled="s.open || s.opening"
+        :aria-label="t('serialDebug.conn.refresh')"
+        @click="refreshPorts"
+      >
+        <FontAwesomeIcon :icon="['fas', 'rotate']" class="size-3.5 shrink-0" aria-hidden="true" />
+        {{ t('serialDebug.conn.refresh') }}
+      </button>
 
-    <label class="field">
-      <span class="label">{{ t('serialDebug.conn.parity') }}</span>
-      <TySelect v-model="s.parity" :options="parityOptions" :disabled="s.open" />
-    </label>
+      <button
+        type="button"
+        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
+        :aria-label="t('serialDebug.conn.settings')"
+        @click="showSettings = true"
+      >
+        <FontAwesomeIcon :icon="['fas', 'gear']" class="size-3.5 shrink-0" aria-hidden="true" />
+        {{ t('serialDebug.conn.settings') }}
+      </button>
 
-    <label class="field">
-      <span class="label">{{ t('serialDebug.conn.stopBits') }}</span>
-      <TySelect v-model="s.stopBits" :options="stopBitsOptions" :disabled="s.open" />
-    </label>
-
-    <label class="toggle flex items-center gap-1 text-xs">
-      <input type="checkbox" v-model="s.autoRelease" />
-      <span>{{ t('serialDebug.conn.autoRelease') }}</span>
-      <span class="tooltip" :title="t('serialDebug.conn.autoReleaseTip')">ⓘ</span>
-    </label>
-
-    <label class="toggle flex items-center gap-1 text-xs">
-      <input type="checkbox" v-model="s.hexView" />
-      <span>{{ t('serialDebug.conn.hexView') }}</span>
-    </label>
-
-    <div class="ml-auto flex gap-2">
-      <button type="button" class="btn-secondary" @click="s.clear()">{{ t('serialDebug.conn.clear') }}</button>
-      <button type="button" class="btn-primary" :disabled="!canOpen && !s.open" @click="toggleOpen">
-        {{ s.open ? t('serialDebug.conn.close') : t('serialDebug.conn.open') }}
+      <button
+        v-if="!s.open"
+        type="button"
+        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
+        :disabled="!canOpen"
+        @click="toggleOpen"
+      >
+        <FontAwesomeIcon v-if="s.opening" :icon="['fas', 'circle-notch']" class="fa-spin size-3.5 shrink-0" aria-hidden="true" />
+        <FontAwesomeIcon v-else :icon="['fas', 'plug']" class="size-3.5 shrink-0" aria-hidden="true" />
+        {{ s.opening ? t('serialDebug.conn.connecting') : t('serialDebug.conn.open') }}
+      </button>
+      <button
+        v-else
+        type="button"
+        class="conn-btn-disconnect flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
+        @click="toggleOpen"
+      >
+        <FontAwesomeIcon :icon="['fas', 'plug-circle-xmark']" class="size-3.5 shrink-0" aria-hidden="true" />
+        {{ t('serialDebug.conn.close') }}
       </button>
     </div>
-  </div>
+
+    <Teleport to="body">
+      <SerialDebugSettingsModal v-if="showSettings" @close="showSettings = false" />
+    </Teleport>
+  </section>
 </template>
 
 <style scoped>
 .field { display: flex; flex-direction: column; gap: 0.25rem; }
-.label { font-size: 0.7rem; color: var(--ty-text-muted); }
-.input { border: 1px solid var(--ty-border); background: var(--ty-canvas); border-radius: 0.5rem; padding: 0.375rem 0.5rem; font-size: 0.875rem; min-width: 7rem; }
-.btn-icon { padding: 0.5rem 0.625rem; border: 1px solid var(--ty-border); border-radius: 0.5rem; background: var(--ty-canvas); }
-.btn-primary { padding: 0.5rem 1rem; background: var(--ty-primary); color: white; border-radius: 0.5rem; font-weight: 600; }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-secondary { padding: 0.5rem 1rem; border: 1px solid var(--ty-border); border-radius: 0.5rem; }
-.tooltip { color: var(--ty-text-muted); cursor: help; }
 </style>

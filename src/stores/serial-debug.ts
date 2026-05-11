@@ -213,12 +213,18 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       appendSysLine(t('serialDebug.log.disconnectedWith', { reason: p.reason }));
       pm.notifyUnplugged(port.value);
     });
+    const cfg = buildConfig();
+    console.log('[SerialDebug] attempting open:', JSON.stringify(cfg));
+    appendSysLine(`[DBG] opening ${cfg.port} baud=${cfg.baudRate} data=${cfg.dataBits} parity=${cfg.parity} stop=${cfg.stopBits}`);
     try {
-      await transport.open(buildConfig());
+      await transport.open(cfg);
       open.value = true;
+      appendSysLine(t('serialDebug.log.connected', { port: port.value, baud: currentBaud() }));
       rLog.info(`[SerialDebug] opened ${port.value} @ ${currentBaud()}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[SerialDebug] open failed:', e);
+      appendSysLine(`[DBG] open error raw: ${String(e)}`);
       appendSysLine(t('serialDebug.err.openFailedWith', { msg }));
       pm.release(port.value, 'serial-debug');
       unsubscribeChunk?.();
@@ -327,6 +333,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     sendHistory.value = data.sendHistory;
     filterText.value = data.filterText;
     filterMode.value = data.filterMode;
+    console.log('[SerialDebug] workspace loaded, filterMode=', data.filterMode, 'filterText=', data.filterText);
   }
 
   function startWorkspacePersistence(): void {

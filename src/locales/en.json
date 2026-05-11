@@ -381,12 +381,17 @@
       "hexView": "Hex view",
       "clear": "Clear",
       "open": "Open",
-      "close": "Close"
+      "close": "Close",
+      "settings": "Serial Settings",
+      "connecting": "Connecting…",
+      "statusConnected": "Connected",
+      "statusDisconnected": "Disconnected"
     },
     "send": {
       "placeholder": "Type to send…",
       "sendBtn": "Send",
-      "hexParseIgnored": "{n} incomplete byte(s) ignored"
+      "hexParseIgnored": "{n} incomplete byte(s) ignored",
+      "history": "Send history"
     },
     "filter": {
       "placeholder": "Filter text…",
@@ -400,8 +405,13 @@
     },
     "log": {
       "waitingData": "Waiting for data…",
+      "title": "Log",
+      "pausedScroll": "↑ Scroll paused",
+      "filterToggle": "Filter",
+      "connected": "Connected {port} @ {baud}",
       "disconnected": "Port lost",
-      "disconnectedWith": "Port lost: {reason}"
+      "disconnectedWith": "Port lost: {reason}",
+      "saveLog": "Save log"
     },
     "hexPopup": {
       "titleHex": "Hex view",

@@ -382,12 +382,17 @@
       "hexView": "Hex 视图",
       "clear": "清空",
       "open": "打开",
-      "close": "关闭"
+      "close": "关闭",
+      "settings": "串口设置",
+      "connecting": "连接中…",
+      "statusConnected": "已连接",
+      "statusDisconnected": "已断开"
     },
     "send": {
       "placeholder": "输入内容…",
       "sendBtn": "发送",
-      "hexParseIgnored": "已忽略 {n} 个不完整字节"
+      "hexParseIgnored": "已忽略 {n} 个不完整字节",
+      "history": "发送历史"
     },
     "filter": {
       "placeholder": "过滤字符串…",
@@ -401,8 +406,13 @@
     },
     "log": {
       "waitingData": "等待数据…",
+      "title": "日志",
+      "pausedScroll": "↑ 已暂停滚动",
+      "filterToggle": "过滤",
+      "connected": "已连接 {port} @ {baud}",
       "disconnected": "端口丢失",
-      "disconnectedWith": "端口丢失: {reason}"
+      "disconnectedWith": "端口丢失: {reason}",
+      "saveLog": "保存日志"
     },
     "hexPopup": {
       "titleHex": "十六进制视图",

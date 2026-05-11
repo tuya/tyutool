@@ -507,6 +507,11 @@ fn reset_main_window_layout(app: AppHandle) -> Result<(), String> {
     apply_default_main_window_layout(&app)
 }
 
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -571,6 +576,7 @@ pub fn run() {
             serial_debug_send,
             serial_debug_state,
             open_serial_debug_filter_window,
+            write_text_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

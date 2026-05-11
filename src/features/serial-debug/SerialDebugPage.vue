@@ -3,7 +3,6 @@ import { onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import SerialDebugConnectionBar from './components/SerialDebugConnectionBar.vue';
-import SerialDebugFilterBar from './components/SerialDebugFilterBar.vue';
 import SerialDebugLogPane from './components/SerialDebugLogPane.vue';
 import SerialDebugSendBar from './components/SerialDebugSendBar.vue';
 import RxSelectionHexPopup from './components/RxSelectionHexPopup.vue';
@@ -35,7 +34,6 @@ onUnmounted(() => {
       </div>
     </header>
     <SerialDebugConnectionBar />
-    <SerialDebugFilterBar />
     <SerialDebugLogPane class="flex-1 min-h-0" />
     <SerialDebugSendBar />
     <RxSelectionHexPopup />
