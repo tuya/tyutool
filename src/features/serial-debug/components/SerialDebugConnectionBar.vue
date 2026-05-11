@@ -46,20 +46,23 @@ function onCustomBaudInput(v: string): void {
 const canOpen = computed(() => !s.opening && !!s.port.trim() && (s.customBaudRate ?? s.baudRate) > 0);
 
 async function refreshPorts(): Promise<void> {
-  if (isTauriRuntime()) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const rows = await invoke<TauriSerialPortRow[]>('list_serial_ports_cmd');
-    serialPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
-  } else {
-    try {
+  try {
+    if (isTauriRuntime()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const rows = await invoke<TauriSerialPortRow[]>('list_serial_ports_cmd');
+      serialPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
+    } else {
       const rows = await wsTransport.listPorts();
       serialPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
-    } catch {
-      serialPortOptions.value = [];
     }
+  } catch {
+    serialPortOptions.value = [];
   }
-  if (!s.port && serialPortOptions.value.length > 0) {
-    s.port = serialPortOptions.value[0].value;
+  if (serialPortOptions.value.length > 0) {
+    const exists = serialPortOptions.value.some(p => p.value === s.port);
+    if (!exists) {
+      s.port = serialPortOptions.value[0].value;
+    }
   }
 }
 
@@ -105,7 +108,7 @@ onMounted(() => {
     <div class="relative flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
       <div class="flex min-w-0 items-center gap-1.5">
         <label for="sd-port" class="conn-field-label shrink-0 text-xs font-semibold">{{ t('serialDebug.conn.port') }}</label>
-        <TySelect id="sd-port" v-model="s.port" :options="serialPortOptions" :disabled="s.open || s.opening" class="min-w-[12rem]" />
+        <TySelect id="sd-port" v-model="s.port" :options="serialPortOptions" :disabled="s.open || s.opening" class="min-w-[12rem]" @open="refreshPorts" />
       </div>
 
       <div class="flex min-w-0 items-center gap-1.5">
