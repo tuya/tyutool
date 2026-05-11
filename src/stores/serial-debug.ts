@@ -339,7 +339,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     sendHistory.value = data.sendHistory;
     filterText.value = data.filterText;
     filterMode.value = data.filterMode;
-    console.log('[SerialDebug] workspace loaded, filterMode=', data.filterMode, 'filterText=', data.filterText);
   }
 
   function startWorkspacePersistence(): void {
