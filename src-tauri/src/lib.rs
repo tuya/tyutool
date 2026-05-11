@@ -190,42 +190,57 @@ fn flash_cancel(state: State<'_, FlashState>) {
 }
 
 #[tauri::command]
-fn serial_debug_open(
+async fn serial_debug_open(
     app: AppHandle,
     state: State<'_, DebugState>,
     cfg: DebugConfig,
 ) -> Result<(), String> {
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "debug state poisoned".to_string())?;
-    if guard.is_some() {
-        return Err("already open".into());
+    {
+        let guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+        if guard.is_some() {
+            return Err("already open".into());
+        }
     }
     let app_for_chunk = app.clone();
     let app_for_disc = app.clone();
-    let session = SerialDebugSession::open(
-        cfg,
-        Box::new(move |chunk: DebugChunk| {
-            let _ = app_for_chunk.emit("serial-debug-chunk", &chunk);
-        }),
-        Box::new(move |reason: String| {
-            let _ = app_for_disc.emit("serial-debug-disconnected", &DisconnectPayload { reason });
-        }),
-    )
+    // Run the blocking serialport::open() off the main thread.
+    let session = tauri::async_runtime::spawn_blocking(move || {
+        SerialDebugSession::open(
+            cfg,
+            Box::new(move |chunk: DebugChunk| {
+                let _ = app_for_chunk.emit("serial-debug-chunk", &chunk);
+            }),
+            Box::new(move |reason: String| {
+                let _ =
+                    app_for_disc.emit("serial-debug-disconnected", &DisconnectPayload { reason });
+            }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
+
+    let mut guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+    if guard.is_some() {
+        // Another open won the race while we were in spawn_blocking; discard this session.
+        session.close();
+        return Err("already open".into());
+    }
     *guard = Some(session);
     Ok(())
 }
 
 #[tauri::command]
-fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> {
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "debug state poisoned".to_string())?;
-    if let Some(session) = guard.take() {
-        session.close();
+async fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> {
+    let session = {
+        let mut guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+        guard.take()
+    };
+    if let Some(session) = session {
+        // h.join() blocks; run it off the async runtime thread.
+        tauri::async_runtime::spawn_blocking(move || session.close())
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
