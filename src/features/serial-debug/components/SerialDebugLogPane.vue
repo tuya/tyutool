@@ -215,6 +215,7 @@ async function saveLog(): Promise<void> {
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .btn-icon:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
+.btn-icon:disabled { cursor: not-allowed; opacity: 0.4; }
 .btn-icon-active { color: var(--ty-primary); border-color: var(--ty-primary); }
 .mode-btn {
   padding: 0.2rem 0.5rem;
@@ -259,8 +260,8 @@ async function saveLog(): Promise<void> {
   width: 2rem;
   text-align: center;
 }
-.line[data-dir="tx"] .dir-badge { background: color-mix(in srgb, var(--ty-primary) 20%, transparent); color: color-mix(in srgb, var(--ty-primary) 80%, var(--ty-surface)); }
-.line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: color-mix(in srgb, var(--ty-success) 80%, var(--ty-surface)); }
+.line[data-dir="tx"] .dir-badge { background: color-mix(in srgb, var(--ty-primary) 20%, transparent); color: var(--ty-primary); }
+.line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: var(--ty-success); }
 .line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
