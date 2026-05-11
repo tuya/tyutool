@@ -22,6 +22,7 @@ export interface SerialDebugWorkspaceSerialized {
   sendHistory: string[];
   filterText: string;
   filterMode: FilterMode;
+  ansiEnabled?: boolean;
 }
 
 export async function loadSerialDebugWorkspace(): Promise<SerialDebugWorkspaceSerialized | null> {

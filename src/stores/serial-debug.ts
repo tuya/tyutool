@@ -44,6 +44,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const lines = ref<DebugLogLine[]>([]);
   const hexView = ref(false);
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
+  const ansiEnabled = ref(true);
   let nextLineId = 1;
   const pending = { tx: '', rx: '' } as Record<'tx' | 'rx', string>;
 
@@ -274,21 +275,29 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     const kind = await transport.openFilterWindow();
     filterWindowOpen.value = true;
     if (kind === 'native') {
-      // Wait briefly for the child window to attach its listeners, then send snapshot.
+      // Wait for FilterWindow to signal it has registered all event listeners,
+      // then send the snapshot. This avoids the race where emit() fires before listen() runs.
+      const { listen } = await import('@tauri-apps/api/event');
+      await new Promise<void>((resolve) => {
+        let unlisten: (() => void) | undefined;
+        const timeout = setTimeout(() => {
+          unlisten?.();
+          resolve();
+        }, 5000);
+        void listen('serial-debug-filter-ready', () => {
+          clearTimeout(timeout);
+          unlisten?.();
+          resolve();
+        }).then((fn) => { unlisten = fn; });
+      });
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      const tries = 10;
-      for (let i = 0; i < tries; i++) {
-        const w = await WebviewWindow.getByLabel('serial-debug-filter');
-        if (w) {
-          await new Promise((r) => setTimeout(r, 200));
-          await w.emit('serial-debug-filter-init', {
-            lines: lines.value,
-            filterText: filterText.value,
-            filterMode: filterMode.value,
-          });
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 100));
+      const w = await WebviewWindow.getByLabel('serial-debug-filter');
+      if (w) {
+        await w.emit('serial-debug-filter-init', {
+          lines: lines.value,
+          filterText: filterText.value,
+          filterMode: filterMode.value,
+        });
       }
     }
     return kind;
@@ -324,6 +333,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     autoRelease.value = data.autoRelease;
     hexView.value = data.hexView;
     hexBytesPerRow.value = data.hexBytesPerRow;
+    ansiEnabled.value = data.ansiEnabled ?? true;
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
@@ -348,6 +358,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
           autoRelease: autoRelease.value,
           hexView: hexView.value,
           hexBytesPerRow: hexBytesPerRow.value,
+          ansiEnabled: ansiEnabled.value,
           sendMode: sendMode.value,
           sendAppendCrlf: sendAppendCrlf.value,
           sendHistory: sendHistory.value,
@@ -358,7 +369,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       watch(
         () => [
           port.value, baudRate.value, customBaudRate.value, dataBits.value, parity.value, stopBits.value,
-          autoRelease.value, hexView.value, hexBytesPerRow.value, sendMode.value, sendAppendCrlf.value,
+          autoRelease.value, hexView.value, hexBytesPerRow.value, ansiEnabled.value, sendMode.value, sendAppendCrlf.value,
           [...sendHistory.value], filterText.value, filterMode.value,
         ],
         save,
@@ -370,7 +381,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   return {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
-    pendingResume, lines, hexView, hexBytesPerRow, sendMode, sendAppendCrlf, sendInput,
+    pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, sendMode, sendAppendCrlf, sendInput,
     sendHistory, filterText, filterMode, filterWindowOpen, hexPopup,
     // actions
     openPort, closePort, send, clear, appendChunk,
