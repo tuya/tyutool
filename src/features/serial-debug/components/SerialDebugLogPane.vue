@@ -168,8 +168,10 @@ async function saveLog(): Promise<void> {
     </div>
     <div v-else ref="scrollRef" class="pane flex-1 overflow-auto font-mono text-xs" @scroll="onScroll" @contextmenu="onContextMenu">
       <div v-for="line in visibleLines" :key="line.id" class="line" :data-dir="line.direction">
-        <span class="ts">{{ formatTs(line.tsMs) }}</span>
-        <span class="dir">{{ line.direction === 'tx' ? '▶' : line.direction === 'rx' ? '◀' : '●' }}</span>
+        <span class="prefix">
+          <span class="ts">{{ formatTs(line.tsMs) }}</span>
+          <span class="dir-badge">{{ line.direction === 'tx' ? 'TX' : line.direction === 'rx' ? 'RX' : 'SYS' }}</span>
+        </span>
         <span class="text">{{ line.text }}</span>
       </div>
       <div v-if="visibleLines.length === 0" class="px-3 py-2 text-[var(--ty-text-muted)]">{{ t('serialDebug.log.waitingData') }}</div>
@@ -235,12 +237,33 @@ async function saveLog(): Promise<void> {
 }
 .paused-badge:hover { background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent); }
 /* log lines */
-.line { padding: 0.125rem 0.75rem; display: grid; grid-template-columns: 7.5rem 1rem 1fr; gap: 0.5rem; }
-.line[data-dir="tx"] { color: var(--ty-primary); }
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  padding: 0.1875rem 0.625rem;
+  font-size: 0.75rem;
+}
+.line[data-dir="tx"] { background: color-mix(in srgb, var(--ty-primary) 6%, transparent); }
+.line[data-dir="rx"] { background: color-mix(in srgb, var(--ty-success) 6%, transparent); }
 .line[data-dir="sys"] { color: var(--ty-text-muted); font-style: italic; }
-.ts { color: var(--ty-text-muted); font-variant-numeric: tabular-nums; }
-.line[data-dir="tx"] .ts { color: color-mix(in srgb, var(--ty-primary) 60%, var(--ty-text-muted)); }
-.text { white-space: pre-wrap; word-break: break-word; }
+.prefix { display: flex; align-items: baseline; gap: 0.25rem; flex-shrink: 0; white-space: nowrap; }
+.ts { color: var(--ty-text-muted); font-size: 0.625rem; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.dir-badge {
+  font-size: 0.5rem;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  padding: 0.0625rem 0;
+  border-radius: 0.1875rem;
+  width: 2rem;
+  text-align: center;
+  display: inline-block;
+}
+.line[data-dir="tx"] .dir-badge { background: color-mix(in srgb, var(--ty-primary) 20%, transparent); color: color-mix(in srgb, var(--ty-primary) 80%, white); }
+.line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: color-mix(in srgb, var(--ty-success) 80%, white); }
+.line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
+.text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
 .menu-item:hover { background: var(--ty-surface-muted); }
 </style>
