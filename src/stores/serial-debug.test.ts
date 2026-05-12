@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { __setSerialDebugTransportForTest, type SerialDebugTransport } from '@/features/serial-debug/transport';
 import type { DebugChunk } from '@/features/serial-debug/types';
+import { MAX_SUB_WINDOW_LINES } from '@/features/serial-debug/constants';
 import { useSerialDebugStore } from './serial-debug';
 
 function fakeTransport(): SerialDebugTransport & {
@@ -188,5 +189,87 @@ describe('useSerialDebugStore port-manager integration', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(s.open).toBe(true);
     expect(s.pendingResume).toBe(false);
+  });
+});
+
+describe('useSerialDebugStore sub-window management', () => {
+  let fake: ReturnType<typeof fakeTransport>;
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    fake = fakeTransport();
+    __setSerialDebugTransportForTest(fake);
+  });
+  afterEach(() => __setSerialDebugTransportForTest(null));
+
+  function chunk(text: string): DebugChunk {
+    return { direction: 'rx', tsMs: 1000, bytes: [...Buffer.from(text + '\n')] };
+  }
+
+  it('fan-out: matching line appears in sub-window', () => {
+    const s = useSerialDebugStore();
+    s.addSubWindow('ERROR', false);
+    s.appendChunk(chunk('ERROR: timeout'));
+    expect(s.subWindows[0].lines.length).toBe(1);
+    expect(s.subWindows[0].lines[0].text).toBe('ERROR: timeout');
+  });
+
+  it('fan-out: non-matching line does not appear in sub-window', () => {
+    const s = useSerialDebugStore();
+    s.addSubWindow('ERROR', false);
+    s.appendChunk(chunk('INFO: ok'));
+    expect(s.subWindows[0].lines.length).toBe(0);
+  });
+
+  it('addSubWindow returns duplicate when same name added twice', () => {
+    const s = useSerialDebugStore();
+    expect(s.addSubWindow('WIFI', false)).toBe('ok');
+    expect(s.addSubWindow('WIFI', false)).toBe('duplicate');
+    expect(s.subWindows.length).toBe(1);
+  });
+
+  it('addSubWindow returns invalid-regex for bad regex pattern', () => {
+    const s = useSerialDebugStore();
+    expect(s.addSubWindow('[invalid', true)).toBe('invalid-regex');
+    expect(s.subWindows.length).toBe(0);
+  });
+
+  it('removeSubWindow removes by id and future chunks do not fan-out to it', () => {
+    const s = useSerialDebugStore();
+    s.addSubWindow('FIRST', false);
+    s.addSubWindow('SECOND', false);
+    const firstId = s.subWindows[0].id;
+    s.removeSubWindow(firstId);
+    expect(s.subWindows.length).toBe(1);
+    expect(s.subWindows[0].name).toBe('SECOND');
+    // chunks matching FIRST should not fan-out to the remaining sub-window
+    s.appendChunk(chunk('FIRST data'));
+    expect(s.subWindows[0].lines.length).toBe(0);
+  });
+
+  it('clear() empties sub-window lines but keeps the sub-window', () => {
+    const s = useSerialDebugStore();
+    s.addSubWindow('LOG', false);
+    s.appendChunk(chunk('LOG entry'));
+    expect(s.subWindows[0].lines.length).toBe(1);
+    s.clear();
+    expect(s.subWindows.length).toBe(1);
+    expect(s.subWindows[0].lines.length).toBe(0);
+  });
+
+  it('FIFO cap: sub-window lines are capped at MAX_SUB_WINDOW_LINES', () => {
+    const s = useSerialDebugStore();
+    s.addSubWindow('X', false);
+    const oneLine = 'X\n';
+    const bytes = [...Buffer.from(oneLine.repeat(MAX_SUB_WINDOW_LINES + 5))];
+    s.appendChunk({ direction: 'rx', tsMs: 1000, bytes });
+    expect(s.subWindows[0].lines.length).toBe(MAX_SUB_WINDOW_LINES);
+  });
+
+  it('sys lines go to all sub-windows regardless of filter', () => {
+    const s = useSerialDebugStore();
+    s.addSubWindow('WIFI', false);
+    s.appendSysLine('Connected to /dev/ttyUSB0');
+    expect(s.subWindows[0].lines.length).toBe(1);
+    expect(s.subWindows[0].lines[0].direction).toBe('sys');
   });
 });

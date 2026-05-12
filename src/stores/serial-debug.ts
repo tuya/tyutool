@@ -9,6 +9,7 @@ import {
   DEFAULT_STOP_BITS,
   MAX_LOG_LINES,
   MAX_SEND_HISTORY,
+  MAX_SUB_WINDOW_LINES,
 } from '@/features/serial-debug/constants';
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
@@ -20,6 +21,7 @@ import type {
   FilterMode,
   HexBytesPerRow,
   SendMode,
+  SubWindow,
 } from '@/features/serial-debug/types';
 import { usePortManagerStore } from '@/stores/port-manager';
 import { showConfirmDialog } from '@/composables/confirmDialog';
@@ -70,6 +72,12 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     initialMode: 'hex',
   });
 
+  // ── sub-windows (split-filter views) ─────────────────────────────────
+  const subWindows = ref<SubWindow[]>([]);
+  // Compiled regex cache — keyed by sub-window id; only present when useRegex is true.
+  // Avoids recompiling on every pushLine call.
+  const subWindowRegexCache = new Map<string, RegExp>();
+
   const transport = serialDebugTransport();
   let unsubscribeChunk: (() => void) | null = null;
   let unsubscribeDisconnect: (() => void) | null = null;
@@ -107,6 +115,16 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     lines.value.push(line);
     if (lines.value.length > MAX_LOG_LINES) {
       lines.value.splice(0, lines.value.length - MAX_LOG_LINES);
+    }
+    // Fan-out to sub-windows
+    for (const sw of subWindows.value) {
+      const matches = sw.useRegex
+        ? (subWindowRegexCache.get(sw.id)?.test(line.text) ?? false)
+        : line.text.includes(sw.filterText);
+      if (matches || line.direction === 'sys') {
+        sw.lines.push(line);
+        if (sw.lines.length > MAX_SUB_WINDOW_LINES) sw.lines.shift();
+      }
     }
     if (filterWindowOpen.value) {
       void maybeEmitFeedLine(line);
@@ -154,6 +172,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     lines.value = [];
     pending.tx = { text: '', bytes: [] };
     pending.rx = { text: '', bytes: [] };
+    for (const sw of subWindows.value) sw.lines = [];
     if (filterWindowOpen.value) {
       void (async () => {
         try {
@@ -280,6 +299,28 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     }
   }
 
+  function addSubWindow(name: string, useRegex: boolean): 'ok' | 'duplicate' | 'invalid-regex' {
+    const trimmed = name.trim();
+    if (!trimmed) return 'invalid-regex';
+    if (subWindows.value.some(sw => sw.name === trimmed)) return 'duplicate';
+    let compiled: RegExp | undefined;
+    if (useRegex) {
+      try { compiled = new RegExp(trimmed); } catch { return 'invalid-regex'; }
+    }
+    const id = crypto.randomUUID();
+    if (compiled) subWindowRegexCache.set(id, compiled);
+    subWindows.value.push({ id, name: trimmed, filterText: trimmed, useRegex, lines: [] });
+    return 'ok';
+  }
+
+  function removeSubWindow(id: string): void {
+    const idx = subWindows.value.findIndex(sw => sw.id === id);
+    if (idx !== -1) {
+      subWindows.value.splice(idx, 1);
+      subWindowRegexCache.delete(id);
+    }
+  }
+
   async function openFilterWindow(): Promise<'native' | 'inline'> {
     filterWindowOpen.value = true;
     if (isTauriRuntime()) {
@@ -387,10 +428,11 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
     pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, sendMode, sendAppendCrlf, sendInput,
-    sendHistory, filterText, filterMode, filterWindowOpen, hexPopup,
+    sendHistory, filterText, filterMode, filterWindowOpen, hexPopup, subWindows,
     // actions
     openPort, closePort, send, clear, appendChunk,
     openFilterWindow, showHexPopup, closeHexPopup, appendSysLine,
+    addSubWindow, removeSubWindow,
     loadWorkspace, startWorkspacePersistence,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,
