@@ -57,16 +57,13 @@ const nav = computed(() => [
   >
     <aside
       v-if="!hideChrome"
-      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[11rem] md:max-h-none md:border-b-0 md:border-r"
+      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[9rem] md:max-h-none md:border-b-0 md:border-r"
       :aria-label="t('app.mainNav')"
     >
-      <div class="border-b border-[var(--ty-border)] px-4 py-3.5 md:px-4 md:py-5">
-        <div class="flex items-center gap-3">
+      <div class="border-b border-[var(--ty-border)] px-4 py-2.5 md:px-4 md:py-3">
+        <div class="flex justify-center">
           <div class="flex size-10 shrink-0 items-center justify-center" aria-hidden="true">
             <img :src="appLogo" alt="tyutool logo" class="size-10 rounded-xl" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-sm font-semibold tracking-tight">tyutool</div>
           </div>
         </div>
       </div>
