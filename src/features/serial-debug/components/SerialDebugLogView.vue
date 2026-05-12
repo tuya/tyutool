@@ -239,7 +239,7 @@ async function saveLog(): Promise<void> {
     @keydown="onContainerKeydown"
   >
     <!-- toolbar -->
-    <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-0.5">
+    <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1">
       <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
 
       <div class="ml-auto flex items-center gap-1">
