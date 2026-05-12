@@ -24,7 +24,7 @@ onMounted(async () => {
     // the Tauri `serial-debug-filter` subwindow. Bail early if somehow reached.
     return;
   }
-  const { listen } = await import('@tauri-apps/api/event');
+  const { listen, emit } = await import('@tauri-apps/api/event');
   unlistenInit = await listen<InitPayload>('serial-debug-filter-init', (ev) => {
     lines.value = ev.payload.lines;
     filterText.value = ev.payload.filterText;
@@ -37,6 +37,8 @@ onMounted(async () => {
   unlistenClear = await listen<ClearPayload>('serial-debug-filter-clear', () => {
     lines.value = [];
   });
+  // Signal the main window that all listeners are ready.
+  await emit('serial-debug-filter-ready');
 });
 
 onUnmounted(() => {
