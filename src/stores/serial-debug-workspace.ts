@@ -22,6 +22,9 @@ export interface SerialDebugWorkspaceSerialized {
   sendHistory: string[];
   ansiEnabled?: boolean;
   logFontSize?: number;
+  autoSave?: boolean;
+  autoSaveDir?: string;
+  autoSaveTimestamp?: boolean;
 }
 
 export async function loadSerialDebugWorkspace(): Promise<SerialDebugWorkspaceSerialized | null> {
