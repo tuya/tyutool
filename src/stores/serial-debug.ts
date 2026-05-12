@@ -47,6 +47,13 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
   const ansiEnabled = ref(true);
   const logFontSize = ref(12);
+
+  // ── auto-save ─────────────────────────────────────────────────────────
+  const autoSave = ref(false);
+  const autoSaveDir = ref('');
+  const autoSaveTimestamp = ref(true);
+  const sessionAutoSavePath = ref<string | null>(null);
+
   let nextLineId = 1;
   const pending = {
     tx: { text: '', bytes: [] as number[] },
@@ -315,8 +322,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   }
 
   let persistStarted = false;
-  function debounce(fn: () => void, ms: number): () => void {
-    let timer: ReturnType<typeof setTimeout> | null = null;
+  function debounce(fn: () => void, ms: number): () => void {    let timer: ReturnType<typeof setTimeout> | null = null;
     return () => {
       if (timer !== null) clearTimeout(timer);
       timer = setTimeout(() => { timer = null; fn(); }, ms);
@@ -338,6 +344,9 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     hexBytesPerRow.value = data.hexBytesPerRow;
     ansiEnabled.value = data.ansiEnabled ?? true;
     logFontSize.value = data.logFontSize ?? 12;
+    autoSave.value = data.autoSave ?? false;
+    autoSaveDir.value = data.autoSaveDir ?? '';
+    autoSaveTimestamp.value = data.autoSaveTimestamp ?? true;
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
@@ -361,6 +370,9 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
           hexBytesPerRow: hexBytesPerRow.value,
           ansiEnabled: ansiEnabled.value,
           logFontSize: logFontSize.value,
+          autoSave: autoSave.value,
+          autoSaveDir: autoSaveDir.value,
+          autoSaveTimestamp: autoSaveTimestamp.value,
           sendMode: sendMode.value,
           sendAppendCrlf: sendAppendCrlf.value,
           sendHistory: sendHistory.value,
@@ -370,6 +382,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
         () => [
           port.value, baudRate.value, customBaudRate.value, dataBits.value, parity.value, stopBits.value,
           autoRelease.value, hexView.value, hexBytesPerRow.value, ansiEnabled.value, logFontSize.value, sendMode.value, sendAppendCrlf.value,
+          autoSave.value, autoSaveDir.value, autoSaveTimestamp.value,
           [...sendHistory.value],
         ],
         save,
@@ -378,17 +391,30 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     });
   }
 
+  async function pickAutoSaveDir(): Promise<void> {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === 'string') {
+      autoSaveDir.value = selected;
+    } else if (!autoSaveDir.value) {
+      // User cancelled and no path was previously set — roll back the switch
+      autoSave.value = false;
+    }
+  }
+
   return {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
     pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, logFontSize, sendMode, sendAppendCrlf, sendInput,
     sendHistory, hexPopup, watchChips, activeChipId,
+    autoSave, autoSaveDir, autoSaveTimestamp, sessionAutoSavePath,
     // actions
     openPort, closePort, send, clear, appendChunk,
     showHexPopup, closeHexPopup, appendSysLine,
     addChip, removeChip, setActiveChip, matchChipKeyword,
     increaseFontSize, decreaseFontSize,
     loadWorkspace, startWorkspacePersistence,
+    pickAutoSaveDir,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,
   };
