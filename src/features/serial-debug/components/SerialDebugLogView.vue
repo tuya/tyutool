@@ -453,8 +453,8 @@ async function saveLog(): Promise<void> {
   padding: 0.1875rem 0.625rem;
   font-size: inherit;
 }
-.line[data-dir="tx"] { background: color-mix(in srgb, var(--ty-primary) 6%, transparent); }
-.line[data-dir="rx"] { background: color-mix(in srgb, var(--ty-success) 6%, transparent); }
+.line[data-dir="tx"] { }
+.line[data-dir="rx"] { }
 .line[data-dir="sys"] { color: var(--ty-text-muted); font-style: italic; }
 .line-search-match { background: color-mix(in srgb, #eab308 20%, transparent) !important; }
 .line-search-current { background: color-mix(in srgb, #f97316 35%, transparent) !important; }
