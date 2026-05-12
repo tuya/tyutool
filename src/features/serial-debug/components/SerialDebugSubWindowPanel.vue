@@ -16,6 +16,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   selectTab: [id: string];
   closeTab: [id: string];
+  clearTab: [id: string];
 }>();
 
 const { t } = useI18n();
@@ -74,6 +75,7 @@ function tabLabel(name: string): string {
         :hex-bytes-per-row="hexBytesPerRow"
         :ansi-enabled="ansiEnabled"
         :export-title="activeWindow?.name"
+        @clear="emit('clearTab', activeId ?? '')"
       />
     </template>
   </div>
