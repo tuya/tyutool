@@ -12,3 +12,5 @@ export const DEFAULT_HEX_BYTES_PER_ROW: HexBytesPerRow = 16;
 
 export const MAX_LOG_LINES = 20000;
 export const MAX_SEND_HISTORY = 20;
+export const MAX_SUB_WINDOW_LINES = 10_000;
+export const MAX_SUB_WINDOW_NAME_LENGTH = 15;
