@@ -81,14 +81,14 @@ onMounted(() => {
 
 <template>
   <section
-    class="conn-bar relative flex min-w-0 flex-wrap items-center gap-3 overflow-hidden rounded-2xl p-3 sm:gap-4 sm:p-3.5"
+    class="conn-bar relative flex min-w-0 flex-wrap items-center gap-3 overflow-hidden rounded-2xl p-2 sm:gap-4 sm:p-2.5"
     :aria-label="t('serialDebug.pageTitle')"
   >
     <div class="conn-bar-bg pointer-events-none absolute inset-0" aria-hidden="true" />
 
     <!-- 状态指示器 -->
     <div class="relative flex shrink-0 items-center gap-2.5">
-      <div class="shrink-0">
+      <div class="shrink-0 flex flex-col justify-center">
         <p class="conn-section-label">{{ t('serialDebug.conn.port') }}</p>
         <div class="mt-0.5 flex items-center gap-1.5">
           <span
