@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import TySelect from '@/components/TySelect.vue';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 
 const emit = defineEmits<{ close: [] }>();
 const s = useSerialDebugStore();
@@ -96,9 +95,8 @@ async function toggleAutoSave(): Promise<void> {
           <span class="cursor-help text-[var(--ty-text-muted)]" :title="t('serialDebug.conn.ansiParseTip')">ⓘ</span>
         </label>
 
-        <template v-if="isTauriRuntime()">
-          <hr class="border-[var(--ty-border)]" />
-          <div class="flex flex-col gap-3">
+        <hr class="border-[var(--ty-border)]" />
+        <div class="flex flex-col gap-3">
             <span class="text-xs font-semibold text-[var(--ty-text)]">{{ t('serialDebug.autoSave.label') }}</span>
 
             <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
@@ -126,8 +124,7 @@ async function toggleAutoSave(): Promise<void> {
               <input type="checkbox" v-model="s.autoSaveTimestamp" class="shrink-0" />
               <span class="text-[var(--ty-text)]">{{ t('serialDebug.autoSave.timestamp') }}</span>
             </label>
-          </div>
-        </template>
+        </div>
       </div>
     </div>
   </div>
