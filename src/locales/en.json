@@ -424,6 +424,15 @@
       "fontDecrease": "Smaller",
       "fontIncrease": "Larger"
     },
+    "autoSave": {
+      "label": "Auto-save logs",
+      "description": "Automatically save all logs to a local file",
+      "dirLabel": "Save directory",
+      "pickDir": "Choose directory",
+      "active": "Auto-saving",
+      "errWrite": "Auto-save failed: {msg}",
+      "timestamp": "Include timestamp per line"
+    },
     "hexPopup": {
       "titleHex": "Hex view",
       "titleAscii": "ASCII view",

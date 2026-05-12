@@ -425,6 +425,15 @@
       "fontDecrease": "缩小字体",
       "fontIncrease": "放大字体"
     },
+    "autoSave": {
+      "label": "自动保存日志",
+      "description": "自动保存全部日志到本地文件",
+      "dirLabel": "保存路径",
+      "pickDir": "选择目录",
+      "active": "自动保存中",
+      "errWrite": "自动保存失败: {msg}",
+      "timestamp": "每行包含时间戳"
+    },
     "hexPopup": {
       "titleHex": "十六进制视图",
       "titleAscii": "ASCII 视图",
