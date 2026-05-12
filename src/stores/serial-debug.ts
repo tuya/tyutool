@@ -46,6 +46,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const hexView = ref(false);
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
   const ansiEnabled = ref(true);
+  const logFontSize = ref(12);
   let nextLineId = 1;
   const pending = {
     tx: { text: '', bytes: [] as number[] },
@@ -297,6 +298,14 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     return line.text.includes(chip.keyword);
   }
 
+  function increaseFontSize(): void {
+    if (logFontSize.value < 18) logFontSize.value++;
+  }
+
+  function decreaseFontSize(): void {
+    if (logFontSize.value > 10) logFontSize.value--;
+  }
+
   function showHexPopup(bytes: Uint8Array, initialMode: 'hex' | 'ascii'): void {
     hexPopup.value = { open: true, bytes, initialMode };
   }
@@ -328,6 +337,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     hexView.value = data.hexView;
     hexBytesPerRow.value = data.hexBytesPerRow;
     ansiEnabled.value = data.ansiEnabled ?? true;
+    logFontSize.value = data.logFontSize ?? 12;
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
@@ -350,6 +360,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
           hexView: hexView.value,
           hexBytesPerRow: hexBytesPerRow.value,
           ansiEnabled: ansiEnabled.value,
+          logFontSize: logFontSize.value,
           sendMode: sendMode.value,
           sendAppendCrlf: sendAppendCrlf.value,
           sendHistory: sendHistory.value,
@@ -358,7 +369,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       watch(
         () => [
           port.value, baudRate.value, customBaudRate.value, dataBits.value, parity.value, stopBits.value,
-          autoRelease.value, hexView.value, hexBytesPerRow.value, ansiEnabled.value, sendMode.value, sendAppendCrlf.value,
+          autoRelease.value, hexView.value, hexBytesPerRow.value, ansiEnabled.value, logFontSize.value, sendMode.value, sendAppendCrlf.value,
           [...sendHistory.value],
         ],
         save,
@@ -370,12 +381,13 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   return {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
-    pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, sendMode, sendAppendCrlf, sendInput,
+    pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, logFontSize, sendMode, sendAppendCrlf, sendInput,
     sendHistory, hexPopup, watchChips, activeChipId,
     // actions
     openPort, closePort, send, clear, appendChunk,
     showHexPopup, closeHexPopup, appendSysLine,
     addChip, removeChip, setActiveChip, matchChipKeyword,
+    increaseFontSize, decreaseFontSize,
     loadWorkspace, startWorkspacePersistence,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,

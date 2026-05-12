@@ -21,6 +21,7 @@ export interface SerialDebugWorkspaceSerialized {
   sendAppendCrlf: boolean;
   sendHistory: string[];
   ansiEnabled?: boolean;
+  logFontSize?: number;
 }
 
 export async function loadSerialDebugWorkspace(): Promise<SerialDebugWorkspaceSerialized | null> {

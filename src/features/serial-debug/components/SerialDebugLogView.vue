@@ -246,6 +246,13 @@ async function saveLog(): Promise<void> {
         <button v-if="lockAutoScroll" type="button" class="paused-badge" @click="resumeScroll">
           {{ t('serialDebug.log.pausedScroll') }}
         </button>
+        <button type="button" class="btn-tool" :disabled="s.logFontSize <= 10" @click="s.decreaseFontSize">
+          <FontAwesomeIcon :icon="['fas', 'minus']" class="size-3 shrink-0" />A
+        </button>
+        <span class="font-size-label">{{ s.logFontSize }}</span>
+        <button type="button" class="btn-tool" :disabled="s.logFontSize >= 18" @click="s.increaseFontSize">
+          A<FontAwesomeIcon :icon="['fas', 'plus']" class="size-3 shrink-0" />
+        </button>
         <button
           type="button"
           class="btn-tool"
@@ -333,6 +340,7 @@ async function saveLog(): Promise<void> {
       v-if="hexView"
       ref="scrollRef"
       class="pane flex-1 overflow-auto p-3 font-mono text-xs"
+      :style="{ fontSize: s.logFontSize + 'px' }"
       @scroll="onScroll"
     >
       <pre class="whitespace-pre">{{ hexRendered }}</pre>
@@ -343,6 +351,7 @@ async function saveLog(): Promise<void> {
       v-else
       ref="scrollRef"
       class="pane flex-1 overflow-auto font-mono text-xs"
+      :style="{ fontSize: s.logFontSize + 'px' }"
       @scroll="onScroll"
       @contextmenu="onContextMenu"
     >
@@ -393,6 +402,7 @@ async function saveLog(): Promise<void> {
 /* toolbar */
 .log-toolbar { background: var(--ty-surface); }
 .toolbar-title { font-size: 0.8125rem; font-weight: 600; color: var(--ty-text-muted); white-space: nowrap; }
+.font-size-label { font-size: 0.75rem; color: var(--ty-text-muted); min-width: 1.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .btn-tool {
   display: inline-flex;
   align-items: center;
@@ -441,7 +451,7 @@ async function saveLog(): Promise<void> {
   align-items: baseline;
   gap: 0.625rem;
   padding: 0.1875rem 0.625rem;
-  font-size: 0.75rem;
+  font-size: inherit;
 }
 .line[data-dir="tx"] { background: color-mix(in srgb, var(--ty-primary) 6%, transparent); }
 .line[data-dir="rx"] { background: color-mix(in srgb, var(--ty-success) 6%, transparent); }
@@ -449,9 +459,9 @@ async function saveLog(): Promise<void> {
 .line-search-match { background: color-mix(in srgb, #eab308 20%, transparent) !important; }
 .line-search-current { background: color-mix(in srgb, #f97316 35%, transparent) !important; }
 .prefix { display: flex; align-items: baseline; gap: 0.25rem; flex-shrink: 0; white-space: nowrap; }
-.ts { color: var(--ty-text-muted); font-size: 0.625rem; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.ts { color: var(--ty-text-muted); font-size: 0.85em; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .dir-badge {
-  font-size: 8px;
+  font-size: 0.7em;
   font-weight: 700;
   font-family: system-ui, sans-serif;
   letter-spacing: 0.05em;
