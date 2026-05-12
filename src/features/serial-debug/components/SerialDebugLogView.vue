@@ -242,35 +242,38 @@ async function saveLog(): Promise<void> {
     <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-0.5">
       <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
 
-      <div class="ml-auto flex items-center gap-2">
+      <div class="ml-auto flex items-center gap-1">
         <button v-if="lockAutoScroll" type="button" class="paused-badge" @click="resumeScroll">
           {{ t('serialDebug.log.pausedScroll') }}
         </button>
         <button
           type="button"
-          class="btn-icon"
-          :class="{ 'btn-icon-active': searchOpen }"
+          class="btn-tool"
+          :class="{ 'btn-tool-active': searchOpen }"
           :aria-label="t('serialDebug.log.filterToggle')"
           @click="openSearch"
         >
-          <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" />
+          <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" class="size-3 shrink-0" />
+          {{ t('serialDebug.log.filterToggle') }}
         </button>
         <button
           type="button"
-          class="btn-icon"
+          class="btn-tool"
           :aria-label="t('serialDebug.log.saveLog')"
           :disabled="lines.length === 0"
           @click="saveLog"
         >
-          <FontAwesomeIcon :icon="['fas', 'download']" />
+          <FontAwesomeIcon :icon="['fas', 'download']" class="size-3 shrink-0" />
+          {{ t('serialDebug.log.saveLog') }}
         </button>
-<button
+        <button
           type="button"
-          class="btn-icon"
+          class="btn-tool"
           :aria-label="t('serialDebug.conn.clear')"
           @click="emit('clear')"
         >
-          <FontAwesomeIcon :icon="['fas', 'trash-can']" />
+          <FontAwesomeIcon :icon="['fas', 'trash-can']" class="size-3 shrink-0" />
+          {{ t('serialDebug.conn.clear') }}
         </button>
       </div>
     </div>
@@ -386,19 +389,24 @@ async function saveLog(): Promise<void> {
 <style scoped>
 /* toolbar */
 .log-toolbar { background: var(--ty-surface); }
-.toolbar-title { font-size: 0.75rem; font-weight: 600; color: var(--ty-text-muted); white-space: nowrap; }
-.btn-icon {
-  padding: 0.375rem 0.5rem;
+.toolbar-title { font-size: 0.8125rem; font-weight: 600; color: var(--ty-text-muted); white-space: nowrap; }
+.btn-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   background: transparent;
   cursor: pointer;
+  font-size: 0.8125rem;
   color: var(--ty-text-muted);
+  white-space: nowrap;
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.btn-icon:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
-.btn-icon:disabled { cursor: not-allowed; opacity: 0.4; }
-.btn-icon-active { color: var(--ty-primary); border-color: var(--ty-primary); }.paused-badge {
+.btn-tool:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
+.btn-tool:disabled { cursor: not-allowed; opacity: 0.4; }
+.btn-tool-active { color: var(--ty-primary); border-color: var(--ty-primary); }.paused-badge {
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
   border-radius: 9999px;
