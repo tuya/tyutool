@@ -138,7 +138,7 @@ function modeTitle(chip: WatchChip): string {
         @click="showPopover ? closePopover() : openPopover()"
       >＋</button>
 
-      <div v-if="showPopover" class="add-popover absolute bottom-full left-0 z-50 mb-1">
+      <div v-if="showPopover" class="add-popover absolute top-full left-0 z-50 mt-1">
         <div class="flex items-center gap-1">
           <input
             ref="inputRef"
