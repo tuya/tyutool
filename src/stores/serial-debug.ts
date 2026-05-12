@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import {
+  CHIP_COLORS,
   COMMON_BAUD_RATES,
   DEFAULT_BAUD_RATE,
   DEFAULT_DATA_BITS,
@@ -9,17 +10,17 @@ import {
   DEFAULT_STOP_BITS,
   MAX_LOG_LINES,
   MAX_SEND_HISTORY,
-  MAX_SUB_WINDOW_LINES,
 } from '@/features/serial-debug/constants';
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
 import type {
+  ChipMode,
   DebugChunk,
   DebugConfig,
   DebugLogLine,
   HexBytesPerRow,
   SendMode,
-  SubWindow,
+  WatchChip,
 } from '@/features/serial-debug/types';
 import { usePortManagerStore } from '@/stores/port-manager';
 import { showConfirmDialog } from '@/composables/confirmDialog';
@@ -58,26 +59,21 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const sendInput = ref('');
   const sendHistory = ref<string[]>([]);
 
-  // ── hex popup (for right-click "to hex/ascii" over selection) ────────
+  // ── hex popup ────────────────────────────────────────────────────────
   const hexPopup = ref<{ open: boolean; bytes: Uint8Array; initialMode: 'hex' | 'ascii' }>({
     open: false,
     bytes: new Uint8Array(),
     initialMode: 'hex',
   });
 
-  // ── sub-windows (split-filter views) ─────────────────────────────────
-  const subWindows = ref<SubWindow[]>([]);
-  // Compiled regex cache — keyed by sub-window id; only present when useRegex is true.
-  // Avoids recompiling on every pushLine call.
-  const subWindowRegexCache = new Map<string, RegExp>();
+  // ── watch chips ──────────────────────────────────────────────────────
+  const watchChips = ref<WatchChip[]>([]);
+  const chipRegexCache = new Map<string, RegExp>();
 
   const transport = serialDebugTransport();
   let unsubscribeChunk: (() => void) | null = null;
   let unsubscribeDisconnect: (() => void) | null = null;
 
-  // Auto-resume: when the port we wanted becomes free again while `pendingResume`
-  // is set, reopen our session. This closes the auto-release round-trip triggered
-  // by flash (or another owner) asking us to yield.
   const resumePortManager = usePortManagerStore();
   watch(
     () => resumePortManager.currentOwner(port.value),
@@ -108,16 +104,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     lines.value.push(line);
     if (lines.value.length > MAX_LOG_LINES) {
       lines.value.splice(0, lines.value.length - MAX_LOG_LINES);
-    }
-    // Fan-out to sub-windows
-    for (const sw of subWindows.value) {
-      const matches = sw.useRegex
-        ? (subWindowRegexCache.get(sw.id)?.test(line.text) ?? false)
-        : line.text.includes(sw.filterText);
-      if (matches || line.direction === 'sys') {
-        sw.lines.push(line);
-        if (sw.lines.length > MAX_SUB_WINDOW_LINES) sw.lines.shift();
-      }
     }
   }
 
@@ -152,7 +138,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     lines.value = [];
     pending.tx = { text: '', bytes: [] };
     pending.rx = { text: '', bytes: [] };
-    for (const sw of subWindows.value) sw.lines = [];
   }
 
   async function stopBackendSession(): Promise<void> {
@@ -270,26 +255,44 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     }
   }
 
-  function addSubWindow(name: string, useRegex: boolean): 'ok' | 'duplicate' | 'invalid-regex' {
-    const trimmed = name.trim();
+  // ── chip actions ──────────────────────────────────────────────────────
+
+  function addChip(keyword: string, useRegex: boolean): 'ok' | 'duplicate' | 'invalid-regex' {
+    const trimmed = keyword.trim();
     if (!trimmed) return 'invalid-regex';
-    if (subWindows.value.some(sw => sw.name === trimmed)) return 'duplicate';
+    if (watchChips.value.some((c) => c.keyword === trimmed)) return 'duplicate';
     let compiled: RegExp | undefined;
     if (useRegex) {
       try { compiled = new RegExp(trimmed); } catch { return 'invalid-regex'; }
     }
     const id = crypto.randomUUID();
-    if (compiled) subWindowRegexCache.set(id, compiled);
-    subWindows.value.push({ id, name: trimmed, filterText: trimmed, useRegex, lines: [] });
+    const color = CHIP_COLORS[watchChips.value.length % CHIP_COLORS.length];
+    if (compiled) chipRegexCache.set(id, compiled);
+    watchChips.value.push({ id, keyword: trimmed, useRegex, mode: 'highlight', color });
     return 'ok';
   }
 
-  function removeSubWindow(id: string): void {
-    const idx = subWindows.value.findIndex(sw => sw.id === id);
+  function removeChip(id: string): void {
+    const idx = watchChips.value.findIndex((c) => c.id === id);
     if (idx !== -1) {
-      subWindows.value.splice(idx, 1);
-      subWindowRegexCache.delete(id);
+      watchChips.value.splice(idx, 1);
+      chipRegexCache.delete(id);
     }
+  }
+
+  function cycleChipMode(id: string): void {
+    const chip = watchChips.value.find((c) => c.id === id);
+    if (!chip) return;
+    const cycle: ChipMode[] = ['highlight', 'filter', 'off'];
+    const next = cycle[(cycle.indexOf(chip.mode) + 1) % cycle.length];
+    chip.mode = next;
+  }
+
+  function matchChipKeyword(line: DebugLogLine, chip: WatchChip): boolean {
+    if (chip.useRegex) {
+      return chipRegexCache.get(chip.id)?.test(line.text) ?? false;
+    }
+    return line.text.includes(chip.keyword);
   }
 
   function showHexPopup(bytes: Uint8Array, initialMode: 'hex' | 'ascii'): void {
@@ -366,11 +369,11 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
     pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, sendMode, sendAppendCrlf, sendInput,
-    sendHistory, hexPopup, subWindows,
+    sendHistory, hexPopup, watchChips,
     // actions
     openPort, closePort, send, clear, appendChunk,
     showHexPopup, closeHexPopup, appendSysLine,
-    addSubWindow, removeSubWindow,
+    addChip, removeChip, cycleChipMode, matchChipKeyword,
     loadWorkspace, startWorkspacePersistence,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,
