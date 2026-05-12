@@ -12,5 +12,14 @@ export const DEFAULT_HEX_BYTES_PER_ROW: HexBytesPerRow = 16;
 
 export const MAX_LOG_LINES = 20000;
 export const MAX_SEND_HISTORY = 20;
-export const MAX_SUB_WINDOW_LINES = 10_000;
-export const MAX_SUB_WINDOW_NAME_LENGTH = 15;
+
+// Six distinct colors that cycle when chips are added
+export const CHIP_COLORS = [
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#3b82f6', // blue
+  '#a855f7', // purple
+] as const;
+

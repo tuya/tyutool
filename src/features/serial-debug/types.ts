@@ -28,7 +28,7 @@ export interface DisconnectPayload {
 export type DebugLineDirection = 'tx' | 'rx' | 'sys';
 
 export interface DebugLogLine {
-  id: number;          // monotonic, used by filter subwindow to skip duplicates
+  id: number;          // monotonic
   tsMs: number;
   direction: DebugLineDirection;
   text: string;        // already decoded (UTF-8, lossy) for ASCII view
@@ -38,10 +38,12 @@ export interface DebugLogLine {
 export type SendMode = 'ascii' | 'hex';
 export type HexBytesPerRow = 8 | 16 | 32;
 
-export interface SubWindow {
+export type ChipMode = 'highlight' | 'filter' | 'off';
+
+export interface WatchChip {
   id: string;
-  name: string;
-  filterText: string;
+  keyword: string;
   useRegex: boolean;
-  lines: DebugLogLine[];
+  mode: ChipMode;
+  color: string; // CSS hex string, e.g. '#ef4444'
 }
