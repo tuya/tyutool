@@ -396,14 +396,15 @@
       "hexParseIgnored": "已忽略 {n} 个不完整字节",
       "history": "发送历史"
     },
-    "subWindow": {
-      "addBtn": "新增窗口",
-      "placeholder": "过滤关键词…",
+    "chip": {
+      "addBtn": "添加过滤词",
+      "placeholder": "关键词…",
       "regexLabel": "正则",
-      "dupWarning": "已存在同名窗口",
+      "dupWarning": "该关键词已存在",
       "invalidRegex": "无效的正则表达式",
-      "closeTab": "关闭",
-      "emptyHint": "在左侧窗口添加过滤关键词以开启分屏视图"
+      "modeHighlight": "高亮匹配行",
+      "modeFilter": "只显示匹配行",
+      "modeOff": "关闭（仅追踪计数）"
     },
     "search": {
       "placeholder": "在此窗口内搜索…",
@@ -413,10 +414,7 @@
       "count": "{current} / {total}",
       "noMatch": "无匹配"
     },
-    "export": {
-      "csv": "导出 CSV"
-    },
-    "log": {
+"log": {
       "waitingData": "等待数据…",
       "title": "日志",
       "pausedScroll": "↑ 已暂停滚动",

@@ -395,14 +395,15 @@
       "hexParseIgnored": "{n} incomplete byte(s) ignored",
       "history": "Send history"
     },
-    "subWindow": {
-      "addBtn": "Add Window",
-      "placeholder": "Filter keyword…",
+    "chip": {
+      "addBtn": "Add filter",
+      "placeholder": "Keyword…",
       "regexLabel": "Regex",
-      "dupWarning": "A window with this name already exists",
+      "dupWarning": "A chip with this keyword already exists",
       "invalidRegex": "Invalid regular expression",
-      "closeTab": "Close",
-      "emptyHint": "Add a filter keyword from the left pane to start split-view"
+      "modeHighlight": "Highlight matching lines",
+      "modeFilter": "Show matching lines only",
+      "modeOff": "Disabled (tracking only)"
     },
     "search": {
       "placeholder": "Search in this pane…",
@@ -412,10 +413,7 @@
       "count": "{current} / {total}",
       "noMatch": "No matches"
     },
-    "export": {
-      "csv": "Export CSV"
-    },
-    "log": {
+"log": {
       "waitingData": "Waiting for data…",
       "title": "Log",
       "pausedScroll": "↑ Scroll paused",
