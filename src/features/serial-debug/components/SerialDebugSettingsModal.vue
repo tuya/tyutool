@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import TySelect from '@/components/TySelect.vue';
+import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 
 const emit = defineEmits<{ close: [] }>();
 const s = useSerialDebugStore();
@@ -30,6 +31,16 @@ function onKeydown(e: KeyboardEvent): void {
 }
 onMounted(() => window.addEventListener('keydown', onKeydown));
 onUnmounted(() => window.removeEventListener('keydown', onKeydown));
+
+async function toggleAutoSave(): Promise<void> {
+  if (!s.autoSave && !s.autoSaveDir) {
+    // No path yet — pick one first, then enable
+    s.autoSave = true; // temporarily set so pickAutoSaveDir can roll it back on cancel
+    await s.pickAutoSaveDir();
+  } else {
+    s.autoSave = !s.autoSave;
+  }
+}
 </script>
 
 <template>
@@ -84,6 +95,39 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
           <span class="text-[var(--ty-text)]">{{ t('serialDebug.conn.ansiParse') }}</span>
           <span class="cursor-help text-[var(--ty-text-muted)]" :title="t('serialDebug.conn.ansiParseTip')">ⓘ</span>
         </label>
+
+        <template v-if="isTauriRuntime()">
+          <hr class="border-[var(--ty-border)]" />
+          <div class="flex flex-col gap-3">
+            <span class="text-xs font-semibold text-[var(--ty-text)]">{{ t('serialDebug.autoSave.label') }}</span>
+
+            <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" :checked="s.autoSave" class="shrink-0" @change="toggleAutoSave" />
+              <span class="text-[var(--ty-text)]">{{ t('serialDebug.autoSave.description') }}</span>
+            </label>
+
+            <div class="flex flex-col gap-1">
+              <span class="text-xs font-semibold text-[var(--ty-text-muted)]">{{ t('serialDebug.autoSave.dirLabel') }}</span>
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-canvas)] px-2 py-1 text-xs text-[var(--ty-text)]"
+                  readonly
+                  :value="s.autoSaveDir || ''"
+                  :placeholder="t('serialDebug.autoSave.dirLabel')"
+                />
+                <button type="button" class="btn-tool shrink-0" @click="s.pickAutoSaveDir()">
+                  {{ t('serialDebug.autoSave.pickDir') }}
+                </button>
+              </div>
+            </div>
+
+            <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" v-model="s.autoSaveTimestamp" class="shrink-0" />
+              <span class="text-[var(--ty-text)]">{{ t('serialDebug.autoSave.timestamp') }}</span>
+            </label>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -91,4 +135,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 
 <style scoped>
 .field { display: flex; flex-direction: column; }
+.btn-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--ty-border);
+  border-radius: 0.375rem;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--ty-text-muted);
+  white-space: nowrap;
+}
+.btn-tool:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
 </style>
