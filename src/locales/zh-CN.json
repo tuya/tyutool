@@ -406,6 +406,26 @@
       "inlineAppliedHint": "Web 模式下过滤已应用到主窗 — 不支持多窗口",
       "hitCount": "命中 {hit} / 共 {total}"
     },
+    "subWindow": {
+      "addBtn": "新增窗口",
+      "placeholder": "过滤关键词…",
+      "regexLabel": "正则",
+      "dupWarning": "已存在同名窗口",
+      "invalidRegex": "无效的正则表达式",
+      "closeTab": "关闭",
+      "emptyHint": "在左侧窗口添加过滤关键词以开启分屏视图"
+    },
+    "search": {
+      "placeholder": "在此窗口内搜索…",
+      "prev": "上一个",
+      "next": "下一个",
+      "close": "关闭",
+      "count": "{current} / {total}",
+      "noMatch": "无匹配"
+    },
+    "export": {
+      "csv": "导出 CSV"
+    },
     "log": {
       "waitingData": "等待数据…",
       "title": "日志",

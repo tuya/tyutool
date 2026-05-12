@@ -405,6 +405,26 @@
       "inlineAppliedHint": "Web mode: filter applied inline to the main pane — secondary windows unavailable",
       "hitCount": "{hit} of {total}"
     },
+    "subWindow": {
+      "addBtn": "Add Window",
+      "placeholder": "Filter keyword…",
+      "regexLabel": "Regex",
+      "dupWarning": "A window with this name already exists",
+      "invalidRegex": "Invalid regular expression",
+      "closeTab": "Close",
+      "emptyHint": "Add a filter keyword from the left pane to start split-view"
+    },
+    "search": {
+      "placeholder": "Search in this pane…",
+      "prev": "Previous",
+      "next": "Next",
+      "close": "Close",
+      "count": "{current} / {total}",
+      "noMatch": "No matches"
+    },
+    "export": {
+      "csv": "Export CSV"
+    },
     "log": {
       "waitingData": "Waiting for data…",
       "title": "Log",
