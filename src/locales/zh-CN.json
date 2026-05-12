@@ -396,16 +396,6 @@
       "hexParseIgnored": "已忽略 {n} 个不完整字节",
       "history": "发送历史"
     },
-    "filter": {
-      "placeholder": "过滤字符串…",
-      "off": "关闭",
-      "include": "包含",
-      "exclude": "排除",
-      "openInWindow": "新窗口",
-      "openInline": "展开视图",
-      "inlineAppliedHint": "Web 模式下过滤已应用到主窗 — 不支持多窗口",
-      "hitCount": "命中 {hit} / 共 {total}"
-    },
     "subWindow": {
       "addBtn": "新增窗口",
       "placeholder": "过滤关键词…",
@@ -434,8 +424,7 @@
       "connected": "已连接 {port}，波特率 {baud}",
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
-      "saveLog": "保存日志",
-      "closeSearch": "关闭搜索"
+      "saveLog": "保存日志"
     },
     "hexPopup": {
       "titleHex": "十六进制视图",

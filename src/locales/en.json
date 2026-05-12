@@ -395,16 +395,6 @@
       "hexParseIgnored": "{n} incomplete byte(s) ignored",
       "history": "Send history"
     },
-    "filter": {
-      "placeholder": "Filter text…",
-      "off": "Off",
-      "include": "Include",
-      "exclude": "Exclude",
-      "openInWindow": "New window",
-      "openInline": "Expand",
-      "inlineAppliedHint": "Web mode: filter applied inline to the main pane — secondary windows unavailable",
-      "hitCount": "{hit} of {total}"
-    },
     "subWindow": {
       "addBtn": "Add Window",
       "placeholder": "Filter keyword…",
@@ -433,8 +423,7 @@
       "connected": "Connected {port} at {baud} baud",
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
-      "saveLog": "Save log",
-      "closeSearch": "Close search"
+      "saveLog": "Save log"
     },
     "hexPopup": {
       "titleHex": "Hex view",

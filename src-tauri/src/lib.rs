@@ -283,27 +283,6 @@ fn serial_debug_state(state: State<'_, DebugState>) -> Result<Option<DebugConfig
     Ok(guard.as_ref().map(|s| s.config().clone()))
 }
 
-#[tauri::command]
-fn open_serial_debug_filter_window(app: AppHandle) -> Result<(), String> {
-    use tauri::WebviewUrl;
-    use tauri::WebviewWindowBuilder;
-
-    if let Some(win) = app.get_webview_window("serial-debug-filter") {
-        win.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-    WebviewWindowBuilder::new(
-        &app,
-        "serial-debug-filter",
-        WebviewUrl::App("serial-debug-filter".into()),
-    )
-    .title("tyutool · 过滤视图")
-    .inner_size(900.0, 600.0)
-    .min_inner_size(500.0, 320.0)
-    .build()
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
 
 #[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
@@ -590,7 +569,6 @@ pub fn run() {
             serial_debug_close,
             serial_debug_send,
             serial_debug_state,
-            open_serial_debug_filter_window,
             write_text_file,
         ])
         .build(tauri::generate_context!())

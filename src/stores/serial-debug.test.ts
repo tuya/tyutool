@@ -24,7 +24,6 @@ function fakeTransport(): SerialDebugTransport & {
     async send(b) { sent.push(b); },
     onChunk(cb) { chunkListeners.add(cb); return () => chunkListeners.delete(cb); },
     onDisconnect(cb) { discListeners.add(cb); return () => discListeners.delete(cb); },
-    async openFilterWindow() { return 'native'; },
     emitChunk(c) { chunkListeners.forEach((l) => l(c)); },
     emitDisconnect(reason) { discListeners.forEach((l) => l({ reason })); },
   };

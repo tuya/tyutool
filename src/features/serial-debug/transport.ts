@@ -11,7 +11,6 @@ export interface SerialDebugTransport {
   send(bytes: Uint8Array): Promise<void>;
   onChunk(cb: ChunkListener): () => void;      // returns unsubscribe
   onDisconnect(cb: DisconnectListener): () => void;
-  openFilterWindow(): Promise<'native' | 'inline'>;
 }
 
 /** Lazy Tauri transport — uses @tauri-apps/api. Loads dynamically so web builds stay lean. */
@@ -57,12 +56,6 @@ class TauriTransport implements SerialDebugTransport {
     this.disconnectListeners.add(cb);
     return () => { this.disconnectListeners.delete(cb); };
   }
-
-  async openFilterWindow(): Promise<'native' | 'inline'> {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('open_serial_debug_filter_window');
-    return 'native';
-  }
 }
 
 /** Web mode transport — talks to `tyutool-cli serve` over WebSocket via wsTransport. */
@@ -102,10 +95,6 @@ class WebTransport implements SerialDebugTransport {
     return () => {
       this.disconnectListeners.delete(cb);
     };
-  }
-
-  async openFilterWindow(): Promise<'native' | 'inline'> {
-    return 'inline';
   }
 }
 

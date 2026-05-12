@@ -13,12 +13,10 @@ import {
 } from '@/features/serial-debug/constants';
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import type {
   DebugChunk,
   DebugConfig,
   DebugLogLine,
-  FilterMode,
   HexBytesPerRow,
   SendMode,
   SubWindow,
@@ -59,11 +57,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const sendAppendCrlf = ref(true);
   const sendInput = ref('');
   const sendHistory = ref<string[]>([]);
-
-  // ── filter ───────────────────────────────────────────────────────────
-  const filterText = ref('');
-  const filterMode = ref<FilterMode>('off');
-  const filterWindowOpen = ref(false);
 
   // ── hex popup (for right-click "to hex/ascii" over selection) ────────
   const hexPopup = ref<{ open: boolean; bytes: Uint8Array; initialMode: 'hex' | 'ascii' }>({
@@ -126,19 +119,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
         if (sw.lines.length > MAX_SUB_WINDOW_LINES) sw.lines.shift();
       }
     }
-    if (filterWindowOpen.value) {
-      void maybeEmitFeedLine(line);
-    }
-  }
-
-  async function maybeEmitFeedLine(line: DebugLogLine): Promise<void> {
-    try {
-      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      const w = await WebviewWindow.getByLabel('serial-debug-filter');
-      if (w) await w.emit('serial-debug-filter-feed', { line });
-    } catch {
-      // window closed or not Tauri — nothing to do
-    }
   }
 
   function appendSysLine(text: string): void {
@@ -173,15 +153,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     pending.tx = { text: '', bytes: [] };
     pending.rx = { text: '', bytes: [] };
     for (const sw of subWindows.value) sw.lines = [];
-    if (filterWindowOpen.value) {
-      void (async () => {
-        try {
-          const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-          const w = await WebviewWindow.getByLabel('serial-debug-filter');
-          if (w) await w.emit('serial-debug-filter-clear', {});
-        } catch { /* ignore */ }
-      })();
-    }
   }
 
   async function stopBackendSession(): Promise<void> {
@@ -321,37 +292,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     }
   }
 
-  async function openFilterWindow(): Promise<'native' | 'inline'> {
-    filterWindowOpen.value = true;
-    if (isTauriRuntime()) {
-      // Register listener BEFORE opening the window to guarantee we never miss
-      // the serial-debug-filter-ready signal even if the subwindow loads instantly.
-      const { listen } = await import('@tauri-apps/api/event');
-      let unlisten: (() => void) | undefined;
-      const readyPromise = new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => { unlisten?.(); resolve(); }, 5000);
-        void listen('serial-debug-filter-ready', () => {
-          clearTimeout(timeout);
-          unlisten?.();
-          resolve();
-        }).then((fn) => { unlisten = fn; });
-      });
-      await transport.openFilterWindow();
-      await readyPromise;
-      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      const w = await WebviewWindow.getByLabel('serial-debug-filter');
-      if (w) {
-        await w.emit('serial-debug-filter-init', {
-          lines: lines.value,
-          filterText: filterText.value,
-          filterMode: filterMode.value,
-        });
-      }
-      return 'native';
-    }
-    return 'inline';
-  }
-
   function showHexPopup(bytes: Uint8Array, initialMode: 'hex' | 'ascii'): void {
     hexPopup.value = { open: true, bytes, initialMode };
   }
@@ -386,8 +326,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
-    // filterText / filterMode are session-only — don't restore to avoid
-    // stale filters silently hiding data after app restart.
   }
 
   function startWorkspacePersistence(): void {
@@ -428,10 +366,10 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
     pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, sendMode, sendAppendCrlf, sendInput,
-    sendHistory, filterText, filterMode, filterWindowOpen, hexPopup, subWindows,
+    sendHistory, hexPopup, subWindows,
     // actions
     openPort, closePort, send, clear, appendChunk,
-    openFilterWindow, showHexPopup, closeHexPopup, appendSysLine,
+    showHexPopup, closeHexPopup, appendSysLine,
     addSubWindow, removeSubWindow,
     loadWorkspace, startWorkspacePersistence,
     // constants for UI

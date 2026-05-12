@@ -36,7 +36,6 @@ export interface DebugLogLine {
 }
 
 export type SendMode = 'ascii' | 'hex';
-export type FilterMode = 'off' | 'include' | 'exclude';
 export type HexBytesPerRow = 8 | 16 | 32;
 
 export interface SubWindow {
