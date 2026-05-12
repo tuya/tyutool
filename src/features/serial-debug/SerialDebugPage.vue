@@ -12,14 +12,11 @@ import RxSelectionHexPopup from './components/RxSelectionHexPopup.vue';
 const s = useSerialDebugStore();
 const { t } = useI18n();
 
-onUnmounted(() => {
-  if (s.open) void s.closePort();
-});
-
 // ── auto-save ─────────────────────────────────────────────────────────────
 
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 let lastFlushedLineId = 0;
+let flushInFlight = false;
 
 function makeStamp(): string {
   const now = new Date();
@@ -43,12 +40,14 @@ function stopInterval(): void {
 }
 
 async function flush(): Promise<void> {
+  if (flushInFlight) return;
   const path = s.sessionAutoSavePath;
   if (!path) return;
 
   const newLines = s.lines.filter((l) => l.id > lastFlushedLineId);
   if (newLines.length === 0) return;
 
+  flushInFlight = true;
   const content = newLines.map((l) => {
     const dir = l.direction === 'tx' ? 'TX ' : l.direction === 'rx' ? 'RX ' : 'SYS';
     if (s.autoSaveTimestamp) {
@@ -66,11 +65,14 @@ async function flush(): Promise<void> {
     s.appendSysLine(t('serialDebug.autoSave.errWrite', { msg }));
     stopInterval();
     s.sessionAutoSavePath = null;
+  } finally {
+    flushInFlight = false;
   }
 }
 
 function startAutoSave(): void {
   if (!s.autoSave || !s.autoSaveDir) return;
+  stopInterval();
   const portDir = sanitizePortName(s.port);
   const filename = `serial-debug-${makeStamp()}.txt`;
   // path separator: Tauri on all platforms accepts forward slash
@@ -84,6 +86,11 @@ async function finalFlushAndStop(): Promise<void> {
   await flush();
   s.sessionAutoSavePath = null;
 }
+
+onUnmounted(() => {
+  if (s.open) void s.closePort();
+  else void finalFlushAndStop();
+});
 
 // Start/stop when port opens or closes
 watch(
@@ -108,10 +115,6 @@ watch(
     }
   },
 );
-
-onUnmounted(() => {
-  stopInterval();
-});
 </script>
 
 <template>
