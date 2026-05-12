@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import { formatHexDump } from '@/features/serial-debug/hex-format';
@@ -35,7 +35,15 @@ const displayLines = computed(() => {
 });
 
 const scrollRef = ref<HTMLDivElement | null>(null);
-const lockAutoScroll = ref(false);
+
+// Per-tab scroll lock. Key: activeChipId (null = "All" tab).
+// Each tab maintains its own pause state independently.
+const lockByTab = reactive(new Map<string | null, boolean>());
+
+const lockAutoScroll = computed({
+  get: (): boolean => lockByTab.get(s.activeChipId ?? null) ?? false,
+  set: (val: boolean) => { lockByTab.set(s.activeChipId ?? null, val); },
+});
 
 async function scrollToBottom(): Promise<void> {
   await nextTick();
@@ -46,11 +54,28 @@ async function scrollToBottom(): Promise<void> {
 
 watch(() => displayLines.value.length, () => { void scrollToBottom(); });
 
-// Reset lock and scroll to bottom whenever the active tab changes
-watch(() => s.activeChipId, () => {
-  lockAutoScroll.value = false;
-  void scrollToBottom();
-});
+// Tab change: scroll to bottom for the newly active tab (respects its own lock state).
+watch(() => s.activeChipId, () => { void scrollToBottom(); });
+
+// hexView toggle swaps the scrollRef DOM node (v-if/v-else); scroll into the new element.
+watch(() => props.hexView, () => { void scrollToBottom(); });
+
+// Layout changes (font size, search bar open/close) shift scrollHeight or clientHeight,
+// which can fire a spurious scroll event that falsely locks auto-scroll.
+// Capture the lock state before the DOM update and restore it after.
+function watchLayoutChange(source: () => unknown): void {
+  watch(source, () => {
+    const wasLocked = lockAutoScroll.value;
+    void nextTick().then(() => {
+      if (!wasLocked) {
+        lockAutoScroll.value = false;
+        void scrollToBottom();
+      }
+    });
+  }, { flush: 'sync' });
+}
+
+watchLayoutChange(() => s.logFontSize);
 
 function onScroll(): void {
   const el = scrollRef.value;
@@ -123,6 +148,7 @@ function dismissCtx(): void { ctxMenu.value = null; }
 
 const containerRef = ref<HTMLDivElement | null>(null);
 const searchOpen = ref(false);
+watchLayoutChange(() => searchOpen.value);
 const searchText = ref('');
 const searchIndex = ref(0);
 const searchInputRef = ref<HTMLInputElement | null>(null);
@@ -243,6 +269,9 @@ async function saveLog(): Promise<void> {
       <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
 
       <div class="ml-auto flex items-center gap-1">
+        <span v-if="s.sessionAutoSavePath" class="autosave-badge">
+          ● {{ t('serialDebug.autoSave.active') }}
+        </span>
         <button v-if="lockAutoScroll" type="button" class="paused-badge" @click="resumeScroll">
           {{ t('serialDebug.log.pausedScroll') }}
         </button>
@@ -431,6 +460,15 @@ async function saveLog(): Promise<void> {
   transition: background-color 0.15s ease, opacity 0.15s ease;
 }
 .paused-badge:hover { background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent); }
+.autosave-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--ty-success) 15%, transparent);
+  color: var(--ty-success);
+  border: 1px solid var(--ty-success);
+  white-space: nowrap;
+}
 /* search bar */
 .search-bar { background: var(--ty-surface); }
 .search-input {
