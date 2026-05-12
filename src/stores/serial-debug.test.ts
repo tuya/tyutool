@@ -3,7 +3,6 @@ import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { __setSerialDebugTransportForTest, type SerialDebugTransport } from '@/features/serial-debug/transport';
 import type { DebugChunk } from '@/features/serial-debug/types';
-import { MAX_SUB_WINDOW_LINES } from '@/features/serial-debug/constants';
 import { useSerialDebugStore } from './serial-debug';
 
 function fakeTransport(): SerialDebugTransport & {
@@ -191,7 +190,7 @@ describe('useSerialDebugStore port-manager integration', () => {
   });
 });
 
-describe('useSerialDebugStore sub-window management', () => {
+describe('useSerialDebugStore watch chip management', () => {
   let fake: ReturnType<typeof fakeTransport>;
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -200,75 +199,84 @@ describe('useSerialDebugStore sub-window management', () => {
   });
   afterEach(() => __setSerialDebugTransportForTest(null));
 
-  function chunk(text: string): DebugChunk {
-    return { direction: 'rx', tsMs: 1000, bytes: [...Buffer.from(text + '\n')] };
-  }
-
-  it('fan-out: matching line appears in sub-window', () => {
+  it('addChip returns ok and adds chip in highlight mode', () => {
     const s = useSerialDebugStore();
-    s.addSubWindow('ERROR', false);
-    s.appendChunk(chunk('ERROR: timeout'));
-    expect(s.subWindows[0].lines.length).toBe(1);
-    expect(s.subWindows[0].lines[0].text).toBe('ERROR: timeout');
+    const result = s.addChip('ERROR', false);
+    expect(result).toBe('ok');
+    expect(s.watchChips.length).toBe(1);
+    expect(s.watchChips[0]).toMatchObject({ keyword: 'ERROR', useRegex: false, mode: 'highlight' });
   });
 
-  it('fan-out: non-matching line does not appear in sub-window', () => {
+  it('addChip returns duplicate when same keyword added twice', () => {
     const s = useSerialDebugStore();
-    s.addSubWindow('ERROR', false);
-    s.appendChunk(chunk('INFO: ok'));
-    expect(s.subWindows[0].lines.length).toBe(0);
+    expect(s.addChip('WIFI', false)).toBe('ok');
+    expect(s.addChip('WIFI', false)).toBe('duplicate');
+    expect(s.watchChips.length).toBe(1);
   });
 
-  it('addSubWindow returns duplicate when same name added twice', () => {
+  it('addChip returns invalid-regex for bad pattern', () => {
     const s = useSerialDebugStore();
-    expect(s.addSubWindow('WIFI', false)).toBe('ok');
-    expect(s.addSubWindow('WIFI', false)).toBe('duplicate');
-    expect(s.subWindows.length).toBe(1);
+    expect(s.addChip('[invalid', true)).toBe('invalid-regex');
+    expect(s.watchChips.length).toBe(0);
   });
 
-  it('addSubWindow returns invalid-regex for bad regex pattern', () => {
+  it('removeChip removes by id', () => {
     const s = useSerialDebugStore();
-    expect(s.addSubWindow('[invalid', true)).toBe('invalid-regex');
-    expect(s.subWindows.length).toBe(0);
+    s.addChip('FIRST', false);
+    s.addChip('SECOND', false);
+    const firstId = s.watchChips[0].id;
+    s.removeChip(firstId);
+    expect(s.watchChips.length).toBe(1);
+    expect(s.watchChips[0].keyword).toBe('SECOND');
   });
 
-  it('removeSubWindow removes by id and future chunks do not fan-out to it', () => {
+  it('cycleChipMode goes highlight → filter → off → highlight', () => {
     const s = useSerialDebugStore();
-    s.addSubWindow('FIRST', false);
-    s.addSubWindow('SECOND', false);
-    const firstId = s.subWindows[0].id;
-    s.removeSubWindow(firstId);
-    expect(s.subWindows.length).toBe(1);
-    expect(s.subWindows[0].name).toBe('SECOND');
-    // chunks matching FIRST should not fan-out to the remaining sub-window
-    s.appendChunk(chunk('FIRST data'));
-    expect(s.subWindows[0].lines.length).toBe(0);
+    s.addChip('LOG', false);
+    const id = s.watchChips[0].id;
+    expect(s.watchChips[0].mode).toBe('highlight');
+    s.cycleChipMode(id);
+    expect(s.watchChips[0].mode).toBe('filter');
+    s.cycleChipMode(id);
+    expect(s.watchChips[0].mode).toBe('off');
+    s.cycleChipMode(id);
+    expect(s.watchChips[0].mode).toBe('highlight');
   });
 
-  it('clear() empties sub-window lines but keeps the sub-window', () => {
+  it('matchChipKeyword matches plain text substring (case-sensitive)', () => {
     const s = useSerialDebugStore();
-    s.addSubWindow('LOG', false);
-    s.appendChunk(chunk('LOG entry'));
-    expect(s.subWindows[0].lines.length).toBe(1);
+    s.addChip('ERROR', false);
+    const chip = s.watchChips[0];
+    expect(s.matchChipKeyword({ id: 1, tsMs: 0, direction: 'rx', text: 'ERROR: timeout' }, chip)).toBe(true);
+    expect(s.matchChipKeyword({ id: 2, tsMs: 0, direction: 'rx', text: 'error: timeout' }, chip)).toBe(false);
+    expect(s.matchChipKeyword({ id: 3, tsMs: 0, direction: 'rx', text: 'no match' }, chip)).toBe(false);
+  });
+
+  it('matchChipKeyword matches regex pattern', () => {
+    const s = useSerialDebugStore();
+    s.addChip('err(or)?', true);
+    const chip = s.watchChips[0];
+    expect(s.matchChipKeyword({ id: 1, tsMs: 0, direction: 'rx', text: 'err: foo' }, chip)).toBe(true);
+    expect(s.matchChipKeyword({ id: 2, tsMs: 0, direction: 'rx', text: 'error: bar' }, chip)).toBe(true);
+    expect(s.matchChipKeyword({ id: 3, tsMs: 0, direction: 'rx', text: 'ok' }, chip)).toBe(false);
+  });
+
+  it('clear does not affect watchChips', () => {
+    const s = useSerialDebugStore();
+    s.addChip('LOG', false);
+    s.appendChunk({ direction: 'rx', tsMs: 1000, bytes: [...Buffer.from('LOG line\n')] });
     s.clear();
-    expect(s.subWindows.length).toBe(1);
-    expect(s.subWindows[0].lines.length).toBe(0);
+    expect(s.watchChips.length).toBe(1);
+    expect(s.lines.length).toBe(0);
   });
 
-  it('FIFO cap: sub-window lines are capped at MAX_SUB_WINDOW_LINES', () => {
+  it('chips cycle colors from CHIP_COLORS when added', async () => {
+    const { CHIP_COLORS } = await import('@/features/serial-debug/constants');
     const s = useSerialDebugStore();
-    s.addSubWindow('X', false);
-    const oneLine = 'X\n';
-    const bytes = [...Buffer.from(oneLine.repeat(MAX_SUB_WINDOW_LINES + 5))];
-    s.appendChunk({ direction: 'rx', tsMs: 1000, bytes });
-    expect(s.subWindows[0].lines.length).toBe(MAX_SUB_WINDOW_LINES);
-  });
-
-  it('sys lines go to all sub-windows regardless of filter', () => {
-    const s = useSerialDebugStore();
-    s.addSubWindow('WIFI', false);
-    s.appendSysLine('Connected to /dev/ttyUSB0');
-    expect(s.subWindows[0].lines.length).toBe(1);
-    expect(s.subWindows[0].lines[0].direction).toBe('sys');
+    for (let i = 0; i < CHIP_COLORS.length + 1; i++) {
+      s.addChip(`kw${i}`, false);
+    }
+    expect(s.watchChips[0].color).toBe(CHIP_COLORS[0]);
+    expect(s.watchChips[CHIP_COLORS.length].color).toBe(CHIP_COLORS[0]);
   });
 });
