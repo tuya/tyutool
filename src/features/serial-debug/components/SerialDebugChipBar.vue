@@ -2,12 +2,11 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
-import type { WatchChip } from '../types';
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
 
-// ── popover state ──────────────────────────────────────────────────────────
+// ── add-popover state ─────────────────────────────────────────────────
 const showPopover = ref(false);
 const addKeyword = ref('');
 const addUseRegex = ref(false);
@@ -27,15 +26,12 @@ function closePopover(): void {
 }
 
 function onDocMousedown(e: MouseEvent): void {
-  if (!popoverRef.value?.contains(e.target as Node)) {
-    closePopover();
-  }
+  if (!popoverRef.value?.contains(e.target as Node)) closePopover();
 }
 
 watch(showPopover, (open) => {
   if (open) {
     document.addEventListener('mousedown', onDocMousedown);
-    // Focus input after DOM update
     setTimeout(() => { inputRef.value?.focus(); }, 0);
   } else {
     document.removeEventListener('mousedown', onDocMousedown);
@@ -43,18 +39,6 @@ watch(showPopover, (open) => {
 });
 
 onUnmounted(() => { document.removeEventListener('mousedown', onDocMousedown); });
-
-// ── add logic ──────────────────────────────────────────────────────────────
-const previewCount = computed<number | null>(() => {
-  const kw = addKeyword.value.trim();
-  if (!kw) return null;
-  if (addUseRegex.value) {
-    let re: RegExp;
-    try { re = new RegExp(kw); } catch { return null; }
-    return s.lines.filter((l) => re.test(l.text)).length;
-  }
-  return s.lines.filter((l) => l.text.includes(kw)).length;
-});
 
 function submitAdd(): void {
   addError.value = '';
@@ -69,76 +53,76 @@ function submitAdd(): void {
 }
 
 function onInputKey(ev: KeyboardEvent): void {
-  if (ev.key === 'Enter') {
-    ev.preventDefault();
-    submitAdd();
-  } else if (ev.key === 'Escape') {
-    closePopover();
-  }
+  if (ev.key === 'Enter') { ev.preventDefault(); submitAdd(); }
+  else if (ev.key === 'Escape') closePopover();
 }
 
-// ── chip helpers ───────────────────────────────────────────────────────────
-const MODE_ICONS: Record<string, string> = {
-  highlight: '●',
-  filter: '◑',
-  off: '○',
-};
-
+// ── tab match counts ──────────────────────────────────────────────────
 const chipMatchCounts = computed<Map<string, number>>(() => {
   const map = new Map<string, number>();
   for (const chip of s.watchChips) {
-    if (chip.mode === 'off') {
-      map.set(chip.id, 0);
-    } else {
-      map.set(chip.id, s.lines.filter((l) => s.matchChipKeyword(l, chip)).length);
-    }
+    map.set(chip.id, s.lines.filter((l) => s.matchChipKeyword(l, chip)).length);
   }
   return map;
 });
 
-function modeTitle(chip: WatchChip): string {
-  if (chip.mode === 'highlight') return t('serialDebug.chip.modeHighlight');
-  if (chip.mode === 'filter') return t('serialDebug.chip.modeFilter');
-  return t('serialDebug.chip.modeOff');
-}
+const previewCount = computed<number | null>(() => {
+  const kw = addKeyword.value.trim();
+  if (!kw) return null;
+  if (addUseRegex.value) {
+    let re: RegExp;
+    try { re = new RegExp(kw); } catch { return null; }
+    return s.lines.filter((l) => re.test(l.text)).length;
+  }
+  return s.lines.filter((l) => l.text.includes(kw)).length;
+});
 </script>
 
 <template>
-  <div class="chip-bar flex items-center gap-2 flex-wrap px-2 py-1.5 border-b border-[var(--ty-border)] bg-[var(--ty-surface)]">
-    <!-- chip list -->
-    <div v-for="chip in s.watchChips" :key="chip.id" class="chip-item">
-      <!-- mode icon (click=cycle) -->
+  <div class="tab-bar flex items-center gap-0.5 px-2 border-b border-[var(--ty-border)] bg-[var(--ty-surface)] overflow-x-auto">
+    <!-- "全部" tab -->
+    <button
+      type="button"
+      class="tab-item"
+      :class="{ 'tab-active': s.activeChipId === null }"
+      @click="s.setActiveChip(null)"
+    >
+      {{ t('serialDebug.chip.tabAll') }}
+    </button>
+
+    <!-- filter tabs -->
+    <div
+      v-for="chip in s.watchChips"
+      :key="chip.id"
+      class="tab-item tab-chip"
+      :class="{ 'tab-active': s.activeChipId === chip.id }"
+      @click="s.setActiveChip(chip.id)"
+    >
+      <span class="tab-dot" :style="{ background: chip.color }" />
+      <span class="tab-keyword" :title="chip.keyword">{{ chip.keyword }}</span>
+      <span v-if="chip.useRegex" class="tab-regex">.*</span>
+      <span class="tab-count" :style="{ color: chip.color }">{{ chipMatchCounts.get(chip.id) ?? 0 }}</span>
       <button
         type="button"
-        class="chip-mode-btn"
-        :style="{ color: chip.color }"
-        :title="modeTitle(chip)"
-        @click="s.cycleChipMode(chip.id)"
-      >{{ MODE_ICONS[chip.mode] }}</button>
-
-      <!-- keyword label -->
-      <span class="chip-label" :title="chip.keyword">{{ chip.keyword }}</span>
-
-      <!-- regex badge -->
-      <span v-if="chip.useRegex" class="chip-badge">.*</span>
-
-      <!-- match count -->
-      <span v-if="chip.mode !== 'off'" class="chip-count">{{ chipMatchCounts.get(chip.id) ?? 0 }}</span>
-
-      <!-- remove -->
-      <button type="button" class="chip-remove" @click="s.removeChip(chip.id)" aria-label="Remove">×</button>
+        class="tab-close"
+        @click.stop="s.removeChip(chip.id)"
+        :aria-label="t('serialDebug.chip.removeTab')"
+      >×</button>
     </div>
 
-    <!-- add button + popover -->
-    <div ref="popoverRef" class="add-wrap relative">
+    <!-- add button -->
+    <div ref="popoverRef" class="add-wrap relative ml-1">
       <button
         type="button"
-        class="btn-add"
-        :title="t('serialDebug.chip.addBtn')"
+        class="tab-add"
+        :class="{ 'tab-add-active': showPopover }"
         @click="showPopover ? closePopover() : openPopover()"
-      >＋</button>
+        :title="t('serialDebug.chip.addBtn')"
+      >
+        <FontAwesomeIcon :icon="['fas', 'plus']" class="size-2.5" />
+      </button>
 
-      <div v-if="showPopover" class="add-popover absolute top-full left-0 z-50 mt-1">
+      <div v-if="showPopover" class="add-popover">
         <div class="flex items-center gap-1">
           <input
             ref="inputRef"
@@ -157,8 +141,10 @@ function modeTitle(chip: WatchChip): string {
           >.*</button>
         </div>
         <div v-if="addError" class="pop-error">{{ addError }}</div>
-        <div class="flex items-center justify-between gap-2 mt-1">
-          <span class="pop-preview">{{ (previewCount ?? 0) }} match{{ (previewCount ?? 0) === 1 ? '' : 'es' }}</span>
+        <div class="flex items-center justify-between gap-2 mt-1.5">
+          <span class="pop-preview">
+            {{ previewCount !== null ? `${previewCount} match${previewCount === 1 ? '' : 'es'}` : '' }}
+          </span>
           <button type="button" class="pop-add-btn" :disabled="!addKeyword.trim()" @click="submitAdd">
             {{ t('serialDebug.chip.addBtn') }}
           </button>
@@ -169,148 +155,164 @@ function modeTitle(chip: WatchChip): string {
 </template>
 
 <style scoped>
-/* ── chip item ─────────────────────────────────────────────────────────── */
-.chip-item {
+/* ── tab bar ─────────────────────────────────────────────────────────── */
+.tab-bar {
+  min-height: 2rem;
+  scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+
+.tab-item {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.1875rem 0.5rem 0.1875rem 0.25rem;
-  border: 1px solid var(--ty-border);
-  border-radius: 9999px;
-  background: var(--ty-canvas);
-  font-size: 0.75rem;
-  line-height: 1;
-}
-
-.chip-mode-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.125rem;
-  height: 1.125rem;
+  gap: 0.3rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.5rem 0.5rem 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
   font-size: 0.75rem;
   cursor: pointer;
-  border-radius: 50%;
-  transition: opacity 0.15s ease;
+  white-space: nowrap;
+  color: var(--ty-text-muted);
+  background: transparent;
+  transition: color 0.15s, background-color 0.15s;
   flex-shrink: 0;
 }
-.chip-mode-btn:hover { opacity: 0.7; }
+.tab-item:hover { color: var(--ty-text); background: var(--ty-surface-muted, color-mix(in srgb, var(--ty-text) 6%, transparent)); }
+.tab-active {
+  color: var(--ty-text);
+  background: var(--ty-canvas);
+  border-color: var(--ty-border);
+  position: relative;
+}
+/* cover bottom border so active tab merges with log area */
+.tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--ty-canvas);
+}
 
-.chip-label {
-  max-width: 10rem;
+.tab-dot {
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tab-keyword {
+  max-width: 8rem;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--ty-text);
+  font-family: monospace;
 }
-
-.chip-badge {
-  padding: 0 0.25rem;
-  border-radius: 0.25rem;
-  background: var(--ty-surface-muted, var(--ty-border));
+.tab-regex {
+  font-size: 0.6rem;
+  font-weight: 700;
   color: var(--ty-text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.6875rem;
+  letter-spacing: -0.02em;
 }
-
-.chip-count {
-  color: var(--ty-text-muted);
+.tab-count {
   font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  opacity: 0.85;
 }
-
-.chip-remove {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 50%;
+.tab-close {
   font-size: 0.875rem;
   line-height: 1;
-  color: var(--ty-text-muted);
+  padding: 0 0.125rem;
+  border-radius: 3px;
+  background: none;
+  border: none;
   cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease;
-  flex-shrink: 0;
+  color: var(--ty-text-muted);
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s;
 }
-.chip-remove:hover { color: var(--ty-danger); background: color-mix(in srgb, var(--ty-danger) 12%, transparent); }
+.tab-close:hover { opacity: 1; background: color-mix(in srgb, var(--ty-danger) 15%, transparent); color: var(--ty-danger); }
 
-/* ── add button ────────────────────────────────────────────────────────── */
-.btn-add {
+/* ── add button ──────────────────────────────────────────────────────── */
+.add-wrap { display: inline-flex; align-items: center; }
+.tab-add {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.625rem;
-  height: 1.625rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
   border: 1px dashed var(--ty-border);
-  border-radius: 9999px;
-  font-size: 0.875rem;
+  background: transparent;
   color: var(--ty-text-muted);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.15s, color 0.15s, background-color 0.15s;
 }
-.btn-add:hover { color: var(--ty-primary); border-color: var(--ty-primary); background: color-mix(in srgb, var(--ty-primary) 8%, transparent); }
+.tab-add:hover, .tab-add-active {
+  border-color: var(--ty-primary);
+  color: var(--ty-primary);
+  background: color-mix(in srgb, var(--ty-primary) 8%, transparent);
+}
 
-/* ── add popover ───────────────────────────────────────────────────────── */
+/* ── popover ─────────────────────────────────────────────────────────── */
 .add-popover {
-  min-width: 16rem;
-  padding: 0.625rem;
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-radius: 0.625rem;
   border: 1px solid var(--ty-border);
-  border-radius: 0.75rem;
   background: var(--ty-surface);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
+  width: 16rem;
 }
-
 .pop-input {
   flex: 1;
-  border: 1px solid var(--ty-border);
-  border-radius: 0.5rem;
-  background: var(--ty-canvas);
-  padding: 0.375rem 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8125rem;
-  color: var(--ty-text);
   min-width: 0;
-}
-.pop-input:focus { outline: none; border-color: var(--ty-primary); }
-
-.pop-toggle {
-  padding: 0.375rem 0.5rem;
   border: 1px solid var(--ty-border);
-  border-radius: 0.5rem;
   background: var(--ty-canvas);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--ty-text-muted);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  flex-shrink: 0;
-}
-.pop-toggle.active { background: var(--ty-primary); color: white; border-color: var(--ty-primary); }
-.pop-toggle:not(.active):hover { background: var(--ty-surface-muted, var(--ty-border)); }
-
-.pop-error {
-  margin-top: 0.375rem;
-  font-size: 0.75rem;
-  color: var(--ty-danger);
-}
-
-.pop-preview {
-  font-size: 0.75rem;
-  color: var(--ty-text-muted);
-}
-
-.pop-add-btn {
-  padding: 0.3125rem 0.75rem;
-  background: var(--ty-primary);
-  color: white;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
   font-size: 0.8125rem;
+  font-family: monospace;
+  outline: none;
+}
+.pop-input:focus { border-color: var(--ty-primary); }
+.pop-toggle {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--ty-border);
+  background: transparent;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--ty-text-muted);
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.pop-toggle.active {
+  background: color-mix(in srgb, var(--ty-primary) 15%, transparent);
+  border-color: var(--ty-primary);
+  color: var(--ty-primary);
+}
+.pop-preview { font-size: 0.7rem; color: var(--ty-text-muted); min-height: 1em; }
+.pop-add-btn {
+  padding: 0.2rem 0.625rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--ty-primary);
+  background: color-mix(in srgb, var(--ty-primary) 15%, transparent);
+  color: var(--ty-primary);
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: background-color 0.15s;
 }
-.pop-add-btn:hover:not(:disabled) { opacity: 0.88; }
-.pop-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pop-add-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ty-primary) 25%, transparent); }
+.pop-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pop-error { font-size: 0.75rem; color: var(--ty-danger); }
 </style>

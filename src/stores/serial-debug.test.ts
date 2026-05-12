@@ -199,12 +199,13 @@ describe('useSerialDebugStore watch chip management', () => {
   });
   afterEach(() => __setSerialDebugTransportForTest(null));
 
-  it('addChip returns ok and adds chip in highlight mode', () => {
+  it('addChip returns ok, adds chip, and sets it as active tab', () => {
     const s = useSerialDebugStore();
     const result = s.addChip('ERROR', false);
     expect(result).toBe('ok');
     expect(s.watchChips.length).toBe(1);
-    expect(s.watchChips[0]).toMatchObject({ keyword: 'ERROR', useRegex: false, mode: 'highlight' });
+    expect(s.watchChips[0]).toMatchObject({ keyword: 'ERROR', useRegex: false });
+    expect(s.activeChipId).toBe(s.watchChips[0].id);
   });
 
   it('addChip returns duplicate when same keyword added twice', () => {
@@ -220,31 +221,31 @@ describe('useSerialDebugStore watch chip management', () => {
     expect(s.watchChips.length).toBe(0);
   });
 
-  it('removeChip removes by id', () => {
+  it('removeChip removes by id and falls back activeChipId', () => {
     const s = useSerialDebugStore();
     s.addChip('FIRST', false);
     s.addChip('SECOND', false);
     const firstId = s.watchChips[0].id;
-    s.removeChip(firstId);
+    const secondId = s.watchChips[1].id;
+    s.setActiveChip(secondId);
+    s.removeChip(secondId);
     expect(s.watchChips.length).toBe(1);
-    expect(s.watchChips[0].keyword).toBe('SECOND');
+    expect(s.watchChips[0].keyword).toBe('FIRST');
+    expect(s.activeChipId).toBe(firstId);
   });
 
-  it('cycleChipMode goes highlight → filter → off → highlight', () => {
+  it('setActiveChip switches active tab (null = All)', () => {
     const s = useSerialDebugStore();
     s.addChip('LOG', false);
     const id = s.watchChips[0].id;
-    expect(s.watchChips[0].mode).toBe('highlight');
-    s.cycleChipMode(id);
-    expect(s.watchChips[0].mode).toBe('filter');
-    s.cycleChipMode(id);
-    expect(s.watchChips[0].mode).toBe('off');
-    s.cycleChipMode(id);
-    expect(s.watchChips[0].mode).toBe('highlight');
+    expect(s.activeChipId).toBe(id);
+    s.setActiveChip(null);
+    expect(s.activeChipId).toBeNull();
+    s.setActiveChip(id);
+    expect(s.activeChipId).toBe(id);
   });
 
-  it('matchChipKeyword matches plain text substring (case-sensitive)', () => {
-    const s = useSerialDebugStore();
+  it('matchChipKeyword matches plain text substring (case-sensitive)', () => {    const s = useSerialDebugStore();
     s.addChip('ERROR', false);
     const chip = s.watchChips[0];
     expect(s.matchChipKeyword({ id: 1, tsMs: 0, direction: 'rx', text: 'ERROR: timeout' }, chip)).toBe(true);

@@ -14,7 +14,6 @@ import {
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
 import type {
-  ChipMode,
   DebugChunk,
   DebugConfig,
   DebugLogLine,
@@ -68,6 +67,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
 
   // ── watch chips ──────────────────────────────────────────────────────
   const watchChips = ref<WatchChip[]>([]);
+  const activeChipId = ref<string | null>(null);
   const chipRegexCache = new Map<string, RegExp>();
 
   const transport = serialDebugTransport();
@@ -268,7 +268,8 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     const id = crypto.randomUUID();
     const color = CHIP_COLORS[watchChips.value.length % CHIP_COLORS.length];
     if (compiled) chipRegexCache.set(id, compiled);
-    watchChips.value.push({ id, keyword: trimmed, useRegex, mode: 'highlight', color });
+    watchChips.value.push({ id, keyword: trimmed, useRegex, color });
+    activeChipId.value = id;
     return 'ok';
   }
 
@@ -278,14 +279,15 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       watchChips.value.splice(idx, 1);
       chipRegexCache.delete(id);
     }
+    if (activeChipId.value === id) {
+      activeChipId.value = watchChips.value.length > 0
+        ? watchChips.value[Math.max(0, idx - 1)].id
+        : null;
+    }
   }
 
-  function cycleChipMode(id: string): void {
-    const chip = watchChips.value.find((c) => c.id === id);
-    if (!chip) return;
-    const cycle: ChipMode[] = ['highlight', 'filter', 'off'];
-    const next = cycle[(cycle.indexOf(chip.mode) + 1) % cycle.length];
-    chip.mode = next;
+  function setActiveChip(id: string | null): void {
+    activeChipId.value = id;
   }
 
   function matchChipKeyword(line: DebugLogLine, chip: WatchChip): boolean {
@@ -369,11 +371,11 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
     pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, sendMode, sendAppendCrlf, sendInput,
-    sendHistory, hexPopup, watchChips,
+    sendHistory, hexPopup, watchChips, activeChipId,
     // actions
     openPort, closePort, send, clear, appendChunk,
     showHexPopup, closeHexPopup, appendSysLine,
-    addChip, removeChip, cycleChipMode, matchChipKeyword,
+    addChip, removeChip, setActiveChip, matchChipKeyword,
     loadWorkspace, startWorkspacePersistence,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,

@@ -38,12 +38,9 @@ export interface DebugLogLine {
 export type SendMode = 'ascii' | 'hex';
 export type HexBytesPerRow = 8 | 16 | 32;
 
-export type ChipMode = 'highlight' | 'filter' | 'off';
-
 export interface WatchChip {
   id: string;
   keyword: string;
   useRegex: boolean;
-  mode: ChipMode;
   color: string; // CSS hex string, e.g. '#ef4444'
 }

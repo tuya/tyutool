@@ -401,9 +401,8 @@
       "regexLabel": "Regex",
       "dupWarning": "A chip with this keyword already exists",
       "invalidRegex": "Invalid regular expression",
-      "modeHighlight": "Highlight matching lines",
-      "modeFilter": "Show matching lines only",
-      "modeOff": "Disabled (tracking only)"
+      "tabAll": "All",
+      "removeTab": "Remove filter"
     },
     "search": {
       "placeholder": "Search in this pane…",
@@ -413,7 +412,7 @@
       "count": "{current} / {total}",
       "noMatch": "No matches"
     },
-"log": {
+    "log": {
       "waitingData": "Waiting for data…",
       "title": "Log",
       "pausedScroll": "↑ Scroll paused",

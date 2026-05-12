@@ -402,9 +402,8 @@
       "regexLabel": "正则",
       "dupWarning": "该关键词已存在",
       "invalidRegex": "无效的正则表达式",
-      "modeHighlight": "高亮匹配行",
-      "modeFilter": "只显示匹配行",
-      "modeOff": "关闭（仅追踪计数）"
+      "tabAll": "全部",
+      "removeTab": "移除过滤"
     },
     "search": {
       "placeholder": "在此窗口内搜索…",
@@ -414,7 +413,7 @@
       "count": "{current} / {total}",
       "noMatch": "无匹配"
     },
-"log": {
+    "log": {
       "waitingData": "等待数据…",
       "title": "日志",
       "pausedScroll": "↑ 已暂停滚动",

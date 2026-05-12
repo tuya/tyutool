@@ -25,26 +25,13 @@ const emit = defineEmits<{
 const s = useSerialDebugStore();
 const { t } = useI18n();
 
-const filterChips = computed(() => s.watchChips.filter((c) => c.mode === 'filter'));
-const highlightChips = computed(() => s.watchChips.filter((c) => c.mode === 'highlight'));
+const activeChip = computed(() =>
+  s.activeChipId ? s.watchChips.find((c) => c.id === s.activeChipId) ?? null : null,
+);
 
 const displayLines = computed(() => {
-  if (filterChips.value.length === 0) return props.lines;
-  return props.lines.filter((l) => filterChips.value.some((c) => s.matchChipKeyword(l, c)));
-});
-
-const lineColorMap = computed<Map<number, string>>(() => {
-  const map = new Map<number, string>();
-  if (highlightChips.value.length === 0) return map;
-  for (const line of props.lines) {
-    for (const chip of highlightChips.value) {
-      if (s.matchChipKeyword(line, chip)) {
-        map.set(line.id, chip.color);
-        break;
-      }
-    }
-  }
-  return map;
+  if (!activeChip.value) return props.lines;
+  return props.lines.filter((l) => s.matchChipKeyword(l, activeChip.value!));
 });
 
 const scrollRef = ref<HTMLDivElement | null>(null);
@@ -357,9 +344,6 @@ async function saveLog(): Promise<void> {
           'line-search-match': matchingLineIds.has(line.id) && line.id !== currentMatchLineId,
           'line-search-current': line.id === currentMatchLineId,
         }"
-        :style="!matchingLineIds.has(line.id) && lineColorMap.has(line.id)
-          ? { background: `color-mix(in srgb, ${lineColorMap.get(line.id)} 18%, transparent)` }
-          : {}"
       >
         <span class="prefix">
           <span class="ts">{{ formatTs(line.tsMs) }}</span>
