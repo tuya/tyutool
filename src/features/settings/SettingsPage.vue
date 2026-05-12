@@ -321,7 +321,7 @@ async function openOpensourceLicenses(): Promise<void> {
 .path-scroll::-webkit-scrollbar { display: none; }
 .path-scroll { scrollbar-width: none; }
 
-/* "关闭" active state — muted neutral, distinct from primary "开启" */
+/* "关闭" active state — danger red, distinct from primary "开启" */
 .ty-btn-toggle-active-off {
   display: inline-flex;
   align-items: center;
@@ -333,12 +333,14 @@ async function openOpensourceLicenses(): Promise<void> {
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  color: var(--ty-text);
-  border: 1px solid var(--ty-border-strong);
-  background-color: var(--ty-surface-muted);
-  transition: background-color 0.18s ease, border-color 0.18s ease;
+  color: #fff;
+  border: 1px solid var(--ty-danger);
+  background-color: var(--ty-danger);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 2px 8px color-mix(in srgb, var(--ty-danger) 24%, transparent);
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .ty-btn-toggle-active-off:hover:not(:disabled) {
-  background-color: var(--ty-border);
+  background-color: color-mix(in srgb, var(--ty-danger) 85%, #000);
+  border-color: color-mix(in srgb, var(--ty-danger) 85%, #000);
 }
 </style>
