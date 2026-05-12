@@ -322,7 +322,8 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   }
 
   let persistStarted = false;
-  function debounce(fn: () => void, ms: number): () => void {    let timer: ReturnType<typeof setTimeout> | null = null;
+  function debounce(fn: () => void, ms: number): () => void {
+    let timer: ReturnType<typeof setTimeout> | null = null;
     return () => {
       if (timer !== null) clearTimeout(timer);
       timer = setTimeout(() => { timer = null; fn(); }, ms);
