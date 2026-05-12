@@ -45,19 +45,15 @@ watch(showPopover, (open) => {
 onUnmounted(() => { document.removeEventListener('mousedown', onDocMousedown); });
 
 // ── add logic ──────────────────────────────────────────────────────────────
-const previewCount = computed(() => {
+const previewCount = computed<number | null>(() => {
   const kw = addKeyword.value.trim();
-  if (!kw) return 0;
-  // Validate regex before counting
+  if (!kw) return null;
   if (addUseRegex.value) {
-    try { new RegExp(kw); } catch { return 0; }
+    let re: RegExp;
+    try { re = new RegExp(kw); } catch { return null; }
+    return s.lines.filter((l) => re.test(l.text)).length;
   }
-  return s.lines.filter((l) => {
-    if (addUseRegex.value) {
-      try { return new RegExp(kw).test(l.text); } catch { return false; }
-    }
-    return l.text.includes(kw);
-  }).length;
+  return s.lines.filter((l) => l.text.includes(kw)).length;
 });
 
 function submitAdd(): void {
@@ -88,10 +84,17 @@ const MODE_ICONS: Record<string, string> = {
   off: '○',
 };
 
-function matchCount(chip: WatchChip): number {
-  if (chip.mode === 'off') return 0;
-  return s.lines.filter((l) => s.matchChipKeyword(l, chip)).length;
-}
+const chipMatchCounts = computed<Map<string, number>>(() => {
+  const map = new Map<string, number>();
+  for (const chip of s.watchChips) {
+    if (chip.mode === 'off') {
+      map.set(chip.id, 0);
+    } else {
+      map.set(chip.id, s.lines.filter((l) => s.matchChipKeyword(l, chip)).length);
+    }
+  }
+  return map;
+});
 
 function modeTitle(chip: WatchChip): string {
   if (chip.mode === 'highlight') return t('serialDebug.chip.modeHighlight');
@@ -120,7 +123,7 @@ function modeTitle(chip: WatchChip): string {
       <span v-if="chip.useRegex" class="chip-badge">.*</span>
 
       <!-- match count -->
-      <span v-if="chip.mode !== 'off'" class="chip-count">{{ matchCount(chip) }}</span>
+      <span v-if="chip.mode !== 'off'" class="chip-count">{{ chipMatchCounts.get(chip.id) ?? 0 }}</span>
 
       <!-- remove -->
       <button type="button" class="chip-remove" @click="s.removeChip(chip.id)" aria-label="Remove">×</button>
@@ -155,7 +158,7 @@ function modeTitle(chip: WatchChip): string {
         </div>
         <div v-if="addError" class="pop-error">{{ addError }}</div>
         <div class="flex items-center justify-between gap-2 mt-1">
-          <span class="pop-preview">{{ previewCount }} match{{ previewCount === 1 ? '' : 'es' }}</span>
+          <span class="pop-preview">{{ (previewCount ?? 0) }} match{{ (previewCount ?? 0) === 1 ? '' : 'es' }}</span>
           <button type="button" class="pop-add-btn" :disabled="!addKeyword.trim()" @click="submitAdd">
             {{ t('serialDebug.chip.addBtn') }}
           </button>
