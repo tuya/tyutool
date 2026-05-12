@@ -4,6 +4,7 @@ import { library } from '@fortawesome/fontawesome-svg-core';
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
 import {
   faArrowsRotate,
+  faArrowUpRightFromSquare,
   faChevronDown,
   faCircle,
   faCircleArrowUp,
@@ -15,6 +16,7 @@ import {
   faClockRotateLeft,
   faCopy,
   faDownload,
+  faExpand,
   faFolderOpen,
   faGear,
   faKey,
@@ -41,6 +43,7 @@ import { useSettingsStore, resolveLocale } from './stores/settings';
 
 library.add(
   faArrowsRotate,
+  faArrowUpRightFromSquare,
   faChevronDown,
   faCircle,
   faCircleArrowUp,
@@ -52,6 +55,7 @@ library.add(
   faClockRotateLeft,
   faCopy,
   faDownload,
+  faExpand,
   faFolderOpen,
   faGear,
   faKey,
