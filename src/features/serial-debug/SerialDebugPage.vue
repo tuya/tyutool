@@ -2,7 +2,7 @@
 import { onUnmounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
-import { sanitizePortName } from '@/features/serial-debug/context';
+import { sanitizePortName, makeStamp, formatTs } from '@/features/serial-debug/context';
 import { stripAnsi } from '@/features/serial-debug/ansi-parse';
 import SerialDebugConnectionBar from './components/SerialDebugConnectionBar.vue';
 import SerialDebugLogView from './components/SerialDebugLogView.vue';
@@ -17,20 +17,6 @@ const { t } = useI18n();
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 let lastFlushedLineId = 0;
 let flushInFlight = false;
-
-function makeStamp(): string {
-  const now = new Date();
-  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-}
-
-function formatTs(ms: number): string {
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  const mmm = String(d.getMilliseconds()).padStart(3, '0');
-  return `${hh}:${mm}:${ss}.${mmm}`;
-}
 
 function stopInterval(): void {
   if (autoSaveInterval !== null) {
@@ -88,8 +74,9 @@ async function finalFlushAndStop(): Promise<void> {
 }
 
 onUnmounted(() => {
-  if (s.open) void s.closePort();
-  else void finalFlushAndStop();
+  void finalFlushAndStop().then(() => {
+    if (s.open) void s.closePort();
+  });
 });
 
 // Start/stop when port opens or closes

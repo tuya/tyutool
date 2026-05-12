@@ -5,6 +5,7 @@ import { useSerialDebugStore } from '@/stores/serial-debug';
 import { formatHexDump } from '@/features/serial-debug/hex-format';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { parseAnsi, stripAnsi, type AnsiStyle } from '@/features/serial-debug/ansi-parse';
+import { makeStamp, formatTs } from '@/features/serial-debug/context';
 import type { DebugLogLine, HexBytesPerRow } from '@/features/serial-debug/types';
 import SerialDebugChipBar from './SerialDebugChipBar.vue';
 
@@ -113,15 +114,6 @@ function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
   };
 }
 
-function formatTs(ms: number): string {
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  const mmm = String(d.getMilliseconds()).padStart(3, '0');
-  return `${hh}:${mm}:${ss}.${mmm}`;
-}
-
 const ctxMenu = ref<{ x: number; y: number; selected: string } | null>(null);
 
 function onContextMenu(ev: MouseEvent): void {
@@ -219,11 +211,6 @@ function onSearchKeydown(ev: KeyboardEvent): void {
     ev.preventDefault();
     void navigateSearch(ev.shiftKey ? -1 : 1);
   }
-}
-
-function makeStamp(): string {
-  const now = new Date();
-  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
 }
 
 async function writeFile(defaultName: string, content: string, ext: string, mimeType: string): Promise<void> {
