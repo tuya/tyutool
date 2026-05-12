@@ -304,24 +304,27 @@ async function saveLog(): Promise<void> {
       </span>
       <button
         type="button"
-        class="btn-icon"
+        class="btn-tool"
         :aria-label="t('serialDebug.search.prev')"
         :disabled="matchCount === 0"
         @click="navigateSearch(-1)"
       >
-        <FontAwesomeIcon :icon="['fas', 'chevron-up']" />
+        <FontAwesomeIcon :icon="['fas', 'chevron-up']" class="size-3 shrink-0" />
+        {{ t('serialDebug.search.prev') }}
       </button>
       <button
         type="button"
-        class="btn-icon"
+        class="btn-tool"
         :aria-label="t('serialDebug.search.next')"
         :disabled="matchCount === 0"
         @click="navigateSearch(1)"
       >
-        <FontAwesomeIcon :icon="['fas', 'chevron-down']" />
+        <FontAwesomeIcon :icon="['fas', 'chevron-down']" class="size-3 shrink-0" />
+        {{ t('serialDebug.search.next') }}
       </button>
-      <button type="button" class="btn-icon" :aria-label="t('serialDebug.search.close')" @click="closeSearch">
-        <FontAwesomeIcon :icon="['fas', 'xmark']" />
+      <button type="button" class="btn-tool" :aria-label="t('serialDebug.search.close')" @click="closeSearch">
+        <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-3 shrink-0" />
+        {{ t('serialDebug.search.close') }}
       </button>
     </div>
 
