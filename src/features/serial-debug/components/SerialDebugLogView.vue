@@ -6,6 +6,7 @@ import { formatHexDump } from '@/features/serial-debug/hex-format';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { parseAnsi, stripAnsi, type AnsiStyle } from '@/features/serial-debug/ansi-parse';
 import type { DebugLogLine, HexBytesPerRow } from '@/features/serial-debug/types';
+import SerialDebugChipBar from './SerialDebugChipBar.vue';
 
 const props = withDefaults(defineProps<{
   lines: DebugLogLine[];
@@ -23,6 +24,28 @@ const emit = defineEmits<{
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
+
+const filterChips = computed(() => s.watchChips.filter((c) => c.mode === 'filter'));
+const highlightChips = computed(() => s.watchChips.filter((c) => c.mode === 'highlight'));
+
+const displayLines = computed(() => {
+  if (filterChips.value.length === 0) return props.lines;
+  return props.lines.filter((l) => filterChips.value.some((c) => s.matchChipKeyword(l, c)));
+});
+
+const lineColorMap = computed<Map<number, string>>(() => {
+  const map = new Map<number, string>();
+  if (highlightChips.value.length === 0) return map;
+  for (const line of props.lines) {
+    for (const chip of highlightChips.value) {
+      if (s.matchChipKeyword(line, chip)) {
+        map.set(line.id, chip.color);
+        break;
+      }
+    }
+  }
+  return map;
+});
 
 const scrollRef = ref<HTMLDivElement | null>(null);
 const lockAutoScroll = ref(false);
@@ -212,14 +235,7 @@ async function saveLog(): Promise<void> {
   await writeFile(`${props.exportTitle}-${makeStamp()}.txt`, content, 'txt', 'text/plain');
 }
 
-async function exportCsv(): Promise<void> {
-  const csvEscape = (str: string) => `"${str.replace(/"/g, '""')}"`;
-  const rows = props.lines.map((l) =>
-    `${l.tsMs},${l.direction},${csvEscape(stripAnsi(l.text))}`,
-  );
-  const content = `timestamp_ms,direction,text\n${rows.join('\n')}`;
-  await writeFile(`${props.exportTitle}-${makeStamp()}.csv`, content, 'csv', 'text/csv');
-}
+
 </script>
 
 <template>
@@ -255,16 +271,7 @@ async function exportCsv(): Promise<void> {
         >
           <FontAwesomeIcon :icon="['fas', 'download']" />
         </button>
-        <button
-          type="button"
-          class="btn-icon btn-icon-text"
-          :aria-label="t('serialDebug.export.csv')"
-          :disabled="lines.length === 0"
-          @click="exportCsv"
-        >
-          CSV
-        </button>
-        <button
+<button
           type="button"
           class="btn-icon"
           :aria-label="t('serialDebug.conn.clear')"
@@ -274,6 +281,9 @@ async function exportCsv(): Promise<void> {
         </button>
       </div>
     </div>
+
+    <!-- chip bar -->
+    <SerialDebugChipBar />
 
     <!-- Ctrl+F search bar -->
     <div
@@ -338,7 +348,7 @@ async function exportCsv(): Promise<void> {
       @contextmenu="onContextMenu"
     >
       <div
-        v-for="line in lines"
+        v-for="line in displayLines"
         :key="line.id"
         :data-line-id="line.id"
         class="line"
@@ -347,6 +357,9 @@ async function exportCsv(): Promise<void> {
           'line-search-match': matchingLineIds.has(line.id) && line.id !== currentMatchLineId,
           'line-search-current': line.id === currentMatchLineId,
         }"
+        :style="!matchingLineIds.has(line.id) && lineColorMap.has(line.id)
+          ? { background: `color-mix(in srgb, ${lineColorMap.get(line.id)} 18%, transparent)` }
+          : {}"
       >
         <span class="prefix">
           <span class="ts">{{ formatTs(line.tsMs) }}</span>
@@ -360,7 +373,7 @@ async function exportCsv(): Promise<void> {
           >{{ span.text }}</span>
         </span>
       </div>
-      <div v-if="lines.length === 0" class="px-3 py-2 text-[var(--ty-text-muted)]">
+      <div v-if="displayLines.length === 0" class="px-3 py-2 text-[var(--ty-text-muted)]">
         {{ t('serialDebug.log.waitingData') }}
       </div>
     </div>
@@ -395,9 +408,7 @@ async function exportCsv(): Promise<void> {
 }
 .btn-icon:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
 .btn-icon:disabled { cursor: not-allowed; opacity: 0.4; }
-.btn-icon-active { color: var(--ty-primary); border-color: var(--ty-primary); }
-.btn-icon-text { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; }
-.paused-badge {
+.btn-icon-active { color: var(--ty-primary); border-color: var(--ty-primary); }.paused-badge {
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
   border-radius: 9999px;
