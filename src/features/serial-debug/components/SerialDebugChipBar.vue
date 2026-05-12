@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 
@@ -11,14 +11,22 @@ const showPopover = ref(false);
 const addKeyword = ref('');
 const addUseRegex = ref(false);
 const addError = ref('');
+const btnRef = ref<HTMLButtonElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
+const popoverPos = ref({ top: '0px', left: '0px' });
 
-function openPopover(): void {
-  showPopover.value = true;
+async function openPopover(): Promise<void> {
   addKeyword.value = '';
   addUseRegex.value = false;
   addError.value = '';
+  showPopover.value = true;
+  await nextTick();
+  if (btnRef.value) {
+    const r = btnRef.value.getBoundingClientRect();
+    popoverPos.value = { top: `${r.bottom + 6}px`, left: `${r.left}px` };
+  }
+  inputRef.value?.focus();
 }
 
 function closePopover(): void {
@@ -26,16 +34,15 @@ function closePopover(): void {
 }
 
 function onDocMousedown(e: MouseEvent): void {
-  if (!popoverRef.value?.contains(e.target as Node)) closePopover();
+  if (
+    !popoverRef.value?.contains(e.target as Node) &&
+    !btnRef.value?.contains(e.target as Node)
+  ) closePopover();
 }
 
 watch(showPopover, (open) => {
-  if (open) {
-    document.addEventListener('mousedown', onDocMousedown);
-    setTimeout(() => { inputRef.value?.focus(); }, 0);
-  } else {
-    document.removeEventListener('mousedown', onDocMousedown);
-  }
+  if (open) document.addEventListener('mousedown', onDocMousedown);
+  else document.removeEventListener('mousedown', onDocMousedown);
 });
 
 onUnmounted(() => { document.removeEventListener('mousedown', onDocMousedown); });
@@ -111,8 +118,9 @@ const previewCount = computed<number | null>(() => {
     </div>
 
     <!-- add button -->
-    <div ref="popoverRef" class="add-wrap relative ml-1">
+    <div class="add-wrap ml-1">
       <button
+        ref="btnRef"
         type="button"
         class="tab-add"
         :class="{ 'tab-add-active': showPopover }"
@@ -121,37 +129,45 @@ const previewCount = computed<number | null>(() => {
       >
         <FontAwesomeIcon :icon="['fas', 'plus']" class="size-2.5" />
       </button>
-
-      <div v-if="showPopover" class="add-popover">
-        <div class="flex items-center gap-1">
-          <input
-            ref="inputRef"
-            v-model="addKeyword"
-            type="text"
-            class="pop-input"
-            :placeholder="t('serialDebug.chip.placeholder')"
-            @keydown="onInputKey"
-          />
-          <button
-            type="button"
-            class="pop-toggle"
-            :class="{ active: addUseRegex }"
-            @click="addUseRegex = !addUseRegex"
-            :title="t('serialDebug.chip.regexLabel')"
-          >.*</button>
-        </div>
-        <div v-if="addError" class="pop-error">{{ addError }}</div>
-        <div class="flex items-center justify-between gap-2 mt-1.5">
-          <span class="pop-preview">
-            {{ previewCount !== null ? `${previewCount} match${previewCount === 1 ? '' : 'es'}` : '' }}
-          </span>
-          <button type="button" class="pop-add-btn" :disabled="!addKeyword.trim()" @click="submitAdd">
-            {{ t('serialDebug.chip.addBtn') }}
-          </button>
-        </div>
-      </div>
     </div>
   </div>
+
+  <!-- popover teleported to body to escape overflow-hidden -->
+  <Teleport to="body">
+    <div
+      v-if="showPopover"
+      ref="popoverRef"
+      class="add-popover"
+      :style="{ top: popoverPos.top, left: popoverPos.left }"
+    >
+      <div class="flex items-center gap-1">
+        <input
+          ref="inputRef"
+          v-model="addKeyword"
+          type="text"
+          class="pop-input"
+          :placeholder="t('serialDebug.chip.placeholder')"
+          @keydown="onInputKey"
+        />
+        <button
+          type="button"
+          class="pop-toggle"
+          :class="{ active: addUseRegex }"
+          @click="addUseRegex = !addUseRegex"
+          :title="t('serialDebug.chip.regexLabel')"
+        >.*</button>
+      </div>
+      <div v-if="addError" class="pop-error">{{ addError }}</div>
+      <div class="flex items-center justify-between gap-2 mt-1.5">
+        <span class="pop-preview">
+          {{ previewCount !== null ? `${previewCount} match${previewCount === 1 ? '' : 'es'}` : '' }}
+        </span>
+        <button type="button" class="pop-add-btn" :disabled="!addKeyword.trim()" @click="submitAdd">
+          {{ t('serialDebug.chip.addBtn') }}
+        </button>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -256,12 +272,10 @@ const previewCount = computed<number | null>(() => {
   background: color-mix(in srgb, var(--ty-primary) 8%, transparent);
 }
 
-/* ── popover ─────────────────────────────────────────────────────────── */
+/* ── popover (teleported to body) ────────────────────────────────────── */
 .add-popover {
-  position: absolute;
-  top: calc(100% + 0.375rem);
-  left: 0;
-  z-index: 50;
+  position: fixed;
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
