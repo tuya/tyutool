@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { APP_VERSION } from '@/config/app';
 import { desktopAppLogDirHint } from '@/config/tauri-desktop-paths';
 import { useSettingsStore, resolveLocale } from '@/stores/settings';
+import { useSerialDebugStore } from '@/stores/serial-debug';
 import type { LogLevelId, LocalePreference } from '@/stores/settings';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { showConfirmDialog } from '@/composables/confirmDialog';
@@ -12,6 +13,7 @@ import TySelect, { type TySelectOption } from '@/components/TySelect.vue';
 
 const { locale, t } = useI18n();
 const settings = useSettingsStore();
+const sd = useSerialDebugStore();
 
 const appVersion = APP_VERSION;
 const showUpdateDialog = ref(false);
@@ -117,6 +119,15 @@ async function openLogsFolder(): Promise<void> {
   } catch (e) {
     const { error: logError } = await import('@tauri-apps/plugin-log');
     await logError(`openLogsFolder failed: ${e}`);
+  }
+}
+
+async function toggleAutoSave(): Promise<void> {
+  if (!sd.autoSave && !sd.autoSaveDir) {
+    sd.autoSave = true;
+    await sd.pickAutoSaveDir();
+  } else {
+    sd.autoSave = !sd.autoSave;
   }
 }
 
@@ -244,6 +255,31 @@ async function openOpensourceLicenses(): Promise<void> {
         </div>
       </section>
     </div>
+
+    <section class="ty-card min-w-0 rounded-xl p-4 sm:p-5" aria-labelledby="serial-debug-heading">
+      <h2 id="serial-debug-heading" class="ty-section-title">
+        {{ t('serialDebug.pageTitle') }}
+      </h2>
+      <div class="mt-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <label class="ty-label">{{ t('serialDebug.autoSave.label') }}</label>
+          <input type="checkbox" :checked="sd.autoSave" class="size-4 cursor-pointer" @change="toggleAutoSave" />
+        </div>
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <label class="ty-label">{{ t('serialDebug.autoSave.dirLabel') }}</label>
+            <p v-if="sd.autoSaveDir" class="mt-0.5 max-w-[16rem] truncate text-xs text-[var(--ty-text-muted)]">{{ sd.autoSaveDir }}</p>
+          </div>
+          <button type="button" class="ty-btn-sm ty-btn-secondary shrink-0" @click="sd.pickAutoSaveDir()">
+            {{ t('serialDebug.autoSave.pickDir') }}
+          </button>
+        </div>
+        <div class="flex items-center justify-between">
+          <label class="ty-label">{{ t('serialDebug.autoSave.timestamp') }}</label>
+          <input type="checkbox" v-model="sd.autoSaveTimestamp" class="size-4 cursor-pointer" />
+        </div>
+      </div>
+    </section>
 
     <section class="ty-card min-w-0 rounded-xl p-4 sm:p-5" aria-labelledby="about-heading">
       <h2 id="about-heading" class="ty-section-title">
