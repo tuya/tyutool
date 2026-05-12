@@ -44,7 +44,13 @@ async function scrollToBottom(): Promise<void> {
   el.scrollTop = el.scrollHeight;
 }
 
-watch(() => props.lines.length, () => { void scrollToBottom(); });
+watch(() => displayLines.value.length, () => { void scrollToBottom(); });
+
+// Reset lock and scroll to bottom whenever the active tab changes
+watch(() => s.activeChipId, () => {
+  lockAutoScroll.value = false;
+  void scrollToBottom();
+});
 
 function onScroll(): void {
   const el = scrollRef.value;
