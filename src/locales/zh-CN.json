@@ -421,7 +421,9 @@
       "connected": "已连接 {port}，波特率 {baud}",
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
-      "saveLog": "保存日志"
+      "saveLog": "保存日志",
+      "fontDecrease": "缩小字体",
+      "fontIncrease": "放大字体"
     },
     "hexPopup": {
       "titleHex": "十六进制视图",

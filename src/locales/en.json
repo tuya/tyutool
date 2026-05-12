@@ -420,7 +420,9 @@
       "connected": "Connected {port} at {baud} baud",
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
-      "saveLog": "Save log"
+      "saveLog": "Save log",
+      "fontDecrease": "Smaller",
+      "fontIncrease": "Larger"
     },
     "hexPopup": {
       "titleHex": "Hex view",

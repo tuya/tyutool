@@ -247,11 +247,11 @@ async function saveLog(): Promise<void> {
           {{ t('serialDebug.log.pausedScroll') }}
         </button>
         <button type="button" class="btn-tool" :disabled="s.logFontSize <= 10" @click="s.decreaseFontSize">
-          <FontAwesomeIcon :icon="['fas', 'magnifying-glass-minus']" class="size-3 shrink-0" />A-
+          <FontAwesomeIcon :icon="['fas', 'magnifying-glass-minus']" class="size-3 shrink-0" />{{ t('serialDebug.log.fontDecrease') }}
         </button>
         <span class="font-size-label">{{ s.logFontSize }}</span>
         <button type="button" class="btn-tool" :disabled="s.logFontSize >= 18" @click="s.increaseFontSize">
-          <FontAwesomeIcon :icon="['fas', 'magnifying-glass-plus']" class="size-3 shrink-0" />A+
+          <FontAwesomeIcon :icon="['fas', 'magnifying-glass-plus']" class="size-3 shrink-0" />{{ t('serialDebug.log.fontIncrease') }}
         </button>
         <button
           type="button"
