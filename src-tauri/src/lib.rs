@@ -506,6 +506,20 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn append_text_file(path: String, content: String) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes()).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -570,6 +584,7 @@ pub fn run() {
             serial_debug_send,
             serial_debug_state,
             write_text_file,
+            append_text_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
