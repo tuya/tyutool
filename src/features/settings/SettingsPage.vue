@@ -219,7 +219,9 @@ async function openOpensourceLicenses(): Promise<void> {
                 v-for="opt in logToggleOptions"
                 :key="String(opt.value)"
                 class="ty-btn-sm"
-                :class="settings.logEnabled === opt.value ? 'ty-btn-toggle-active' : 'ty-btn-secondary'"
+                :class="settings.logEnabled === opt.value
+                  ? (opt.value ? 'ty-btn-toggle-active' : 'ty-btn-toggle-active-off')
+                  : 'ty-btn-secondary'"
                 @click="settings.setLogEnabled(opt.value)"
               >
                 {{ opt.label }}
@@ -265,10 +267,12 @@ async function openOpensourceLicenses(): Promise<void> {
           <label class="ty-label">{{ t('serialDebug.autoSave.label') }}</label>
           <input type="checkbox" :checked="sd.autoSave" class="size-4 cursor-pointer" @change="toggleAutoSave" />
         </div>
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <label class="ty-label">{{ t('serialDebug.autoSave.dirLabel') }}</label>
-            <p v-if="sd.autoSaveDir" class="mt-0.5 max-w-[16rem] truncate text-xs text-[var(--ty-text-muted)]">{{ sd.autoSaveDir }}</p>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex min-w-0 flex-1 items-center gap-2">
+            <label class="ty-label shrink-0">{{ t('serialDebug.autoSave.dirLabel') }}</label>
+            <div class="path-scroll min-w-0 flex-1 overflow-x-auto">
+              <span v-if="sd.autoSaveDir" class="whitespace-nowrap text-xs text-[var(--ty-text-muted)]">{{ sd.autoSaveDir }}</span>
+            </div>
           </div>
           <button type="button" class="ty-btn-sm ty-btn-secondary shrink-0" @click="sd.pickAutoSaveDir()">
             {{ t('serialDebug.autoSave.pickDir') }}
@@ -311,3 +315,30 @@ async function openOpensourceLicenses(): Promise<void> {
     <UpdateDialog :open="showUpdateDialog" @close="showUpdateDialog = false" />
   </div>
 </template>
+
+<style scoped>
+/* Hide scrollbar while keeping scroll functionality */
+.path-scroll::-webkit-scrollbar { display: none; }
+.path-scroll { scrollbar-width: none; }
+
+/* "关闭" active state — muted neutral, distinct from primary "开启" */
+.ty-btn-toggle-active-off {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--ty-text);
+  border: 1px solid var(--ty-border-strong);
+  background-color: var(--ty-surface-muted);
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+.ty-btn-toggle-active-off:hover:not(:disabled) {
+  background-color: var(--ty-border);
+}
+</style>
