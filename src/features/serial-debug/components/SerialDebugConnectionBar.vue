@@ -116,7 +116,7 @@ onMounted(() => {
     <div class="relative flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
       <div class="flex min-w-0 items-center gap-1.5">
         <label for="sd-port" class="conn-field-label shrink-0 text-xs font-semibold">{{ t('serialDebug.conn.port') }}</label>
-        <TySelect id="sd-port" v-model="s.port" :options="serialPortOptions" :disabled="s.open || s.opening" class="min-w-[12rem]" @open="refreshPorts" />
+        <TySelect id="sd-port" v-model="s.port" :options="serialPortOptions" :placeholder="rawPortOptions.length === 0 ? t('flash.noPortsPlaceholder') : undefined" :disabled="s.open || s.opening" class="min-w-[12rem]" @open="refreshPorts" />
       </div>
 
       <div class="flex min-w-0 items-center gap-1.5">
