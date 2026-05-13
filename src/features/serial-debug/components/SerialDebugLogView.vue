@@ -601,7 +601,7 @@ async function saveLog(): Promise<void> {
 .line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: var(--ty-success); }
 .line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
-mark.search-keyword-mark { background: #fbbf24; color: #1c1917; border-radius: 0.125rem; padding: 0 0.1rem; }
+mark.search-keyword-mark { background: var(--ty-primary); color: #fff; border-radius: 0.2rem; padding: 0 0.2rem; font-style: normal; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
 .menu-item:hover { background: var(--ty-surface-muted); }
 </style>
