@@ -253,10 +253,38 @@ async function saveLog(): Promise<void> {
     @keydown="onContainerKeydown"
   >
     <!-- toolbar -->
-    <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1">
+    <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5">
       <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
 
+      <!-- display toggles: timestamp & direction badge — left side, next to title -->
+      <button
+        type="button"
+        class="btn-tool"
+        :class="{ 'btn-tool-active': s.showTimestamp }"
+        :aria-label="t('serialDebug.log.toggleTimestamp')"
+        @click="s.showTimestamp = !s.showTimestamp"
+      >
+        <FontAwesomeIcon :icon="['fas', 'clock']" class="size-3 shrink-0" />
+        {{ t('serialDebug.log.toggleTimestamp') }}
+      </button>
+      <button
+        type="button"
+        class="btn-tool"
+        :class="{ 'btn-tool-active': s.showDirBadge }"
+        :aria-label="t('serialDebug.log.toggleDirBadge')"
+        @click="s.showDirBadge = !s.showDirBadge"
+      >
+        <FontAwesomeIcon :icon="['fas', 'tag']" class="size-3 shrink-0" />
+        {{ t('serialDebug.log.toggleDirBadge') }}
+      </button>
+
+      <button v-if="lockAutoScroll" type="button" class="paused-badge" :aria-label="t('serialDebug.log.pausedScroll')" @click="resumeScroll">
+        <FontAwesomeIcon :icon="['fas', 'arrow-down']" class="size-3 shrink-0" />
+        {{ t('serialDebug.log.pausedScroll') }}
+      </button>
+
       <div class="ml-auto flex items-center gap-1">
+        <!-- status: autosave -->
         <span class="autosave-indicator" :class="{ 'autosave-indicator--active': s.sessionAutoSavePath }">
           <FontAwesomeIcon
             :icon="s.sessionAutoSavePath ? faCircleNotch : faFloppyDisk"
@@ -265,16 +293,23 @@ async function saveLog(): Promise<void> {
           />
           {{ s.sessionAutoSavePath ? t('serialDebug.autoSave.active') : t('serialDebug.autoSave.off') }}
         </span>
-        <button v-if="lockAutoScroll" type="button" class="paused-badge" @click="resumeScroll">
-          {{ t('serialDebug.log.pausedScroll') }}
-        </button>
-        <button type="button" class="btn-tool" :disabled="s.logFontSize <= 10" @click="s.decreaseFontSize">
-          <FontAwesomeIcon :icon="['fas', 'magnifying-glass-minus']" class="size-3 shrink-0" />{{ t('serialDebug.log.fontDecrease') }}
-        </button>
-        <span class="font-size-label">{{ s.logFontSize }}</span>
-        <button type="button" class="btn-tool" :disabled="s.logFontSize >= 18" @click="s.increaseFontSize">
-          <FontAwesomeIcon :icon="['fas', 'magnifying-glass-plus']" class="size-3 shrink-0" />{{ t('serialDebug.log.fontIncrease') }}
-        </button>
+
+        <span class="toolbar-divider" />
+
+        <!-- font size stepper -->
+        <div class="font-size-stepper">
+          <button type="button" class="stepper-btn" :disabled="s.logFontSize <= 10" :aria-label="t('serialDebug.log.fontDecrease')" @click="s.decreaseFontSize">
+            <FontAwesomeIcon :icon="['fas', 'magnifying-glass-minus']" class="size-3 shrink-0" />
+          </button>
+          <span class="font-size-label">{{ t('serialDebug.log.fontSize') }} {{ s.logFontSize }}</span>
+          <button type="button" class="stepper-btn" :disabled="s.logFontSize >= 18" :aria-label="t('serialDebug.log.fontIncrease')" @click="s.increaseFontSize">
+            <FontAwesomeIcon :icon="['fas', 'magnifying-glass-plus']" class="size-3 shrink-0" />
+          </button>
+        </div>
+
+        <span class="toolbar-divider" />
+
+        <!-- search -->
         <button
           type="button"
           class="btn-tool"
@@ -285,6 +320,10 @@ async function saveLog(): Promise<void> {
           <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" class="size-3 shrink-0" />
           {{ t('serialDebug.log.filterToggle') }}
         </button>
+
+        <span class="toolbar-divider" />
+
+        <!-- action group: save & clear -->
         <button
           type="button"
           class="btn-tool"
@@ -388,9 +427,12 @@ async function saveLog(): Promise<void> {
           'line-search-current': line.id === currentMatchLineId,
         }"
       >
-        <span class="prefix">
-          <span class="ts">{{ formatTs(line.tsMs) }}</span>
-          <span class="dir-badge">{{ line.direction === 'tx' ? 'TX' : line.direction === 'rx' ? 'RX' : 'SYS' }}</span>
+        <span v-if="s.showTimestamp || s.showDirBadge" class="prefix">
+          <span v-if="s.showTimestamp" class="ts">{{ formatTs(line.tsMs) }}</span>
+          <span
+            v-if="s.showDirBadge"
+            class="dir-badge"
+          >{{ line.direction === 'tx' ? 'TX' : line.direction === 'rx' ? 'RX' : 'SYS' }}</span>
         </span>
         <span class="text">
           <span
@@ -424,7 +466,28 @@ async function saveLog(): Promise<void> {
 /* toolbar */
 .log-toolbar { background: var(--ty-surface); }
 .toolbar-title { font-size: 0.8125rem; font-weight: 600; color: var(--ty-text-muted); white-space: nowrap; }
-.font-size-label { font-size: 0.75rem; color: var(--ty-text-muted); min-width: 1.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.toolbar-divider { width: 1px; height: 1rem; background: var(--ty-border); flex-shrink: 0; margin: 0 0.125rem; }
+.font-size-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ty-border);
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+.stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.125rem 0.4rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ty-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.stepper-btn:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
+.stepper-btn:disabled { cursor: not-allowed; opacity: 0.4; }
+.font-size-label { font-size: 0.75rem; color: var(--ty-text-muted); min-width: 4rem; text-align: center; font-variant-numeric: tabular-nums; border-left: 1px solid var(--ty-border); border-right: 1px solid var(--ty-border); padding: 0 0.375rem; white-space: nowrap; }
 .btn-tool {
   display: inline-flex;
   align-items: center;

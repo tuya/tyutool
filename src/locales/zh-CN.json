@@ -416,14 +416,17 @@
     "log": {
       "waitingData": "等待数据…",
       "title": "日志",
-      "pausedScroll": "↑ 已暂停滚动",
+      "pausedScroll": "滚动到底部",
       "filterToggle": "过滤",
+      "toggleTimestamp": "时间戳",
+      "toggleDirBadge": "标签",
       "connected": "已连接 {port}，波特率 {baud}",
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
       "saveLog": "保存日志",
       "fontDecrease": "缩小字体",
-      "fontIncrease": "放大字体"
+      "fontIncrease": "放大字体",
+      "fontSize": "字体"
     },
     "autoSave": {
       "label": "自动保存日志",
@@ -433,7 +436,9 @@
       "active": "自动保存中",
       "off": "自动保存",
       "errWrite": "自动保存失败: {msg}",
-      "timestamp": "每行包含时间戳"
+      "timestamp": "每行包含时间戳",
+      "timestampFmtOn": "[12:00:00.000] [RX] [数据]",
+      "timestampFmtOff": "[RX] [数据]"
     },
     "hexPopup": {
       "titleHex": "十六进制视图",

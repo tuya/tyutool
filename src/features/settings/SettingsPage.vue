@@ -279,7 +279,12 @@ async function openOpensourceLicenses(): Promise<void> {
           </button>
         </div>
         <div class="flex items-center justify-between">
-          <label class="ty-label">{{ t('serialDebug.autoSave.timestamp') }}</label>
+          <div class="flex items-center gap-2">
+            <label class="ty-label">{{ t('serialDebug.autoSave.timestamp') }}</label>
+            <span class="font-mono text-xs text-[var(--ty-text-muted)]">
+              {{ sd.autoSaveTimestamp ? t('serialDebug.autoSave.timestampFmtOn') : t('serialDebug.autoSave.timestampFmtOff') }}
+            </span>
+          </div>
           <input type="checkbox" v-model="sd.autoSaveTimestamp" class="size-4 cursor-pointer" />
         </div>
       </div>

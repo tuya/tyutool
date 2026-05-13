@@ -47,6 +47,8 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
   const ansiEnabled = ref(true);
   const logFontSize = ref(12);
+  const showTimestamp = ref(true);
+  const showDirBadge = ref(true);
 
   // ── auto-save ─────────────────────────────────────────────────────────
   const autoSave = ref(false);
@@ -348,6 +350,8 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     autoSave.value = data.autoSave ?? false;
     autoSaveDir.value = data.autoSaveDir ?? '';
     autoSaveTimestamp.value = data.autoSaveTimestamp ?? true;
+    showTimestamp.value = data.showTimestamp ?? true;
+    showDirBadge.value = data.showDirBadge ?? true;
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
@@ -374,6 +378,8 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
           autoSave: autoSave.value,
           autoSaveDir: autoSaveDir.value,
           autoSaveTimestamp: autoSaveTimestamp.value,
+          showTimestamp: showTimestamp.value,
+          showDirBadge: showDirBadge.value,
           sendMode: sendMode.value,
           sendAppendCrlf: sendAppendCrlf.value,
           sendHistory: sendHistory.value,
@@ -383,7 +389,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
         () => [
           port.value, baudRate.value, customBaudRate.value, dataBits.value, parity.value, stopBits.value,
           autoRelease.value, hexView.value, hexBytesPerRow.value, ansiEnabled.value, logFontSize.value, sendMode.value, sendAppendCrlf.value,
-          autoSave.value, autoSaveDir.value, autoSaveTimestamp.value,
+          autoSave.value, autoSaveDir.value, autoSaveTimestamp.value, showTimestamp.value, showDirBadge.value,
           [...sendHistory.value],
         ],
         save,
@@ -406,7 +412,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   return {
     // state
     open, opening, port, baudRate, customBaudRate, dataBits, parity, stopBits, autoRelease,
-    pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, logFontSize, sendMode, sendAppendCrlf, sendInput,
+    pendingResume, lines, hexView, hexBytesPerRow, ansiEnabled, logFontSize, showTimestamp, showDirBadge, sendMode, sendAppendCrlf, sendInput,
     sendHistory, hexPopup, watchChips, activeChipId,
     autoSave, autoSaveDir, autoSaveTimestamp, sessionAutoSavePath,
     // actions

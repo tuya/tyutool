@@ -3,6 +3,7 @@ import { createPinia } from 'pinia';
 import { library } from '@fortawesome/fontawesome-svg-core';
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
 import {
+  faArrowDown,
   faArrowsRotate,
   faArrowUpRightFromSquare,
   faChevronDown,
@@ -13,6 +14,7 @@ import {
   faCircleExclamation,
   faCircleInfo,
   faCircleXmark,
+  faClock,
   faClockRotateLeft,
   faCopy,
   faDownload,
@@ -30,6 +32,7 @@ import {
   faPowerOff,
   faRotate,
   faScroll,
+  faTag,
   faTerminal,
   faTrash,
   faTrashCan,
@@ -44,6 +47,7 @@ import { router } from './router';
 import { useSettingsStore, resolveLocale } from './stores/settings';
 
 library.add(
+  faArrowDown,
   faArrowsRotate,
   faArrowUpRightFromSquare,
   faChevronDown,
@@ -54,6 +58,7 @@ library.add(
   faCircleExclamation,
   faCircleInfo,
   faCircleXmark,
+  faClock,
   faClockRotateLeft,
   faCopy,
   faDownload,
@@ -71,6 +76,7 @@ library.add(
   faPowerOff,
   faRotate,
   faScroll,
+  faTag,
   faTerminal,
   faTrash,
   faTrashCan,

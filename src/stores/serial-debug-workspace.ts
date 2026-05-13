@@ -25,6 +25,8 @@ export interface SerialDebugWorkspaceSerialized {
   autoSave?: boolean;
   autoSaveDir?: string;
   autoSaveTimestamp?: boolean;
+  showTimestamp?: boolean;
+  showDirBadge?: boolean;
 }
 
 export async function loadSerialDebugWorkspace(): Promise<SerialDebugWorkspaceSerialized | null> {

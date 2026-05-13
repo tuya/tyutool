@@ -415,14 +415,17 @@
     "log": {
       "waitingData": "Waiting for data…",
       "title": "Log",
-      "pausedScroll": "↑ Scroll paused",
+      "pausedScroll": "Scroll to bottom",
       "filterToggle": "Filter",
+      "toggleTimestamp": "Timestamp",
+      "toggleDirBadge": "Badge",
       "connected": "Connected {port} at {baud} baud",
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
       "saveLog": "Save log",
       "fontDecrease": "Smaller",
-      "fontIncrease": "Larger"
+      "fontIncrease": "Larger",
+      "fontSize": "Font"
     },
     "autoSave": {
       "label": "Auto-save logs",
@@ -432,7 +435,9 @@
       "active": "Auto-saving",
       "off": "Auto-save",
       "errWrite": "Auto-save failed: {msg}",
-      "timestamp": "Include timestamp per line"
+      "timestamp": "Include timestamp per line",
+      "timestampFmtOn": "[12:00:00.000] [RX] [data]",
+      "timestampFmtOff": "[RX] [data]"
     },
     "hexPopup": {
       "titleHex": "Hex view",
