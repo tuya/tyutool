@@ -180,7 +180,10 @@ const currentMatchLineId = computed<number | null>(() => {
   return list[searchIndex.value % list.length];
 });
 
-watch(searchText, () => { searchIndex.value = 0; });
+watch(searchText, () => {
+  searchIndex.value = 0;
+  void scrollToMatch();
+});
 watch(matchCount, (count) => {
   if (searchIndex.value >= count && count > 0) searchIndex.value = count - 1;
 });
