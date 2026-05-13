@@ -458,7 +458,14 @@ async function saveLog(): Promise<void> {
             v-for="(span, si) in renderSpans(line.text)"
             :key="si"
             :style="spanStyle(span.style)"
-          >{{ span.text }}</span>
+          >
+            <template v-if="searchQuery && matchingLineIds.has(line.id)">
+              <template v-for="(seg, sj) in splitByKeyword(span.text, searchQuery)" :key="sj">
+                <mark v-if="seg.isMatch" class="search-keyword-mark">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+              </template>
+            </template>
+            <template v-else>{{ span.text }}</template>
+          </span>
         </span>
       </div>
       <div v-if="displayLines.length === 0" class="px-3 py-2 text-[var(--ty-text-muted)]">
@@ -594,6 +601,7 @@ async function saveLog(): Promise<void> {
 .line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: var(--ty-success); }
 .line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+mark.search-keyword-mark { background: color-mix(in srgb, #eab308 55%, transparent); color: inherit; border-radius: 0.125rem; padding: 0 0.05rem; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
 .menu-item:hover { background: var(--ty-surface-muted); }
 </style>
