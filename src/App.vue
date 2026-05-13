@@ -100,7 +100,7 @@ const nav = computed(() => [
           <RouterView v-slot="{ Component }">
             <transition name="ty-route" mode="out-in">
               <keep-alive :include="['SerialDebugPage']">
-                <component :is="Component" />
+                <component :is="Component" :key="route.name" />
               </keep-alive>
             </transition>
           </RouterView>
