@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { faCircleNotch, faFloppyDisk } from '@fortawesome/free-solid-svg-icons';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import { formatHexDump } from '@/features/serial-debug/hex-format';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
@@ -256,8 +257,13 @@ async function saveLog(): Promise<void> {
       <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
 
       <div class="ml-auto flex items-center gap-1">
-        <span v-if="s.sessionAutoSavePath" class="autosave-badge">
-          ● {{ t('serialDebug.autoSave.active') }}
+        <span class="autosave-indicator" :class="{ 'autosave-indicator--active': s.sessionAutoSavePath }">
+          <FontAwesomeIcon
+            :icon="s.sessionAutoSavePath ? faCircleNotch : faFloppyDisk"
+            class="size-3 shrink-0"
+            :class="{ 'fa-spin': s.sessionAutoSavePath }"
+          />
+          {{ s.sessionAutoSavePath ? t('serialDebug.autoSave.active') : t('serialDebug.autoSave.off') }}
         </span>
         <button v-if="lockAutoScroll" type="button" class="paused-badge" @click="resumeScroll">
           {{ t('serialDebug.log.pausedScroll') }}
@@ -447,14 +453,21 @@ async function saveLog(): Promise<void> {
   transition: background-color 0.15s ease, opacity 0.15s ease;
 }
 .paused-badge:hover { background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent); }
-.autosave-badge {
-  font-size: 0.7rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--ty-success) 15%, transparent);
-  color: var(--ty-success);
-  border: 1px solid var(--ty-success);
+.autosave-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
   white-space: nowrap;
+  color: var(--ty-text-muted);
+  opacity: 0.55;
+  user-select: none;
+}
+.autosave-indicator--active {
+  color: var(--ty-success);
+  opacity: 1;
 }
 /* search bar */
 .search-bar { background: var(--ty-surface); }

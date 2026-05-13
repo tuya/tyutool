@@ -430,6 +430,7 @@
       "dirLabel": "Save directory",
       "pickDir": "Choose directory",
       "active": "Auto-saving",
+      "off": "Auto-save",
       "errWrite": "Auto-save failed: {msg}",
       "timestamp": "Include timestamp per line"
     },

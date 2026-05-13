@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { faCircleNotch } from '@fortawesome/free-solid-svg-icons';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { formatSerialPortLabel, type SerialPortDropdownOption, type TauriSerialPortRow } from '@/features/firmware-flash/serial-port-label';
@@ -11,7 +12,14 @@ import SerialDebugSettingsModal from './SerialDebugSettingsModal.vue';
 const s = useSerialDebugStore();
 const { t } = useI18n();
 
-const serialPortOptions = ref<SerialPortDropdownOption[]>([]);
+const rawPortOptions = ref<SerialPortDropdownOption[]>([]);
+
+const serialPortOptions = computed<SerialPortDropdownOption[]>(() => {
+  if (rawPortOptions.value.length === 0) {
+    return [{ value: '', label: t('flash.noPortsPlaceholder'), disabled: true }];
+  }
+  return rawPortOptions.value;
+});
 const useCustomBaud = ref(false);
 const customBaudInput = ref('');
 const showSettings = ref(false);
@@ -50,18 +58,18 @@ async function refreshPorts(): Promise<void> {
     if (isTauriRuntime()) {
       const { invoke } = await import('@tauri-apps/api/core');
       const rows = await invoke<TauriSerialPortRow[]>('list_serial_ports_cmd');
-      serialPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
+      rawPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
     } else {
       const rows = await wsTransport.listPorts();
-      serialPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
+      rawPortOptions.value = rows.map((p) => ({ value: p.path, label: formatSerialPortLabel(p, t) }));
     }
   } catch {
-    serialPortOptions.value = [];
+    rawPortOptions.value = [];
   }
-  if (serialPortOptions.value.length > 0) {
-    const exists = serialPortOptions.value.some(p => p.value === s.port);
+  if (rawPortOptions.value.length > 0) {
+    const exists = rawPortOptions.value.some(p => p.value === s.port);
     if (!exists) {
-      s.port = serialPortOptions.value[0].value;
+      s.port = rawPortOptions.value[0].value;
     }
   }
 }
@@ -156,7 +164,7 @@ onMounted(() => {
         :disabled="!canOpen"
         @click="toggleOpen"
       >
-        <FontAwesomeIcon v-if="s.opening" :icon="['fas', 'circle-notch']" class="fa-spin size-3.5 shrink-0" aria-hidden="true" />
+        <FontAwesomeIcon v-if="s.opening" :icon="faCircleNotch" class="fa-spin size-3.5 shrink-0" aria-hidden="true" />
         <FontAwesomeIcon v-else :icon="['fas', 'plug']" class="size-3.5 shrink-0" aria-hidden="true" />
         {{ s.opening ? t('serialDebug.conn.connecting') : t('serialDebug.conn.open') }}
       </button>

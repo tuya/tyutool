@@ -367,7 +367,7 @@
     "introLead": "实时终端。",
     "introRest": "看打印、发指令，断线自动提示。",
     "conn": {
-      "port": "端口",
+      "port": "串口",
       "refresh": "刷新端口",
       "baud": "波特率",
       "customBaud": "自定义",
@@ -431,6 +431,7 @@
       "dirLabel": "保存路径",
       "pickDir": "选择目录",
       "active": "自动保存中",
+      "off": "自动保存",
       "errWrite": "自动保存失败: {msg}",
       "timestamp": "每行包含时间戳"
     },
