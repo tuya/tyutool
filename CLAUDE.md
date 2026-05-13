@@ -145,22 +145,22 @@ All flash UI state lives in the Pinia store at `src/stores/flash.ts` (`useFlashS
 
 ## Conventions
 
-### 文件与目录命名
+### File and directory naming
 
-- `.ts` / `.rs` 文件：kebab-case（`hex-format.ts`、`serial_debug.rs`）
-- `.vue` 文件：PascalCase（`SerialDebugPage.vue`）
-- feature 目录：kebab-case（`firmware-flash/`、`serial-debug/`）
+- `.ts` / `.rs` files: kebab-case (`hex-format.ts`, `serial_debug.rs`)
+- `.vue` files: PascalCase (`SerialDebugPage.vue`)
+- Feature directories: kebab-case (`firmware-flash/`, `serial-debug/`)
 
-### Tauri IPC 契约
+### Tauri IPC contract
 
-- 命令名：snake_case；Tauri 入口与内部同名函数时加 `_cmd` 后缀（`list_serial_ports_cmd`）
-- 事件名：kebab-case，`feature-noun` 格式（`serial-debug-chunk`、`flash-progress`）
-- 前端类型手动镜像对应 Rust 类型，注释标明 Rust 源路径（见 `serial-debug/types.ts`）
-- Tauri API（`@tauri-apps/api/*`）和 `@tauri-apps/plugin-store` 必须动态 `import()`，不能顶层 import
-- 所有 Tauri 功能前通过 `isTauriRuntime()` 判断，web 模式不调用 Tauri 命令
+- Command names: snake_case; add `_cmd` suffix when a Tauri entry point shares a name with an internal function (`list_serial_ports_cmd`)
+- Event names: kebab-case, `feature-noun` format (`serial-debug-chunk`, `flash-progress`)
+- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`)
+- Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
+- All Tauri-only code must be gated behind `isTauriRuntime()`; never invoke Tauri commands in web mode
 
-### 测试
+### Testing
 
-- 测试文件与源文件同目录，同名加 `.test.ts`；Rust 用内联 `#[cfg(test)] mod tests`
-- 纯逻辑（工具函数、类型转换）必须有单元测试；Vue 组件和 store 按需测试
-- 前端测试运行在 `node` 环境，不依赖 DOM
+- Test files live next to their source, same name with `.test.ts` suffix; Rust uses inline `#[cfg(test)] mod tests`
+- Pure logic (utility functions, type conversions) must have unit tests; Vue components and stores as needed
+- Frontend tests run in the `node` environment — no DOM
