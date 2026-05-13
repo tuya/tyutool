@@ -105,6 +105,20 @@ function renderSpans(text: string): Array<{ text: string; style: AnsiStyle }> {
   return props.ansiEnabled ? parseAnsi(text) : [{ text: stripAnsi(text), style: {} }];
 }
 
+function splitByKeyword(text: string, q: string): Array<{ text: string; isMatch: boolean }> {
+  const parts: Array<{ text: string; isMatch: boolean }> = [];
+  const lower = text.toLowerCase();
+  let pos = 0;
+  while (pos < text.length) {
+    const idx = lower.indexOf(q, pos);
+    if (idx === -1) { parts.push({ text: text.slice(pos), isMatch: false }); break; }
+    if (idx > pos) parts.push({ text: text.slice(pos, idx), isMatch: false });
+    parts.push({ text: text.slice(idx, idx + q.length), isMatch: true });
+    pos = idx + q.length;
+  }
+  return parts;
+}
+
 function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
   return {
     color: style.fg,
@@ -146,9 +160,11 @@ const searchText = ref('');
 const searchIndex = ref(0);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
+const searchQuery = computed(() => searchText.value.trim().toLowerCase());
+
 // Single pass: ordered list of matching IDs; Set derived from it for O(1) template lookup.
 const matchingLineIdList = computed<number[]>(() => {
-  const q = searchText.value.trim().toLowerCase();
+  const q = searchQuery.value;
   if (!q) return [];
   return props.lines
     .filter((l) => stripAnsi(l.text).toLowerCase().includes(q))
