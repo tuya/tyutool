@@ -96,15 +96,15 @@ const nav = computed(() => [
       tabindex="-1"
     >
       <div class="mx-auto w-full min-w-0 max-w-5xl" :class="fullBleedMain ? 'flex min-h-0 flex-1 flex-col' : ''">
-        <transition name="ty-route" mode="out-in">
-          <div
-            :key="route.fullPath"
-            class="min-w-0"
-            :class="fullBleedMain ? 'flex min-h-0 w-full flex-1 flex-col' : ''"
-          >
-            <RouterView />
-          </div>
-        </transition>
+        <div class="min-w-0" :class="fullBleedMain ? 'flex min-h-0 w-full flex-1 flex-col' : ''">
+          <RouterView v-slot="{ Component }">
+            <transition name="ty-route" mode="out-in">
+              <keep-alive :include="['SerialDebugPage']">
+                <component :is="Component" />
+              </keep-alive>
+            </transition>
+          </RouterView>
+        </div>
       </div>
     </main>
     <TyConfirmDialog />

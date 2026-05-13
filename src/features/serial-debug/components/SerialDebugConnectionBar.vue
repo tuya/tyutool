@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onActivated, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { faCircleNotch } from '@fortawesome/free-solid-svg-icons';
 import { useSerialDebugStore } from '@/stores/serial-debug';
@@ -83,6 +83,10 @@ async function toggleOpen(): Promise<void> {
 }
 
 onMounted(() => {
+  void refreshPorts();
+});
+
+onActivated(() => {
   void refreshPorts();
 });
 </script>

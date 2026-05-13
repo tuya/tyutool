@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onUnmounted, watch } from 'vue';
+defineOptions({ name: 'SerialDebugPage' })
+import { onActivated, onDeactivated, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import { sanitizePortName, makeStamp, formatTs } from '@/features/serial-debug/context';
@@ -67,16 +68,28 @@ function startAutoSave(): void {
   autoSaveInterval = setInterval(() => { void flush(); }, 5000);
 }
 
-async function finalFlushAndStop(): Promise<void> {
+async function finalFlushAndStop(keepSession = false): Promise<void> {
   stopInterval();
   await flush();
-  s.sessionAutoSavePath = null;
+  if (!keepSession) {
+    s.sessionAutoSavePath = null;
+  }
 }
 
-onUnmounted(() => {
-  void finalFlushAndStop().then(() => {
-    if (s.open) void s.closePort();
-  });
+onActivated(() => {
+  if (s.open && s.sessionAutoSavePath) {
+    // Resuming after navigation: all existing lines were already flushed on deactivate.
+    // Restore the watermark so the next flush only picks up lines that arrived while away.
+    lastFlushedLineId = s.lines.length > 0 ? s.lines[s.lines.length - 1].id : 0;
+    autoSaveInterval = setInterval(() => { void flush(); }, 5000);
+  } else if (s.open) {
+    startAutoSave();
+  }
+});
+
+onDeactivated(() => {
+  // keepSession=true: port stays open across navigation, preserve the auto-save file path.
+  void finalFlushAndStop(s.open);
 });
 
 // Start/stop when port opens or closes
