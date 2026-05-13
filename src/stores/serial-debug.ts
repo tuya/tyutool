@@ -13,6 +13,7 @@ import {
 } from '@/features/serial-debug/constants';
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
+import { wsTransport } from '@/features/firmware-flash/ws-transport';
 import type {
   DebugChunk,
   DebugConfig,
@@ -243,7 +244,6 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('device_reset_cmd', { args: { port: port.value, chipId } });
       } else {
-        const { wsTransport } = await import('@/features/firmware-flash/ws-transport');
         await wsTransport.deviceReset(port.value, chipId);
       }
       appendSysLine(t('serialDebug.log.deviceResetOk', { port: port.value }));
