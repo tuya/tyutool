@@ -29,3 +29,8 @@
 - All UI strings must go through `t()`; no hardcoded text
 - Key structure: `rootKey.section.item`, all camelCase; root keys are camelCase feature names (`serialDebug`, `flash`, `settings`, `app`, `common`) — not directory names
 - New keys must be added to both `zh-CN.json` and `en.json` simultaneously
+
+## UI parity: web vs Tauri
+
+- The UI must look and behave identically in `dev:web` and `tauri:dev`; any visible difference is a bug.
+- `TySelect` displays `placeholder` (default `'—'`) when no option matches `modelValue`. If you render a disabled placeholder option with `value: ''`, also bind `:placeholder` to the same text — otherwise the button shows `'—'` whenever `modelValue` is a non-empty string that doesn't match any real option.
