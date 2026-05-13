@@ -140,3 +140,27 @@ All flash UI state lives in the Pinia store at `src/stores/flash.ts` (`useFlashS
 - Rust tests live alongside source in `crates/` or in `src-tauri/src/lib.rs`.
 - Pre-commit hooks (lefthook) auto-format staged `.ts`/`.vue` files with Prettier and staged `.rs` files with `cargo fmt`.
 - `@` alias resolves to `src/` in both Vite and vitest configs.
+
+---
+
+## Conventions
+
+### 文件与目录命名
+
+- `.ts` / `.rs` 文件：kebab-case（`hex-format.ts`、`serial_debug.rs`）
+- `.vue` 文件：PascalCase（`SerialDebugPage.vue`）
+- feature 目录：kebab-case（`firmware-flash/`、`serial-debug/`）
+
+### Tauri IPC 契约
+
+- 命令名：snake_case；Tauri 入口与内部同名函数时加 `_cmd` 后缀（`list_serial_ports_cmd`）
+- 事件名：kebab-case，`feature-noun` 格式（`serial-debug-chunk`、`flash-progress`）
+- 前端类型手动镜像对应 Rust 类型，注释标明 Rust 源路径（见 `serial-debug/types.ts`）
+- Tauri API（`@tauri-apps/api/*`）和 `@tauri-apps/plugin-store` 必须动态 `import()`，不能顶层 import
+- 所有 Tauri 功能前通过 `isTauriRuntime()` 判断，web 模式不调用 Tauri 命令
+
+### 测试
+
+- 测试文件与源文件同目录，同名加 `.test.ts`；Rust 用内联 `#[cfg(test)] mod tests`
+- 纯逻辑（工具函数、类型转换）必须有单元测试；Vue 组件和 store 按需测试
+- 前端测试运行在 `node` 环境，不依赖 DOM
