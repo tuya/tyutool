@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { faCircleNotch, faFloppyDisk } from '@fortawesome/free-solid-svg-icons';
 import { useSerialDebugStore } from '@/stores/serial-debug';
@@ -152,6 +152,25 @@ function showCtxPopup(mode: 'hex' | 'ascii'): void {
 }
 
 function dismissCtx(): void { ctxMenu.value = null; }
+
+let savedScrollTop: number | null = null;
+
+onDeactivated(() => {
+  ctxMenu.value = null;
+  savedScrollTop = scrollRef.value?.scrollTop ?? null;
+});
+
+onActivated(async () => {
+  await nextTick();
+  const el = scrollRef.value;
+  if (!el) return;
+  if (lockAutoScroll.value && savedScrollTop !== null) {
+    el.scrollTop = savedScrollTop;
+  } else if (!lockAutoScroll.value) {
+    el.scrollTop = el.scrollHeight;
+  }
+  savedScrollTop = null;
+});
 
 const containerRef = ref<HTMLDivElement | null>(null);
 const searchOpen = ref(false);

@@ -43,10 +43,12 @@ async function flush(): Promise<void> {
     return stripAnsi(l.text);
   }).join('\n') + '\n';
 
+  const flushedUpToId = newLines[newLines.length - 1].id;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('append_text_file', { path, content });
-    lastFlushedLineId = newLines[newLines.length - 1].id;
+    // Only advance the watermark — never roll it back if onActivated already moved it forward.
+    if (flushedUpToId > lastFlushedLineId) lastFlushedLineId = flushedUpToId;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     s.appendSysLine(t('serialDebug.autoSave.errWrite', { msg }));
@@ -81,6 +83,7 @@ onActivated(() => {
     // Resuming after navigation: all existing lines were already flushed on deactivate.
     // Restore the watermark so the next flush only picks up lines that arrived while away.
     lastFlushedLineId = s.lines.length > 0 ? s.lines[s.lines.length - 1].id : 0;
+    stopInterval();
     autoSaveInterval = setInterval(() => { void flush(); }, 5000);
   } else if (s.open) {
     startAutoSave();
