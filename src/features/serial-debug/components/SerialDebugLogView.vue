@@ -583,8 +583,8 @@ async function saveLog(): Promise<void> {
 .line[data-dir="tx"] { }
 .line[data-dir="rx"] { }
 .line[data-dir="sys"] { color: var(--ty-text-muted); font-style: italic; }
-.line-search-match { background: color-mix(in srgb, #eab308 20%, transparent) !important; }
-.line-search-current { background: color-mix(in srgb, #f97316 35%, transparent) !important; }
+.line-search-match { background: color-mix(in srgb, var(--ty-primary) 12%, transparent) !important; }
+.line-search-current { background: color-mix(in srgb, var(--ty-primary) 28%, transparent) !important; outline: 1px solid color-mix(in srgb, var(--ty-primary) 45%, transparent); outline-offset: -1px; }
 .prefix { display: flex; align-items: baseline; gap: 0.25rem; flex-shrink: 0; white-space: nowrap; }
 .ts { color: var(--ty-text-muted); font-size: 0.85em; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .dir-badge {
@@ -601,7 +601,7 @@ async function saveLog(): Promise<void> {
 .line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: var(--ty-success); }
 .line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
-mark.search-keyword-mark { background: color-mix(in srgb, #eab308 55%, transparent); color: inherit; border-radius: 0.125rem; padding: 0 0.05rem; }
+mark.search-keyword-mark { background: #fbbf24; color: #1c1917; border-radius: 0.125rem; padding: 0 0.1rem; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
 .menu-item:hover { background: var(--ty-surface-muted); }
 </style>
