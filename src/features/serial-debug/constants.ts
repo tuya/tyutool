@@ -15,11 +15,11 @@ export const MAX_SEND_HISTORY = 20;
 
 // Six distinct colors that cycle when chips are added
 export const CHIP_COLORS = [
-  '#ef4444', // red
-  '#f97316', // orange
-  '#eab308', // yellow
-  '#22c55e', // green
-  '#3b82f6', // blue
-  '#a855f7', // purple
+  '#6366f1', // indigo
+  '#06b6d4', // cyan
+  '#10b981', // emerald
+  '#8b5cf6', // violet
+  '#0ea5e9', // sky
+  '#ec4899', // pink
 ] as const;
 
