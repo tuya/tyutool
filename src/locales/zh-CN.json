@@ -388,7 +388,9 @@
       "settings": "串口设置",
       "connecting": "连接中…",
       "statusConnected": "已连接",
-      "statusDisconnected": "已断开"
+      "statusDisconnected": "已断开",
+      "deviceReset": "设备复位",
+      "deviceResetHint": "通过 DTR/RTS 对设备复位。复位时序取决于芯片平台，请先在「固件烧录」中选择正确的芯片。"
     },
     "send": {
       "placeholder": "输入内容…",
@@ -426,7 +428,10 @@
       "saveLog": "保存日志",
       "fontDecrease": "缩小字体",
       "fontIncrease": "放大字体",
-      "fontSize": "字体"
+      "fontSize": "字体",
+      "deviceResetOk": "设备复位（DTR/RTS）已发送：{port}",
+      "deviceResetFailed": "设备复位失败：{msg}",
+      "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（无 device_reset），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。"
     },
     "autoSave": {
       "label": "自动保存日志",

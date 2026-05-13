@@ -24,6 +24,7 @@ import type {
 import { usePortManagerStore } from '@/stores/port-manager';
 import { showConfirmDialog } from '@/composables/confirmDialog';
 import { i18n } from '@/i18n';
+import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { rLog } from '@/utils/log';
 
 export const useSerialDebugStore = defineStore('serial-debug', () => {
@@ -235,6 +236,28 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     pm.release(port.value, 'serial-debug');
   }
 
+  async function deviceReset(chipId: string): Promise<void> {
+    if (!port.value.trim()) return;
+    try {
+      if (isTauriRuntime()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('device_reset_cmd', { args: { port: port.value, chipId } });
+      } else {
+        const { wsTransport } = await import('@/features/firmware-flash/ws-transport');
+        await wsTransport.deviceReset(port.value, chipId);
+      }
+      appendSysLine(t('serialDebug.log.deviceResetOk', { port: port.value }));
+      rLog.info(`[SerialDebug] Device reset (DTR/RTS) on ${port.value}`);
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      if (raw.includes('unknown variant') && raw.includes('device_reset')) {
+        appendSysLine(t('serialDebug.log.deviceResetServeOutdated'));
+      } else {
+        appendSysLine(t('serialDebug.log.deviceResetFailed', { msg: raw }));
+      }
+    }
+  }
+
   async function send(): Promise<void> {
     if (!open.value) return;
     const raw = sendInput.value;
@@ -416,7 +439,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     sendHistory, hexPopup, watchChips, activeChipId,
     autoSave, autoSaveDir, autoSaveTimestamp, sessionAutoSavePath,
     // actions
-    openPort, closePort, send, clear, appendChunk,
+    openPort, closePort, deviceReset, send, clear, appendChunk,
     showHexPopup, closeHexPopup, appendSysLine,
     addChip, removeChip, setActiveChip, matchChipKeyword,
     increaseFontSize, decreaseFontSize,

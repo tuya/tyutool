@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref } from 'vue';
+import { computed, onActivated, onDeactivated, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { faCircleNotch } from '@fortawesome/free-solid-svg-icons';
 import { useSerialDebugStore } from '@/stores/serial-debug';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { formatSerialPortLabel, type SerialPortDropdownOption, type TauriSerialPortRow } from '@/features/firmware-flash/serial-port-label';
 import { wsTransport } from '@/features/firmware-flash/ws-transport';
+import { useFlashStore } from '@/stores/flash';
+import { rustPluginIdForChip } from '@/features/firmware-flash/chip-manifests';
 import TySelect from '@/components/TySelect.vue';
 import SerialDebugSettingsModal from './SerialDebugSettingsModal.vue';
 
 const s = useSerialDebugStore();
+const flashStore = useFlashStore();
 const { t } = useI18n();
 
 const rawPortOptions = ref<SerialPortDropdownOption[]>([]);
@@ -87,7 +90,11 @@ onMounted(() => {
 });
 
 onActivated(() => {
-  void refreshPorts();
+  if (!s.open) void refreshPorts();
+});
+
+onDeactivated(() => {
+  showSettings.value = false;
 });
 </script>
 
@@ -143,22 +150,23 @@ onActivated(() => {
       <button
         type="button"
         class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
-        :disabled="s.open || s.opening"
-        :aria-label="t('serialDebug.conn.refresh')"
-        @click="refreshPorts"
-      >
-        <FontAwesomeIcon :icon="['fas', 'rotate']" class="size-3.5 shrink-0" aria-hidden="true" />
-        {{ t('serialDebug.conn.refresh') }}
-      </button>
-
-      <button
-        type="button"
-        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
         :aria-label="t('serialDebug.conn.settings')"
         @click="showSettings = true"
       >
         <FontAwesomeIcon :icon="['fas', 'gear']" class="size-3.5 shrink-0" aria-hidden="true" />
         {{ t('serialDebug.conn.settings') }}
+      </button>
+
+      <button
+        type="button"
+        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
+        :disabled="!s.port.trim()"
+        :aria-label="t('serialDebug.conn.deviceReset')"
+        :title="t('serialDebug.conn.deviceResetHint')"
+        @click="s.deviceReset(rustPluginIdForChip(flashStore.selectedChipId))"
+      >
+        <FontAwesomeIcon :icon="['fas', 'power-off']" class="size-3.5 shrink-0" aria-hidden="true" />
+        {{ t('serialDebug.conn.deviceReset') }}
       </button>
 
       <button
