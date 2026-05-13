@@ -8,6 +8,7 @@ import {
   SERIAL_PORT_OPTIONS,
 } from '@/features/firmware-flash/constants';
 import { chipManifest, rustPluginIdForChip } from '@/features/firmware-flash/chip-manifests';
+import { usePortManagerStore } from '@/stores/port-manager';
 import { type FlashJobPayload, type FlashProgressPayload, isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import {
   alignedExclusiveEraseRange4K,
@@ -440,6 +441,7 @@ export const useFlashStore = defineStore('flash', () => {
         connected.value = false;
         appendLog(t('flash.log.autoDisconnected'));
       }
+      usePortManagerStore().release(selectedSerialPort.value, 'flash');
     }
   }
 
@@ -603,6 +605,22 @@ export const useFlashStore = defineStore('flash', () => {
     autoConnected.value = false;
     appendLog(t('flash.log.connected'));
     rLog.info(`[Flash] Connected to port: ${selectedSerialPort.value}`);
+
+    const pm = usePortManagerStore();
+    const outcome = await pm.acquire({
+      id: 'flash',
+      port: selectedSerialPort.value,
+      onReleaseRequest: async () => false, // flash never yields mid-operation
+      onReleased: () => {
+        connected.value = false;
+        autoConnected.value = false;
+      },
+    });
+    if (outcome === 'denied') {
+      connected.value = false;
+      appendLog(t('flash.log.portBusy', { port: selectedSerialPort.value }));
+      return;
+    }
   }
 
   function disconnect(): void {
@@ -620,6 +638,7 @@ export const useFlashStore = defineStore('flash', () => {
     connected.value = false;
     autoConnected.value = false;
     appendLog(t('flash.log.disconnected'));
+    usePortManagerStore().release(selectedSerialPort.value, 'flash');
   }
 
   async function deviceReset(): Promise<void> {

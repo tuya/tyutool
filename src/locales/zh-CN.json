@@ -12,6 +12,7 @@
     "tagline": "嵌入式工具",
     "nav": {
       "flash": "固件烧录",
+      "serialDebug": "串口调试",
       "settings": "设置"
     },
     "mainNav": "主导航",
@@ -358,6 +359,110 @@
         "savingBytes": "保存 {size} 字节至 {path}",
         "authorizeNotSupported": "该芯片不支持授权操作。"
       }
+    }
+  },
+  "serialDebug": {
+    "tool": "工具",
+    "pageTitle": "串口调试",
+    "introLead": "实时终端。",
+    "introRest": "看打印、发指令，断线自动提示。",
+    "conn": {
+      "port": "串口",
+      "refresh": "刷新端口",
+      "baud": "波特率",
+      "customBaud": "自定义",
+      "dataBits": "数据位",
+      "parity": "校验位",
+      "parityNone": "无",
+      "parityOdd": "奇",
+      "parityEven": "偶",
+      "stopBits": "停止位",
+      "autoRelease": "烧录时自动释放",
+      "autoReleaseTip": "开启后，烧录会在无提示下自动关闭本会话；烧录结束后尝试重新打开",
+      "hexView": "Hex 视图",
+      "ansiParse": "解析 ANSI 颜色与样式",
+      "ansiParseTip": "关闭后剥除转义码，显示纯文本",
+      "clear": "清空",
+      "open": "打开",
+      "close": "关闭",
+      "settings": "串口设置",
+      "connecting": "连接中…",
+      "statusConnected": "已连接",
+      "statusDisconnected": "已断开",
+      "deviceReset": "设备复位",
+      "deviceResetHint": "通过 DTR/RTS 对设备复位。复位时序取决于芯片平台，请先在「固件烧录」中选择正确的芯片。"
+    },
+    "send": {
+      "placeholder": "输入内容…",
+      "sendBtn": "发送",
+      "hexParseIgnored": "已忽略 {n} 个不完整字节",
+      "history": "发送历史"
+    },
+    "chip": {
+      "addBtn": "添加过滤词",
+      "placeholder": "关键词…",
+      "regexLabel": "正则",
+      "dupWarning": "该关键词已存在",
+      "invalidRegex": "无效的正则表达式",
+      "tabAll": "全部",
+      "removeTab": "移除过滤"
+    },
+    "search": {
+      "placeholder": "在此窗口内搜索…",
+      "prev": "上一个",
+      "next": "下一个",
+      "close": "关闭",
+      "count": "{current} / {total}",
+      "noMatch": "无匹配"
+    },
+    "log": {
+      "waitingData": "等待数据…",
+      "title": "日志",
+      "pausedScroll": "滚动到底部",
+      "filterToggle": "过滤",
+      "toggleTimestamp": "时间戳",
+      "toggleDirBadge": "标签",
+      "connected": "已连接 {port}，波特率 {baud}",
+      "disconnected": "端口丢失",
+      "disconnectedWith": "端口丢失: {reason}",
+      "saveLog": "保存日志",
+      "fontDecrease": "缩小字体",
+      "fontIncrease": "放大字体",
+      "fontSize": "字体",
+      "deviceResetOk": "设备复位（DTR/RTS）已发送：{port}",
+      "deviceResetFailed": "设备复位失败：{msg}",
+      "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（无 device_reset），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。"
+    },
+    "autoSave": {
+      "label": "自动保存日志",
+      "description": "自动保存全部日志到本地文件",
+      "dirLabel": "保存路径",
+      "pickDir": "选择目录",
+      "active": "自动保存中",
+      "off": "自动保存",
+      "errWrite": "自动保存失败: {msg}",
+      "timestamp": "每行包含时间戳",
+      "timestampFmtOn": "[12:00:00.000] [RX] [数据]",
+      "timestampFmtOff": "[RX] [数据]"
+    },
+    "hexPopup": {
+      "titleHex": "十六进制视图",
+      "titleAscii": "ASCII 视图",
+      "copy": "复制",
+      "toHex": "以 Hex 查看",
+      "toAscii": "以 ASCII 查看"
+    },
+    "confirm": {
+      "releaseForFlashTitle": "端口冲突",
+      "releaseForFlashBody": "{requester} 正在请求该端口，是否让出？",
+      "releaseOk": "让出",
+      "releaseCancel": "取消"
+    },
+    "err": {
+      "invalidConfig": "配置无效",
+      "openFailedWith": "打开失败: {msg}",
+      "sendFailed": "发送失败: {msg}",
+      "portDenied": "当前端口被占用，本次未打开"
     }
   }
 }

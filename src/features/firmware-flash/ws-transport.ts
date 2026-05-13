@@ -23,6 +23,7 @@ export interface WsProgressEvent {
 export class WsTransport {
   private ws: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
+  private activeSerialDebugChunkHandler: ((ev: MessageEvent) => void) | null = null;
 
   private closeCurrentConnection(): void {
     const ws = this.ws;
@@ -290,6 +291,60 @@ export class WsTransport {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'cancel' }));
     }
+  }
+
+  async serialDebugOpen(
+    cfg: import('../serial-debug/types').DebugConfig,
+    onChunk: (chunk: import('../serial-debug/types').DebugChunk) => void,
+    onDisconnect: (reason: string) => void,
+  ): Promise<void> {
+    const ws = await this.connect();
+    return new Promise((resolve, reject) => {
+      const handler = (ev: MessageEvent) => {
+        let msg: { type: string; chunk?: { direction: 'tx'|'rx'; tsMs: number; bytes: number[] }; reason?: string; message?: string };
+        try { msg = JSON.parse(ev.data as string); } catch { return; }
+        switch (msg.type) {
+          case 'serial_debug_opened':
+            ws.addEventListener('message', chunkHandler);
+            ws.removeEventListener('message', handler);
+            resolve();
+            break;
+          case 'error':
+            ws.removeEventListener('message', handler);
+            reject(new Error(msg.message ?? 'ws error'));
+            break;
+          // ignore other message types here
+        }
+      };
+      const chunkHandler = (ev: MessageEvent) => {
+        try {
+          const m = JSON.parse(ev.data as string) as { type: string; chunk?: import('../serial-debug/types').DebugChunk; reason?: string };
+          if (m.type === 'serial_debug_chunk' && m.chunk) onChunk(m.chunk);
+          else if (m.type === 'serial_debug_disconnected') onDisconnect(m.reason ?? '');
+        } catch { /* ignore */ }
+      };
+      this.activeSerialDebugChunkHandler = chunkHandler;
+      ws.addEventListener('message', handler);
+      ws.send(JSON.stringify({ type: 'serial_debug_open', cfg }));
+    });
+  }
+
+  async serialDebugClose(): Promise<void> {
+    // Remove the message listener BEFORE sending the close — prevents late-arriving
+    // chunks after close from reaching stale handlers.
+    if (this.ws && this.activeSerialDebugChunkHandler) {
+      this.ws.removeEventListener('message', this.activeSerialDebugChunkHandler);
+      this.activeSerialDebugChunkHandler = null;
+    }
+    // Only send close if the socket is actually open; do not force-reconnect just to close.
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'serial_debug_close' }));
+    }
+  }
+
+  async serialDebugSend(bytes: Uint8Array): Promise<void> {
+    const ws = await this.connect();
+    ws.send(JSON.stringify({ type: 'serial_debug_send', bytes: Array.from(bytes) }));
   }
 }
 

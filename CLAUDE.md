@@ -140,3 +140,27 @@ All flash UI state lives in the Pinia store at `src/stores/flash.ts` (`useFlashS
 - Rust tests live alongside source in `crates/` or in `src-tauri/src/lib.rs`.
 - Pre-commit hooks (lefthook) auto-format staged `.ts`/`.vue` files with Prettier and staged `.rs` files with `cargo fmt`.
 - `@` alias resolves to `src/` in both Vite and vitest configs.
+
+---
+
+## Conventions
+
+### File and directory naming
+
+- `.ts` / `.rs` files: kebab-case (`hex-format.ts`, `serial_debug.rs`)
+- `.vue` files: PascalCase (`SerialDebugPage.vue`)
+- Feature directories: kebab-case (`firmware-flash/`, `serial-debug/`)
+
+### Tauri IPC contract
+
+- Command names: snake_case; add `_cmd` suffix when a Tauri entry point shares a name with an internal function (`list_serial_ports_cmd`)
+- Event names: kebab-case, `feature-noun` format (`serial-debug-chunk`, `flash-progress`)
+- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`)
+- Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
+- All Tauri-only code must be gated behind `isTauriRuntime()`; never invoke Tauri commands in web mode
+
+### Testing
+
+- Test files live next to their source, same name with `.test.ts` suffix; Rust uses inline `#[cfg(test)] mod tests`
+- Pure logic (utility functions, type conversions) must have unit tests; Vue components and stores as needed
+- Frontend tests run in the `node` environment — no DOM

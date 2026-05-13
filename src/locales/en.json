@@ -12,6 +12,7 @@
     "tagline": "Embedded utilities",
     "nav": {
       "flash": "Firmware flash",
+      "serialDebug": "Serial debug",
       "settings": "Settings"
     },
     "mainNav": "Main navigation",
@@ -357,6 +358,110 @@
         "savingBytes": "Saving {size} bytes to {path}",
         "authorizeNotSupported": "Authorize mode not supported for this chip."
       }
+    }
+  },
+  "serialDebug": {
+    "tool": "Tool",
+    "pageTitle": "Serial Debug",
+    "introLead": "Realtime terminal.",
+    "introRest": " See prints, send commands, disconnects are surfaced.",
+    "conn": {
+      "port": "Port",
+      "refresh": "Refresh ports",
+      "baud": "Baud",
+      "customBaud": "Custom",
+      "dataBits": "Data bits",
+      "parity": "Parity",
+      "parityNone": "None",
+      "parityOdd": "Odd",
+      "parityEven": "Even",
+      "stopBits": "Stop bits",
+      "autoRelease": "Auto-release for flash",
+      "autoReleaseTip": "When on, flashing silently closes this session and re-opens it after flash finishes.",
+      "hexView": "Hex view",
+      "ansiParse": "Parse ANSI colors & styles",
+      "ansiParseTip": "Disable to strip escape codes and show plain text",
+      "clear": "Clear",
+      "open": "Open",
+      "close": "Close",
+      "settings": "Serial Settings",
+      "connecting": "Connecting…",
+      "statusConnected": "Connected",
+      "statusDisconnected": "Disconnected",
+      "deviceReset": "Reset device",
+      "deviceResetHint": "Sends DTR/RTS reset. Sequence depends on chip — select the correct chip platform in Firmware Flash first."
+    },
+    "send": {
+      "placeholder": "Type to send…",
+      "sendBtn": "Send",
+      "hexParseIgnored": "{n} incomplete byte(s) ignored",
+      "history": "Send history"
+    },
+    "chip": {
+      "addBtn": "Add filter",
+      "placeholder": "Keyword…",
+      "regexLabel": "Regex",
+      "dupWarning": "A chip with this keyword already exists",
+      "invalidRegex": "Invalid regular expression",
+      "tabAll": "All",
+      "removeTab": "Remove filter"
+    },
+    "search": {
+      "placeholder": "Search in this pane…",
+      "prev": "Previous",
+      "next": "Next",
+      "close": "Close",
+      "count": "{current} / {total}",
+      "noMatch": "No matches"
+    },
+    "log": {
+      "waitingData": "Waiting for data…",
+      "title": "Log",
+      "pausedScroll": "Scroll to bottom",
+      "filterToggle": "Filter",
+      "toggleTimestamp": "Timestamp",
+      "toggleDirBadge": "Badge",
+      "connected": "Connected {port} at {baud} baud",
+      "disconnected": "Port lost",
+      "disconnectedWith": "Port lost: {reason}",
+      "saveLog": "Save log",
+      "fontDecrease": "Smaller",
+      "fontIncrease": "Larger",
+      "fontSize": "Font",
+      "deviceResetOk": "Device reset (DTR/RTS) sent on {port}",
+      "deviceResetFailed": "Device reset failed: {msg}",
+      "deviceResetServeOutdated": "Device reset failed: browser is still connected to an old tyutool-cli serve (no device_reset support). Close the process holding port 9527 and restart serve."
+    },
+    "autoSave": {
+      "label": "Auto-save logs",
+      "description": "Automatically save all logs to a local file",
+      "dirLabel": "Save directory",
+      "pickDir": "Choose directory",
+      "active": "Auto-saving",
+      "off": "Auto-save",
+      "errWrite": "Auto-save failed: {msg}",
+      "timestamp": "Include timestamp per line",
+      "timestampFmtOn": "[12:00:00.000] [RX] [data]",
+      "timestampFmtOff": "[RX] [data]"
+    },
+    "hexPopup": {
+      "titleHex": "Hex view",
+      "titleAscii": "ASCII view",
+      "copy": "Copy",
+      "toHex": "View as Hex",
+      "toAscii": "View as ASCII"
+    },
+    "confirm": {
+      "releaseForFlashTitle": "Port conflict",
+      "releaseForFlashBody": "{requester} is requesting this port. Release?",
+      "releaseOk": "Release",
+      "releaseCancel": "Cancel"
+    },
+    "err": {
+      "invalidConfig": "Invalid configuration",
+      "openFailedWith": "Open failed: {msg}",
+      "sendFailed": "Send failed: {msg}",
+      "portDenied": "Port is busy; open cancelled"
     }
   }
 }

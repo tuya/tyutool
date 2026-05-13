@@ -7,6 +7,7 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use anyhow::Context;
 use base64::Engine;
@@ -15,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
-use tyutool_core::{device_reset_dtr_rts, list_serial_ports, run_job, FlashJob, SerialPortEntry};
+use tyutool_core::{
+    device_reset_dtr_rts, list_serial_ports, run_job, DebugChunk, DebugConfig, FlashJob,
+    SerialDebugSession, SerialPortEntry,
+};
 
 // ── Client → Server ──────────────────────────────────────────────────────────
 
@@ -35,6 +39,14 @@ pub enum ClientMessage {
         file_contents: Option<Vec<String>>,
     },
     Cancel,
+    SerialDebugOpen {
+        cfg: DebugConfig,
+    },
+    SerialDebugClose,
+    SerialDebugSend {
+        bytes: Vec<u8>,
+    },
+    SerialDebugState,
 }
 
 // ── Server → Client ──────────────────────────────────────────────────────────
@@ -50,6 +62,15 @@ pub enum ServerMessage {
     },
     Progress { payload: serde_json::Value },
     Error { message: String },
+    SerialDebugChunk { chunk: DebugChunk },
+    SerialDebugOpened,
+    SerialDebugClosed,
+    SerialDebugStateInfo {
+        open: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cfg: Option<DebugConfig>,
+    },
+    SerialDebugDisconnected { reason: String },
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -85,8 +106,33 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         }
     };
 
-    let (mut sink, mut stream) = ws.split();
+    let (sink, mut stream) = ws.split();
     let cancel = Arc::new(AtomicBool::new(false));
+
+    // ── mpsc sink pump ───────────────────────────────────────────────────────
+    // Background tasks (progress callbacks, serial-debug reader thread) need to
+    // push ServerMessage values from contexts that don't own the WS sink. Wrap
+    // the sink in a single drainer task fed by an unbounded mpsc.
+    use tokio::sync::mpsc;
+    let (sink_tx, mut sink_rx) = mpsc::unbounded_channel::<ServerMessage>();
+
+    let mut sink_moved = sink;
+    let pump = tokio::spawn(async move {
+        while let Some(msg) = sink_rx.recv().await {
+            let text = serde_json::to_string(&msg).unwrap_or_else(|e| {
+                serde_json::to_string(&ServerMessage::Error {
+                    message: e.to_string(),
+                })
+                .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"serialize failed\"}".into())
+            });
+            if sink_moved.send(Message::Text(text.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Per-connection serial-debug session state.
+    let debug_session: Arc<Mutex<Option<SerialDebugSession>>> = Arc::new(Mutex::new(None));
 
     while let Some(Ok(msg)) = stream.next().await {
         let text = match msg {
@@ -98,13 +144,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         let client_msg: ClientMessage = match serde_json::from_str(&text) {
             Ok(m) => m,
             Err(e) => {
-                send_msg(
-                    &mut sink,
-                    &ServerMessage::Error {
-                        message: e.to_string(),
-                    },
-                )
-                .await;
+                let _ = sink_tx.send(ServerMessage::Error {
+                    message: e.to_string(),
+                });
                 continue;
             }
         };
@@ -112,7 +154,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         match client_msg {
             ClientMessage::ListPorts => {
                 let ports = list_serial_ports().unwrap_or_default();
-                send_msg(&mut sink, &ServerMessage::Ports { ports }).await;
+                let _ = sink_tx.send(ServerMessage::Ports { ports });
             }
             ClientMessage::DeviceReset { port, chip_id } => {
                 // Run on blocking pool so serial `open()` / DTR/RTS never stalls the WS task.
@@ -138,7 +180,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                         ),
                     },
                 };
-                send_msg(&mut sink, &msg).await;
+                let _ = sink_tx.send(msg);
             }
             ClientMessage::Cancel => {
                 cancel.store(true, Ordering::Relaxed);
@@ -149,10 +191,94 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 file_contents,
             } => {
                 cancel.store(false, Ordering::Relaxed);
-                handle_run_job(&mut sink, Arc::clone(&cancel), &mut job, file_content, file_contents).await;
+                handle_run_job(&sink_tx, Arc::clone(&cancel), &mut job, file_content, file_contents)
+                    .await;
+            }
+            ClientMessage::SerialDebugOpen { cfg } => {
+                let mut guard = debug_session.lock().unwrap();
+                if guard.is_some() {
+                    let _ = sink_tx.send(ServerMessage::Error {
+                        message: "already open".into(),
+                    });
+                    continue;
+                }
+                let sink_for_chunk = sink_tx.clone();
+                let sink_for_disc = sink_tx.clone();
+                let result = SerialDebugSession::open(
+                    cfg,
+                    Box::new(move |chunk| {
+                        let _ = sink_for_chunk.send(ServerMessage::SerialDebugChunk { chunk });
+                    }),
+                    Box::new(move |reason| {
+                        let _ =
+                            sink_for_disc.send(ServerMessage::SerialDebugDisconnected { reason });
+                    }),
+                );
+                match result {
+                    Ok(s) => {
+                        *guard = Some(s);
+                        let _ = sink_tx.send(ServerMessage::SerialDebugOpened);
+                    }
+                    Err(e) => {
+                        let _ = sink_tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
+            }
+            ClientMessage::SerialDebugClose => {
+                let mut guard = debug_session.lock().unwrap();
+                if let Some(s) = guard.take() {
+                    s.close();
+                }
+                let _ = sink_tx.send(ServerMessage::SerialDebugClosed);
+            }
+            ClientMessage::SerialDebugSend { bytes } => {
+                let guard = debug_session.lock().unwrap();
+                if let Some(s) = guard.as_ref() {
+                    if let Err(e) = s.write(&bytes) {
+                        let _ = sink_tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                        continue;
+                    }
+                    let ts_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let _ = sink_tx.send(ServerMessage::SerialDebugChunk {
+                        chunk: DebugChunk {
+                            direction: tyutool_core::Direction::Tx,
+                            ts_ms,
+                            bytes,
+                        },
+                    });
+                } else {
+                    let _ = sink_tx.send(ServerMessage::Error {
+                        message: "serial debug not open".into(),
+                    });
+                }
+            }
+            ClientMessage::SerialDebugState => {
+                let guard = debug_session.lock().unwrap();
+                let (open, cfg) = match guard.as_ref() {
+                    Some(s) => (true, Some(s.config().clone())),
+                    None => (false, None),
+                };
+                let _ = sink_tx.send(ServerMessage::SerialDebugStateInfo { open, cfg });
             }
         }
     }
+
+    // Clean up any open serial-debug session before dropping the sink.
+    if let Ok(mut guard) = debug_session.lock() {
+        if let Some(s) = guard.take() {
+            s.close();
+        }
+    }
+
+    drop(sink_tx);
+    let _ = pump.await;
 
     log::info!("WS connection closed");
 }
@@ -160,10 +286,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
 // ── Run job handler ──────────────────────────────────────────────────────────
 
 async fn handle_run_job(
-    sink: &mut futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-        Message,
-    >,
+    sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
     cancel: Arc<AtomicBool>,
     job: &mut FlashJob,
     file_content: Option<String>,
@@ -179,7 +302,9 @@ async fn handle_run_job(
                 temp_paths.push(p);
             }
             Err(e) => {
-                send_msg(sink, &ServerMessage::Error { message: e.to_string() }).await;
+                let _ = sink_tx.send(ServerMessage::Error {
+                    message: e.to_string(),
+                });
                 return;
             }
         }
@@ -189,7 +314,9 @@ async fn handle_run_job(
     if let Some(contents) = file_contents {
         if let Some(ref mut segments) = job.segments {
             if contents.len() != segments.len() {
-                send_msg(sink, &ServerMessage::Error { message: "file_contents length mismatch with segments".into() }).await;
+                let _ = sink_tx.send(ServerMessage::Error {
+                    message: "file_contents length mismatch with segments".into(),
+                });
                 return;
             }
             for (i, b64) in contents.iter().enumerate() {
@@ -199,7 +326,9 @@ async fn handle_run_job(
                         temp_paths.push(p);
                     }
                     Err(e) => {
-                        send_msg(sink, &ServerMessage::Error { message: e.to_string() }).await;
+                        let _ = sink_tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
                         // cleanup already created files? temp_paths will be cleaned at end
                         return;
                     }
@@ -256,7 +385,7 @@ async fn handle_run_job(
         {
             saw_done = true;
         }
-        send_msg(sink, &ServerMessage::Progress { payload }).await;
+        let _ = sink_tx.send(ServerMessage::Progress { payload });
     }
     // Channel closed → blocking task has finished
 
@@ -275,7 +404,7 @@ async fn handle_run_job(
             .and_then(|n| n.to_str())
             .unwrap_or("read.bin");
         let payload = serde_json::json!({ "kind": "file_content", "name": name, "content": b64 });
-        send_msg(sink, &ServerMessage::Progress { payload }).await;
+        let _ = sink_tx.send(ServerMessage::Progress { payload });
     }
 
     if !saw_done {
@@ -284,13 +413,9 @@ async fn handle_run_job(
             Err(e) => (false, Some(e.to_string())),
         };
         let done_payload = serde_json::json!({ "kind": "done", "ok": ok, "message": message });
-        send_msg(
-            sink,
-            &ServerMessage::Progress {
-                payload: done_payload,
-            },
-        )
-        .await;
+        let _ = sink_tx.send(ServerMessage::Progress {
+            payload: done_payload,
+        });
     }
 
     // Clean up temp files
@@ -300,18 +425,6 @@ async fn handle_run_job(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-async fn send_msg(
-    sink: &mut futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-        Message,
-    >,
-    msg: &ServerMessage,
-) {
-    if let Ok(json) = serde_json::to_string(msg) {
-        let _ = sink.send(Message::Text(json.into())).await;
-    }
-}
 
 fn decode_to_temp(b64: &str, prefix: &str) -> anyhow::Result<String> {
     let bytes = base64::engine::general_purpose::STANDARD

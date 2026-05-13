@@ -1,13 +1,24 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
 struct FlashState {
     cancel: Arc<AtomicBool>,
+}
+
+struct DebugState {
+    session: StdMutex<Option<SerialDebugSession>>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DisconnectPayload {
+    reason: String,
 }
 
 const DEFAULT_MAIN_WINDOW_WIDTH: f64 = 1280.0;
@@ -177,6 +188,101 @@ fn flash_cancel(state: State<'_, FlashState>) {
     log::info!("[Flash] User cancelled operation");
     state.cancel.store(true, Ordering::SeqCst);
 }
+
+#[tauri::command]
+async fn serial_debug_open(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+    cfg: DebugConfig,
+) -> Result<(), String> {
+    {
+        let guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+        if guard.is_some() {
+            return Err("already open".into());
+        }
+    }
+    let app_for_chunk = app.clone();
+    let app_for_disc = app.clone();
+    // Run the blocking serialport::open() off the main thread.
+    let session = tauri::async_runtime::spawn_blocking(move || {
+        SerialDebugSession::open(
+            cfg,
+            Box::new(move |chunk: DebugChunk| {
+                let _ = app_for_chunk.emit("serial-debug-chunk", &chunk);
+            }),
+            Box::new(move |reason: String| {
+                let _ =
+                    app_for_disc.emit("serial-debug-disconnected", &DisconnectPayload { reason });
+            }),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let mut guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+    if guard.is_some() {
+        // Another open won the race while we were in spawn_blocking; discard this session.
+        session.close();
+        return Err("already open".into());
+    }
+    *guard = Some(session);
+    Ok(())
+}
+
+#[tauri::command]
+async fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> {
+    let session = {
+        let mut guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+        guard.take()
+    };
+    if let Some(session) = session {
+        // h.join() blocks; run it off the async runtime thread.
+        tauri::async_runtime::spawn_blocking(move || session.close())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_send(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    {
+        let guard = state
+            .session
+            .lock()
+            .map_err(|_| "debug state poisoned".to_string())?;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| "serial debug not open".to_string())?;
+        session.write(&bytes).map_err(|e| e.to_string())?;
+    } // DebugState lock dropped here — emit happens unlocked
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let chunk = tyutool_core::DebugChunk {
+        direction: tyutool_core::Direction::Tx,
+        ts_ms,
+        bytes,
+    };
+    let _ = app.emit("serial-debug-chunk", &chunk);
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_state(state: State<'_, DebugState>) -> Result<Option<DebugConfig>, String> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
+    Ok(guard.as_ref().map(|s| s.config().clone()))
+}
+
 
 #[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
@@ -395,6 +501,25 @@ fn reset_main_window_layout(app: AppHandle) -> Result<(), String> {
     apply_default_main_window_layout(&app)
 }
 
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn append_text_file(path: String, content: String) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes()).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -417,6 +542,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(FlashState {
             cancel: Arc::new(AtomicBool::new(false)),
+        })
+        .manage(DebugState {
+            session: StdMutex::new(None),
         })
         .setup(|app| {
             let version = app.package_info().version.to_string();
@@ -451,6 +579,12 @@ pub fn run() {
             get_install_type,
             set_log_level,
             reset_main_window_layout,
+            serial_debug_open,
+            serial_debug_close,
+            serial_debug_send,
+            serial_debug_state,
+            write_text_file,
+            append_text_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

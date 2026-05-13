@@ -9,7 +9,7 @@ const ctx = useFirmwareFlashContext();
 
 // Only destructure actions (functions) — ref state must be accessed via ctx.xxx
 // to preserve Pinia reactive() wrapper (destructuring unwraps refs into snapshots).
-const { refreshDevice, connect, disconnect, deviceReset } = ctx;
+const { refreshDevice, connect, disconnect } = ctx;
 
 /** True when the authorize tab is active — baud rate then controls auth baud. */
 const isAuthTab = computed(() => ctx.activeTab === 'authorize');
@@ -77,7 +77,6 @@ const chipValue = computed({
   },
 });
 
-const deviceResetHintTitle = computed(() => t(`flash.deviceResetHints.${ctx.selectedChipId}`));
 </script>
 
 <template>
@@ -167,26 +166,6 @@ const deviceResetHintTitle = computed(() => t(`flash.deviceResetHints.${ctx.sele
 
     <!-- 操作按钮 -->
     <div class="relative flex shrink-0 items-center gap-2">
-      <button
-        type="button"
-        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
-        :disabled="ctx.connected || ctx.busy"
-        @click="refreshDevice"
-      >
-        <FontAwesomeIcon :icon="['fas', 'arrows-rotate']" class="size-3.5 shrink-0" aria-hidden="true" />
-        {{ t('flash.refresh') }}
-      </button>
-      <button
-        type="button"
-        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
-        :disabled="!ctx.selectedSerialPort || ctx.busy"
-        :aria-label="t('flash.deviceReset')"
-        :title="deviceResetHintTitle"
-        @click="deviceReset"
-      >
-        <FontAwesomeIcon :icon="['fas', 'power-off']" class="size-3.5 shrink-0" aria-hidden="true" />
-        {{ t('flash.deviceReset') }}
-      </button>
       <button
         v-if="!ctx.connected"
         type="button"

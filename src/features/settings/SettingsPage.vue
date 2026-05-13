@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { APP_VERSION } from '@/config/app';
 import { desktopAppLogDirHint } from '@/config/tauri-desktop-paths';
 import { useSettingsStore, resolveLocale } from '@/stores/settings';
+import { useSerialDebugStore } from '@/stores/serial-debug';
 import type { LogLevelId, LocalePreference } from '@/stores/settings';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { showConfirmDialog } from '@/composables/confirmDialog';
@@ -12,6 +13,7 @@ import TySelect, { type TySelectOption } from '@/components/TySelect.vue';
 
 const { locale, t } = useI18n();
 const settings = useSettingsStore();
+const sd = useSerialDebugStore();
 
 const appVersion = APP_VERSION;
 const showUpdateDialog = ref(false);
@@ -120,6 +122,15 @@ async function openLogsFolder(): Promise<void> {
   }
 }
 
+async function toggleAutoSave(): Promise<void> {
+  if (!sd.autoSave && !sd.autoSaveDir) {
+    sd.autoSave = true;
+    await sd.pickAutoSaveDir();
+  } else {
+    sd.autoSave = !sd.autoSave;
+  }
+}
+
 async function openOpensourceLicenses(): Promise<void> {
   try {
     const { openUrl } = await import('@tauri-apps/plugin-opener');
@@ -208,7 +219,9 @@ async function openOpensourceLicenses(): Promise<void> {
                 v-for="opt in logToggleOptions"
                 :key="String(opt.value)"
                 class="ty-btn-sm"
-                :class="settings.logEnabled === opt.value ? 'ty-btn-toggle-active' : 'ty-btn-secondary'"
+                :class="settings.logEnabled === opt.value
+                  ? (opt.value ? 'ty-btn-toggle-active' : 'ty-btn-toggle-active-off')
+                  : 'ty-btn-secondary'"
                 @click="settings.setLogEnabled(opt.value)"
               >
                 {{ opt.label }}
@@ -245,6 +258,38 @@ async function openOpensourceLicenses(): Promise<void> {
       </section>
     </div>
 
+    <section class="ty-card min-w-0 rounded-xl p-4 sm:p-5" aria-labelledby="serial-debug-heading">
+      <h2 id="serial-debug-heading" class="ty-section-title">
+        {{ t('serialDebug.pageTitle') }}
+      </h2>
+      <div class="mt-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <label class="ty-label">{{ t('serialDebug.autoSave.label') }}</label>
+          <input type="checkbox" :checked="sd.autoSave" class="size-4 cursor-pointer" @change="toggleAutoSave" />
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex min-w-0 flex-1 items-center gap-2">
+            <label class="ty-label shrink-0">{{ t('serialDebug.autoSave.dirLabel') }}</label>
+            <div class="path-scroll min-w-0 flex-1 overflow-x-auto">
+              <span v-if="sd.autoSaveDir" class="whitespace-nowrap text-xs text-[var(--ty-text-muted)]">{{ sd.autoSaveDir }}</span>
+            </div>
+          </div>
+          <button type="button" class="ty-btn-sm ty-btn-secondary shrink-0" @click="sd.pickAutoSaveDir()">
+            {{ t('serialDebug.autoSave.pickDir') }}
+          </button>
+        </div>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <label class="ty-label">{{ t('serialDebug.autoSave.timestamp') }}</label>
+            <span class="font-mono text-xs text-[var(--ty-text-muted)]">
+              {{ sd.autoSaveTimestamp ? t('serialDebug.autoSave.timestampFmtOn') : t('serialDebug.autoSave.timestampFmtOff') }}
+            </span>
+          </div>
+          <input type="checkbox" v-model="sd.autoSaveTimestamp" class="size-4 cursor-pointer" />
+        </div>
+      </div>
+    </section>
+
     <section class="ty-card min-w-0 rounded-xl p-4 sm:p-5" aria-labelledby="about-heading">
       <h2 id="about-heading" class="ty-section-title">
         {{ t('settings.about') }}
@@ -275,3 +320,32 @@ async function openOpensourceLicenses(): Promise<void> {
     <UpdateDialog :open="showUpdateDialog" @close="showUpdateDialog = false" />
   </div>
 </template>
+
+<style scoped>
+/* Hide scrollbar while keeping scroll functionality */
+.path-scroll::-webkit-scrollbar { display: none; }
+.path-scroll { scrollbar-width: none; }
+
+/* "关闭" active state — danger red, distinct from primary "开启" */
+.ty-btn-toggle-active-off {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  border: 1px solid var(--ty-danger);
+  background-color: var(--ty-danger);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 2px 8px color-mix(in srgb, var(--ty-danger) 24%, transparent);
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.ty-btn-toggle-active-off:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--ty-danger) 85%, #000);
+  border-color: color-mix(in srgb, var(--ty-danger) 85%, #000);
+}
+</style>

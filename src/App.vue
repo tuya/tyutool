@@ -8,20 +8,25 @@ import { useAutoUpdate } from '@/composables/useAutoUpdate';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { APP_VERSION } from '@/config/app';
 import { rLog } from '@/utils/log';
+import { useSerialDebugStore } from '@/stores/serial-debug';
 import appLogo from '@/assets/logo.png';
 
 const route = useRoute();
 const { t } = useI18n();
 useAutoUpdate();
 
-onMounted(() => {
+onMounted(async () => {
   rLog.info(`[Frontend] tyutool v${APP_VERSION} initialized`);
   rLog.info(
     `[Frontend] Platform: ${navigator.platform}, Lang: ${navigator.language}, Tauri: ${isTauriRuntime()}`
   );
+  const sd = useSerialDebugStore();
+  await sd.loadWorkspace();
+  sd.startWorkspacePersistence();
 });
 
 const fullBleedMain = computed(() => route.meta.layout === 'fullBleed');
+const hideChrome = computed(() => route.meta.chrome === 'none');
 
 const nav = computed(() => [
   {
@@ -29,6 +34,12 @@ const nav = computed(() => [
     to: '/flash',
     label: t('app.nav.flash'),
     faIcon: ['fas', 'microchip'] as [string, string],
+  },
+  {
+    name: 'serial-debug' as const,
+    to: '/serial-debug',
+    label: t('app.nav.serialDebug'),
+    faIcon: ['fas', 'terminal'] as [string, string],
   },
   {
     name: 'settings' as const,
@@ -45,16 +56,14 @@ const nav = computed(() => [
     :style="{ color: 'var(--ty-text)', backgroundColor: 'var(--ty-canvas)' }"
   >
     <aside
-      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[15.5rem] md:max-h-none md:border-b-0 md:border-r"
+      v-if="!hideChrome"
+      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[9rem] md:max-h-none md:border-b-0 md:border-r"
       :aria-label="t('app.mainNav')"
     >
-      <div class="border-b border-[var(--ty-border)] px-4 py-3.5 md:px-4 md:py-5">
-        <div class="flex items-center gap-3">
+      <div class="border-b border-[var(--ty-border)] px-4 py-2.5 md:px-4 md:py-3">
+        <div class="flex justify-center">
           <div class="flex size-10 shrink-0 items-center justify-center" aria-hidden="true">
             <img :src="appLogo" alt="tyutool logo" class="size-10 rounded-xl" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-sm font-semibold tracking-tight">tyutool</div>
           </div>
         </div>
       </div>
@@ -87,15 +96,15 @@ const nav = computed(() => [
       tabindex="-1"
     >
       <div class="mx-auto w-full min-w-0 max-w-5xl" :class="fullBleedMain ? 'flex min-h-0 flex-1 flex-col' : ''">
-        <transition name="ty-route" mode="out-in">
-          <div
-            :key="route.fullPath"
-            class="min-w-0"
-            :class="fullBleedMain ? 'flex min-h-0 w-full flex-1 flex-col' : ''"
-          >
-            <RouterView />
-          </div>
-        </transition>
+        <div class="min-w-0" :class="fullBleedMain ? 'flex min-h-0 w-full flex-1 flex-col' : ''">
+          <RouterView v-slot="{ Component }">
+            <transition name="ty-route" mode="out-in">
+              <keep-alive :include="['SerialDebugPage']">
+                <component :is="Component" :key="route.name" />
+              </keep-alive>
+            </transition>
+          </RouterView>
+        </div>
       </div>
     </main>
     <TyConfirmDialog />
