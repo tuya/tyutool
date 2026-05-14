@@ -5,7 +5,7 @@ import { APP_VERSION } from '@/config/app';
 import { desktopAppLogDirHint } from '@/config/tauri-desktop-paths';
 import { useSettingsStore, resolveLocale } from '@/stores/settings';
 import { useSerialDebugStore } from '@/stores/serial-debug';
-import type { LogLevelId, LocalePreference } from '@/stores/settings';
+import type { LogLevelId, LocalePreference, ThemeStyle } from '@/stores/settings';
 import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
 import { showConfirmDialog } from '@/composables/confirmDialog';
 import UpdateDialog from './UpdateDialog.vue';
@@ -43,6 +43,16 @@ const localeValue = computed({
     settings.setLocale(val as LocalePreference);
     locale.value = resolveLocale(val as LocalePreference);
   },
+});
+
+const themeStyleOptions = computed<TySelectOption[]>(() => [
+  { value: 'default', label: t('settings.themeStyleDefault') },
+  { value: 'tuyaopen-ide', label: t('settings.themeStyleTuyaopenIde') },
+]);
+
+const themeStyleValue = computed({
+  get: () => settings.themeStyle,
+  set: (val: string) => settings.setThemeStyle(val as ThemeStyle),
 });
 
 // Sync vue-i18n locale when settings locale changes (e.g. from Tauri store load)
@@ -167,6 +177,18 @@ async function openOpensourceLicenses(): Promise<void> {
         <h2 id="appearance-heading" class="ty-section-title">
           {{ t('settings.appearance') }}
         </h2>
+        <div class="mt-4 space-y-2">
+          <label for="settings-theme-style" class="block text-sm font-medium text-[var(--ty-text)]">
+            {{ t('settings.themeStyle') }}
+          </label>
+          <TySelect
+            id="settings-theme-style"
+            v-model="themeStyleValue"
+            :options="themeStyleOptions"
+            class="w-full max-w-md"
+            style="height: 2.5rem"
+          />
+        </div>
         <fieldset class="mt-4 space-y-3">
           <legend class="sr-only">{{ t('settings.themeLegend') }}</legend>
           <div class="space-y-2">
