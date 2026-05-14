@@ -8,10 +8,12 @@ import {
   loadStoredLogEnabled,
   loadStoredLogLevel,
   loadStoredTheme,
+  loadStoredThemeStyle,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
   LOCALE_KEY,
   THEME_KEY,
+  THEME_STYLE_KEY,
 } from './settings-utils';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
@@ -44,12 +46,17 @@ async function persistSetting(key: string, value: string): Promise<void> {
 
 export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<ThemePreference>(loadStoredTheme());
+  const themeStyle = ref<ThemeStyle>(loadStoredThemeStyle());
   const locale = ref<LocalePreference>(loadStoredLocale());
   const logEnabled = ref<boolean>(loadStoredLogEnabled());
   const logLevel = ref<LogLevelId>(loadStoredLogLevel());
 
   function setTheme(value: ThemePreference): void {
     theme.value = value;
+  }
+
+  function setThemeStyle(value: ThemeStyle): void {
+    themeStyle.value = value;
   }
 
   function setLocale(value: LocalePreference): void {
@@ -79,9 +86,13 @@ export const useSettingsStore = defineStore('settings', () => {
     const { Store } = await import('@tauri-apps/plugin-store');
     const store = await Store.load(STORE_FILE);
     const storedTheme = await store.get<ThemePreference>(THEME_KEY);
+    const storedThemeStyle = await store.get<string>(THEME_STYLE_KEY);
     const storedLocale = await store.get<LocalePreference>(LOCALE_KEY);
     if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') {
       theme.value = storedTheme;
+    }
+    if (storedThemeStyle === 'default' || storedThemeStyle === 'tuyaopen-ide') {
+      themeStyle.value = storedThemeStyle;
     }
     if (storedLocale === 'zh-CN' || storedLocale === 'en' || storedLocale === 'auto') {
       locale.value = storedLocale;
@@ -101,20 +112,27 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function init(): void {
     // Apply theme to DOM on startup
-    applyThemeToDom(theme.value);
+    applyThemeToDom(theme.value, themeStyle.value);
 
     // Load persisted settings from Tauri store (async, may update theme/locale after init)
     if (isTauriRuntime()) {
       _ready = loadFromTauriStore().then(() => {
-        applyThemeToDom(theme.value);
+        applyThemeToDom(theme.value, themeStyle.value);
       });
     }
 
     // Persist theme and re-apply on change
     watch(theme, v => {
       void persistSetting(THEME_KEY, v);
-      applyThemeToDom(v);
+      applyThemeToDom(v, themeStyle.value);
       rLog.debug(`[Settings] Theme changed to: ${v}`);
+    });
+
+    // Persist themeStyle and re-apply on change
+    watch(themeStyle, v => {
+      void persistSetting(THEME_STYLE_KEY, v);
+      applyThemeToDom(theme.value, v);
+      rLog.debug(`[Settings] Theme style changed to: ${v}`);
     });
 
     // Persist locale on change
@@ -146,17 +164,19 @@ export const useSettingsStore = defineStore('settings', () => {
     // Handle system theme changes
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
       if (theme.value === 'system') {
-        applyThemeToDom(theme.value);
+        applyThemeToDom(theme.value, themeStyle.value);
       }
     });
   }
 
   return {
     theme,
+    themeStyle,
     locale,
     logEnabled,
     logLevel,
     setTheme,
+    setThemeStyle,
     setLocale,
     setLogEnabled,
     setLogLevel,
