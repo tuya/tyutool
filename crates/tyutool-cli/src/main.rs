@@ -20,7 +20,7 @@ enum Commands {
     /// Flash firmware to device
     Write {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t5", "ln882h"]))]
+        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3"]))]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -41,7 +41,7 @@ enum Commands {
     /// Read flash from device
     Read {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t5", "ln882h"]))]
+        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3"]))]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -68,7 +68,7 @@ enum Commands {
         /// Serial port (default: first available)
         #[arg(short = 'p', long = "port")]
         port: Option<String>,
-        /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5/t3); ESP32* uses espflash hard_reset
+        /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5/t3/t1); ESP32* uses espflash hard_reset
         #[arg(short = 'd', long = "device", default_value = "bk7231n")]
         device: String,
     },
@@ -81,7 +81,6 @@ enum Commands {
         #[arg(long)]
         source: Option<String>,
     },
-    /// Serve {
     /// Start a local WebSocket server for browser-mode flashing (dev only).
     Serve {
         /// WebSocket port to listen on
@@ -105,16 +104,13 @@ enum Commands {
 fn default_baud(device: &str) -> u32 {
     match device.to_ascii_lowercase().as_str() {
         "ln882h" => 115200,
+        "esp32" | "esp32c3" | "esp32c6" | "esp32s3" => 460800,
         _ => 921600,
     }
 }
 
-fn default_start(device: &str) -> String {
-    match device.to_ascii_lowercase().as_str() {
-        "bk7231n" => "0x00000000".to_string(),
-        "t5" => "0x00000000".to_string(),
-        _ => "0x00000000".to_string(),
-    }
+fn default_start(_device: &str) -> String {
+    "0x00000000".to_string()
 }
 
 fn choose_port() -> Result<String, Box<dyn std::error::Error>> {
