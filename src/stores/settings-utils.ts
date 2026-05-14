@@ -3,16 +3,25 @@
  * Extracted from the Pinia store for independent testability.
  */
 
-import type { LocalePreference, LogLevelId, ThemePreference } from './settings';
+import type { LocalePreference, LogLevelId, ThemePreference, ThemeStyle } from './settings';
 
 const THEME_KEY = 'tyutool-theme';
+const THEME_STYLE_KEY = 'tyutool-theme-style';
 const LOCALE_KEY = 'tyutool-locale';
 const LEGACY_THEME_KEY = 'tyutools-theme';
 const LEGACY_LOCALE_KEY = 'tyutools-locale';
 const LOG_ENABLED_KEY = 'tyutool-log-enabled';
 const LOG_LEVEL_KEY = 'tyutool-log-level';
 
-export { THEME_KEY, LOCALE_KEY, LEGACY_THEME_KEY, LEGACY_LOCALE_KEY, LOG_ENABLED_KEY, LOG_LEVEL_KEY };
+export {
+  THEME_KEY,
+  THEME_STYLE_KEY,
+  LOCALE_KEY,
+  LEGACY_THEME_KEY,
+  LEGACY_LOCALE_KEY,
+  LOG_ENABLED_KEY,
+  LOG_LEVEL_KEY,
+};
 
 export function loadStoredTheme(): ThemePreference {
   let s = localStorage.getItem(THEME_KEY) as ThemePreference | null;
@@ -28,6 +37,12 @@ export function loadStoredTheme(): ThemePreference {
     return s;
   }
   return 'system';
+}
+
+export function loadStoredThemeStyle(): ThemeStyle {
+  const s = localStorage.getItem(THEME_STYLE_KEY);
+  if (s === 'tuyaopen-ide') return 'tuyaopen-ide';
+  return 'default';
 }
 
 export function loadStoredLocale(): LocalePreference {
@@ -60,7 +75,7 @@ export function loadStoredLogLevel(): LogLevelId {
   return 'info';
 }
 
-export function applyThemeToDom(pref: ThemePreference): void {
+export function applyThemeToDom(pref: ThemePreference, style: ThemeStyle = 'default'): void {
   const root = document.documentElement;
   let mode: 'light' | 'dark' = 'dark';
   if (pref === 'system') {
@@ -69,4 +84,5 @@ export function applyThemeToDom(pref: ThemePreference): void {
     mode = pref;
   }
   root.classList.toggle('dark', mode === 'dark');
+  root.classList.toggle('tuyaopen-ide', style === 'tuyaopen-ide');
 }
