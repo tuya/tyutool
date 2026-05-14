@@ -15,6 +15,7 @@ import {
 } from './settings-utils';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
+export type ThemeStyle = 'default' | 'tuyaopen-ide';
 export type LocaleId = 'zh-CN' | 'en';
 export type LocalePreference = LocaleId | 'auto';
 export type LogLevelId = 'error' | 'warn' | 'info' | 'debug' | 'trace';
