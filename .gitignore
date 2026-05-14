@@ -38,6 +38,9 @@ tmp/
 *.swo
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
-.claude/
+.claude/*
+!.claude/skills/
+__pycache__/
+*.pyc
 docs/superpowers/
 .superpowers/
