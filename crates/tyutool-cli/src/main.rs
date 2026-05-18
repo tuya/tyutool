@@ -5,6 +5,7 @@ use tyutool_core::{
     device_reset_dtr_rts, list_serial_ports, run_job, usb_port_survey, FlashJob, FlashMode, FlashProgress,
 };
 
+mod reporter;
 mod serve;
 mod update;
 
