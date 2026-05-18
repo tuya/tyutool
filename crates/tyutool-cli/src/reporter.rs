@@ -76,6 +76,86 @@ impl CliReporter {
     }
 }
 
+impl Inner {
+    fn is_plain(&self) -> bool {
+        self.pb.is_hidden()
+    }
+
+    fn handle(&mut self, p: FlashProgress) {
+        match p {
+            FlashProgress::Phase { name } => self.on_phase(name),
+            FlashProgress::Percent { value } => self.on_percent(value),
+            FlashProgress::Done { ok, message } => self.on_done(ok, message),
+            _ => {}
+        }
+    }
+
+    fn on_phase(&mut self, name: String) {
+        let label = map_phase(&name);
+        self.finish_current_phase();
+        self.current_phase = Some(label.clone());
+        self.next_milestone = 10;
+
+        if self.is_plain() {
+            eprint!("{:<14}", label);
+        } else {
+            self.pb.set_position(0);
+            self.pb.set_message(label);
+        }
+    }
+
+    fn finish_current_phase(&mut self) {
+        if let Some(label) = self.current_phase.take() {
+            if self.is_plain() {
+                eprintln!("  OK");
+            } else {
+                self.pb.println(format!("  \x1b[32m✓\x1b[0m {}", label));
+                self.pb.set_position(0);
+            }
+        }
+    }
+
+    fn on_done(&mut self, ok: bool, message: Option<String>) {
+        self.finish_current_phase();
+
+        let secs = self.start.elapsed().as_secs_f64();
+
+        if self.is_plain() {
+            if ok {
+                eprintln!("Flash OK  {:.1}s", secs);
+            } else {
+                let msg = message.as_deref().unwrap_or("unknown error");
+                eprintln!("Flash FAILED: {}  {:.1}s", msg, secs);
+            }
+        } else {
+            self.pb.finish_and_clear();
+            if ok {
+                eprintln!("  \x1b[32m✓\x1b[0m Flash complete  {:.1}s", secs);
+            } else {
+                let msg = message.as_deref().unwrap_or("unknown error");
+                eprintln!("  \x1b[31m✗\x1b[0m Flash failed: {}  {:.1}s", msg, secs);
+            }
+        }
+    }
+
+    fn on_percent(&mut self, value: u8) {
+        let label = match &self.current_phase {
+            Some(l) => l.clone(),
+            None => return,
+        };
+
+        if self.is_plain() {
+            if is_long_phase(&label) {
+                for m in pop_milestones(&mut self.next_milestone, value) {
+                    eprint!("  {}%", m);
+                }
+            }
+        } else {
+            self.pb.set_position(value as u64);
+        }
+    }
+}
+
 pub(crate) fn map_phase(name: &str) -> String {
     if let Some(rest) = name.strip_prefix("segment_") {
         if let Some((n, m)) = rest.split_once("_of_") {
