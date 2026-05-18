@@ -6,6 +6,7 @@ use tyutool_core::{
 };
 
 mod reporter;
+use reporter::{CliReporter, JobInfo};
 mod serve;
 mod update;
 
@@ -260,30 +261,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             end,
             file,
         } => {
-            let baud = baud.unwrap_or_else(|| {
-                let b = default_baud(&device);
-                eprintln!("Use default baudrate: [{}]", b);
-                b
-            });
-            let start = start.unwrap_or_else(|| {
-                let s = default_start(&device);
-                eprintln!("Use default start address: [{}]", s);
-                s
-            });
+            let baud = baud.unwrap_or_else(|| default_baud(&device));
+            let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
                 None => choose_port()?,
             };
             let end = match end {
                 Some(e) => e,
-                None => {
-                    let computed = compute_end_from_file(&start, &file)?;
-                    eprintln!("Computed end address from file size: [{}]", computed);
-                    computed
-                }
+                None => compute_end_from_file(&start, &file)?,
             };
-
+            let file_size = std::fs::metadata(&file).ok().map(|m| m.len());
             let chip_id = device.to_ascii_uppercase();
+
+            let reporter = CliReporter::new(&JobInfo {
+                mode: "write",
+                device: &chip_id,
+                port: &port,
+                baud,
+                file: Some(&file),
+                file_size,
+                range_start: &start,
+                range_end: &end,
+            });
+
             let job = FlashJob {
                 mode: FlashMode::Flash,
                 chip_id,
@@ -302,24 +303,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_key: None,
             };
             let cancel = AtomicBool::new(false);
-            let res = run_job(&job, &cancel, |p| match p {
-                FlashProgress::Percent { value } => eprintln!("[progress] {value}%"),
-                FlashProgress::LogLine { line } => eprintln!("[log] {line}"),
-                FlashProgress::LogKey { key, params } => {
-                    if params.is_empty() {
-                        eprintln!("[log] {key}");
-                    } else {
-                        let pairs: Vec<String> =
-                            params.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                        eprintln!("[log] {key}  ({})", pairs.join(", "));
-                    }
-                }
-                FlashProgress::Phase { name } => eprintln!("[phase] {name}"),
-                FlashProgress::Done { ok, message } => {
-                    eprintln!("[done] ok={ok} msg={message:?}");
-                }
-            });
-            res.map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+            run_job(&job, &cancel, reporter.callback())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
         Commands::Read {
             device,
@@ -329,29 +314,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             length,
             file,
         } => {
-            let baud = baud.unwrap_or_else(|| {
-                let b = default_baud(&device);
-                eprintln!("Use default baudrate: [{}]", b);
-                b
-            });
-            let start = start.unwrap_or_else(|| {
-                let s = default_start(&device);
-                eprintln!("Use default start address: [{}]", s);
-                s
-            });
+            let baud = baud.unwrap_or_else(|| default_baud(&device));
+            let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
                 None => choose_port()?,
             };
-
-            // Compute end address from start + length
             let start_val = parse_hex_addr(&start)?;
             let length_val = parse_hex_addr(&length)?;
-            let end_val = start_val + length_val;
-            let end = format!("0x{:08X}", end_val);
-            eprintln!("Read length: [{}], end address: [{}]", length, end);
-
+            let end = format!("0x{:08X}", start_val + length_val);
             let chip_id = device.to_ascii_uppercase();
+
+            let reporter = CliReporter::new(&JobInfo {
+                mode: "read",
+                device: &chip_id,
+                port: &port,
+                baud,
+                file: Some(&file),
+                file_size: None,
+                range_start: &start,
+                range_end: &end,
+            });
+
             let job = FlashJob {
                 mode: FlashMode::Read,
                 chip_id,
@@ -370,24 +354,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_key: None,
             };
             let cancel = AtomicBool::new(false);
-            let res = run_job(&job, &cancel, |p| match p {
-                FlashProgress::Percent { value } => eprintln!("[progress] {value}%"),
-                FlashProgress::LogLine { line } => eprintln!("[log] {line}"),
-                FlashProgress::LogKey { key, params } => {
-                    if params.is_empty() {
-                        eprintln!("[log] {key}");
-                    } else {
-                        let pairs: Vec<String> =
-                            params.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                        eprintln!("[log] {key}  ({})", pairs.join(", "));
-                    }
-                }
-                FlashProgress::Phase { name } => eprintln!("[phase] {name}"),
-                FlashProgress::Done { ok, message } => {
-                    eprintln!("[done] ok={ok} msg={message:?}");
-                }
-            });
-            res.map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+            run_job(&job, &cancel, reporter.callback())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
     }
     Ok(())

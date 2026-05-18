@@ -27,6 +27,12 @@ struct Inner {
 }
 
 impl CliReporter {
+    pub fn callback(&self) -> impl Fn(FlashProgress) + '_ {
+        move |p| {
+            self.inner.lock().unwrap().handle(p);
+        }
+    }
+
     pub fn new(info: &JobInfo<'_>) -> Self {
         let is_rich = console::Term::stderr().is_term();
 
