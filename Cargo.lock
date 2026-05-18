@@ -5816,6 +5816,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "console",
  "env_logger",
  "flate2",
  "futures-util",

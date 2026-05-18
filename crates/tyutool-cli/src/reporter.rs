@@ -1,3 +1,81 @@
+use std::sync::Mutex;
+use std::time::Instant;
+
+use indicatif::{ProgressBar, ProgressStyle};
+use tyutool_core::FlashProgress;
+
+pub struct JobInfo<'a> {
+    pub mode: &'a str,
+    pub device: &'a str,
+    pub port: &'a str,
+    pub baud: u32,
+    pub file: Option<&'a str>,
+    pub file_size: Option<u64>,
+    pub range_start: &'a str,
+    pub range_end: &'a str,
+}
+
+pub struct CliReporter {
+    inner: Mutex<Inner>,
+}
+
+struct Inner {
+    pb: ProgressBar,
+    start: Instant,
+    current_phase: Option<String>,
+    next_milestone: u8,
+}
+
+impl CliReporter {
+    pub fn new(info: &JobInfo<'_>) -> Self {
+        let is_rich = console::Term::stderr().is_term();
+
+        if is_rich {
+            eprintln!(
+                "tyutool {} · {} · {} @ {}",
+                info.mode, info.device, info.port, info.baud
+            );
+        } else {
+            eprintln!(
+                "tyutool {}  {}  {}  {}",
+                info.mode, info.device, info.port, info.baud
+            );
+        }
+        if let Some(file) = info.file {
+            let size_str = info
+                .file_size
+                .map(|s| format!("  {}", format_file_size(s)))
+                .unwrap_or_default();
+            eprintln!("  File   {}{}", file, size_str);
+        }
+        if is_rich {
+            eprintln!("  Range  {} → {}", info.range_start, info.range_end);
+        } else {
+            eprintln!("  Range  {} -> {}", info.range_start, info.range_end);
+        }
+        eprintln!();
+
+        let pb = ProgressBar::new(100);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "  {spinner:.cyan} {msg:<14} {bar:25.cyan/black}  {percent:>3}%",
+            )
+            .unwrap()
+            .progress_chars("━━░"),
+        );
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+
+        Self {
+            inner: Mutex::new(Inner {
+                pb,
+                start: Instant::now(),
+                current_phase: None,
+                next_milestone: 10,
+            }),
+        }
+    }
+}
+
 pub(crate) fn map_phase(name: &str) -> String {
     if let Some(rest) = name.strip_prefix("segment_") {
         if let Some((n, m)) = rest.split_once("_of_") {
