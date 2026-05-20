@@ -11,34 +11,17 @@ use espflash::flasher::Flasher;
 use espflash::target::ProgressCallbacks;
 use serialport::UsbPortInfo;
 
-use std::collections::HashMap;
-
 use crate::error::FlashError;
+use crate::flash_event::{FlashEvent, FlashMilestone, FlashPhase};
 use crate::job::{FlashJob, FlashMode};
-use crate::progress::FlashProgress;
 
 use super::chips::EspChipDef;
 
-// ── i18n helper ──────────────────────────────────────────────────────────────
-
-/// Emit a structured i18n log event.  `key` is a frontend i18n path; `pairs`
-/// are `(param_name, value)` tuples for substitution.
-fn emit_key(progress: &dyn Fn(FlashProgress), key: &'static str, pairs: &[(&str, String)]) {
-    let params: HashMap<String, String> = pairs
-        .iter()
-        .map(|(k, v)| ((*k).to_string(), v.clone()))
-        .collect();
-    progress(FlashProgress::LogKey {
-        key: key.to_string(),
-        params,
-    });
-}
-
 // ── Progress adapter ─────────────────────────────────────────────────────────
 
-/// Bridges espflash `ProgressCallbacks` to our `FlashProgress` enum.
+/// Bridges espflash `ProgressCallbacks` to our `FlashEvent` enum.
 struct ProgressAdapter<'a> {
-    progress: &'a dyn Fn(FlashProgress),
+    progress: &'a dyn Fn(FlashEvent),
     total: usize,
     current: usize,
     /// Percent range mapped to [pct_start, pct_end).
@@ -47,7 +30,7 @@ struct ProgressAdapter<'a> {
 }
 
 impl<'a> ProgressAdapter<'a> {
-    fn new(progress: &'a dyn Fn(FlashProgress), pct_start: u8, pct_end: u8) -> Self {
+    fn new(progress: &'a dyn Fn(FlashEvent), pct_start: u8, pct_end: u8) -> Self {
         Self {
             progress,
             total: 1,
@@ -68,20 +51,20 @@ impl ProgressCallbacks for ProgressAdapter<'_> {
         self.current = current;
         let range = self.pct_end.saturating_sub(self.pct_start) as u64;
         let pct = self.pct_start as u64 + (current as u64 * range / self.total as u64);
-        (self.progress)(FlashProgress::Percent {
+        (self.progress)(FlashEvent::Percent {
             value: pct.min(self.pct_end as u64) as u8,
         });
     }
 
     fn verifying(&mut self) {
-        (self.progress)(FlashProgress::Phase {
-            name: "Verify".to_string(),
+        (self.progress)(FlashEvent::Phase {
+            phase: FlashPhase::Verify,
         });
     }
 
     fn finish(&mut self, skipped: bool) {
         if !skipped {
-            (self.progress)(FlashProgress::Percent {
+            (self.progress)(FlashEvent::Percent {
                 value: self.pct_end,
             });
         }
@@ -154,7 +137,7 @@ fn esp_err(e: espflash::Error) -> FlashError {
 pub(crate) fn run_esp(
     job: &FlashJob,
     cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
     def: &EspChipDef,
 ) -> Result<(), FlashError> {
     log::info!(
@@ -164,22 +147,13 @@ pub(crate) fn run_esp(
         job.mode
     );
 
-    let lk = |key: &'static str, pairs: &[(&str, String)]| {
-        emit_key(progress, key, pairs);
-    };
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        });
-    };
-
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
     }
 
     // ── Open serial port ─────────────────────────────────────────────
-    phase("Connect");
-    lk("flash.log.esp.openingPort", &[("port", job.port.clone())]);
+    progress(FlashEvent::Phase { phase: FlashPhase::Connect });
+    log::info!("Opening port {}", job.port);
 
     let port_info = usb_port_info(&job.port);
 
@@ -197,7 +171,7 @@ pub(crate) fn run_esp(
     );
 
     // ── Connect & detect chip ────────────────────────────────────────
-    lk("flash.log.esp.connectingDevice", &[]);
+    log::info!("Connecting to ESP device");
 
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
@@ -216,29 +190,21 @@ pub(crate) fn run_esp(
     // Log device information
     match flasher.device_info() {
         Ok(info) => {
-            lk(
-                "flash.log.esp.connected",
-                &[
-                    ("chip", info.chip.to_string()),
-                    ("revision", format!("{:?}", info.revision)),
-                ],
-            );
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::Connected {
+                    chip_info: Some(format!("{} (revision {:?})", info.chip, info.revision)),
+                },
+            });
         }
         Err(e) => {
-            lk(
-                "flash.log.esp.readDeviceInfoFailed",
-                &[("error", e.to_string())],
-            );
+            log::warn!("Failed to read ESP device info: {}", e);
         }
     }
 
     // Switch to user-requested baud rate if higher than default
     let target_baud = job.baud_rate.max(115_200);
     if target_baud > 115_200 {
-        lk(
-            "flash.log.esp.switchingBaud",
-            &[("baud", target_baud.to_string())],
-        );
+        log::info!("Switching baud rate to {}", target_baud);
         flasher.change_baud(target_baud).map_err(esp_err)?;
     }
 
@@ -264,15 +230,8 @@ fn run_flash(
     job: &FlashJob,
     flasher: &mut Flasher,
     cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let lk = |key: &'static str, pairs: &[(&str, String)]| emit_key(progress, key, pairs);
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        })
-    };
-
     // Collect segments: either from job.segments or from legacy fields
     let segments = if let Some(ref s) = job.segments {
         s.clone()
@@ -303,9 +262,11 @@ fn run_flash(
         let seg_start_pct = (i as u64 * 100 / total_segments as u64) as u8;
         let seg_end_pct = ((i + 1) as u64 * 100 / total_segments as u64) as u8;
 
-        progress(FlashProgress::LogKey {
-            key: "flash.log.segmentLog".to_string(),
-            params: [("n".to_string(), (i + 1).to_string())].into(),
+        progress(FlashEvent::Phase {
+            phase: FlashPhase::WriteSegment {
+                current: (i + 1) as u32,
+                total: total_segments as u32,
+            },
         });
 
         // Read firmware file
@@ -321,29 +282,27 @@ fn run_flash(
 
         let flash_addr = parse_hex(Some(&seg.start_addr), "start_addr")?;
 
-        lk(
-            "flash.log.esp.flashingBytes",
-            &[
-                ("size", firmware.len().to_string()),
-                ("addr", format!("0x{:08X}", flash_addr)),
-            ],
+        log::info!(
+            "Flashing {} bytes at 0x{:08X}",
+            firmware.len(),
+            flash_addr
         );
 
         if cancel.load(Ordering::Relaxed) {
             return Err(FlashError::Cancelled);
         }
 
-        phase("Write");
+        progress(FlashEvent::Phase { phase: FlashPhase::Write });
         // Map segment progress to its portion of [0, 100]
         let mut cb = ProgressAdapter::new(progress, seg_start_pct, seg_end_pct);
         flasher
             .write_bin_to_flash(flash_addr, &firmware, &mut cb)
             .map_err(esp_err)?;
 
-        lk("flash.log.esp.flashWriteComplete", &[]);
+        log::info!("Flash write complete for segment {}/{}", i + 1, total_segments);
     }
 
-    progress(FlashProgress::Percent { value: 100 });
+    progress(FlashEvent::Percent { value: 100 });
     Ok(())
 }
 
@@ -353,15 +312,8 @@ fn run_erase(
     job: &FlashJob,
     flasher: &mut Flasher,
     cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let lk = |key: &'static str, pairs: &[(&str, String)]| emit_key(progress, key, pairs);
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        })
-    };
-
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
     }
@@ -397,28 +349,26 @@ fn run_erase(
                     "aligned erase region is empty; check erase_start_hex / erase_end_hex".into(),
                 ));
             }
-            lk(
-                "flash.log.esp.erasingRegion",
-                &[
-                    ("start", format!("0x{:08X}", aligned_start)),
-                    ("end", format!("0x{:08X}", aligned_exclusive_end)),
-                    ("size", size.to_string()),
-                ],
+            log::info!(
+                "Erasing region 0x{:08X}..0x{:08X} ({} bytes)",
+                aligned_start,
+                aligned_exclusive_end,
+                size
             );
-            phase("Erase");
-            progress(FlashProgress::Percent { value: 10 });
+            progress(FlashEvent::Phase { phase: FlashPhase::Erase });
+            progress(FlashEvent::Percent { value: 10 });
             flasher.erase_region(aligned_start, size).map_err(esp_err)?;
         }
         _ => {
-            lk("flash.log.esp.eraseAllFlash", &[]);
-            phase("Erase");
-            progress(FlashProgress::Percent { value: 10 });
+            log::info!("Erasing all flash");
+            progress(FlashEvent::Phase { phase: FlashPhase::Erase });
+            progress(FlashEvent::Percent { value: 10 });
             flasher.erase_flash().map_err(esp_err)?;
         }
     }
 
-    lk("flash.log.esp.eraseComplete", &[]);
-    progress(FlashProgress::Percent { value: 100 });
+    progress(FlashEvent::Milestone { milestone: FlashMilestone::EraseComplete });
+    progress(FlashEvent::Percent { value: 100 });
     Ok(())
 }
 
@@ -428,15 +378,8 @@ fn run_read(
     job: &FlashJob,
     flasher: &mut Flasher,
     cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let lk = |key: &'static str, pairs: &[(&str, String)]| emit_key(progress, key, pairs);
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        })
-    };
-
     let read_start = parse_hex(job.read_start_hex.as_deref(), "read_start_hex").unwrap_or(0x0);
     let read_end = parse_hex(job.read_end_hex.as_deref(), "read_end_hex").unwrap_or(0x0040_0000); // default 4 MiB
 
@@ -454,21 +397,19 @@ fn run_read(
 
     let size = read_end - read_start;
 
-    lk(
-        "flash.log.esp.readingBytes",
-        &[
-            ("size", size.to_string()),
-            ("addr", format!("0x{:08X}", read_start)),
-            ("path", file_path.to_string()),
-        ],
+    log::info!(
+        "Reading {} bytes at 0x{:08X} to {}",
+        size,
+        read_start,
+        file_path
     );
 
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
     }
 
-    phase("Read");
-    progress(FlashProgress::Percent { value: 10 });
+    progress(FlashEvent::Phase { phase: FlashPhase::Read });
+    progress(FlashEvent::Percent { value: 10 });
 
     // espflash::Flasher::read_flash() does not expose ProgressCallbacks, so we
     // replicate its block-read loop here using the public connection() API to
@@ -477,8 +418,8 @@ fn run_read(
         flasher, read_start, size, 0x1000, 64, file_path, cancel, progress,
     )?;
 
-    lk("flash.log.esp.readComplete", &[]);
-    progress(FlashProgress::Percent { value: 100 });
+    log::info!("Read complete");
+    progress(FlashEvent::Percent { value: 100 });
     Ok(())
 }
 
@@ -496,7 +437,7 @@ fn read_flash_with_progress(
     max_in_flight: u32,
     file_path: &str,
     cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     use std::fs::OpenOptions;
     use std::io::Write as _;
@@ -549,7 +490,7 @@ fn read_flash_with_progress(
 
         // Emit per-block progress: PCT_START → PCT_END
         let pct = PCT_START + (data.len() as u64 * (PCT_END - PCT_START) / size as u64);
-        progress(FlashProgress::Percent {
+        progress(FlashEvent::Percent {
             value: pct.min(PCT_END) as u8,
         });
 

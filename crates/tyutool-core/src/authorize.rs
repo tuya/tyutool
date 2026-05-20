@@ -18,7 +18,6 @@
 //! # Read-only flow (uuid + authkey absent)
 //! Steps 1–4, then `auth-read` to display current auth state.
 
-use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -27,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::FlashError;
 use crate::job::FlashJob;
-use crate::progress::FlashProgress;
+use crate::flash_event::{FlashEvent, FlashMilestone};
 
 // ── Timing (aligned with auth_handler.py) ────────────────────────────────
 
@@ -117,17 +116,6 @@ pub fn probe_device_authorization(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-fn emit_log_key<F: Fn(FlashProgress)>(progress: &F, key: &str, pairs: &[(&str, String)]) {
-    let mut params = HashMap::new();
-    for (k, v) in pairs {
-        params.insert((*k).to_string(), v.clone());
-    }
-    progress(FlashProgress::LogKey {
-        key: key.to_string(),
-        params,
-    });
-}
 
 /// Strip ANSI escape sequences (`\x1b[...m` style) from a string.
 fn strip_ansi(s: &str) -> String {
@@ -357,11 +345,11 @@ impl AuthSession {
 
 /// Run the TuyaOpen UART authorization flow.
 ///
-/// Emits [`FlashProgress`] events throughout. The caller is responsible for
+/// Emits [`FlashEvent`] events throughout. The caller is responsible for
 /// emitting the final `Done` event (matching the pattern in `run_job`).
 pub fn run_authorize<F>(job: &FlashJob, cancel: &AtomicBool, progress: F) -> Result<(), FlashError>
 where
-    F: Fn(FlashProgress),
+    F: Fn(FlashEvent),
 {
     let uuid = job
         .authorize_uuid
@@ -378,11 +366,7 @@ where
     let write_mode = !uuid.is_empty() && !authkey.is_empty();
 
     // ── Step 1: Open serial ───────────────────────────────────────────
-    emit_log_key(
-        &progress,
-        "flash.log.auth.openingPort",
-        &[("port", job.port.clone())],
-    );
+    log::info!("flash.log.auth.openingPort: port={}", job.port);
     let mut sess = AuthSession::open(&job.port)?;
 
     if cancel.load(Ordering::Relaxed) {
@@ -390,7 +374,7 @@ where
     }
 
     // ── Step 2: Drain stale boot output ──────────────────────────────
-    emit_log_key(&progress, "flash.log.auth.drainBootOutput", &[]);
+    log::info!("flash.log.auth.drainBootOutput");
     sess.drain_boot_output();
 
     if cancel.load(Ordering::Relaxed) {
@@ -398,7 +382,7 @@ where
     }
 
     // ── Step 3: Hardware reset ────────────────────────────────────────
-    emit_log_key(&progress, "flash.log.auth.resetDevice", &[]);
+    log::info!("flash.log.auth.resetDevice");
     sess.hardware_reset()?;
 
     if cancel.load(Ordering::Relaxed) {
@@ -406,11 +390,7 @@ where
     }
 
     // ── Step 4: Wait for boot ─────────────────────────────────────────
-    emit_log_key(
-        &progress,
-        "flash.log.auth.waitBoot",
-        &[("seconds", POST_RESET_WAIT.as_secs().to_string())],
-    );
+    log::info!("flash.log.auth.waitBoot: seconds={}", POST_RESET_WAIT.as_secs());
     let wait_end = Instant::now() + POST_RESET_WAIT;
     while Instant::now() < wait_end {
         if cancel.load(Ordering::Relaxed) {
@@ -427,7 +407,7 @@ where
     // Send a few Enter keypresses to ensure the TuyaOpen CLI shell is fully
     // interactive before we issue auth commands (prevents auth-read returning
     // None when the shell is still printing its boot banner).
-    emit_log_key(&progress, "flash.log.auth.waitShell", &[]);
+    log::info!("flash.log.auth.waitShell");
     sess.wake_shell();
 
     if cancel.load(Ordering::Relaxed) {
@@ -436,7 +416,7 @@ where
 
     if write_mode {
         // ── Step 5: Optional read — skip UART write if device already matches ──
-        emit_log_key(&progress, "flash.log.auth.readDeviceAuth", &[]);
+        log::info!("flash.log.auth.readDeviceAuth");
         let mut existing_auth: Option<(String, String)> = None;
         for _attempt in 1..=5u32 {
             if cancel.load(Ordering::Relaxed) {
@@ -456,7 +436,7 @@ where
                 && u == &uuid
                 && k == &authkey
             {
-                emit_log_key(&progress, "flash.log.auth.alreadySame", &[]);
+                log::info!("flash.log.auth.alreadySame");
                 return Ok(());
             }
         }
@@ -465,7 +445,7 @@ where
         // Send the auth command once. Some firmware versions print
         // "Authorization write succeeds." and stay running; others reboot
         // immediately. Either way, we verify by auth-read after settling.
-        emit_log_key(&progress, "flash.log.auth.writeStart", &[]);
+        log::info!("flash.log.auth.writeStart");
         let _response_lines = sess.auth_write(&uuid, &authkey);
 
         if cancel.load(Ordering::Relaxed) {
@@ -473,11 +453,7 @@ where
         }
 
         // ── Step 6: Wait for device to settle after possible reboot ───
-        emit_log_key(
-            &progress,
-            "flash.log.auth.waitSettle",
-            &[("seconds", POST_RESET_WAIT.as_secs().to_string())],
-        );
+        log::info!("flash.log.auth.waitSettle: seconds={}", POST_RESET_WAIT.as_secs());
         let wait_end = Instant::now() + POST_RESET_WAIT;
         while Instant::now() < wait_end {
             if cancel.load(Ordering::Relaxed) {
@@ -493,10 +469,10 @@ where
         }
 
         // ── Step 7: Verify via auth-read ──────────────────────────────
-        emit_log_key(&progress, "flash.log.auth.verify", &[]);
+        log::info!("flash.log.auth.verify");
         match sess.auth_read() {
             Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
-                emit_log_key(&progress, "flash.log.auth.verifyOk", &[]);
+                log::info!("flash.log.auth.verifyOk");
                 Ok(())
             }
             Some((rb_uuid, rb_key)) if rb_uuid == uuid => {
@@ -516,26 +492,24 @@ where
         }
     } else {
         // ── Step 5 (read-only): auth-read ─────────────────────────────
-        emit_log_key(&progress, "flash.log.auth.readCurrent", &[]);
+        log::info!("flash.log.auth.readCurrent");
         match sess.auth_read() {
             Some((existing_uuid, existing_key)) => {
                 if existing_uuid == PLACEHOLDER_UUID {
-                    emit_log_key(&progress, "flash.log.auth.notAuthorized", &[]);
+                    log::info!("flash.log.auth.notAuthorized");
                 } else {
-                    emit_log_key(&progress, "flash.log.auth.authorized", &[]);
-                    emit_log_key(
-                        &progress,
-                        "flash.log.auth.readResult",
-                        &[
-                            ("uuid", existing_uuid.clone()),
-                            ("authkey", existing_key.clone()),
-                        ],
-                    );
+                    log::info!("flash.log.auth.authorized");
+                    progress(FlashEvent::Milestone {
+                        milestone: FlashMilestone::AuthReadComplete {
+                            uuid: existing_uuid.clone(),
+                            authkey: existing_key.clone(),
+                        },
+                    });
                 }
                 Ok(())
             }
             None => {
-                emit_log_key(&progress, "flash.log.auth.noData", &[]);
+                log::info!("flash.log.auth.noData");
                 Ok(())
             }
         }

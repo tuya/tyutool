@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicBool;
 use crate::error::FlashError;
 use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
-use crate::progress::FlashProgress;
+use crate::flash_event::{FlashEvent, FlashPhase};
 
 use super::beken::chip::Bk7231nSpec;
 use super::beken::ops;
@@ -23,7 +23,7 @@ impl FlashPlugin for Bk7231nPlugin {
         &self,
         job: &FlashJob,
         cancel: &AtomicBool,
-        progress: &dyn Fn(FlashProgress),
+        progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
         let chip = Bk7231nSpec;
         run_beken(job, cancel, progress, &chip, false)
@@ -37,25 +37,19 @@ impl FlashPlugin for Bk7231nPlugin {
 pub(crate) fn run_beken(
     job: &FlashJob,
     cancel: &AtomicBool,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
     chip: &dyn super::beken::chip::ChipSpec,
     is_t5: bool,
 ) -> Result<(), FlashError> {
     log::info!("Plugin starting: port={}, mode={:?}", job.port, job.mode);
 
     // ── Helper closures ─────────────────────────────────────────────
-    let log = |msg: &str| {
-        progress(FlashProgress::LogLine {
-            line: msg.to_string(),
-        });
-    };
+    let log = |msg: &str| log::info!("{}", msg);
     let pct = |v: u8| {
-        progress(FlashProgress::Percent { value: v });
+        progress(FlashEvent::Percent { value: v });
     };
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        });
+    let phase = |p: FlashPhase| {
+        progress(FlashEvent::Phase { phase: p });
     };
 
     // ── Open serial port ────────────────────────────────────────────
@@ -63,12 +57,12 @@ pub(crate) fn run_beken(
     let mut transport = Transport::new(serial_io, &job.port, chip.initial_baud(), cancel, &log);
 
     // ── Phase: Handshake ────────────────────────────────────────────
-    phase("Handshake");
+    phase(FlashPhase::Handshake);
     ops::shake(&mut transport, job.baud_rate, chip, is_t5).map_err(to_flash_err)?;
     pct(3);
 
     // ── Phase: Read flash parameters ────────────────────────────────
-    phase("ReadFlashID");
+    phase(FlashPhase::ReadFlashId);
     let flash_params = ops::get_flash_params(&mut transport, chip).map_err(to_flash_err)?;
     pct(5);
 
@@ -96,13 +90,11 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
     transport: &mut Transport<'_, T>,
     chip: &dyn super::beken::chip::ChipSpec,
     flash_params: &super::beken::flash_table::FlashParams,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let pct = |v: u8| progress(FlashProgress::Percent { value: v });
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        })
+    let pct = |v: u8| progress(FlashEvent::Percent { value: v });
+    let phase = |p: FlashPhase| {
+        progress(FlashEvent::Phase { phase: p })
     };
 
     // Collect segments: either from job.segments or from legacy fields
@@ -134,7 +126,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
     }
 
     // Unprotect
-    phase("Unprotect");
+    phase(FlashPhase::Unprotect);
     ops::unprotect_flash(transport, flash_params, chip).map_err(to_flash_err)?;
     pct(8);
 
@@ -145,9 +137,11 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
         let seg_end_pct = 8 + ((i + 1) as u64 * 87 / total_segments as u64) as u8;
         let seg_range = (seg_end_pct - seg_start_pct) as u64;
 
-        progress(FlashProgress::LogKey {
-            key: "flash.log.segmentLog".to_string(),
-            params: [("n".to_string(), (i + 1).to_string())].into(),
+        progress(FlashEvent::Phase {
+            phase: FlashPhase::WriteSegment {
+                current: (i + 1) as u32,
+                total: total_segments as u32,
+            },
         });
 
         // Read firmware file
@@ -170,7 +164,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
             & !(super::beken::ops::SECTOR_SIZE_PUB - 1);
 
         // Erase
-        phase("Erase");
+        phase(FlashPhase::Erase);
         ops::erase(
             transport,
             flash_params,
@@ -186,7 +180,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
         .map_err(to_flash_err)?;
 
         // Write
-        phase("Write");
+        phase(FlashPhase::Write);
         ops::write(
             transport,
             flash_params,
@@ -206,7 +200,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
 
         // CRC check
         if !chip.has_per_sector_crc() {
-            phase("Verify");
+            phase(FlashPhase::Verify);
             let padding_len = if firmware.len() & 0xff != 0 {
                 0x100 - (firmware.len() & 0xff)
             } else {
@@ -222,11 +216,11 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
     }
 
     // Protect
-    phase("Protect");
+    phase(FlashPhase::Protect);
     ops::protect_flash(transport, flash_params, chip).map_err(to_flash_err)?;
 
     // Reboot
-    phase("Reboot");
+    phase(FlashPhase::Reboot);
     ops::reboot(transport).map_err(to_flash_err)?;
     pct(100);
 
@@ -239,13 +233,11 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
     transport: &mut Transport<'_, T>,
     chip: &dyn super::beken::chip::ChipSpec,
     flash_params: &super::beken::flash_table::FlashParams,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let pct = |v: u8| progress(FlashProgress::Percent { value: v });
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        })
+    let pct = |v: u8| progress(FlashEvent::Percent { value: v });
+    let phase = |p: FlashPhase| {
+        progress(FlashEvent::Phase { phase: p })
     };
 
     let start = ops::parse_hex_addr(job.erase_start_hex.as_deref()).map_err(to_flash_err)?;
@@ -268,12 +260,12 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
     }
 
     // Unprotect
-    phase("Unprotect");
+    phase(FlashPhase::Unprotect);
     ops::unprotect_flash(transport, flash_params, chip).map_err(to_flash_err)?;
     pct(8);
 
     // Erase
-    phase("Erase");
+    phase(FlashPhase::Erase);
     ops::erase(
         transport,
         flash_params,
@@ -289,11 +281,11 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
     pct(95);
 
     // Protect
-    phase("Protect");
+    phase(FlashPhase::Protect);
     ops::protect_flash(transport, flash_params, chip).map_err(to_flash_err)?;
 
     // Reboot
-    phase("Reboot");
+    phase(FlashPhase::Reboot);
     ops::reboot(transport).map_err(to_flash_err)?;
     pct(100);
 
@@ -306,13 +298,11 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
     transport: &mut Transport<'_, T>,
     chip: &dyn super::beken::chip::ChipSpec,
     flash_params: &super::beken::flash_table::FlashParams,
-    progress: &dyn Fn(FlashProgress),
+    progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let pct = |v: u8| progress(FlashProgress::Percent { value: v });
-    let phase = |name: &str| {
-        progress(FlashProgress::Phase {
-            name: name.to_string(),
-        })
+    let pct = |v: u8| progress(FlashEvent::Percent { value: v });
+    let phase = |p: FlashPhase| {
+        progress(FlashEvent::Phase { phase: p })
     };
 
     let start = ops::parse_hex_addr(job.read_start_hex.as_deref()).unwrap_or(0);
@@ -332,18 +322,8 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
         .ok_or_else(|| FlashError::InvalidJob("missing read_file_path".into()))?;
 
     // Read
-    phase("Read");
-    {
-        use std::collections::HashMap;
-        let mut p = HashMap::new();
-        p.insert("start".to_string(), format!("{:#010x}", start));
-        p.insert("end".to_string(), format!("{:#010x}", end));
-        p.insert("kib".to_string(), (length / 1024).to_string());
-        progress(FlashProgress::LogKey {
-            key: "flash.log.beken.readRange".to_string(),
-            params: p,
-        });
-    }
+    phase(FlashPhase::Read);
+    log::info!("Reading {:#010x}..{:#010x} ({} KiB)", start, end, length / 1024);
     let data = ops::read(
         transport,
         flash_params,
@@ -362,30 +342,21 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
     // BK7231N bootrom uses crc32_ver2 (no final XOR).
     // For read, we use the raw data length (already aligned from sector reads).
     if !chip.has_per_sector_crc() {
-        phase("Verify");
+        phase(FlashPhase::Verify);
         let expected_crc = ops::crc32_ver2(&data);
         ops::crc_check(transport, start, length, expected_crc).map_err(to_flash_err)?;
     }
     pct(90);
 
     // Save to file
-    phase("Save");
-    {
-        use std::collections::HashMap;
-        let mut p = HashMap::new();
-        p.insert("size".to_string(), data.len().to_string());
-        p.insert("path".to_string(), file_path.to_string());
-        progress(FlashProgress::LogKey {
-            key: "flash.log.beken.savingBytes".to_string(),
-            params: p,
-        });
-    }
+    phase(FlashPhase::Save);
+    log::info!("Saving {} bytes to {}", data.len(), file_path);
     std::fs::write(file_path, &data)
         .map_err(|e| FlashError::Plugin(format!("cannot write file '{}': {e}", file_path)))?;
     pct(95);
 
     // Reboot
-    phase("Reboot");
+    phase(FlashPhase::Reboot);
     ops::reboot(transport).map_err(to_flash_err)?;
     pct(100);
 

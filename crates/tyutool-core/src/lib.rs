@@ -2,10 +2,10 @@
 
 mod authorize;
 mod error;
+pub mod flash_event;
 mod job;
 mod plugin;
 pub mod plugins;
-mod progress;
 mod registry;
 mod serial;
 mod serial_debug;
@@ -14,9 +14,11 @@ mod usb_port_survey;
 
 pub use authorize::{probe_device_authorization, DeviceAuthorization};
 pub use error::FlashError;
+pub use flash_event::{
+    FlashEvent, FlashMilestone, FlashPhase, FlashResult, JobDetails, JobSummary,
+};
 pub use job::{FlashJob, FlashMode};
 pub use plugin::FlashPlugin;
-pub use progress::FlashProgress;
 pub use registry::{default_registry, run_job, FlashPluginRegistry};
 pub use serial::{
     check_port_available, device_reset_dtr_rts, list_serial_ports, PortCheckResult, SerialPortEntry,
