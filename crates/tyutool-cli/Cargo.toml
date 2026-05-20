@@ -9,7 +9,9 @@ name = "tyutool_cli"
 path = "src/main.rs"
 
 [dependencies]
-env_logger = "0.11"
+fern = "0.7"
+chrono = { version = "0.4", features = ["clock"] }
+dirs = "5"
 log = "0.4"
 clap = { version = "4", features = ["derive"] }
 tyutool-core = { path = "../tyutool-core" }
@@ -28,3 +30,5 @@ tokio-tungstenite = "0.24"
 futures-util = "0.3"
 base64 = "0.22"
 anyhow = "1"
+indicatif = "0.17"
+console = "0.15"
