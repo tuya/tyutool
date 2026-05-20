@@ -141,6 +141,59 @@ All flash UI state lives in the Pinia store at `src/stores/flash.ts` (`useFlashS
 - Pre-commit hooks (lefthook) auto-format staged `.ts`/`.vue` files with Prettier and staged `.rs` files with `cargo fmt`.
 - `@` alias resolves to `src/` in both Vite and vitest configs.
 
+### Logging Contract
+
+tyutool has two independent output channels — keep them strictly separate:
+
+```
+tyutool-core
+    │
+    ├─► FlashEvent callback  →  user-visible (CLI terminal / GUI / WebSocket)
+    └─► log::* macros        →  developer diagnostics (file; optionally stderr)
+```
+
+**User-visible → `FlashEvent` callback**
+
+Use `FlashEvent` whenever the user needs to see the information:
+- Job metadata (firmware size, port, device) → `FlashEvent::JobSummary`
+- Phase transitions → `FlashEvent::Phase(FlashPhase::*)` — use typed variants, not `Other(String)`
+- Progress → `FlashEvent::Percent`
+- Key milestones (connected, erase complete, etc.) → `FlashEvent::Milestone(FlashMilestone::*)`
+- User action required → `FlashEvent::Warning { message }`
+- Final outcome → `FlashEvent::Done`
+
+**Developer-only → `log::*` macros**
+
+Use `log::info!` / `log::debug!` / `log::warn!` / `log::error!` for diagnostic information:
+- Protocol frame contents, byte addresses, sector offsets
+- Retry counts, internal state transitions
+- Any detail a user cannot act on
+
+**Decision rule:** Ask yourself: "Can the user make a decision based on this?" → `FlashEvent`. Otherwise → `log::*`.
+
+**Prohibited:**
+- Using `log::info!` for user-visible content
+- Using bare string variants (`FlashPhase::Other`) for new phases — add a typed variant instead
+- Displaying `AuthReadComplete` credentials as plain log text in GUI (must use secure modal)
+
+**Routing per platform:**
+
+| Platform | FlashEvent | log::* |
+|----------|-----------|--------|
+| CLI | CliReporter → stderr | `{data_dir}/tyutool/tyutool.log` (`--verbose` also → stderr) |
+| GUI (Tauri) | Tauri event → UI | tauri-plugin-log → file (level controlled by developer setting) |
+| Web/IDE | WebSocket JSON → browser UI | CLI-side log file |
+
+### CLI Command Documentation
+
+`docs/cli.md` is the authoritative CLI reference. **Any change to CLI commands must include a `docs/cli.md` update in the same commit or PR:**
+
+- Adding a subcommand or flag
+- Removing or renaming a subcommand or flag
+- Changing a default value or behavior
+
+PRs that modify `crates/tyutool-cli/src/main.rs` (command definitions) without updating `docs/cli.md` must not be merged.
+
 ---
 
 ## Conventions
