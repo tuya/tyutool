@@ -2,15 +2,25 @@ use std::sync::atomic::AtomicBool;
 
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
 use tyutool_core::{
-    device_reset_dtr_rts, list_serial_ports, run_job, usb_port_survey, FlashJob, FlashMode, FlashProgress,
+    device_reset_dtr_rts, list_serial_ports, run_job, usb_port_survey, FlashJob, FlashMode,
 };
 
+mod reporter;
+use reporter::CliReporter;
 mod serve;
 mod update;
 
 #[derive(Parser)]
 #[command(name = "tyutool", version, about = "Tuya Uart Tool.")]
 struct Cli {
+    /// Also write developer logs to stderr (always writes to log file)
+    #[arg(long, global = true)]
+    verbose: bool,
+
+    /// Force plain text output (ASCII, no spinner/progress bar)
+    #[arg(long, global = true)]
+    plain: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -130,9 +140,14 @@ fn choose_port() -> Result<String, Box<dyn std::error::Error>> {
             eprintln!("  [{}] {}", i, p.path);
         }
     }
-    // Default to first port
-    eprintln!("Using first port: {}", ports[0].path);
-    Ok(ports[0].path.clone())
+    eprint!("Select port [0-{}]: ", ports.len() - 1);
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let idx: usize = input.trim().parse().map_err(|_| "Invalid selection")?;
+    if idx >= ports.len() {
+        return Err(format!("Selection out of range: {}", idx).into());
+    }
+    Ok(ports[idx].path.clone())
 }
 
 fn compute_end_from_file(
@@ -156,13 +171,72 @@ fn parse_hex_addr(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
     u64::from_str_radix(raw, 16).map_err(|e| format!("invalid hex address '{}': {}", s, e).into())
 }
 
+fn init_logging(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let log_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("tyutool");
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join("tyutool.log");
+
+    let fmt = |out: fern::FormatCallback<'_>,
+               message: &std::fmt::Arguments<'_>,
+               record: &log::Record<'_>| {
+        out.finish(format_args!(
+            "[{} {} {}] {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            record.level(),
+            record.target(),
+            message
+        ))
+    };
+
+    let mut dispatch = fern::Dispatch::new()
+        .format(fmt)
+        .level(log::LevelFilter::Info)
+        .chain(fern::log_file(&log_path)?);
+
+    if verbose {
+        dispatch = dispatch.chain(
+            fern::Dispatch::new()
+                .format(|out, message, record| {
+                    out.finish(format_args!(
+                        "[{} {}] {}",
+                        record.level(),
+                        record.target(),
+                        message
+                    ))
+                })
+                .chain(std::io::stderr()),
+        );
+        eprintln!("[log] Writing to: {}", log_path.display());
+    }
+
+    dispatch.apply()?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let force_plain = cli.plain;
 
+    // Init file logging (+ stderr if --verbose)
     let survey_json_only = matches!(cli.command, Commands::UsbPortSurvey);
-    let default_log = if survey_json_only { "off" } else { "info" };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_log)).init();
+    if !survey_json_only {
+        init_logging(cli.verbose)?;
+    }
 
+    // User-facing startup banner (not a log::info! call)
+    if !survey_json_only {
+        eprintln!(
+            "tyutool v{}  {}/{}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+        eprintln!();
+    }
+
+    // Developer diagnostics → log file (not shown to user)
     if !survey_json_only {
         log::info!("========================================");
         log::info!("[App] tyutool-cli v{} starting", env!("CARGO_PKG_VERSION"));
@@ -242,14 +316,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_key: authkey,
             };
             let cancel = AtomicBool::new(false);
-            let res = run_job(&job, &cancel, |p| match p {
-                FlashProgress::LogLine { line } => eprintln!("[log] {line}"),
-                FlashProgress::Done { ok, message } => {
-                    eprintln!("[done] ok={ok} msg={message:?}");
-                }
-                _ => {}
-            });
-            res.map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+            let reporter = CliReporter::new(force_plain);
+            run_job(&job, &cancel, reporter.callback())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
         Commands::Write {
             device,
@@ -259,30 +328,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             end,
             file,
         } => {
-            let baud = baud.unwrap_or_else(|| {
-                let b = default_baud(&device);
-                eprintln!("Use default baudrate: [{}]", b);
-                b
-            });
-            let start = start.unwrap_or_else(|| {
-                let s = default_start(&device);
-                eprintln!("Use default start address: [{}]", s);
-                s
-            });
+            let baud = baud.unwrap_or_else(|| default_baud(&device));
+            let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
                 None => choose_port()?,
             };
             let end = match end {
                 Some(e) => e,
-                None => {
-                    let computed = compute_end_from_file(&start, &file)?;
-                    eprintln!("Computed end address from file size: [{}]", computed);
-                    computed
-                }
+                None => compute_end_from_file(&start, &file)?,
             };
-
             let chip_id = device.to_ascii_uppercase();
+
+            let reporter = CliReporter::new(force_plain);
+
             let job = FlashJob {
                 mode: FlashMode::Flash,
                 chip_id,
@@ -301,24 +360,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_key: None,
             };
             let cancel = AtomicBool::new(false);
-            let res = run_job(&job, &cancel, |p| match p {
-                FlashProgress::Percent { value } => eprintln!("[progress] {value}%"),
-                FlashProgress::LogLine { line } => eprintln!("[log] {line}"),
-                FlashProgress::LogKey { key, params } => {
-                    if params.is_empty() {
-                        eprintln!("[log] {key}");
-                    } else {
-                        let pairs: Vec<String> =
-                            params.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                        eprintln!("[log] {key}  ({})", pairs.join(", "));
-                    }
-                }
-                FlashProgress::Phase { name } => eprintln!("[phase] {name}"),
-                FlashProgress::Done { ok, message } => {
-                    eprintln!("[done] ok={ok} msg={message:?}");
-                }
-            });
-            res.map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+            run_job(&job, &cancel, reporter.callback())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
         Commands::Read {
             device,
@@ -328,29 +371,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             length,
             file,
         } => {
-            let baud = baud.unwrap_or_else(|| {
-                let b = default_baud(&device);
-                eprintln!("Use default baudrate: [{}]", b);
-                b
-            });
-            let start = start.unwrap_or_else(|| {
-                let s = default_start(&device);
-                eprintln!("Use default start address: [{}]", s);
-                s
-            });
+            let baud = baud.unwrap_or_else(|| default_baud(&device));
+            let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
                 None => choose_port()?,
             };
-
-            // Compute end address from start + length
             let start_val = parse_hex_addr(&start)?;
             let length_val = parse_hex_addr(&length)?;
-            let end_val = start_val + length_val;
-            let end = format!("0x{:08X}", end_val);
-            eprintln!("Read length: [{}], end address: [{}]", length, end);
-
+            let end = format!("0x{:08X}", start_val + length_val);
             let chip_id = device.to_ascii_uppercase();
+
+            let reporter = CliReporter::new(force_plain);
+
             let job = FlashJob {
                 mode: FlashMode::Read,
                 chip_id,
@@ -369,24 +402,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_key: None,
             };
             let cancel = AtomicBool::new(false);
-            let res = run_job(&job, &cancel, |p| match p {
-                FlashProgress::Percent { value } => eprintln!("[progress] {value}%"),
-                FlashProgress::LogLine { line } => eprintln!("[log] {line}"),
-                FlashProgress::LogKey { key, params } => {
-                    if params.is_empty() {
-                        eprintln!("[log] {key}");
-                    } else {
-                        let pairs: Vec<String> =
-                            params.iter().map(|(k, v)| format!("{k}={v}")).collect();
-                        eprintln!("[log] {key}  ({})", pairs.join(", "));
-                    }
-                }
-                FlashProgress::Phase { name } => eprintln!("[phase] {name}"),
-                FlashProgress::Done { ok, message } => {
-                    eprintln!("[done] ok={ok} msg={message:?}");
-                }
-            });
-            res.map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+            run_job(&job, &cancel, reporter.callback())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
     }
     Ok(())
