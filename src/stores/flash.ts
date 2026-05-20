@@ -260,8 +260,12 @@ export const useFlashStore = defineStore('flash', () => {
     if (isTauriRuntime()) {
       try {
         const { open } = await import('@tauri-apps/plugin-dialog');
+        const { dirname, homeDir } = await import('@tauri-apps/api/path');
+        const existingPath = flashSegments.value[index].firmwarePath.trim();
+        const defaultPath = existingPath ? await dirname(existingPath) : await homeDir();
         const selected = await open({
           multiple: false,
+          defaultPath,
           filters: [
             {
               name: 'Firmware',
