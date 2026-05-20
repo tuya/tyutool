@@ -237,17 +237,18 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     pm.release(port.value, 'serial-debug');
   }
 
-  async function deviceReset(chipId: string): Promise<void> {
-    if (!port.value.trim()) return;
+  async function deviceReset(chipId: string, resetPort?: string): Promise<void> {
+    const effectivePort = resetPort?.trim() || port.value;
+    if (!effectivePort) return;
     try {
       if (isTauriRuntime()) {
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('device_reset_cmd', { args: { port: port.value, chipId } });
+        await invoke('device_reset_cmd', { args: { port: effectivePort, chipId } });
       } else {
-        await wsTransport.deviceReset(port.value, chipId);
+        await wsTransport.deviceReset(effectivePort, chipId);
       }
-      appendSysLine(t('serialDebug.log.deviceResetOk', { port: port.value }));
-      rLog.info(`[SerialDebug] Device reset (DTR/RTS) on ${port.value}`);
+      appendSysLine(t('serialDebug.log.deviceResetOk', { port: effectivePort }));
+      rLog.info(`[SerialDebug] Device reset (DTR/RTS) on ${effectivePort}`);
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       if (raw.includes('unknown variant') && raw.includes('device_reset')) {

@@ -163,7 +163,7 @@ onDeactivated(() => {
         :disabled="!s.port.trim()"
         :aria-label="t('serialDebug.conn.deviceReset')"
         :title="t('serialDebug.conn.deviceResetHint')"
-        @click="s.deviceReset(rustPluginIdForChip(flashStore.selectedChipId))"
+        @click="s.deviceReset(rustPluginIdForChip(flashStore.selectedChipId), flashStore.selectedSerialPort)"
       >
         <FontAwesomeIcon :icon="['fas', 'power-off']" class="size-3.5 shrink-0" aria-hidden="true" />
         {{ t('serialDebug.conn.deviceReset') }}

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { wsTransport } from '@/features/firmware-flash/ws-transport';
 import { __setSerialDebugTransportForTest, type SerialDebugTransport } from '@/features/serial-debug/transport';
 import type { DebugChunk } from '@/features/serial-debug/types';
 import { useSerialDebugStore } from './serial-debug';
@@ -279,5 +280,45 @@ describe('useSerialDebugStore watch chip management', () => {
     }
     expect(s.watchChips[0].color).toBe(CHIP_COLORS[0]);
     expect(s.watchChips[CHIP_COLORS.length].color).toBe(CHIP_COLORS[0]);
+  });
+});
+
+describe('useSerialDebugStore.deviceReset', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses provided resetPort when given', async () => {
+    const spy = vi.spyOn(wsTransport, 'deviceReset').mockResolvedValue(undefined);
+    const s = useSerialDebugStore();
+    s.port = '/dev/ttyACM1';
+
+    await s.deviceReset('T5', '/dev/ttyACM0');
+
+    expect(spy).toHaveBeenCalledWith('/dev/ttyACM0', 'T5');
+  });
+
+  it('falls back to port.value when resetPort is not provided', async () => {
+    const spy = vi.spyOn(wsTransport, 'deviceReset').mockResolvedValue(undefined);
+    const s = useSerialDebugStore();
+    s.port = '/dev/ttyACM1';
+
+    await s.deviceReset('T5');
+
+    expect(spy).toHaveBeenCalledWith('/dev/ttyACM1', 'T5');
+  });
+
+  it('falls back to port.value when resetPort is empty string', async () => {
+    const spy = vi.spyOn(wsTransport, 'deviceReset').mockResolvedValue(undefined);
+    const s = useSerialDebugStore();
+    s.port = '/dev/ttyACM1';
+
+    await s.deviceReset('T5', '');
+
+    expect(spy).toHaveBeenCalledWith('/dev/ttyACM1', 'T5');
   });
 });
