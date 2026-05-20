@@ -173,11 +173,11 @@ export class WsTransport {
     };
     let found: { uuid: string; authkey: string } | null = null;
     await this.runJob(job, [], ev => {
-      if (ev.payload.kind === 'log_key' && ev.payload.key === 'flash.log.auth.readResult') {
-        const uuid = ev.payload.params?.uuid?.trim() ?? '';
-        const authkey = ev.payload.params?.authkey?.trim() ?? '';
+      if (ev.payload.kind === 'milestone' && typeof ev.payload.milestone === 'object'
+          && 'auth_read_complete' in ev.payload.milestone) {
+        const { uuid, authkey } = ev.payload.milestone.auth_read_complete;
         if (uuid && authkey) {
-          found = { uuid, authkey };
+          found = { uuid: uuid.trim(), authkey: authkey.trim() };
         }
       }
     });
@@ -266,10 +266,14 @@ export class WsTransport {
 
           if (kind === 'done') {
             ws.removeEventListener('message', handler);
-            if (p['ok']) {
+            const result = p['result'] as Record<string, unknown>;
+            if ('ok' in result) {
               resolve();
+            } else if ('cancelled' in result) {
+              reject(new Error('Cancelled'));
             } else {
-              reject(new Error((p['message'] as string) ?? 'operation failed'));
+              const msg = (result['err'] as Record<string, unknown>)?.['message'] as string | undefined;
+              reject(new Error(msg ?? 'operation failed'));
             }
           }
         }

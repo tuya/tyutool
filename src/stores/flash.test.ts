@@ -19,24 +19,19 @@ vi.mock('@/features/firmware-flash/ws-transport', () => {
       _job: unknown,
       _file: unknown,
       onProgress: (ev: {
-        payload: { kind: string; value?: number; name?: string; line?: string; ok?: boolean; message?: string };
+        payload: { kind: string; value?: number; phase?: string; result?: { ok: { elapsed_secs: number } } };
       }) => void
     ) => {
-      // Fire-and-forget: start setInterval and resolve immediately so startOperation returns
-      // right away.
+      // Fire-and-forget: start setInterval and simulate WS progress
       let step = 0;
       const timer = setInterval(() => {
         step += 1;
         const next = Math.min(100, step * 4);
-        // Emit a log_line on step 1 to simulate phase logging
-        if (step === 1) {
-          onProgress({ payload: { kind: 'log_line', line: `[mock] step ${step}` } });
-        }
         onProgress({ payload: { kind: 'percent', value: next } });
         if (next >= 100) {
           clearInterval(timer);
           cancelFn = null;
-          onProgress({ payload: { kind: 'done', ok: true } });
+          onProgress({ payload: { kind: 'done', result: { ok: { elapsed_secs: 1.0 } } } });
         }
       }, 220);
       cancelFn = () => {

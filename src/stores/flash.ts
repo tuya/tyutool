@@ -362,20 +362,24 @@ export const useFlashStore = defineStore('flash', () => {
   }
 
   function handleFlashProgressPayload(p: FlashProgressPayload): void {
+    if (p.kind === 'job_summary') {
+      return;
+    }
+
     if (p.kind === 'percent') {
       flashProgress.value = Math.min(100, Math.max(0, p.value));
       return;
     }
-    if (p.kind === 'log_line') {
-      appendLog(p.line);
+
+    if (p.kind === 'phase') {
       return;
     }
-    if (p.kind === 'log_key') {
-      if (p.key === 'flash.log.auth.readResult') {
-        const uuid = p.params?.uuid ?? '';
-        const authkey = p.params?.authkey ?? '';
+
+    if (p.kind === 'milestone') {
+      const m = p.milestone;
+      if (typeof m === 'object' && 'auth_read_complete' in m) {
+        const { uuid, authkey } = m.auth_read_complete;
         const copyText = `UUID:${uuid}\nAuthKey:${authkey}`;
-        // Show auth values in a modal after successful read; do not echo secrets into the log.
         void showConfirmDialog({
           title: t('flash.confirm.authReadTitle'),
           message: t('flash.confirm.authReadBody', { uuid, authkey }),
@@ -395,21 +399,24 @@ export const useFlashStore = defineStore('flash', () => {
         appendLog(t('flash.log.authReadShown'));
         return;
       }
-      appendLog(t(p.key, p.params ?? {}));
+      const milestoneKey = typeof m === 'string' ? m : Object.keys(m)[0];
+      const i18nKey = `flash.log.milestone.${milestoneKey}`;
+      appendLog(i18n.global.te(i18nKey) ? t(i18nKey) : `[${milestoneKey}]`);
       return;
     }
-    if (p.kind === 'phase') {
-      const phaseKey = `flash.log.phase.${p.name}`;
-      const msg = i18n.global.te(phaseKey) ? t(phaseKey) : `[${p.name}]`;
-      appendLog(msg);
+
+    if (p.kind === 'warning') {
+      appendLog(`⚠ ${p.message}`);
       return;
     }
+
     if (p.kind === 'done') {
       const op = runningOp.value;
-      const doneMsg = p.message?.trim() ?? '';
       runningOp.value = null;
       authOpIsRead.value = false;
-      if (p.ok === true) {
+
+      const result = p.result;
+      if ('ok' in result) {
         flashPhase.value = 'success';
         flashProgress.value = 100;
         if (op === 'flash') {
@@ -425,21 +432,23 @@ export const useFlashStore = defineStore('flash', () => {
           flashMessage.value = t('flash.msg.authDone');
           appendLog(t('flash.log.authOkLog'));
         }
-        rLog.info(`[Flash] Operation '${op}' completed successfully`);
+        rLog.info(`[Flash] Operation '${op}' completed in ${result.ok.elapsed_secs.toFixed(1)}s`);
+      } else if ('cancelled' in result) {
+        flashPhase.value = 'error';
+        flashMessage.value = t('flash.msg.cancelled', { fallback: 'Cancelled' });
+        rLog.info(`[Flash] Operation '${op}' cancelled`);
       } else {
         flashPhase.value = 'error';
-        const raw = doneMsg;
-        const displayMsg = raw ? mapBackendUserMessage(raw) : t('flash.err.withMsg', { msg: 'unknown' });
+        const displayMsg = result.err.message
+          ? mapBackendUserMessage(result.err.message)
+          : t('flash.err.withMsg', { msg: 'unknown' });
         flashMessage.value = displayMsg;
         appendLog(t('flash.err.withMsg', { msg: displayMsg }));
         rLog.error(`[Flash] Operation '${op}' failed: ${flashMessage.value}`);
       }
       logOperationDuration();
-      // Auto-disconnect if this operation was auto-connected
       if (autoConnected.value) {
         autoConnected.value = false;
-        connected.value = false;
-        appendLog(t('flash.log.autoDisconnected'));
       }
       usePortManagerStore().release(selectedSerialPort.value, 'flash');
     }
