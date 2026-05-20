@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicBool;
 use crate::error::FlashError;
 use crate::job::FlashJob;
 use crate::plugin::FlashPlugin;
-use crate::progress::FlashProgress;
+use crate::flash_event::FlashEvent;
 
 use super::beken::chip::T3Spec;
 
@@ -28,7 +28,7 @@ impl FlashPlugin for T3Plugin {
         &self,
         job: &FlashJob,
         cancel: &AtomicBool,
-        progress: &dyn Fn(FlashProgress),
+        progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
         log::info!("T3 plugin delegating to run_beken (is_t5=true)");
         let chip = T3Spec;
