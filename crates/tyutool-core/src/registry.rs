@@ -4,11 +4,11 @@ use std::sync::{Arc, OnceLock};
 use crate::error::FlashError;
 use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
+use crate::flash_event::{FlashEvent, FlashResult, JobSummary};
 use crate::plugins::{
     Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32s3Plugin, Ln882hPlugin,
     T1Plugin, T2Plugin, T3Plugin, T5Plugin,
 };
-use crate::progress::FlashProgress;
 
 /// Global registry of chip plugins (Python `FlashInterface.SocList` equivalent).
 pub struct FlashPluginRegistry {
@@ -70,15 +70,18 @@ pub fn default_registry() -> &'static FlashPluginRegistry {
 }
 
 /// Run a job against the default registry (CLI and Tauri use this).
-/// Emits [`FlashProgress::Done`] exactly once at the end (success or failure).
+/// Emits [`FlashEvent::JobSummary`] at the start and [`FlashEvent::Done`] at the end.
 pub fn run_job<F>(
     job: &FlashJob,
     cancel: &std::sync::atomic::AtomicBool,
     progress: F,
 ) -> Result<(), FlashError>
 where
-    F: Fn(FlashProgress),
+    F: Fn(FlashEvent),
 {
+    let start = std::time::Instant::now();
+    progress(FlashEvent::JobSummary(JobSummary::from_job(job)));
+
     log::info!(
         "run_job: chip={}, port={}, mode={:?}",
         job.normalized_chip_id(),
@@ -86,51 +89,40 @@ where
         job.mode
     );
 
-    // TuyaOpen device authorization is UART text-command based, entirely independent of any
-    // chip's BootROM or ESP stub flash protocol — handle before plugin dispatch.
-    if matches!(job.mode, FlashMode::Authorize) {
-        log::info!(
-            "run_job: Authorize mode — running UART auth protocol on port={}",
-            job.port
-        );
-        match crate::authorize::run_authorize(job, cancel, &progress) {
-            Ok(()) => {
-                progress(FlashProgress::Done {
-                    ok: true,
-                    message: None,
-                });
-                log::info!("run_job: authorize completed successfully");
-                return Ok(());
-            }
-            Err(e) => {
-                log::error!("run_job: authorize failed: {}", e);
-                progress(FlashProgress::Done {
-                    ok: false,
-                    message: Some(e.to_string()),
-                });
-                return Err(e);
-            }
-        }
-    }
+    let result = if matches!(job.mode, FlashMode::Authorize) {
+        log::info!("run_job: Authorize mode on port={}", job.port);
+        crate::authorize::run_authorize(job, cancel, &progress)
+    } else {
+        let reg = default_registry();
+        let chip = job.normalized_chip_id();
+        let plugin = reg.get(&chip)?;
+        plugin.run(job, cancel, &progress)
+    };
 
-    let reg = default_registry();
-    let chip = job.normalized_chip_id();
-    let plugin = reg.get(&chip)?;
-    match plugin.run(job, cancel, &progress) {
+    let elapsed_secs = start.elapsed().as_secs_f64();
+    match result {
         Ok(()) => {
-            progress(FlashProgress::Done {
-                ok: true,
-                message: None,
+            progress(FlashEvent::Done {
+                result: FlashResult::Ok { elapsed_secs },
             });
-            log::info!("run_job: completed successfully");
+            log::info!("run_job: completed in {:.1}s", elapsed_secs);
             Ok(())
         }
-        Err(e) => {
-            log::error!("run_job: failed: {}", e);
-            progress(FlashProgress::Done {
-                ok: false,
-                message: Some(e.to_string()),
+        Err(crate::error::FlashError::Cancelled) => {
+            progress(FlashEvent::Done {
+                result: FlashResult::Cancelled { elapsed_secs },
             });
+            log::info!("run_job: cancelled after {:.1}s", elapsed_secs);
+            Err(crate::error::FlashError::Cancelled)
+        }
+        Err(e) => {
+            progress(FlashEvent::Done {
+                result: FlashResult::Err {
+                    message: e.to_string(),
+                    elapsed_secs,
+                },
+            });
+            log::error!("run_job: failed after {:.1}s: {}", elapsed_secs, e);
             Err(e)
         }
     }
@@ -214,8 +206,8 @@ mod tests {
     fn authorize_mode_dispatches_before_chip_lookup() {
         // With mode=Authorize and a bad port, run_job should attempt the auth
         // flow (not the chip registry), fail with a serial-open error, and emit
-        // Done{ok:false} — never touching the chip registry.
-        use crate::progress::FlashProgress;
+        // Done{result: Err{..}} — never touching the chip registry.
+        use crate::flash_event::{FlashEvent, FlashResult};
 
         let job = FlashJob {
             mode: FlashMode::Authorize,
@@ -237,9 +229,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let saw_done = AtomicBool::new(false);
         let res = run_job(&job, &cancel, |p| {
-            if let FlashProgress::Done { ok, .. } = p {
-                // Expected: false (port open fails)
-                assert!(!ok);
+            if let FlashEvent::Done { result: FlashResult::Err { .. } } = p {
                 saw_done.store(true, Ordering::SeqCst);
             }
         });

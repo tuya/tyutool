@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicBool;
 use crate::error::FlashError;
 use crate::job::FlashJob;
 use crate::plugin::FlashPlugin;
-use crate::progress::FlashProgress;
+use crate::flash_event::FlashEvent;
 
 use super::beken::chip::T2Spec;
 
@@ -26,7 +26,7 @@ impl FlashPlugin for T2Plugin {
         &self,
         job: &FlashJob,
         cancel: &AtomicBool,
-        progress: &dyn Fn(FlashProgress),
+        progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
         let chip = T2Spec;
         super::bk7231n::run_beken(job, cancel, progress, &chip, false)
