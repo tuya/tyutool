@@ -1,7 +1,6 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { i18n } from '@/i18n';
 import {
-  AUTH_BAUD_RATE_DEFAULT,
   BAUD_RATE_OPTIONS,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
@@ -80,7 +79,7 @@ export const useFlashStore = defineStore('flash', () => {
   const selectedSerialPort = ref('');
   const selectedBaudRate = ref<number>(chipManifest(DEFAULT_CHIP_ID).defaultBaudRate);
   /** Baud rate for TuyaOpen UART authorization — independent of flash/erase/read baud. */
-  const selectedAuthBaudRate = ref<number>(AUTH_BAUD_RATE_DEFAULT);
+  const selectedAuthBaudRate = ref<number>(chipManifest(DEFAULT_CHIP_ID).defaultAuthBaudRate);
   const selectedChipId = ref<string>(DEFAULT_CHIP_ID);
 
   const flashSegments = ref<FlashSegment[]>([
@@ -202,6 +201,7 @@ export const useFlashStore = defineStore('flash', () => {
     const manifest = chipManifest(newChipId);
     readEndAddr.value = manifest.flashSize;
     selectedBaudRate.value = manifest.defaultBaudRate;
+    selectedAuthBaudRate.value = manifest.defaultAuthBaudRate;
     const chipLabel = t(`flash.chips.${newChipId}`);
     appendLog(t('flash.log.chipChanged', { chip: chipLabel }));
     rLog.info(`[Flash] Chip changed to ${newChipId} (${chipLabel}), baud=${manifest.defaultBaudRate}`);

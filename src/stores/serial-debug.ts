@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   CHIP_COLORS,
   COMMON_BAUD_RATES,
-  DEFAULT_BAUD_RATE,
   DEFAULT_DATA_BITS,
   DEFAULT_HEX_BYTES_PER_ROW,
   DEFAULT_PARITY,
@@ -11,6 +10,8 @@ import {
   MAX_LOG_LINES,
   MAX_SEND_HISTORY,
 } from '@/features/serial-debug/constants';
+import { chipManifest } from '@/features/firmware-flash/chip-manifests';
+import { useFlashStore } from '@/stores/flash';
 import { parseHexInput } from '@/features/serial-debug/hex-format';
 import { serialDebugTransport } from '@/features/serial-debug/transport';
 import { wsTransport } from '@/features/firmware-flash/ws-transport';
@@ -35,7 +36,17 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
   const open = ref(false);
   const opening = ref(false);
   const port = ref('');
-  const baudRate = ref<number>(DEFAULT_BAUD_RATE);
+  const flashStore = useFlashStore();
+  // null = follow flash chip default; number = user's explicit choice (persisted).
+  const baudRateUserOverride = ref<number | null>(null);
+  const _baudRateInternal = ref<number>(chipManifest(flashStore.selectedChipId).defaultLogBaudRate);
+  const baudRate = computed({
+    get: () => _baudRateInternal.value,
+    set: (value: number) => {
+      baudRateUserOverride.value = value;
+      _baudRateInternal.value = value;
+    },
+  });
   const customBaudRate = ref<number | null>(null);
   const dataBits = ref(DEFAULT_DATA_BITS);
   const parity = ref(DEFAULT_PARITY);
@@ -93,6 +104,16 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
       if (current === null && pendingResume.value && !open.value && !opening.value) {
         pendingResume.value = false;
         void openPort();
+      }
+    },
+  );
+
+  // Follow flash chip default baud rate when no user override is set
+  watch(
+    () => flashStore.selectedChipId,
+    (chipId) => {
+      if (baudRateUserOverride.value === null) {
+        _baudRateInternal.value = chipManifest(chipId).defaultLogBaudRate;
       }
     },
   );
@@ -361,7 +382,13 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
     const data = await loadSerialDebugWorkspace();
     if (!data) return;
     port.value = data.port;
-    baudRate.value = data.baudRate;
+    if (data.baudRate === null) {
+      baudRateUserOverride.value = null;
+      _baudRateInternal.value = chipManifest(flashStore.selectedChipId).defaultLogBaudRate;
+    } else {
+      baudRateUserOverride.value = data.baudRate;
+      _baudRateInternal.value = data.baudRate;
+    }
     customBaudRate.value = data.customBaudRate;
     dataBits.value = data.dataBits;
     parity.value = data.parity;
@@ -389,7 +416,7 @@ export const useSerialDebugStore = defineStore('serial-debug', () => {
         void saveSerialDebugWorkspace({
           v: SD_WORKSPACE_VERSION,
           port: port.value,
-          baudRate: baudRate.value,
+          baudRate: baudRateUserOverride.value,
           customBaudRate: customBaudRate.value,
           dataBits: dataBits.value,
           parity: parity.value,

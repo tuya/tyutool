@@ -5,7 +5,6 @@
 
 import {
   BAUD_RATE_OPTIONS,
-  AUTH_BAUD_RATE_DEFAULT,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
 } from '@/features/firmware-flash/constants';
@@ -65,9 +64,12 @@ function normalizeBaud(chipId: string, baud: unknown): number {
   }
 }
 
-function normalizeAuthBaud(baud: unknown): number {
-  const n = typeof baud === 'number' && Number.isFinite(baud) ? baud : AUTH_BAUD_RATE_DEFAULT;
-  return (BAUD_RATE_OPTIONS as readonly number[]).includes(n) ? n : AUTH_BAUD_RATE_DEFAULT;
+function normalizeAuthBaud(chipId: string, baud: unknown): number {
+  const fallback = (() => {
+    try { return chipManifest(chipId).defaultAuthBaudRate; } catch { return chipManifest(DEFAULT_CHIP_ID).defaultAuthBaudRate; }
+  })();
+  const n = typeof baud === 'number' && Number.isFinite(baud) ? baud : fallback;
+  return (BAUD_RATE_OPTIONS as readonly number[]).includes(n) ? n : fallback;
 }
 
 function clampSegmentIndex(index: unknown, len: number): number {
@@ -120,7 +122,7 @@ export function parseFlashWorkspaceJson(raw: string | null): FlashWorkspaceSeria
       flashSegments.push({ id, firmwarePath, startAddr, endAddr });
     }
     const baud = normalizeBaud(chipId, rec.selectedBaudRate);
-    const authBaud = normalizeAuthBaud(rec.authBaudRate);
+    const authBaud = normalizeAuthBaud(chipId, rec.authBaudRate);
     const activeSegmentIndex = clampSegmentIndex(rec.activeSegmentIndex, flashSegments.length);
     return {
       v: WORKSPACE_VERSION,

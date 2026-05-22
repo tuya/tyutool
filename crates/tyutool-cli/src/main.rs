@@ -111,6 +111,8 @@ enum Commands {
     },
 }
 
+// Must stay in sync with `defaultBaudRate` in src/features/firmware-flash/chip-manifests.ts.
+// When adding or modifying a chip, update both.
 fn default_baud(device: &str) -> u32 {
     match device.to_ascii_lowercase().as_str() {
         "ln882h" => 115200,

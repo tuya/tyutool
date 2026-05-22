@@ -9,7 +9,8 @@ const KEY = 'serial-debug-workspace.v1';
 export interface SerialDebugWorkspaceSerialized {
   v: number;
   port: string;
-  baudRate: number;
+  /** null = follow flash chip default; number = user's explicit choice. */
+  baudRate: number | null;
   customBaudRate: number | null;
   dataBits: DebugDataBits;
   parity: DebugParity;

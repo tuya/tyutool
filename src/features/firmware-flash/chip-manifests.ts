@@ -6,6 +6,10 @@ export interface ChipManifest {
   rustPluginId: string;
   /** Default baud rate for this chip's flash protocol. */
   defaultBaudRate: number;
+  /** Default baud rate for TuyaOpen UART authorization (independent of flash baud). */
+  defaultAuthBaudRate: number;
+  /** Default baud rate for serial debug / log monitor. */
+  defaultLogBaudRate: number;
   /** Total flash size (used as default read end address). */
   flashSize: string;
   /**
@@ -22,6 +26,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   esp32: {
     rustPluginId: 'ESP32',
     defaultBaudRate: 460800,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00400000', // 4 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -31,6 +37,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   esp32c3: {
     rustPluginId: 'ESP32C3',
     defaultBaudRate: 460800,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00400000', // 4 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -40,6 +48,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   esp32c6: {
     rustPluginId: 'ESP32C6',
     defaultBaudRate: 460800,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00800000', // 8 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -49,6 +59,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   esp32s3: {
     rustPluginId: 'ESP32S3',
     defaultBaudRate: 460800,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x01000000', // 16 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -58,6 +70,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   t5: {
     rustPluginId: 'T5',
     defaultBaudRate: 921600,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 460800,
     flashSize: '0x00800000', // 8 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -68,6 +82,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   t1: {
     rustPluginId: 'T1',
     defaultBaudRate: 921600,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00800000', // 8 MiB — same layout as T5
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -78,6 +94,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   t3: {
     rustPluginId: 'T3',
     defaultBaudRate: 921600,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 460800,
     flashSize: '0x00400000', // 4 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -88,6 +106,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   t2: {
     rustPluginId: 'T2',
     defaultBaudRate: 921600,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00200000', // 2 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -98,6 +118,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   bk7231n: {
     rustPluginId: 'BK7231N',
     defaultBaudRate: 921600,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00200000', // 2 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
@@ -108,6 +130,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   ln882h: {
     rustPluginId: 'LN882H',
     defaultBaudRate: 115200,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
     flashSize: '0x00200000', // 2 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
