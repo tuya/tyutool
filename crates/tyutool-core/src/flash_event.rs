@@ -85,6 +85,9 @@ pub enum FlashMilestone {
     Rebooted,
     /// TuyaOpen auth read result. GUI MUST display this in a secure modal, not plain log.
     AuthReadComplete { uuid: String, authkey: String },
+    /// Auth read completed but device has no valid authorization.
+    /// Covers both placeholder UUID and no-data cases.
+    AuthReadEmpty,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +215,13 @@ mod tests {
         let v = serde_json::to_value(&m).unwrap();
         assert_eq!(v["auth_read_complete"]["uuid"], "abc");
         assert_eq!(v["auth_read_complete"]["authkey"], "xyz");
+    }
+
+    #[test]
+    fn auth_read_empty_serializes_to_string() {
+        let m = FlashMilestone::AuthReadEmpty;
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v, serde_json::json!("auth_read_empty"));
     }
 
     #[test]
