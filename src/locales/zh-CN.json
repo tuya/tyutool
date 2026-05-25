@@ -239,7 +239,10 @@
       "authReadTitle": "当前设备授权信息",
       "authReadBody": "UUID：{uuid}\nAuthKey：{authkey}",
       "authReadOk": "我知道了",
-      "authReadCopyCmd": "复制"
+      "authReadCopyCmd": "复制",
+      "authReadEmptyTitle": "设备未授权",
+      "authReadEmptyBody": "请使用\"授权写入\"功能为设备写入 UUID 和 AuthKey。",
+      "authReadEmptyOk": "我知道了"
     },
     "log": {
       "readyTag": "就绪",
@@ -307,6 +310,7 @@
       "eraseDoneLog": "擦除流程结束。",
       "authOkLog": "授权验证通过。",
       "authReadShown": "已读取授权信息，详情见弹窗。",
+      "authReadEmpty": "设备未授权，详情见弹窗。",
       "authReadCopied": "已复制到剪贴板。",
       "authExistsFound": "设备已有授权：UUID={uuid}，AuthKey={authkey}",
       "authOverwritePrompt": "设备已存在授权信息，请在对话框中确认是否覆盖写入。",

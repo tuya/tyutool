@@ -238,7 +238,10 @@
       "authReadTitle": "Current Device Authorization",
       "authReadBody": "UUID: {uuid}\nAuthKey: {authkey}",
       "authReadOk": "OK",
-      "authReadCopyCmd": "Copy"
+      "authReadCopyCmd": "Copy",
+      "authReadEmptyTitle": "Device Not Authorized",
+      "authReadEmptyBody": "Use the \"Write Authorization\" function to write UUID and AuthKey to the device.",
+      "authReadEmptyOk": "OK"
     },
     "log": {
       "readyTag": "Ready",
@@ -306,6 +309,7 @@
       "eraseDoneLog": "Erase finished.",
       "authOkLog": "Authorization verified.",
       "authReadShown": "Authorization details read. See popup.",
+      "authReadEmpty": "Device not authorized, see dialog.",
       "authReadCopied": "Copied to clipboard.",
       "authExistsFound": "Device already authorized: UUID={uuid}, AuthKey={authkey}",
       "authOverwritePrompt": "The device already has authorization. Confirm in the dialog whether to overwrite.",

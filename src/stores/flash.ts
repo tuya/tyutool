@@ -402,6 +402,17 @@ export const useFlashStore = defineStore('flash', () => {
         appendLog(t('flash.log.authReadShown'));
         return;
       }
+      if (m === 'auth_read_empty') {
+        void showConfirmDialog({
+          title: t('flash.confirm.authReadEmptyTitle'),
+          message: t('flash.confirm.authReadEmptyBody'),
+          kind: 'warning',
+          okLabel: t('flash.confirm.authReadEmptyOk'),
+          showCancel: false,
+        });
+        appendLog(t('flash.log.authReadEmpty'));
+        return;
+      }
       const milestoneKey = typeof m === 'string' ? m : Object.keys(m)[0];
       const i18nKey = `flash.log.milestone.${milestoneKey}`;
       appendLog(i18n.global.te(i18nKey) ? t(i18nKey) : `[${milestoneKey}]`);

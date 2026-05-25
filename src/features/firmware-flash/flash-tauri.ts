@@ -42,7 +42,8 @@ export type FlashMilestone =
   | { connected: { chip_info: string | null } }
   | { flash_id_read: { mid: number | null } }
   | { segment_written: { current: number; total: number } }
-  | { auth_read_complete: { uuid: string; authkey: string } };
+  | { auth_read_complete: { uuid: string; authkey: string } }
+  | 'auth_read_empty';
 
 export type FlashResultPayload =
   | { ok: { elapsed_secs: number } }
