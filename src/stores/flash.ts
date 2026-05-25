@@ -183,11 +183,10 @@ export const useFlashStore = defineStore('flash', () => {
   }
 
   watch(
-    logLines,
+    () => logLines.value.length,
     () => {
       void scrollLogToBottom();
-    },
-    { deep: true }
+    }
   );
 
   // Auto-update readFileName, readEndAddr and baudRate when chip changes
@@ -975,7 +974,14 @@ export const useFlashStore = defineStore('flash', () => {
       }
     }
 
-    // ── 4. Auto-connect if not manually connected ──────────────────
+    // ── 4. Commit to the operation — gives immediate visual feedback ──
+    flashPhase.value = 'running';
+    operationStartTime = Date.now();
+    runningOp.value = kind;
+    flashProgress.value = 0;
+    flashMessage.value = '';
+
+    // ── 4b. Auto-connect if not manually connected ─────────────────
     if (!connected.value) {
       appendLog(t('flash.log.autoConnecting', { port: selectedSerialPort.value }));
       await connect();
@@ -983,6 +989,7 @@ export const useFlashStore = defineStore('flash', () => {
         // connect() failed (port busy etc.) — error already logged
         flashMessage.value = t('flash.err.portUnavailable');
         flashPhase.value = 'error';
+        runningOp.value = null;
         return;
       }
       autoConnected.value = true;
@@ -1024,6 +1031,8 @@ export const useFlashStore = defineStore('flash', () => {
             });
             if (!confirmed) {
               appendLog(t('flash.log.authOverwriteCancelled'));
+              flashPhase.value = 'idle';
+              runningOp.value = null;
               return;
             }
           }
@@ -1035,12 +1044,6 @@ export const useFlashStore = defineStore('flash', () => {
     }
 
     // ── 5. Start operation ─────────────────────────────────────────
-    flashPhase.value = 'running';
-    operationStartTime = Date.now();
-    runningOp.value = kind;
-    flashProgress.value = 0;
-    flashMessage.value = '';
-
     rLog.info(
       `[Flash] Starting '${kind}' — chip=${selectedChipId.value}, port=${selectedSerialPort.value}, baud=${selectedBaudRate.value}`
     );
