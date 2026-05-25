@@ -496,7 +496,9 @@ where
         match sess.auth_read() {
             Some((existing_uuid, existing_key)) => {
                 if existing_uuid == PLACEHOLDER_UUID {
-                    log::info!("flash.log.auth.notAuthorized");
+                    progress(FlashEvent::Milestone {
+                        milestone: FlashMilestone::AuthReadEmpty,
+                    });
                 } else {
                     log::info!("flash.log.auth.authorized");
                     progress(FlashEvent::Milestone {
@@ -509,7 +511,9 @@ where
                 Ok(())
             }
             None => {
-                log::info!("flash.log.auth.noData");
+                progress(FlashEvent::Milestone {
+                    milestone: FlashMilestone::AuthReadEmpty,
+                });
                 Ok(())
             }
         }
