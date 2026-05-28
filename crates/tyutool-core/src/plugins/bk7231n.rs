@@ -45,9 +45,6 @@ pub(crate) fn run_beken(
 
     // ── Helper closures ─────────────────────────────────────────────
     let log = |msg: &str| log::info!("{}", msg);
-    let pct = |v: u8| {
-        progress(FlashEvent::Percent { value: v });
-    };
     let phase = |p: FlashPhase| {
         progress(FlashEvent::Phase { phase: p });
     };

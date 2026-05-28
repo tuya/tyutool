@@ -1149,6 +1149,9 @@ export const useFlashStore = defineStore('flash', () => {
       try {
         await startOperationTauri(kind);
       } catch (e) {
+        cancelIndeterminateCheck();
+        currentBackendPhase.value = null;
+        phaseIndeterminate.value = false;
         runningOp.value = null;
         flashPhase.value = 'error';
         const msg = e instanceof Error ? e.message : String(e);
@@ -1160,6 +1163,9 @@ export const useFlashStore = defineStore('flash', () => {
       try {
         await startOperationWs(kind);
       } catch (e) {
+        cancelIndeterminateCheck();
+        currentBackendPhase.value = null;
+        phaseIndeterminate.value = false;
         runningOp.value = null;
         flashPhase.value = 'error';
         const msg = e instanceof Error ? e.message : String(e);

@@ -1,12 +1,27 @@
 <script setup lang="ts">
+import { ref, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useFirmwareFlashContext } from '../context';
+import { PHASE_STYLES } from '../phase-styles';
 
 const { t } = useI18n();
 const ctx = useFirmwareFlashContext();
 
 // Only destructure actions — ref state accessed via ctx.xxx for reactivity.
 const { clearLogs, copyLogs, resetFlash } = ctx;
+
+// Prevent progress bar width from animating backwards when phase resets to 0
+const skipWidthTransition = ref(false);
+watch(
+  () => ctx.currentBackendPhase,
+  (newPhase) => {
+    if (newPhase === null) return;
+    skipWidthTransition.value = true;
+    nextTick(() => {
+      skipWidthTransition.value = false;
+    });
+  },
+);
 </script>
 
 <template>
@@ -47,25 +62,49 @@ const { clearLogs, copyLogs, resetFlash } = ctx;
 
     <!-- 进度条 -->
     <section
-      v-if="ctx.flashPhase === 'running' || ctx.flashProgress > 0"
+      v-if="ctx.flashPhase === 'running'"
       class="aside-progress-card min-w-0 shrink-0 rounded-xl p-3"
       :aria-label="ctx.progressCaption"
     >
       <div class="mb-2 flex items-center justify-between text-xs">
-        <span class="font-medium text-[var(--ty-text-muted)]">{{ ctx.progressCaption }}</span>
-        <span class="aside-progress-pct tabular-nums font-bold">{{ ctx.flashProgress }}%</span>
+        <span class="font-medium text-[var(--ty-text-muted)]">
+          {{
+            ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
+              ? t(PHASE_STYLES[ctx.currentBackendPhase].labelKey)
+              : ctx.progressCaption
+          }}
+        </span>
+        <span
+          v-if="!ctx.phaseIndeterminate"
+          class="aside-progress-pct tabular-nums font-bold"
+        >
+          {{ ctx.phaseProgress }}%
+        </span>
       </div>
       <div
         class="aside-progress-track h-2 overflow-hidden rounded-full"
         role="progressbar"
-        :aria-valuenow="ctx.flashProgress"
+        :aria-busy="ctx.phaseIndeterminate"
+        :aria-valuenow="ctx.phaseIndeterminate ? undefined : ctx.phaseProgress"
         aria-valuemin="0"
         aria-valuemax="100"
       >
         <div
-          class="aside-progress-fill h-full rounded-full transition-[width] duration-300 ease-out"
-          :style="{ width: `${ctx.flashProgress}%` }"
+          v-if="!ctx.phaseIndeterminate"
+          class="aside-progress-fill h-full rounded-full ease-out"
+          :class="
+            skipWidthTransition
+              ? 'transition-[background-color] duration-300'
+              : 'transition-[width,background-color] duration-300'
+          "
+          :style="{
+            width: `${ctx.phaseProgress}%`,
+            background: ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
+              ? PHASE_STYLES[ctx.currentBackendPhase].gradient
+              : 'linear-gradient(90deg, var(--ty-primary), var(--ty-accent))',
+          }"
         />
+        <div v-else class="aside-progress-indeterminate h-full w-full rounded-full" />
       </div>
     </section>
 

@@ -750,7 +750,28 @@
   }
 
   .aside-progress-fill {
-    background: linear-gradient(90deg, var(--ty-primary), var(--ty-accent));
+  }
+
+  .aside-progress-indeterminate {
+    background: repeating-linear-gradient(
+      90deg,
+      var(--ty-primary) 0%,
+      var(--ty-accent) 40%,
+      var(--ty-primary) 80%
+    );
+    background-size: 200% 100%;
+    animation: progress-slide 1.4s ease-in-out infinite;
+  }
+
+  @keyframes progress-slide {
+    0%   { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aside-progress-indeterminate {
+      animation-duration: 0.01ms;
+    }
   }
 
   /* 日志卡片整体 */
