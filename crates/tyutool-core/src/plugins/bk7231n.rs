@@ -59,12 +59,10 @@ pub(crate) fn run_beken(
     // ── Phase: Handshake ────────────────────────────────────────────
     phase(FlashPhase::Handshake);
     ops::shake(&mut transport, job.baud_rate, chip, is_t5).map_err(to_flash_err)?;
-    pct(3);
 
     // ── Phase: Read flash parameters ────────────────────────────────
     phase(FlashPhase::ReadFlashId);
     let flash_params = ops::get_flash_params(&mut transport, chip).map_err(to_flash_err)?;
-    pct(5);
 
     // ── Dispatch by mode ────────────────────────────────────────────
     match job.mode {
@@ -128,15 +126,10 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
     // Unprotect
     phase(FlashPhase::Unprotect);
     ops::unprotect_flash(transport, flash_params, chip).map_err(to_flash_err)?;
-    pct(8);
 
     let total_segments = segments.len();
 
     for (i, seg) in segments.iter().enumerate() {
-        let seg_start_pct = 8 + (i as u64 * 87 / total_segments as u64) as u8;
-        let seg_end_pct = 8 + ((i + 1) as u64 * 87 / total_segments as u64) as u8;
-        let seg_range = (seg_end_pct - seg_start_pct) as u64;
-
         progress(FlashEvent::Phase {
             phase: FlashPhase::WriteSegment {
                 current: (i + 1) as u32,
@@ -172,12 +165,11 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
             erase_start,
             erase_end,
             &|done, total| {
-                let p = seg_start_pct
-                    + (done as u64 * (seg_range * 30 / 100) / total.max(1) as u64) as u8;
-                pct(p);
+                pct((done as u64 * 100 / total.max(1) as u64) as u8);
             },
         )
         .map_err(to_flash_err)?;
+        pct(100); // explicitly mark Erase complete before transitioning
 
         // Write
         phase(FlashPhase::Write);
@@ -188,15 +180,11 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
             &firmware,
             base_addr,
             &|done, total| {
-                // Write takes 30% -> 90% of segment range
-                let offset = (seg_range * 30 / 100) as u8;
-                let p = seg_start_pct
-                    + offset
-                    + (done as u64 * (seg_range * 60 / 100) / total.max(1) as u64) as u8;
-                pct(p);
+                pct((done as u64 * 100 / total.max(1) as u64) as u8);
             },
         )
         .map_err(to_flash_err)?;
+        pct(100); // explicitly mark Write complete before transitioning
 
         // CRC check
         if !chip.has_per_sector_crc() {
@@ -211,8 +199,8 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
             let expected_crc = ops::crc32_ver2(&padded);
             ops::crc_check(transport, base_addr, padded.len() as u32, expected_crc)
                 .map_err(to_flash_err)?;
+            pct(100); // explicitly mark Verify complete before transitioning
         }
-        pct(seg_end_pct);
     }
 
     // Protect
@@ -222,7 +210,6 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
     // Reboot
     phase(FlashPhase::Reboot);
     ops::reboot(transport).map_err(to_flash_err)?;
-    pct(100);
 
     Ok(())
 }
@@ -262,7 +249,6 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
     // Unprotect
     phase(FlashPhase::Unprotect);
     ops::unprotect_flash(transport, flash_params, chip).map_err(to_flash_err)?;
-    pct(8);
 
     // Erase
     phase(FlashPhase::Erase);
@@ -273,12 +259,11 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
         aligned_start,
         aligned_end,
         &|done, total| {
-            let p = 8 + (done as u64 * 87 / total.max(1) as u64) as u8; // 8→95%
-            pct(p);
+            pct((done as u64 * 100 / total.max(1) as u64) as u8);
         },
     )
     .map_err(to_flash_err)?;
-    pct(95);
+    pct(100);
 
     // Protect
     phase(FlashPhase::Protect);
@@ -287,7 +272,6 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
     // Reboot
     phase(FlashPhase::Reboot);
     ops::reboot(transport).map_err(to_flash_err)?;
-    pct(100);
 
     Ok(())
 }
@@ -331,12 +315,10 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
         start,
         length,
         &|done, total| {
-            let p = 5 + (done as u64 * 80 / total.max(1) as u64) as u8; // 5→85%
-            pct(p);
+            pct((done as u64 * 100 / total.max(1) as u64) as u8);
         },
     )
     .map_err(to_flash_err)?;
-    pct(85);
 
     // CRC check (BK7231N only — T5 already verified per-sector CRC during read)
     // BK7231N bootrom uses crc32_ver2 (no final XOR).
@@ -345,20 +327,18 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
         phase(FlashPhase::Verify);
         let expected_crc = ops::crc32_ver2(&data);
         ops::crc_check(transport, start, length, expected_crc).map_err(to_flash_err)?;
+        pct(100);
     }
-    pct(90);
 
     // Save to file
     phase(FlashPhase::Save);
     log::info!("Saving {} bytes to {}", data.len(), file_path);
     std::fs::write(file_path, &data)
         .map_err(|e| FlashError::Plugin(format!("cannot write file '{}': {e}", file_path)))?;
-    pct(95);
 
     // Reboot
     phase(FlashPhase::Reboot);
     ops::reboot(transport).map_err(to_flash_err)?;
-    pct(100);
 
     Ok(())
 }
