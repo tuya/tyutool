@@ -260,7 +260,7 @@ fn run_read(
         addr += CHUNK;
         let done = (addr.min(aligned_end) - aligned_start) as u64;
         let total = (aligned_end - aligned_start) as u64;
-        progress(FlashEvent::Percent { value: (done * 90 / total) as u8 });
+        progress(FlashEvent::Percent { value: (done * 100 / total) as u8 });
     }
 
     // Switch back to 115200 so device is in a predictable state
@@ -273,7 +273,6 @@ fn run_read(
         .map_err(|e| FlashError::Plugin(format!("cannot write '{file_path}': {e}")))?;
 
     log::info!("Read complete: {} bytes saved to {}", buf.len(), file_path);
-    progress(FlashEvent::Percent { value: 100 });
     Ok(())
 }
 
@@ -381,18 +380,18 @@ fn run_flash(
 
         log::info!("Writing {} bytes at 0x{:08x}", data.len(), start);
 
-        let seg_start_pct = (idx as u64 * 90 / total_segs as u64) as u8;
-        let seg_end_pct = ((idx + 1) as u64 * 90 / total_segs as u64) as u8;
+        progress(FlashEvent::Phase { phase: FlashPhase::Write });
 
         XmodemSend::new(&mut port, &data, 16 * 1024).send(
             "qio.bin",
             cancel,
             &|sent, total| {
-                let range = (seg_end_pct - seg_start_pct) as u64;
-                let pct = seg_start_pct + (sent as u64 * range / total as u64) as u8;
+                let pct = (sent as u64 * 100 / total.max(1) as u64) as u8;
                 progress(FlashEvent::Percent { value: pct });
             },
         )?;
+        // Emit 100% explicitly — XMODEM callback may not land exactly on 100
+        progress(FlashEvent::Percent { value: 100 });
 
         progress(FlashEvent::Milestone {
             milestone: FlashMilestone::SegmentWritten {
