@@ -405,7 +405,6 @@ fn run_flash(
     send_command(&mut port, "reboot")?;
     let _ = read_response(&mut port, 128, 1);
 
-    progress(FlashEvent::Percent { value: 100 });
     Ok(())
 }
 
