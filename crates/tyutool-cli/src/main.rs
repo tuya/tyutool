@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::sync::atomic::AtomicBool;
 
 use clap::{builder::PossibleValuesParser, Parser, Subcommand};
@@ -143,6 +144,7 @@ fn choose_port() -> Result<String, Box<dyn std::error::Error>> {
         }
     }
     eprint!("Select port [0-{}]: ", ports.len() - 1);
+    let _ = std::io::stderr().flush();
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
     let idx: usize = input.trim().parse().map_err(|_| "Invalid selection")?;
