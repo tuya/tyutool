@@ -1,4 +1,3 @@
-use std::io::Write as _;
 use std::sync::Mutex;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -58,6 +57,14 @@ impl CliReporter {
 impl CliReporter {
     pub fn is_plain(&self) -> bool {
         self.inner.lock().unwrap().is_plain
+    }
+
+    pub fn is_inline(&self) -> bool {
+        self.inner.lock().unwrap().inline
+    }
+
+    pub fn show_percent_flag(&self) -> bool {
+        self.inner.lock().unwrap().show_percent
     }
 }
 
@@ -139,8 +146,12 @@ impl Inner {
         self.show_percent = show_percent;
 
         if self.is_plain {
-            eprint!("{:<16}", label);
-            self.inline = true;
+            if self.show_percent {
+                eprintln!("{}", label);
+            } else {
+                eprint!("{:<16}", label);
+                self.inline = true;
+            }
         } else {
             self.pb.set_position(0);
             self.pb.set_message(label);
@@ -150,7 +161,11 @@ impl Inner {
     fn finish_current_phase(&mut self) {
         if let Some(label) = self.current_phase_label.take() {
             if self.is_plain {
-                eprintln!("  OK");
+                if self.show_percent {
+                    eprintln!("  100%");
+                } else {
+                    eprintln!("  OK");
+                }
                 self.inline = false;
             } else {
                 self.pb.println(format!("  \x1b[32m✓\x1b[0m {}", label));
@@ -174,11 +189,8 @@ impl Inner {
         if self.is_plain {
             if self.show_percent {
                 let milestones = pop_milestones(&mut self.next_milestone, value);
-                if !milestones.is_empty() {
-                    for m in milestones {
-                        eprint!("  {}%", m);
-                    }
-                    let _ = std::io::stderr().flush();
+                for m in milestones {
+                    eprintln!("  {}%", m);
                 }
             }
         } else {
@@ -373,5 +385,88 @@ mod tests {
     fn force_plain_overrides_tty_detection() {
         let reporter = CliReporter::new(true);
         assert!(reporter.is_plain());
+    }
+
+    // -----------------------------------------------------------------------
+    // plain-mode on_phase: percent phases must NOT be inline (label gets its
+    // own newline so pipe readers receive it immediately); non-percent phases
+    // MUST stay inline so that "Handshake         OK" lands on one line.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_erase_phase_not_inline() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Erase });
+        assert!(!r.is_inline(), "Erase is a percent phase — must NOT be inline");
+        assert!(r.show_percent_flag());
+    }
+
+    #[test]
+    fn plain_write_phase_not_inline() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Write });
+        assert!(!r.is_inline(), "Write is a percent phase — must NOT be inline");
+        assert!(r.show_percent_flag());
+    }
+
+    #[test]
+    fn plain_read_phase_not_inline() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Read });
+        assert!(!r.is_inline(), "Read is a percent phase — must NOT be inline");
+    }
+
+    #[test]
+    fn plain_handshake_phase_is_inline() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Handshake });
+        assert!(r.is_inline(), "Handshake is non-percent — must be inline");
+        assert!(!r.show_percent_flag());
+    }
+
+    #[test]
+    fn plain_protect_phase_is_inline() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Protect });
+        assert!(r.is_inline(), "Protect is non-percent — must be inline");
+    }
+
+    #[test]
+    fn plain_reboot_phase_is_inline() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Reboot });
+        assert!(r.is_inline(), "Reboot is non-percent — must be inline");
+    }
+
+    // When a percent phase finishes, show_percent stays true so
+    // finish_current_phase knows to emit "100%" instead of "OK".
+    #[test]
+    fn percent_phase_show_percent_flag_remains_after_phase_start() {
+        let r = CliReporter::new(true);
+        let cb = r.callback();
+        cb(FlashEvent::Phase { phase: FlashPhase::Erase });
+        assert!(r.show_percent_flag(), "show_percent must be true while Erase is active");
+        // Starting next phase calls finish_current_phase (which reads show_percent),
+        // then resets show_percent for the new phase.
+        cb(FlashEvent::Phase { phase: FlashPhase::Handshake });
+        assert!(!r.show_percent_flag(), "show_percent must be false for Handshake");
+    }
+
+    // Milestones are emitted one by one at each 10% boundary.
+    #[test]
+    fn pop_milestones_one_at_a_time() {
+        let mut m: u8 = 10;
+        assert_eq!(pop_milestones(&mut m, 10), vec![10]);
+        assert_eq!(m, 20);
+        assert_eq!(pop_milestones(&mut m, 15), Vec::<u8>::new());
+        assert_eq!(m, 20);
+        assert_eq!(pop_milestones(&mut m, 20), vec![20]);
+        assert_eq!(m, 30);
     }
 }
