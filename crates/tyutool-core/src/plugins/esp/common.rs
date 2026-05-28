@@ -60,6 +60,11 @@ impl ProgressCallbacks for ProgressAdapter<'_> {
         (self.progress)(FlashEvent::Phase {
             phase: FlashPhase::Verify,
         });
+        // Reset so Verify emits an independent 0-100% range, not a continuation of Write's range.
+        self.pct_start = 0;
+        self.pct_end = 100;
+        self.total = 1;
+        self.current = 0;
     }
 
     fn finish(&mut self, skipped: bool) {
@@ -259,9 +264,6 @@ fn run_flash(
     let total_segments = segments.len();
 
     for (i, seg) in segments.iter().enumerate() {
-        let seg_start_pct = (i as u64 * 100 / total_segments as u64) as u8;
-        let seg_end_pct = ((i + 1) as u64 * 100 / total_segments as u64) as u8;
-
         progress(FlashEvent::Phase {
             phase: FlashPhase::WriteSegment {
                 current: (i + 1) as u32,
@@ -293,8 +295,8 @@ fn run_flash(
         }
 
         progress(FlashEvent::Phase { phase: FlashPhase::Write });
-        // Map segment progress to its portion of [0, 100]
-        let mut cb = ProgressAdapter::new(progress, seg_start_pct, seg_end_pct);
+        // Each segment emits an independent 0-100% range.
+        let mut cb = ProgressAdapter::new(progress, 0, 100);
         flasher
             .write_bin_to_flash(flash_addr, &firmware, &mut cb)
             .map_err(esp_err)?;
