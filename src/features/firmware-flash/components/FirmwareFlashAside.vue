@@ -52,7 +52,7 @@ watch(
 
     <!-- 清除结果按钮 -->
     <button
-      v-if="ctx.flashPhase !== 'idle'"
+      v-if="ctx.flashPhase === 'success' || ctx.flashPhase === 'error'"
       type="button"
       class="ty-btn-secondary inline-flex min-h-9 w-full shrink-0 justify-center rounded-xl px-3 py-2 text-xs font-medium"
       @click="resetFlash"
