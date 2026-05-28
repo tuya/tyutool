@@ -10,10 +10,14 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
 struct FlashState {
-    cancel: Arc<AtomicBool>,
-    /// Handle to the currently running flash thread, if any.
-    /// Held so the next flash_run can join (with timeout) before spawning a new thread,
-    /// preventing two threads from racing on the same serial port.
+    /// Cancel signal for the **current** operation. Wrapped in a Mutex so
+    /// flash_run can atomically swap in a fresh Arc for the new operation while
+    /// leaving the old Arc signalled — preventing the old thread's cancel from
+    /// being cleared when a new operation starts.
+    cancel: StdMutex<Arc<AtomicBool>>,
+    /// Handle to the running flash thread, if any. Joined (with 3 s timeout)
+    /// before a new operation spawns, ensuring the serial port is fully
+    /// released. On timeout the new operation is rejected rather than racing.
     thread: StdMutex<Option<JoinHandle<()>>>,
 }
 
@@ -171,26 +175,38 @@ fn flash_run(
         job.baud_rate
     );
 
-    // Signal any running thread to stop.
-    state.cancel.store(true, Ordering::SeqCst);
+    // Create a fresh cancel flag for this operation and signal the old one.
+    // Swapping atomically under the mutex ensures the old Arc stays `true`
+    // while the new Arc starts at `false` — the two operations never share a
+    // cancel flag, so starting a new job cannot un-cancel the previous one.
+    let new_cancel = Arc::new(AtomicBool::new(false));
+    let old_cancel = {
+        let mut guard = state.cancel.lock().map_err(|e| e.to_string())?;
+        std::mem::replace(&mut *guard, new_cancel.clone())
+    };
+    old_cancel.store(true, Ordering::SeqCst);
 
-    // Join the previous thread with a 3-second timeout so the serial port is
-    // fully released before the new operation opens it.  A timeout thread is
-    // used because join() blocks and we cannot afford to hang indefinitely.
+    // Wait up to 3 seconds for the previous thread to exit.  If it hasn't
+    // finished — e.g. blocked on a serial read with a long timeout — reject
+    // the new request rather than racing on the same port.
     {
-        let mut guard = state.thread.lock().unwrap();
+        let mut guard = state.thread.lock().map_err(|e| e.to_string())?;
         if let Some(prev) = guard.take() {
             let (tx, rx) = std::sync::mpsc::channel::<()>();
             std::thread::spawn(move || {
                 let _ = prev.join();
                 let _ = tx.send(());
             });
-            let _ = rx.recv_timeout(Duration::from_secs(3));
+            if rx.recv_timeout(Duration::from_secs(3)).is_err() {
+                return Err(
+                    "previous flash operation has not stopped yet; wait a few seconds and retry"
+                        .into(),
+                );
+            }
         }
     }
 
-    state.cancel.store(false, Ordering::SeqCst);
-    let cancel = state.cancel.clone();
+    let cancel = new_cancel;
     let app = app.clone();
     let handle = std::thread::spawn(move || {
         let _ = tyutool_core::run_job(&job, &cancel, |p| {
@@ -198,7 +214,7 @@ fn flash_run(
         });
     });
 
-    *state.thread.lock().unwrap() = Some(handle);
+    *state.thread.lock().map_err(|e| e.to_string())? = Some(handle);
     Ok(())
 }
 
@@ -212,7 +228,9 @@ fn authorize_probe_cmd(port: String) -> Result<Option<tyutool_core::DeviceAuthor
 #[tauri::command]
 fn flash_cancel(state: State<'_, FlashState>) {
     log::info!("[Flash] User cancelled operation");
-    state.cancel.store(true, Ordering::SeqCst);
+    if let Ok(guard) = state.cancel.lock() {
+        guard.store(true, Ordering::SeqCst);
+    }
 }
 
 #[tauri::command]
@@ -567,7 +585,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(FlashState {
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel: StdMutex::new(Arc::new(AtomicBool::new(false))),
             thread: StdMutex::new(None),
         })
         .manage(DebugState {

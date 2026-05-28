@@ -60,7 +60,10 @@ impl ProgressCallbacks for ProgressAdapter<'_> {
         (self.progress)(FlashEvent::Phase {
             phase: FlashPhase::Verify,
         });
-        // Reset so Verify emits an independent 0-100% range, not a continuation of Write's range.
+        // Reset so Verify emits an independent 0-100% range, not a continuation
+        // of Write's range.  NOTE: espflash is called with verify=false (see
+        // Flasher::connect below), so verifying() is currently unreachable.
+        // The reset is kept as a safety net in case verify is enabled in future.
         self.pct_start = 0;
         self.pct_end = 100;
         self.total = 1;
