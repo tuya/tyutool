@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -10,6 +11,10 @@ use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
 struct FlashState {
     cancel: Arc<AtomicBool>,
+    /// Handle to the currently running flash thread, if any.
+    /// Held so the next flash_run can join (with timeout) before spawning a new thread,
+    /// preventing two threads from racing on the same serial port.
+    thread: StdMutex<Option<JoinHandle<()>>>,
 }
 
 struct DebugState {
@@ -165,14 +170,35 @@ fn flash_run(
         job.port,
         job.baud_rate
     );
+
+    // Signal any running thread to stop.
+    state.cancel.store(true, Ordering::SeqCst);
+
+    // Join the previous thread with a 3-second timeout so the serial port is
+    // fully released before the new operation opens it.  A timeout thread is
+    // used because join() blocks and we cannot afford to hang indefinitely.
+    {
+        let mut guard = state.thread.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                let _ = prev.join();
+                let _ = tx.send(());
+            });
+            let _ = rx.recv_timeout(Duration::from_secs(3));
+        }
+    }
+
     state.cancel.store(false, Ordering::SeqCst);
     let cancel = state.cancel.clone();
     let app = app.clone();
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         let _ = tyutool_core::run_job(&job, &cancel, |p| {
             let _ = app.emit("flash-progress", &p);
         });
     });
+
+    *state.thread.lock().unwrap() = Some(handle);
     Ok(())
 }
 
@@ -542,6 +568,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(FlashState {
             cancel: Arc::new(AtomicBool::new(false)),
+            thread: StdMutex::new(None),
         })
         .manage(DebugState {
             session: StdMutex::new(None),
