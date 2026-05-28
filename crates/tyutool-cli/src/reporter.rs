@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::sync::Mutex;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -172,8 +173,12 @@ impl Inner {
 
         if self.is_plain {
             if self.show_percent {
-                for m in pop_milestones(&mut self.next_milestone, value) {
-                    eprint!("  {}%", m);
+                let milestones = pop_milestones(&mut self.next_milestone, value);
+                if !milestones.is_empty() {
+                    for m in milestones {
+                        eprint!("  {}%", m);
+                    }
+                    let _ = std::io::stderr().flush();
                 }
             }
         } else {
