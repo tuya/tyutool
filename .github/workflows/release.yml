@@ -70,7 +70,8 @@ jobs:
           fi
 
           git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
-                 crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml
+                 crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml \
+                 Cargo.lock
           git commit -m "chore: bump version to ${VERSION} [skip ci]"
           git push origin "refactor/v3"
 
