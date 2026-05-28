@@ -161,11 +161,13 @@ impl Inner {
     fn finish_current_phase(&mut self) {
         if let Some(label) = self.current_phase_label.take() {
             if self.is_plain {
-                if self.show_percent {
-                    eprintln!("  100%");
-                } else {
+                if !self.show_percent {
                     eprintln!("  OK");
                 }
+                // Percent phases: do NOT flush milestones here. Each plugin is required to emit
+                // Percent(100) before transitioning to the next phase, so 100% arrives via on_percent()
+                // naturally. Flushing here would also incorrectly print 100% on error paths, since
+                // finish_current_phase is called regardless of FlashResult.
                 self.inline = false;
             } else {
                 self.pb.println(format!("  \x1b[32m✓\x1b[0m {}", label));
@@ -230,6 +232,14 @@ impl Inner {
     }
 
     fn on_done(&mut self, result: FlashResult) {
+        // Safety net for the terminal percent phase: if the last percent phase didn't emit Percent(100)
+        // (e.g. LN882H erase-only which has no granular progress), flush remaining milestones now.
+        // Only on Ok — must not claim 100% completion when the operation failed or was cancelled.
+        if matches!(result, FlashResult::Ok { .. }) && self.is_plain && self.show_percent {
+            for m in pop_milestones(&mut self.next_milestone, 100) {
+                eprintln!("  {}%", m);
+            }
+        }
         self.finish_current_phase();
 
         if self.is_plain {
@@ -306,10 +316,7 @@ fn milestone_text(m: &FlashMilestone) -> String {
 pub(crate) fn is_percent_phase(phase: &FlashPhase) -> bool {
     matches!(
         phase,
-        FlashPhase::Write
-            | FlashPhase::Erase
-            | FlashPhase::Read
-            | FlashPhase::WriteSegment { .. }
+        FlashPhase::Write | FlashPhase::Erase | FlashPhase::Read | FlashPhase::Verify
     )
 }
 
@@ -355,9 +362,9 @@ mod tests {
         assert!(is_percent_phase(&FlashPhase::Write));
         assert!(is_percent_phase(&FlashPhase::Erase));
         assert!(is_percent_phase(&FlashPhase::Read));
-        assert!(is_percent_phase(&FlashPhase::WriteSegment { current: 1, total: 3 }));
+        assert!(is_percent_phase(&FlashPhase::Verify));
+        assert!(!is_percent_phase(&FlashPhase::WriteSegment { current: 1, total: 3 }));
         assert!(!is_percent_phase(&FlashPhase::Handshake));
-        assert!(!is_percent_phase(&FlashPhase::Verify));
     }
 
     #[test]
@@ -452,10 +459,21 @@ mod tests {
         let cb = r.callback();
         cb(FlashEvent::Phase { phase: FlashPhase::Erase });
         assert!(r.show_percent_flag(), "show_percent must be true while Erase is active");
-        // Starting next phase calls finish_current_phase (which reads show_percent),
-        // then resets show_percent for the new phase.
-        cb(FlashEvent::Phase { phase: FlashPhase::Handshake });
-        assert!(!r.show_percent_flag(), "show_percent must be false for Handshake");
+        // Verify is also a percent phase
+        cb(FlashEvent::Phase { phase: FlashPhase::Verify });
+        assert!(r.show_percent_flag(), "show_percent must be true for Verify");
+        cb(FlashEvent::Phase { phase: FlashPhase::Protect });
+        assert!(!r.show_percent_flag(), "show_percent must be false for Protect");
+    }
+
+    #[test]
+    fn write_segment_is_not_percent_phase() {
+        assert!(!is_percent_phase(&FlashPhase::WriteSegment { current: 1, total: 2 }));
+    }
+
+    #[test]
+    fn verify_is_percent_phase() {
+        assert!(is_percent_phase(&FlashPhase::Verify));
     }
 
     // Milestones are emitted one by one at each 10% boundary.
