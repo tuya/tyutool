@@ -37,6 +37,7 @@ import {
   WORKSPACE_VERSION,
   type FlashWorkspaceSerialized,
 } from '@/stores/flash-workspace';
+import { PHASE_STYLES, phaseKey } from '@/features/firmware-flash/phase-styles';
 
 /** Factory-unauthorized placeholder from TuyaOpen firmware (matches `authorize.rs`). */
 const AUTHORIZE_PLACEHOLDER_UUID = 'uuidxxxxxxxxxxxxxxxx';
@@ -140,6 +141,12 @@ export const useFlashStore = defineStore('flash', () => {
   const flashMessage = ref('');
   const runningOp = ref<OpKind | null>(null);
 
+  // Phase-aware progress tracking
+  const currentBackendPhase = ref<string | null>(null);
+  const phaseProgress = ref(0);
+  const phaseIndeterminate = ref(false);
+  let indeterminateTimer: ReturnType<typeof setTimeout> | null = null;
+
   let progressTimer: ReturnType<typeof setInterval> | null = null;
   let unlistenFlash: (() => void) | undefined;
   let operationStartTime: number | null = null;
@@ -180,6 +187,22 @@ export const useFlashStore = defineStore('flash', () => {
       return;
     }
     el.scrollTop = el.scrollHeight;
+  }
+
+  function scheduleIndeterminateCheck(): void {
+    cancelIndeterminateCheck();
+    indeterminateTimer = setTimeout(() => {
+      if (currentBackendPhase.value !== null) {
+        phaseIndeterminate.value = true;
+      }
+    }, 2000);
+  }
+
+  function cancelIndeterminateCheck(): void {
+    if (indeterminateTimer !== null) {
+      clearTimeout(indeterminateTimer);
+      indeterminateTimer = null;
+    }
   }
 
   watch(
@@ -371,10 +394,24 @@ export const useFlashStore = defineStore('flash', () => {
 
     if (p.kind === 'percent') {
       flashProgress.value = Math.min(100, Math.max(0, p.value));
+      // Only update phase progress when we're in a registered phase
+      if (currentBackendPhase.value !== null) {
+        phaseIndeterminate.value = false;
+        cancelIndeterminateCheck();
+        phaseProgress.value = Math.min(100, Math.max(0, p.value));
+      }
       return;
     }
 
     if (p.kind === 'phase') {
+      const key = phaseKey(p.phase);
+      if (key in PHASE_STYLES) {
+        currentBackendPhase.value = key;
+        phaseProgress.value = 0;
+        phaseIndeterminate.value = false;
+        scheduleIndeterminateCheck();
+      }
+      // Unregistered phases (write_segment, handshake, etc.): ignore, keep current bar state
       return;
     }
 
@@ -425,6 +462,9 @@ export const useFlashStore = defineStore('flash', () => {
     }
 
     if (p.kind === 'done') {
+      cancelIndeterminateCheck();
+      phaseIndeterminate.value = false;
+      currentBackendPhase.value = null;
       const op = runningOp.value;
       runningOp.value = null;
       authOpIsRead.value = false;
@@ -653,6 +693,10 @@ export const useFlashStore = defineStore('flash', () => {
       runningOp.value = null;
       flashPhase.value = 'idle';
       flashProgress.value = 0;
+      phaseProgress.value = 0;
+      currentBackendPhase.value = null;
+      phaseIndeterminate.value = false;
+      cancelIndeterminateCheck();
       flashMessage.value = '';
       appendLog(t('flash.log.operationCancelled'));
       rLog.info('[Flash] Operation cancelled by user');
@@ -990,6 +1034,10 @@ export const useFlashStore = defineStore('flash', () => {
     operationStartTime = Date.now();
     runningOp.value = kind;
     flashProgress.value = 0;
+    phaseProgress.value = 0;
+    currentBackendPhase.value = null;
+    phaseIndeterminate.value = false;
+    cancelIndeterminateCheck();
     flashMessage.value = '';
 
     // ── 4b. Auto-connect if not manually connected ─────────────────
@@ -1131,12 +1179,19 @@ export const useFlashStore = defineStore('flash', () => {
     runningOp.value = null;
     flashPhase.value = 'idle';
     flashProgress.value = 0;
+    phaseProgress.value = 0;
+    currentBackendPhase.value = null;
+    phaseIndeterminate.value = false;
+    cancelIndeterminateCheck();
     flashMessage.value = '';
   }
 
   /** Call from component's onUnmounted to release timers and listeners. */
   function cleanup(): void {
     stopFlash();
+    cancelIndeterminateCheck();
+    phaseIndeterminate.value = false;
+    currentBackendPhase.value = null;
     if (unlistenFlash) {
       unlistenFlash();
       unlistenFlash = undefined;
@@ -1335,6 +1390,9 @@ export const useFlashStore = defineStore('flash', () => {
     flashPhase,
     flashMessage,
     runningOp,
+    currentBackendPhase,
+    phaseProgress,
+    phaseIndeterminate,
     logLines,
     logScrollRef,
     lockAutoScroll,
