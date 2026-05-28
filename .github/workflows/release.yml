@@ -395,9 +395,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/download-artifact@v8
-        if: steps.gate.outputs.skip != 'true'
-        with: { path: artifacts/ }
+      # Temporarily disabled: network latency and Gitee storage constraints — only latest.json is pushed for now
+      # - uses: actions/download-artifact@v8
+      #   if: steps.gate.outputs.skip != 'true'
+      #   with: { path: artifacts/ }
 
       - uses: pnpm/action-setup@v5
         if: steps.gate.outputs.skip != 'true'
@@ -443,16 +444,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p gitee-assets
-          declare -A seen
-          while IFS= read -r -d '' fpath; do
-            fname="$(basename "$fpath")"
-            if [[ -n "${seen[$fname]:-}" ]]; then
-              echo "::error::Duplicate release asset name '${fname}' from '${seen[$fname]}' and '${fpath}'."
-              exit 1
-            fi
-            seen[$fname]="$fpath"
-            cp "$fpath" "gitee-assets/$fname"
-          done < <(find artifacts/ -type f -print0)
+          # Temporarily disabled: network latency and Gitee storage constraints — only latest.json is pushed for now
+          # declare -A seen
+          # while IFS= read -r -d '' fpath; do
+          #   fname="$(basename "$fpath")"
+          #   if [[ -n "${seen[$fname]:-}" ]]; then
+          #     echo "::error::Duplicate release asset name '${fname}' from '${seen[$fname]}' and '${fpath}'."
+          #     exit 1
+          #   fi
+          #   seen[$fname]="$fpath"
+          #   cp "$fpath" "gitee-assets/$fname"
+          # done < <(find artifacts/ -type f -print0)
           cp -f latest.json gitee-assets/
           ls -lh gitee-assets/
 
