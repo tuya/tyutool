@@ -13,28 +13,24 @@ export interface PhaseStyle {
 // Phases NOT in this table (write_segment, handshake, etc.) do not update the progress bar.
 export const PHASE_STYLES: Record<string, PhaseStyle> = {
   erase: {
-    gradient:
-      'linear-gradient(90deg, var(--ty-accent), color-mix(in srgb, var(--ty-accent) 70%, var(--ty-primary)))',
-    glowColor: 'var(--ty-accent)',
-    labelKey: 'flash.phaseErase',
+    gradient:  'linear-gradient(90deg, var(--phase-erase-from), var(--phase-erase-to))',
+    glowColor: 'var(--phase-erase-glow)',
+    labelKey:  'flash.phaseErase',
   },
   write: {
-    gradient:
-      'linear-gradient(90deg, var(--ty-primary), color-mix(in srgb, var(--ty-primary) 70%, var(--ty-accent)))',
-    glowColor: 'var(--ty-primary)',
-    labelKey: 'flash.phaseWrite',
+    gradient:  'linear-gradient(90deg, var(--phase-write-from), var(--phase-write-to))',
+    glowColor: 'var(--phase-write-glow)',
+    labelKey:  'flash.phaseWrite',
   },
   verify: {
-    gradient:
-      'linear-gradient(90deg, var(--ty-success), color-mix(in srgb, var(--ty-success) 80%, var(--ty-primary)))',
-    glowColor: 'var(--ty-success)',
-    labelKey: 'flash.phaseVerify',
+    gradient:  'linear-gradient(90deg, var(--phase-verify-from), var(--phase-verify-to))',
+    glowColor: 'var(--phase-verify-glow)',
+    labelKey:  'flash.phaseVerify',
   },
   read: {
-    gradient:
-      'linear-gradient(90deg, var(--ty-primary), color-mix(in srgb, var(--ty-primary) 60%, var(--ty-success)))',
-    glowColor: 'var(--ty-primary)',
-    labelKey: 'flash.phaseRead',
+    gradient:  'linear-gradient(90deg, var(--phase-read-from), var(--phase-read-to))',
+    glowColor: 'var(--phase-read-glow)',
+    labelKey:  'flash.phaseRead',
   },
 }
 

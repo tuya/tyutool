@@ -24,6 +24,24 @@
   --ty-log-fg: #0f172a;
   --ty-ring: #2563eb;
   --ty-ring-offset: #eef2f7;
+
+  /* ── Progress phase colors (light mode) ────────── */
+  /* Erase — thermal / heat spectrum */
+  --phase-erase-from: #e11d48;
+  --phase-erase-to:   #f97316;
+  --phase-erase-glow: #e11d48;
+  /* Write — electric / data-flow spectrum */
+  --phase-write-from: #1d4ed8;
+  --phase-write-to:   #7c3aed;
+  --phase-write-glow: #1d4ed8;
+  /* Verify — validation / scan-pass spectrum */
+  --phase-verify-from: #059669;
+  --phase-verify-to:   #0284c7;
+  --phase-verify-glow: #059669;
+  /* Read — extraction / golden-scan spectrum */
+  --phase-read-from: #b45309;
+  --phase-read-to:   #d97706;
+  --phase-read-glow: #b45309;
 }
 
 .dark {
@@ -45,6 +63,23 @@
   --ty-log-fg: #e2e8f0;
   --ty-ring: #60a5fa;
   --ty-ring-offset: #020617;
+
+  /* ── Progress phase colors (dark mode — full neon saturation) ── */
+  --phase-erase-from: #ff2d55;
+  --phase-erase-to:   #ff9500;
+  --phase-erase-glow: #ff2d55;
+
+  --phase-write-from: #00b4d8;
+  --phase-write-to:   #7b2fbe;
+  --phase-write-glow: #00b4d8;
+
+  --phase-verify-from: #00f5a0;
+  --phase-verify-to:   #00b4d8;
+  --phase-verify-glow: #00f5a0;
+
+  --phase-read-from: #ffca28;
+  --phase-read-to:   #ff6f00;
+  --phase-read-glow: #ffca28;
 }
 
 /* ─── TuyaOpen IDE light theme ──────────────────────────────────────────── */
@@ -67,6 +102,23 @@
   --ty-log-fg: #1f1f1f;
   --ty-ring: #cc3800;
   --ty-ring-offset: #f5f5f5;
+
+  /* Phase colors — warm industrial tones to match TuyaOpen branding */
+  --phase-erase-from: #cc3800;
+  --phase-erase-to:   #f97316;
+  --phase-erase-glow: #cc3800;
+
+  --phase-write-from: #0369a1;
+  --phase-write-to:   #6d28d9;
+  --phase-write-glow: #0369a1;
+
+  --phase-verify-from: #2ea043;
+  --phase-verify-to:   #0284c7;
+  --phase-verify-glow: #2ea043;
+
+  --phase-read-from: #a16207;
+  --phase-read-to:   #d97706;
+  --phase-read-glow: #a16207;
 }
 
 /* ─── TuyaOpen IDE dark theme ───────────────────────────────────────────── */
@@ -89,6 +141,23 @@
   --ty-log-fg: #e5e5e5;
   --ty-ring: #ff5500;
   --ty-ring-offset: #1f1f1f;
+
+  /* Phase colors — neon but warmer to suit orange-primary IDE */
+  --phase-erase-from: #ff5500;
+  --phase-erase-to:   #ffaa00;
+  --phase-erase-glow: #ff5500;
+
+  --phase-write-from: #29b6f6;
+  --phase-write-to:   #9c27b0;
+  --phase-write-glow: #29b6f6;
+
+  --phase-verify-from: #4ec9b0;
+  --phase-verify-to:   #00bcd4;
+  --phase-verify-glow: #4ec9b0;
+
+  --phase-read-from: #ffd600;
+  --phase-read-to:   #ff6d00;
+  --phase-read-glow: #ffd600;
 }
 
 @theme {
