@@ -501,9 +501,12 @@ export const useFlashStore = defineStore('flash', () => {
         rLog.error(`[Flash] Operation '${op}' failed: ${flashMessage.value}`);
       }
       logOperationDuration();
-      if (autoConnected.value) {
-        autoConnected.value = false;
-      }
+      // The flash operation closes the serial port on the Rust side when it
+      // finishes (success, error, or cancel). Sync GUI state accordingly so
+      // the port is visibly released and available for other features.
+      connected.value = false;
+      autoConnected.value = false;
+      appendLog(t('flash.log.disconnected'));
       usePortManagerStore().release(selectedSerialPort.value, 'flash');
     }
   }
