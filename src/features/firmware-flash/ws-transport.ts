@@ -7,10 +7,15 @@
 
 import type { FlashJobPayload, FlashProgressPayload } from './flash-tauri';
 import type { TauriSerialPortRow } from './serial-port-label';
+import { platform } from '../../platform';
 
 const WS_PORT = '9527';
 
 function wsUrl(): string {
+  // In VS Code webview, read the injected wsUrl (may include port-forwarded URL
+  // for Remote SSH). Fall back to localhost for plain web / dev mode.
+  const injected = platform.getWsUrl();
+  if (injected) return injected;
   const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1';
   return `ws://${host}:${WS_PORT}`;
 }
