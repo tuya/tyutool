@@ -9,6 +9,8 @@ import {
 import { chipManifest, rustPluginIdForChip } from '@/features/firmware-flash/chip-manifests';
 import { usePortManagerStore } from '@/stores/port-manager';
 import { type FlashJobPayload, type FlashProgressPayload, isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
+import { getRuntime } from '../runtime';
+import { platform } from '../platform';
 import {
   alignedExclusiveEraseRange4K,
   exclusiveEraseRangeNeeds4KAlignment,
@@ -307,6 +309,13 @@ export const useFlashStore = defineStore('flash', () => {
         }
       } catch {
         /* ignore */
+      }
+      return;
+    }
+    if (getRuntime() === 'vscode') {
+      const path = await platform.pickFile(crypto.randomUUID(), '.bin,.hex,.elf,.img');
+      if (path) {
+        flashSegments.value[index].firmwarePath = path;
       }
       return;
     }
