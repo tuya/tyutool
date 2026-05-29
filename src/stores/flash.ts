@@ -1,16 +1,23 @@
-import { computed, nextTick, ref, watch } from 'vue';
-import { i18n } from '@/i18n';
+import { computed, nextTick, ref, watch } from "vue";
+import { i18n } from "@/i18n";
 import {
   BAUD_RATE_OPTIONS,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
   SERIAL_PORT_OPTIONS,
-} from '@/features/firmware-flash/constants';
-import { chipManifest, rustPluginIdForChip } from '@/features/firmware-flash/chip-manifests';
-import { usePortManagerStore } from '@/stores/port-manager';
-import { type FlashJobPayload, type FlashProgressPayload, isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { getRuntime } from '../runtime';
-import { platform } from '../platform';
+} from "@/features/firmware-flash/constants";
+import {
+  chipManifest,
+  rustPluginIdForChip,
+} from "@/features/firmware-flash/chip-manifests";
+import { usePortManagerStore } from "@/stores/port-manager";
+import {
+  type FlashJobPayload,
+  type FlashProgressPayload,
+  isTauriRuntime,
+} from "@/features/firmware-flash/flash-tauri";
+import { getRuntime } from "../runtime";
+import { platform } from "../platform";
 import {
   alignedExclusiveEraseRange4K,
   exclusiveEraseRangeNeeds4KAlignment,
@@ -18,42 +25,52 @@ import {
   formatBigIntAddrHex,
   parseHexAddr,
   validateAddrRange,
-} from '@/features/firmware-flash/hex';
+} from "@/features/firmware-flash/hex";
 import {
   formatSerialPortLabel,
   tuyaDualSerialHoverTooltip,
   type SerialPortDropdownOption,
   type TauriSerialPortRow,
-} from '@/features/firmware-flash/serial-port-label';
-import { addTimestampSuffix, formatDuration } from '@/features/firmware-flash/utils';
-import type { ErasePresetKind, FlashPhase, FlashSegment, OpKind } from '@/features/firmware-flash/types';
-import { showConfirmDialog } from '@/composables/confirmDialog';
-import { APP_VERSION } from '@/config/app';
-import { rLog } from '@/utils/log';
-import { defineStore } from 'pinia';
-import { wsTransport } from '@/features/firmware-flash/ws-transport';
-import type { WsProgressEvent } from '@/features/firmware-flash/ws-transport';
+} from "@/features/firmware-flash/serial-port-label";
+import {
+  addTimestampSuffix,
+  formatDuration,
+} from "@/features/firmware-flash/utils";
+import type {
+  ErasePresetKind,
+  FlashPhase,
+  FlashSegment,
+  OpKind,
+} from "@/features/firmware-flash/types";
+import { showConfirmDialog } from "@/composables/confirmDialog";
+import { APP_VERSION } from "@/config/app";
+import { rLog } from "@/utils/log";
+import { defineStore } from "pinia";
+import { wsTransport } from "@/features/firmware-flash/ws-transport";
+import type { WsProgressEvent } from "@/features/firmware-flash/ws-transport";
 import {
   loadFlashWorkspaceFromStorage,
   saveFlashWorkspaceToStorage,
   WORKSPACE_VERSION,
   type FlashWorkspaceSerialized,
-} from '@/stores/flash-workspace';
-import { PHASE_STYLES, phaseKey } from '@/features/firmware-flash/phase-styles';
+} from "@/stores/flash-workspace";
+import { PHASE_STYLES, phaseKey } from "@/features/firmware-flash/phase-styles";
 
 /** Factory-unauthorized placeholder from TuyaOpen firmware (matches `authorize.rs`). */
-const AUTHORIZE_PLACEHOLDER_UUID = 'uuidxxxxxxxxxxxxxxxx';
+const AUTHORIZE_PLACEHOLDER_UUID = "uuidxxxxxxxxxxxxxxxx";
 
-function addrRangeMessage(err: NonNullable<ReturnType<typeof validateAddrRange>>): string {
+function addrRangeMessage(
+  err: NonNullable<ReturnType<typeof validateAddrRange>>,
+): string {
   const t = i18n.global.t;
-  if (err === 'invalid') {
-    return t('flash.err.addrInvalid');
+  if (err === "invalid") {
+    return t("flash.err.addrInvalid");
   }
-  return t('flash.err.startAfterEnd');
+  return t("flash.err.startAfterEnd");
 }
 
 function mapBackendUserMessage(raw: string | undefined): string {
-  return raw?.trim() ?? '';
+  return raw?.trim() ?? "";
 }
 
 function createDebounced(fn: () => void, ms: number): () => void {
@@ -69,7 +86,7 @@ function createDebounced(fn: () => void, ms: number): () => void {
   };
 }
 
-export const useFlashStore = defineStore('flash', () => {
+export const useFlashStore = defineStore("flash", () => {
   const t = i18n.global.t;
   const locale = i18n.global.locale;
 
@@ -77,21 +94,25 @@ export const useFlashStore = defineStore('flash', () => {
   const workspaceRestoreMuted = ref(false);
   let workspacePersistStarted = false;
 
-  const activeTab = ref<OpKind>('flash');
+  const activeTab = ref<OpKind>("flash");
   const connected = ref(false);
-  const selectedSerialPort = ref('');
-  const selectedBaudRate = ref<number>(chipManifest(DEFAULT_CHIP_ID).defaultBaudRate);
+  const selectedSerialPort = ref("");
+  const selectedBaudRate = ref<number>(
+    chipManifest(DEFAULT_CHIP_ID).defaultBaudRate,
+  );
   /** Baud rate for TuyaOpen UART authorization — independent of flash/erase/read baud. */
-  const selectedAuthBaudRate = ref<number>(chipManifest(DEFAULT_CHIP_ID).defaultAuthBaudRate);
+  const selectedAuthBaudRate = ref<number>(
+    chipManifest(DEFAULT_CHIP_ID).defaultAuthBaudRate,
+  );
   const selectedChipId = ref<string>(DEFAULT_CHIP_ID);
 
   const flashSegments = ref<FlashSegment[]>([
     {
       id: Math.random().toString(36).substring(2, 9),
-      firmwarePath: '',
+      firmwarePath: "",
       firmwareFile: null,
-      startAddr: '0x00000000',
-      endAddr: '0x00000000',
+      startAddr: "0x00000000",
+      endAddr: "0x00000000",
     },
   ]);
   const activeSegmentIndex = ref(0);
@@ -101,46 +122,48 @@ export const useFlashStore = defineStore('flash', () => {
 
   const flashStartAddr = computed({
     get: () => flashSegments.value[0].startAddr,
-    set: val => {
+    set: (val) => {
       flashSegments.value[0].startAddr = val;
     },
   });
   const flashEndAddr = computed({
     get: () => flashSegments.value[0].endAddr,
-    set: val => {
+    set: (val) => {
       flashSegments.value[0].endAddr = val;
     },
   });
   const firmwarePath = computed({
     get: () => flashSegments.value[0].firmwarePath,
-    set: val => {
+    set: (val) => {
       flashSegments.value[0].firmwarePath = val;
     },
   });
   const firmwareFile = computed({
     get: () => flashSegments.value[0].firmwareFile,
-    set: val => {
+    set: (val) => {
       flashSegments.value[0].firmwareFile = val;
     },
   });
 
-  const eraseStartAddr = ref('0x00000000');
-  const eraseEndAddr = ref('0x00000000');
-  const readStartAddr = ref('0x00000000');
+  const eraseStartAddr = ref("0x00000000");
+  const eraseEndAddr = ref("0x00000000");
+  const readStartAddr = ref("0x00000000");
   const readEndAddr = ref(chipManifest(DEFAULT_CHIP_ID).flashSize);
-  const readDir = ref('');
-  const readFileName = ref(`tyutool_read_${selectedChipId.value.toLowerCase()}.bin`);
+  const readDir = ref("");
+  const readFileName = ref(
+    `tyutool_read_${selectedChipId.value.toLowerCase()}.bin`,
+  );
   const readFileNameModified = ref(false);
-  const authorizeUuid = ref('');
-  const authorizeAuthKey = ref('');
+  const authorizeUuid = ref("");
+  const authorizeAuthKey = ref("");
   /** True while a read-only auth operation started by startAuthRead() is in flight. */
   const authOpIsRead = ref(false);
 
   const autoConnected = ref(false);
 
   const flashProgress = ref(0);
-  const flashPhase = ref<FlashPhase>('idle');
-  const flashMessage = ref('');
+  const flashPhase = ref<FlashPhase>("idle");
+  const flashMessage = ref("");
   const runningOp = ref<OpKind | null>(null);
 
   // Phase-aware progress tracking
@@ -153,10 +176,12 @@ export const useFlashStore = defineStore('flash', () => {
   let unlistenFlash: (() => void) | undefined;
   let operationStartTime: number | null = null;
 
-  const serialPortOptions = ref<SerialPortDropdownOption[]>(SERIAL_PORT_OPTIONS.map(p => ({ ...p })));
+  const serialPortOptions = ref<SerialPortDropdownOption[]>(
+    SERIAL_PORT_OPTIONS.map((p) => ({ ...p })),
+  );
 
   const logLines = ref<string[]>([
-    `[${t('flash.log.readyTag')}] ${t('flash.log.appInfo', { version: APP_VERSION })} — ${t('flash.log.waiting')}`,
+    `[${t("flash.log.readyTag")}] ${t("flash.log.appInfo", { version: APP_VERSION })} — ${t("flash.log.waiting")}`,
   ]);
   const logScrollRef = ref<HTMLDivElement | null>(null);
   const lockAutoScroll = ref(false);
@@ -177,7 +202,9 @@ export const useFlashStore = defineStore('flash', () => {
   function logOperationDuration(): void {
     if (operationStartTime !== null) {
       const elapsed = Date.now() - operationStartTime;
-      appendLog(t('flash.log.operationDuration', { duration: formatDuration(elapsed) }));
+      appendLog(
+        t("flash.log.operationDuration", { duration: formatDuration(elapsed) }),
+      );
       operationStartTime = null;
     }
   }
@@ -211,11 +238,11 @@ export const useFlashStore = defineStore('flash', () => {
     () => logLines.value.length,
     () => {
       void scrollLogToBottom();
-    }
+    },
   );
 
   // Auto-update readFileName, readEndAddr and baudRate when chip changes
-  watch(selectedChipId, newChipId => {
+  watch(selectedChipId, (newChipId) => {
     if (workspaceRestoreMuted.value) {
       return;
     }
@@ -227,8 +254,10 @@ export const useFlashStore = defineStore('flash', () => {
     selectedBaudRate.value = manifest.defaultBaudRate;
     selectedAuthBaudRate.value = manifest.defaultAuthBaudRate;
     const chipLabel = t(`flash.chips.${newChipId}`);
-    appendLog(t('flash.log.chipChanged', { chip: chipLabel }));
-    rLog.info(`[Flash] Chip changed to ${newChipId} (${chipLabel}), baud=${manifest.defaultBaudRate}`);
+    appendLog(t("flash.log.chipChanged", { chip: chipLabel }));
+    rLog.info(
+      `[Flash] Chip changed to ${newChipId} (${chipLabel}), baud=${manifest.defaultBaudRate}`,
+    );
   });
 
   function onReadFileNameInput(value: string): void {
@@ -239,24 +268,24 @@ export const useFlashStore = defineStore('flash', () => {
   const readFilePath = computed(() => {
     const dir = readDir.value.trim();
     const name = readFileName.value.trim();
-    if (!dir || !name) return '';
+    if (!dir || !name) return "";
     // Normalize: ensure exactly one separator between dir and name
-    const sep = dir.endsWith('/') || dir.endsWith('\\') ? '' : '/';
+    const sep = dir.endsWith("/") || dir.endsWith("\\") ? "" : "/";
     return `${dir}${sep}${name}`;
   });
 
   function clearLogs(): void {
     logLines.value = [];
-    appendLog(t('flash.log.cleared'));
+    appendLog(t("flash.log.cleared"));
   }
 
   async function copyLogs(): Promise<void> {
-    const text = logLines.value.join('\n');
+    const text = logLines.value.join("\n");
     try {
       await navigator.clipboard.writeText(text);
-      appendLog(t('flash.log.copied'));
+      appendLog(t("flash.log.copied"));
     } catch {
-      appendLog(t('flash.log.copyFailed'));
+      appendLog(t("flash.log.copyFailed"));
     }
   }
 
@@ -265,7 +294,7 @@ export const useFlashStore = defineStore('flash', () => {
     const startVal = parseHexAddr(seg.startAddr);
     const start = startVal !== null ? Number(startVal) : 0;
     const end = start + fileSize;
-    seg.endAddr = `0x${end.toString(16).toUpperCase().padStart(8, '0')}`;
+    seg.endAddr = `0x${end.toString(16).toUpperCase().padStart(8, "0")}`;
   }
 
   /** Default start/end for a new row: chain from previous segment's end (same value until a file sets the end). */
@@ -273,9 +302,9 @@ export const useFlashStore = defineStore('flash', () => {
     const prev = flashSegments.value[flashSegments.value.length - 1];
     const parsed = parseHexAddr(prev.endAddr);
     if (parsed === null) {
-      return { startAddr: '0x00000000', endAddr: '0x00000000' };
+      return { startAddr: "0x00000000", endAddr: "0x00000000" };
     }
-    const normalized = `0x${parsed.toString(16).toUpperCase().padStart(8, '0')}`;
+    const normalized = `0x${parsed.toString(16).toUpperCase().padStart(8, "0")}`;
     return { startAddr: normalized, endAddr: normalized };
   }
 
@@ -283,25 +312,29 @@ export const useFlashStore = defineStore('flash', () => {
     activeSegmentIndex.value = index;
     if (isTauriRuntime()) {
       try {
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const { dirname, homeDir } = await import('@tauri-apps/api/path');
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const { dirname, homeDir } = await import("@tauri-apps/api/path");
         const existingPath = flashSegments.value[index].firmwarePath.trim();
-        const defaultPath = existingPath ? await dirname(existingPath) : await homeDir();
+        const defaultPath = existingPath
+          ? await dirname(existingPath)
+          : await homeDir();
         const selected = await open({
           multiple: false,
           defaultPath,
           filters: [
             {
-              name: 'Firmware',
-              extensions: ['bin', 'hex', 'elf', 'img'],
+              name: "Firmware",
+              extensions: ["bin", "hex", "elf", "img"],
             },
           ],
         });
         if (selected !== null) {
           flashSegments.value[index].firmwarePath = selected;
           try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const size = await invoke<number>('get_file_size', { path: selected });
+            const { invoke } = await import("@tauri-apps/api/core");
+            const size = await invoke<number>("get_file_size", {
+              path: selected,
+            });
             updateFlashEndAddr(index, size);
           } catch {
             /* get_file_size not available, skip auto-calc */
@@ -312,10 +345,15 @@ export const useFlashStore = defineStore('flash', () => {
       }
       return;
     }
-    if (getRuntime() === 'vscode') {
-      const path = await platform.pickFile(crypto.randomUUID(), '.bin,.hex,.elf,.img');
-      if (path) {
-        flashSegments.value[index].firmwarePath = path;
+    if (getRuntime() === "vscode") {
+      const result = await platform.pickFile(
+        crypto.randomUUID(),
+        ".bin,.hex,.elf,.img",
+      );
+      if (result) {
+        flashSegments.value[index].firmwarePath = result.path;
+        flashSegments.value[index].firmwareFile = result.file;
+        if (result.file) updateFlashEndAddr(index, result.file.size);
       }
       return;
     }
@@ -327,12 +365,12 @@ export const useFlashStore = defineStore('flash', () => {
     const file = input.files?.[0];
     const index = activeSegmentIndex.value;
     const seg = flashSegments.value[index];
-    seg.firmwarePath = file ? file.name : '';
+    seg.firmwarePath = file ? file.name : "";
     seg.firmwareFile = file ?? null;
     if (file) {
       updateFlashEndAddr(index, file.size);
     }
-    input.value = '';
+    input.value = "";
   }
 
   function addSegment(): void {
@@ -340,24 +378,24 @@ export const useFlashStore = defineStore('flash', () => {
     const addrs = initialAddrsForNewSegment();
     flashSegments.value.push({
       id: Math.random().toString(36).substring(2, 9),
-      firmwarePath: '',
+      firmwarePath: "",
       firmwareFile: null,
       startAddr: addrs.startAddr,
       endAddr: addrs.endAddr,
     });
-    appendLog(t('flash.log.segmentAdded', { n: flashSegments.value.length }));
+    appendLog(t("flash.log.segmentAdded", { n: flashSegments.value.length }));
   }
 
   function removeSegment(index: number): void {
     if (index === 0 || flashSegments.value.length <= 1) return;
     flashSegments.value.splice(index, 1);
-    appendLog(t('flash.log.segmentRemoved', { n: index + 1 }));
+    appendLog(t("flash.log.segmentRemoved", { n: index + 1 }));
   }
 
   async function onPickReadDir(): Promise<void> {
     if (isTauriRuntime()) {
       try {
-        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import("@tauri-apps/plugin-dialog");
         const selected = await open({
           directory: true,
           multiple: false,
@@ -372,14 +410,14 @@ export const useFlashStore = defineStore('flash', () => {
     }
     // In web mode, read output is downloaded automatically via browser download trigger.
     // No directory selection is needed; inform the user.
-    appendLog(t('flash.log.browserReadNoDir'));
+    appendLog(t("flash.log.browserReadNoDir"));
   }
 
   async function cancelBackendFlash(): Promise<void> {
     if (isTauriRuntime()) {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('flash_cancel');
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("flash_cancel");
       } catch {
         /* ignore */
       }
@@ -397,11 +435,11 @@ export const useFlashStore = defineStore('flash', () => {
   }
 
   function handleFlashProgressPayload(p: FlashProgressPayload): void {
-    if (p.kind === 'job_summary') {
+    if (p.kind === "job_summary") {
       return;
     }
 
-    if (p.kind === 'percent') {
+    if (p.kind === "percent") {
       flashProgress.value = Math.min(100, Math.max(0, p.value));
       // Only update phase progress when we're in a registered phase
       if (currentBackendPhase.value !== null) {
@@ -412,7 +450,7 @@ export const useFlashStore = defineStore('flash', () => {
       return;
     }
 
-    if (p.kind === 'phase') {
+    if (p.kind === "phase") {
       const key = phaseKey(p.phase);
       if (key in PHASE_STYLES) {
         currentBackendPhase.value = key;
@@ -424,53 +462,53 @@ export const useFlashStore = defineStore('flash', () => {
       return;
     }
 
-    if (p.kind === 'milestone') {
+    if (p.kind === "milestone") {
       const m = p.milestone;
-      if (typeof m === 'object' && 'auth_read_complete' in m) {
+      if (typeof m === "object" && "auth_read_complete" in m) {
         const { uuid, authkey } = m.auth_read_complete;
         const copyText = `UUID:${uuid}\nAuthKey:${authkey}`;
         void showConfirmDialog({
-          title: t('flash.confirm.authReadTitle'),
-          message: t('flash.confirm.authReadBody', { uuid, authkey }),
-          kind: 'info',
-          extraActionLabel: t('flash.confirm.authReadCopyCmd'),
+          title: t("flash.confirm.authReadTitle"),
+          message: t("flash.confirm.authReadBody", { uuid, authkey }),
+          kind: "info",
+          extraActionLabel: t("flash.confirm.authReadCopyCmd"),
           onExtraAction: async () => {
             try {
               await navigator.clipboard.writeText(copyText);
-              appendLog(t('flash.log.authReadCopied'));
+              appendLog(t("flash.log.authReadCopied"));
             } catch {
-              appendLog(t('flash.log.copyFailed'));
+              appendLog(t("flash.log.copyFailed"));
             }
           },
-          okLabel: t('flash.confirm.authReadOk'),
+          okLabel: t("flash.confirm.authReadOk"),
           showCancel: false,
         });
-        appendLog(t('flash.log.authReadShown'));
+        appendLog(t("flash.log.authReadShown"));
         return;
       }
-      if (m === 'auth_read_empty') {
+      if (m === "auth_read_empty") {
         void showConfirmDialog({
-          title: t('flash.confirm.authReadEmptyTitle'),
-          message: t('flash.confirm.authReadEmptyBody'),
-          kind: 'warning',
-          okLabel: t('flash.confirm.authReadEmptyOk'),
+          title: t("flash.confirm.authReadEmptyTitle"),
+          message: t("flash.confirm.authReadEmptyBody"),
+          kind: "warning",
+          okLabel: t("flash.confirm.authReadEmptyOk"),
           showCancel: false,
         });
-        appendLog(t('flash.log.authReadEmpty'));
+        appendLog(t("flash.log.authReadEmpty"));
         return;
       }
-      const milestoneKey = typeof m === 'string' ? m : Object.keys(m)[0];
+      const milestoneKey = typeof m === "string" ? m : Object.keys(m)[0];
       const i18nKey = `flash.log.milestone.${milestoneKey}`;
       appendLog(i18n.global.te(i18nKey) ? t(i18nKey) : `[${milestoneKey}]`);
       return;
     }
 
-    if (p.kind === 'warning') {
+    if (p.kind === "warning") {
       appendLog(`⚠ ${p.message}`);
       return;
     }
 
-    if (p.kind === 'done') {
+    if (p.kind === "done") {
       cancelIndeterminateCheck();
       phaseIndeterminate.value = false;
       currentBackendPhase.value = null;
@@ -479,34 +517,38 @@ export const useFlashStore = defineStore('flash', () => {
       authOpIsRead.value = false;
 
       const result = p.result;
-      if ('ok' in result) {
-        flashPhase.value = 'success';
+      if ("ok" in result) {
+        flashPhase.value = "success";
         flashProgress.value = 100;
-        if (op === 'flash') {
-          flashMessage.value = t('flash.msg.flashDone');
-          appendLog(t('flash.log.verifyOk'));
-        } else if (op === 'erase') {
-          flashMessage.value = t('flash.msg.eraseDone');
-          appendLog(t('flash.log.eraseDoneLog'));
-        } else if (op === 'read') {
-          flashMessage.value = t('flash.msg.readDone');
-          appendLog(t('flash.log.readDoneLog'));
-        } else if (op === 'authorize') {
-          flashMessage.value = t('flash.msg.authDone');
-          appendLog(t('flash.log.authOkLog'));
+        if (op === "flash") {
+          flashMessage.value = t("flash.msg.flashDone");
+          appendLog(t("flash.log.verifyOk"));
+        } else if (op === "erase") {
+          flashMessage.value = t("flash.msg.eraseDone");
+          appendLog(t("flash.log.eraseDoneLog"));
+        } else if (op === "read") {
+          flashMessage.value = t("flash.msg.readDone");
+          appendLog(t("flash.log.readDoneLog"));
+        } else if (op === "authorize") {
+          flashMessage.value = t("flash.msg.authDone");
+          appendLog(t("flash.log.authOkLog"));
         }
-        rLog.info(`[Flash] Operation '${op}' completed in ${result.ok.elapsed_secs.toFixed(1)}s`);
-      } else if ('cancelled' in result) {
-        flashPhase.value = 'error';
-        flashMessage.value = t('flash.msg.cancelled', { fallback: 'Cancelled' });
+        rLog.info(
+          `[Flash] Operation '${op}' completed in ${result.ok.elapsed_secs.toFixed(1)}s`,
+        );
+      } else if ("cancelled" in result) {
+        flashPhase.value = "error";
+        flashMessage.value = t("flash.msg.cancelled", {
+          fallback: "Cancelled",
+        });
         rLog.info(`[Flash] Operation '${op}' cancelled`);
       } else {
-        flashPhase.value = 'error';
+        flashPhase.value = "error";
         const displayMsg = result.err.message
           ? mapBackendUserMessage(result.err.message)
-          : t('flash.err.withMsg', { msg: 'unknown' });
+          : t("flash.err.withMsg", { msg: "unknown" });
         flashMessage.value = displayMsg;
-        appendLog(t('flash.err.withMsg', { msg: displayMsg }));
+        appendLog(t("flash.err.withMsg", { msg: displayMsg }));
         rLog.error(`[Flash] Operation '${op}' failed: ${flashMessage.value}`);
       }
       logOperationDuration();
@@ -515,8 +557,8 @@ export const useFlashStore = defineStore('flash', () => {
       // the port is visibly released and available for other features.
       connected.value = false;
       autoConnected.value = false;
-      appendLog(t('flash.log.disconnected'));
-      usePortManagerStore().release(selectedSerialPort.value, 'flash');
+      appendLog(t("flash.log.disconnected"));
+      usePortManagerStore().release(selectedSerialPort.value, "flash");
     }
   }
 
@@ -526,11 +568,11 @@ export const useFlashStore = defineStore('flash', () => {
   async function startAuthRead(): Promise<void> {
     const savedUuid = authorizeUuid.value;
     const savedKey = authorizeAuthKey.value;
-    authorizeUuid.value = '';
-    authorizeAuthKey.value = '';
+    authorizeUuid.value = "";
+    authorizeAuthKey.value = "";
     authOpIsRead.value = true;
     try {
-      await startOperation('authorize');
+      await startOperation("authorize");
     } finally {
       authorizeUuid.value = savedUuid;
       authorizeAuthKey.value = savedKey;
@@ -542,10 +584,13 @@ export const useFlashStore = defineStore('flash', () => {
     if (unlistenFlash || !isTauriRuntime()) {
       return;
     }
-    const { listen } = await import('@tauri-apps/api/event');
-    unlistenFlash = await listen<FlashProgressPayload>('flash-progress', ev => {
-      handleFlashProgressPayload(ev.payload);
-    });
+    const { listen } = await import("@tauri-apps/api/event");
+    unlistenFlash = await listen<FlashProgressPayload>(
+      "flash-progress",
+      (ev) => {
+        handleFlashProgressPayload(ev.payload);
+      },
+    );
   }
 
   /** Fingerprint of last scan result to suppress duplicate log lines. `undefined` = never scanned yet (distinct from empty list `''`). */
@@ -554,10 +599,17 @@ export const useFlashStore = defineStore('flash', () => {
   async function refreshDevice(): Promise<void> {
     if (isTauriRuntime()) {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const ports = await invoke<TauriSerialPortRow[]>('list_serial_ports_cmd');
-        serialPortOptions.value = ports.map(p => {
-          const tip = tuyaDualSerialHoverTooltip(p.usbVid, p.usbPid, p.usbInterface, t);
+        const { invoke } = await import("@tauri-apps/api/core");
+        const ports = await invoke<TauriSerialPortRow[]>(
+          "list_serial_ports_cmd",
+        );
+        serialPortOptions.value = ports.map((p) => {
+          const tip = tuyaDualSerialHoverTooltip(
+            p.usbVid,
+            p.usbPid,
+            p.usbInterface,
+            t,
+          );
           const row: SerialPortDropdownOption = {
             value: p.path,
             label: formatSerialPortLabel(p, t),
@@ -569,35 +621,37 @@ export const useFlashStore = defineStore('flash', () => {
         });
 
         // Fingerprint includes role/interface so label updates when metadata changes
-        const fingerprint = ports.map(p => `${p.path}:${p.portRole ?? ''}:${p.usbInterface ?? ''}`).join(',');
+        const fingerprint = ports
+          .map((p) => `${p.path}:${p.portRole ?? ""}:${p.usbInterface ?? ""}`)
+          .join(",");
 
         if (ports.length > 0) {
-          const exists = ports.some(p => p.path === selectedSerialPort.value);
+          const exists = ports.some((p) => p.path === selectedSerialPort.value);
           if (!exists) {
             selectedSerialPort.value = ports[0].path;
           }
           // Only log when the port list actually changed
           if (fingerprint !== lastScanFingerprint) {
             appendLog(
-              t('flash.log.portsFound', {
+              t("flash.log.portsFound", {
                 list: serialPortOptions.value
                   .map((x: SerialPortDropdownOption) => x.label)
-                  .join(locale.value === 'zh-CN' ? '、' : ', '),
-              })
+                  .join(locale.value === "zh-CN" ? "、" : ", "),
+              }),
             );
           }
         } else {
-          selectedSerialPort.value = '';
+          selectedSerialPort.value = "";
           connected.value = false;
           if (fingerprint !== lastScanFingerprint) {
-            appendLog(t('flash.log.noPortsFound'));
+            appendLog(t("flash.log.noPortsFound"));
           }
         }
         lastScanFingerprint = fingerprint;
       } catch {
-        appendLog(t('flash.log.portsListFailed'));
+        appendLog(t("flash.log.portsListFailed"));
         serialPortOptions.value = [];
-        selectedSerialPort.value = '';
+        selectedSerialPort.value = "";
         connected.value = false;
         lastScanFingerprint = undefined;
       }
@@ -605,8 +659,13 @@ export const useFlashStore = defineStore('flash', () => {
       // Web mode: ask the local serve process for ports
       try {
         const ports = await wsTransport.listPorts();
-        serialPortOptions.value = ports.map(p => {
-          const tip = tuyaDualSerialHoverTooltip(p.usbVid, p.usbPid, p.usbInterface, t);
+        serialPortOptions.value = ports.map((p) => {
+          const tip = tuyaDualSerialHoverTooltip(
+            p.usbVid,
+            p.usbPid,
+            p.usbInterface,
+            t,
+          );
           const row: SerialPortDropdownOption = {
             value: p.path,
             label: formatSerialPortLabel(p, t),
@@ -616,32 +675,34 @@ export const useFlashStore = defineStore('flash', () => {
           }
           return row;
         });
-        const fingerprint = ports.map(p => `${p.path}:${p.portRole ?? ''}:${p.usbInterface ?? ''}`).join(',');
+        const fingerprint = ports
+          .map((p) => `${p.path}:${p.portRole ?? ""}:${p.usbInterface ?? ""}`)
+          .join(",");
         if (ports.length > 0) {
-          const exists = ports.some(p => p.path === selectedSerialPort.value);
+          const exists = ports.some((p) => p.path === selectedSerialPort.value);
           if (!exists) selectedSerialPort.value = ports[0].path;
           if (fingerprint !== lastScanFingerprint) {
             appendLog(
-              t('flash.log.portsFound', {
+              t("flash.log.portsFound", {
                 list: serialPortOptions.value
                   .map((x: SerialPortDropdownOption) => x.label)
-                  .join(locale.value === 'zh-CN' ? '、' : ', '),
-              })
+                  .join(locale.value === "zh-CN" ? "、" : ", "),
+              }),
             );
           }
         } else {
-          selectedSerialPort.value = '';
+          selectedSerialPort.value = "";
           connected.value = false;
           if (fingerprint !== lastScanFingerprint) {
-            appendLog(t('flash.log.noPortsFound'));
-            appendLog(t('flash.log.noPortsFoundWebServeHint'));
+            appendLog(t("flash.log.noPortsFound"));
+            appendLog(t("flash.log.noPortsFoundWebServeHint"));
           }
         }
         lastScanFingerprint = fingerprint;
       } catch {
-        appendLog('WS: 无法连接到 tyutool-cli serve (ws://127.0.0.1:9527)');
+        appendLog("WS: 无法连接到 tyutool-cli serve (ws://127.0.0.1:9527)");
         serialPortOptions.value = [];
-        selectedSerialPort.value = '';
+        selectedSerialPort.value = "";
         connected.value = false;
         lastScanFingerprint = undefined;
       }
@@ -650,40 +711,51 @@ export const useFlashStore = defineStore('flash', () => {
 
   async function connect(): Promise<void> {
     if (!selectedSerialPort.value) {
-      appendLog(t('flash.log.noPortsFound'));
+      appendLog(t("flash.log.noPortsFound"));
       return;
     }
     if (isTauriRuntime()) {
       try {
-        const { invoke } = await import('@tauri-apps/api/core');
+        const { invoke } = await import("@tauri-apps/api/core");
         const result = await invoke<{
           available: boolean;
           errorMessage?: string | null;
           processInfo?: string | null;
           killHint?: string | null;
-        }>('check_port_available_cmd', { port: selectedSerialPort.value });
+        }>("check_port_available_cmd", { port: selectedSerialPort.value });
 
         if (!result.available) {
-          appendLog(t('flash.log.portBusy', { port: selectedSerialPort.value }));
-          if (result.errorMessage) appendLog(t('flash.log.portBusyDetail', { msg: result.errorMessage }));
-          if (result.processInfo) appendLog(t('flash.log.portBusyProcess', { info: result.processInfo }));
-          if (result.killHint) appendLog(t('flash.log.portBusyKillHint', { cmd: result.killHint }));
+          appendLog(
+            t("flash.log.portBusy", { port: selectedSerialPort.value }),
+          );
+          if (result.errorMessage)
+            appendLog(
+              t("flash.log.portBusyDetail", { msg: result.errorMessage }),
+            );
+          if (result.processInfo)
+            appendLog(
+              t("flash.log.portBusyProcess", { info: result.processInfo }),
+            );
+          if (result.killHint)
+            appendLog(
+              t("flash.log.portBusyKillHint", { cmd: result.killHint }),
+            );
           return;
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        appendLog(t('flash.log.portCheckFailed', { msg }));
+        appendLog(t("flash.log.portCheckFailed", { msg }));
         // Continue — let the real operation fail if there's really a problem
       }
     }
     connected.value = true;
     autoConnected.value = false;
-    appendLog(t('flash.log.connected'));
+    appendLog(t("flash.log.connected"));
     rLog.info(`[Flash] Connected to port: ${selectedSerialPort.value}`);
 
     const pm = usePortManagerStore();
     const outcome = await pm.acquire({
-      id: 'flash',
+      id: "flash",
       port: selectedSerialPort.value,
       onReleaseRequest: async () => false, // flash never yields mid-operation
       onReleased: () => {
@@ -691,9 +763,9 @@ export const useFlashStore = defineStore('flash', () => {
         autoConnected.value = false;
       },
     });
-    if (outcome === 'denied') {
+    if (outcome === "denied") {
       connected.value = false;
-      appendLog(t('flash.log.portBusy', { port: selectedSerialPort.value }));
+      appendLog(t("flash.log.portBusy", { port: selectedSerialPort.value }));
       return;
     }
   }
@@ -703,21 +775,21 @@ export const useFlashStore = defineStore('flash', () => {
       // Cancel the running operation before disconnecting
       stopFlash();
       runningOp.value = null;
-      flashPhase.value = 'idle';
+      flashPhase.value = "idle";
       flashProgress.value = 0;
       phaseProgress.value = 0;
       currentBackendPhase.value = null;
       phaseIndeterminate.value = false;
       cancelIndeterminateCheck();
-      flashMessage.value = '';
-      appendLog(t('flash.log.operationCancelled'));
-      rLog.info('[Flash] Operation cancelled by user');
+      flashMessage.value = "";
+      appendLog(t("flash.log.operationCancelled"));
+      rLog.info("[Flash] Operation cancelled by user");
     }
     rLog.info(`[Flash] Disconnected from port: ${selectedSerialPort.value}`);
     connected.value = false;
     autoConnected.value = false;
-    appendLog(t('flash.log.disconnected'));
-    usePortManagerStore().release(selectedSerialPort.value, 'flash');
+    appendLog(t("flash.log.disconnected"));
+    usePortManagerStore().release(selectedSerialPort.value, "flash");
   }
 
   async function deviceReset(): Promise<void> {
@@ -727,8 +799,8 @@ export const useFlashStore = defineStore('flash', () => {
     const chipId = rustPluginIdForChip(selectedChipId.value);
     try {
       if (isTauriRuntime()) {
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('device_reset_cmd', {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("device_reset_cmd", {
           args: {
             port: selectedSerialPort.value,
             chipId,
@@ -737,14 +809,18 @@ export const useFlashStore = defineStore('flash', () => {
       } else {
         await wsTransport.deviceReset(selectedSerialPort.value, chipId);
       }
-      appendLog(t('flash.log.deviceResetOk', { port: selectedSerialPort.value }));
-      rLog.info(`[Flash] Device reset (DTR/RTS) on ${selectedSerialPort.value}`);
+      appendLog(
+        t("flash.log.deviceResetOk", { port: selectedSerialPort.value }),
+      );
+      rLog.info(
+        `[Flash] Device reset (DTR/RTS) on ${selectedSerialPort.value}`,
+      );
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
-      if (raw.includes('unknown variant') && raw.includes('device_reset')) {
-        appendLog(t('flash.log.deviceResetServeOutdated'));
+      if (raw.includes("unknown variant") && raw.includes("device_reset")) {
+        appendLog(t("flash.log.deviceResetServeOutdated"));
       } else {
-        appendLog(t('flash.log.deviceResetFailed', { msg: raw }));
+        appendLog(t("flash.log.deviceResetFailed", { msg: raw }));
       }
       rLog.warn(`[Flash] Device reset failed: ${raw}`);
     }
@@ -752,16 +828,16 @@ export const useFlashStore = defineStore('flash', () => {
 
   function opTitle(kind: OpKind): string {
     switch (kind) {
-      case 'flash':
-        return t('flash.tabs.flash');
-      case 'erase':
-        return t('flash.tabs.erase');
-      case 'read':
-        return t('flash.tabs.read');
-      case 'authorize':
-        return t('flash.tabs.authorize');
+      case "flash":
+        return t("flash.tabs.flash");
+      case "erase":
+        return t("flash.tabs.erase");
+      case "read":
+        return t("flash.tabs.read");
+      case "authorize":
+        return t("flash.tabs.authorize");
       default:
-        return '';
+        return "";
     }
   }
 
@@ -771,43 +847,59 @@ export const useFlashStore = defineStore('flash', () => {
       mode: kind,
       chipId,
       port: selectedSerialPort.value,
-      baudRate: kind === 'authorize' ? selectedAuthBaudRate.value : selectedBaudRate.value,
-      flashStartHex: kind === 'flash' ? formatAddrHex(flashStartAddr.value) : null,
-      flashEndHex: kind === 'flash' ? formatAddrHex(flashEndAddr.value) : null,
-      eraseStartHex: kind === 'erase' ? formatAddrHex(eraseStartAddr.value) : null,
-      eraseEndHex: kind === 'erase' ? formatAddrHex(eraseEndAddr.value) : null,
-      readStartHex: kind === 'read' ? formatAddrHex(readStartAddr.value) : null,
-      readEndHex: kind === 'read' ? formatAddrHex(readEndAddr.value) : null,
-      readFilePath: kind === 'read' && readFilePath.value.trim() ? readFilePath.value.trim() : null,
-      firmwarePath: kind === 'flash' && firmwarePath.value.trim() ? firmwarePath.value.trim() : null,
+      baudRate:
+        kind === "authorize"
+          ? selectedAuthBaudRate.value
+          : selectedBaudRate.value,
+      flashStartHex:
+        kind === "flash" ? formatAddrHex(flashStartAddr.value) : null,
+      flashEndHex: kind === "flash" ? formatAddrHex(flashEndAddr.value) : null,
+      eraseStartHex:
+        kind === "erase" ? formatAddrHex(eraseStartAddr.value) : null,
+      eraseEndHex: kind === "erase" ? formatAddrHex(eraseEndAddr.value) : null,
+      readStartHex: kind === "read" ? formatAddrHex(readStartAddr.value) : null,
+      readEndHex: kind === "read" ? formatAddrHex(readEndAddr.value) : null,
+      readFilePath:
+        kind === "read" && readFilePath.value.trim()
+          ? readFilePath.value.trim()
+          : null,
+      firmwarePath:
+        kind === "flash" && firmwarePath.value.trim()
+          ? firmwarePath.value.trim()
+          : null,
       segments:
-        kind === 'flash'
-          ? flashSegments.value.map(s => ({
+        kind === "flash"
+          ? flashSegments.value.map((s) => ({
               firmwarePath: s.firmwarePath,
               startAddr: formatAddrHex(s.startAddr),
               endAddr: formatAddrHex(s.endAddr),
             }))
           : null,
-      authorizeUuid: kind === 'authorize' ? authorizeUuid.value.trim() || null : null,
-      authorizeKey: kind === 'authorize' ? authorizeAuthKey.value.trim() || null : null,
+      authorizeUuid:
+        kind === "authorize" ? authorizeUuid.value.trim() || null : null,
+      authorizeKey:
+        kind === "authorize" ? authorizeAuthKey.value.trim() || null : null,
     };
   }
 
   async function startOperationTauri(kind: OpKind): Promise<void> {
     await ensureFlashListener();
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { invoke } = await import("@tauri-apps/api/core");
     const job = buildFlashJob(kind);
-    await invoke('flash_run', { job });
+    await invoke("flash_run", { job });
   }
 
   async function startOperationWs(kind: OpKind): Promise<void> {
     const job = buildFlashJob(kind);
 
     // For flash mode, send all File objects; server decodes and uses temp paths
-    const filesToUpload = kind === 'flash' ? flashSegments.value.map(s => s.firmwareFile) : [firmwareFile.value];
+    const filesToUpload =
+      kind === "flash"
+        ? flashSegments.value.map((s) => s.firmwareFile)
+        : [firmwareFile.value];
 
     // For read mode in web, the server saves to a temp path and returns file_content
-    if (kind === 'read') {
+    if (kind === "read") {
       job.readFilePath = null; // server uses temp path
     }
 
@@ -816,20 +908,26 @@ export const useFlashStore = defineStore('flash', () => {
 
       // If server sent a file_content message (read mode), trigger browser download
       if (ev.fileContent) {
-        triggerBrowserDownload(ev.fileContent.content, readFileName.value || ev.fileContent.name);
+        triggerBrowserDownload(
+          ev.fileContent.content,
+          readFileName.value || ev.fileContent.name,
+        );
       }
     });
   }
 
-  function triggerBrowserDownload(base64Content: string, filename: string): void {
+  function triggerBrowserDownload(
+    base64Content: string,
+    filename: string,
+  ): void {
     const binary = atob(base64Content);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     a.click();
@@ -847,193 +945,205 @@ export const useFlashStore = defineStore('flash', () => {
     eraseStartAddr.value = preset.start;
     eraseEndAddr.value = preset.end;
     const labelKey =
-      kind === 'authInfo'
-        ? 'flash.eraseAuthInfo'
-        : kind === 'fullChipNoRf'
-          ? 'flash.eraseFullChipNoRf'
-          : 'flash.eraseFullChip';
+      kind === "authInfo"
+        ? "flash.eraseAuthInfo"
+        : kind === "fullChipNoRf"
+          ? "flash.eraseFullChipNoRf"
+          : "flash.eraseFullChip";
     appendLog(
-      t('flash.log.erasePresetApplied', {
+      t("flash.log.erasePresetApplied", {
         chip: selectedChipLabel.value,
         label: t(labelKey),
         start: preset.start,
         end: preset.end,
-      })
+      }),
     );
   }
 
   async function startOperation(kind: OpKind): Promise<void> {
-    if (flashPhase.value === 'running') {
+    if (flashPhase.value === "running") {
       return;
     }
 
     // ── 1. Input validation ────────────────────────────────────────
-    if (kind === 'flash') {
-      const anyEmpty = flashSegments.value.some(s => !s.firmwarePath.trim());
+    if (kind === "flash") {
+      const anyEmpty = flashSegments.value.some((s) => !s.firmwarePath.trim());
       if (anyEmpty) {
-        flashMessage.value = t('flash.err.selectFirmware');
-        flashPhase.value = 'error';
-        appendLog(t('flash.err.selectFirmwareLog'));
+        flashMessage.value = t("flash.err.selectFirmware");
+        flashPhase.value = "error";
+        appendLog(t("flash.err.selectFirmwareLog"));
         return;
       }
     }
-    if (kind === 'read' && !readDir.value.trim() && isTauriRuntime()) {
-      flashMessage.value = t('flash.err.selectReadDir');
-      flashPhase.value = 'error';
-      appendLog(t('flash.err.selectReadDirLog'));
+    if (kind === "read" && !readDir.value.trim() && isTauriRuntime()) {
+      flashMessage.value = t("flash.err.selectReadDir");
+      flashPhase.value = "error";
+      appendLog(t("flash.err.selectReadDirLog"));
       return;
     }
-    if (kind === 'read' && !readFileName.value.trim()) {
-      flashMessage.value = t('flash.err.selectReadFileName');
-      flashPhase.value = 'error';
-      appendLog(t('flash.err.selectReadFileNameLog'));
+    if (kind === "read" && !readFileName.value.trim()) {
+      flashMessage.value = t("flash.err.selectReadFileName");
+      flashPhase.value = "error";
+      appendLog(t("flash.err.selectReadFileNameLog"));
       return;
     }
-    if (kind === 'authorize') {
+    if (kind === "authorize") {
       const hasUuid = !!authorizeUuid.value.trim();
       const hasKey = !!authorizeAuthKey.value.trim();
       if (hasUuid !== hasKey) {
-        flashMessage.value = t('flash.err.fillAuthLog');
-        flashPhase.value = 'error';
-        appendLog(t('flash.err.fillAuthLog'));
+        flashMessage.value = t("flash.err.fillAuthLog");
+        flashPhase.value = "error";
+        appendLog(t("flash.err.fillAuthLog"));
         return;
       }
       if (hasUuid && authorizeUuid.value.trim().length !== 20) {
-        const msg = t('flash.err.authUuidLen');
+        const msg = t("flash.err.authUuidLen");
         flashMessage.value = msg;
-        flashPhase.value = 'error';
-        appendLog(t('flash.err.withMsg', { msg }));
+        flashPhase.value = "error";
+        appendLog(t("flash.err.withMsg", { msg }));
         return;
       }
       if (hasKey && authorizeAuthKey.value.trim().length !== 32) {
-        const msg = t('flash.err.authKeyLen');
+        const msg = t("flash.err.authKeyLen");
         flashMessage.value = msg;
-        flashPhase.value = 'error';
-        appendLog(t('flash.err.withMsg', { msg }));
+        flashPhase.value = "error";
+        appendLog(t("flash.err.withMsg", { msg }));
         return;
       }
     }
     if (!selectedSerialPort.value) {
-      flashMessage.value = t('flash.err.deviceDisconnected');
-      flashPhase.value = 'error';
-      appendLog(t('flash.err.deviceDisconnectedLog'));
+      flashMessage.value = t("flash.err.deviceDisconnected");
+      flashPhase.value = "error";
+      appendLog(t("flash.err.deviceDisconnectedLog"));
       return;
     }
 
-    if (kind === 'flash') {
+    if (kind === "flash") {
       for (let i = 0; i < flashSegments.value.length; i++) {
         const seg = flashSegments.value[i];
         const err = validateAddrRange(seg.startAddr, seg.endAddr);
         if (err) {
-          const msg = `${t('flash.segment')} ${i + 1}: ${addrRangeMessage(err)}`;
+          const msg = `${t("flash.segment")} ${i + 1}: ${addrRangeMessage(err)}`;
           flashMessage.value = msg;
-          flashPhase.value = 'error';
-          appendLog(t('flash.err.withMsg', { msg }));
+          flashPhase.value = "error";
+          appendLog(t("flash.err.withMsg", { msg }));
           return;
         }
       }
     }
-    if (kind === 'erase') {
+    if (kind === "erase") {
       const err = validateAddrRange(eraseStartAddr.value, eraseEndAddr.value);
       if (err) {
         const msg = addrRangeMessage(err);
         flashMessage.value = msg;
-        flashPhase.value = 'error';
-        appendLog(t('flash.err.withMsg', { msg }));
+        flashPhase.value = "error";
+        appendLog(t("flash.err.withMsg", { msg }));
         return;
       }
     }
-    if (kind === 'read') {
+    if (kind === "read") {
       const err = validateAddrRange(readStartAddr.value, readEndAddr.value);
       if (err) {
         const msg = addrRangeMessage(err);
         flashMessage.value = msg;
-        flashPhase.value = 'error';
-        appendLog(t('flash.err.withMsg', { msg }));
+        flashPhase.value = "error";
+        appendLog(t("flash.err.withMsg", { msg }));
         return;
       }
     }
 
     // ── 2. Erase confirmation dialog ───────────────────────────────
-    if (kind === 'erase') {
+    if (kind === "erase") {
       const start = formatAddrHex(eraseStartAddr.value);
       const end = formatAddrHex(eraseEndAddr.value);
       const chip = selectedChipLabel.value;
 
-      let confirmMsg = t('flash.confirm.eraseBody', { chip, start, end });
-      let okLabel = t('flash.confirm.eraseOk');
+      let confirmMsg = t("flash.confirm.eraseBody", { chip, start, end });
+      let okLabel = t("flash.confirm.eraseOk");
 
       if (chipManifest(selectedChipId.value).eraseRequires4KAlignment) {
         const sa = parseHexAddr(eraseStartAddr.value);
         const ea = parseHexAddr(eraseEndAddr.value);
-        if (sa !== null && ea !== null && exclusiveEraseRangeNeeds4KAlignment(sa, ea)) {
-          const { alignedStart, alignedEndExclusive } = alignedExclusiveEraseRange4K(sa, ea);
-          confirmMsg = t('flash.confirm.eraseBodyMisaligned4k', {
+        if (
+          sa !== null &&
+          ea !== null &&
+          exclusiveEraseRangeNeeds4KAlignment(sa, ea)
+        ) {
+          const { alignedStart, alignedEndExclusive } =
+            alignedExclusiveEraseRange4K(sa, ea);
+          confirmMsg = t("flash.confirm.eraseBodyMisaligned4k", {
             chip,
             start,
             end,
-            sectorHex: '0x1000',
+            sectorHex: "0x1000",
             alignedStart: formatBigIntAddrHex(alignedStart),
             alignedEnd: formatBigIntAddrHex(alignedEndExclusive),
           });
-          okLabel = t('flash.confirm.eraseOkAlign');
+          okLabel = t("flash.confirm.eraseOkAlign");
         }
       }
 
       const confirmed = await showConfirmDialog({
-        title: t('flash.confirm.eraseTitle'),
+        title: t("flash.confirm.eraseTitle"),
         message: confirmMsg,
-        kind: 'warning',
+        kind: "warning",
         okLabel,
-        cancelLabel: t('flash.confirm.eraseCancel'),
+        cancelLabel: t("flash.confirm.eraseCancel"),
       });
 
       if (!confirmed) {
-        appendLog(t('flash.log.eraseCancelled'));
+        appendLog(t("flash.log.eraseCancelled"));
         return;
       }
 
       if (chipManifest(selectedChipId.value).eraseRequires4KAlignment) {
         const sa = parseHexAddr(eraseStartAddr.value);
         const ea = parseHexAddr(eraseEndAddr.value);
-        if (sa !== null && ea !== null && exclusiveEraseRangeNeeds4KAlignment(sa, ea)) {
-          const { alignedStart, alignedEndExclusive } = alignedExclusiveEraseRange4K(sa, ea);
+        if (
+          sa !== null &&
+          ea !== null &&
+          exclusiveEraseRangeNeeds4KAlignment(sa, ea)
+        ) {
+          const { alignedStart, alignedEndExclusive } =
+            alignedExclusiveEraseRange4K(sa, ea);
           eraseStartAddr.value = formatBigIntAddrHex(alignedStart);
           eraseEndAddr.value = formatBigIntAddrHex(alignedEndExclusive);
           appendLog(
-            t('flash.log.eraseRangeAligned', {
+            t("flash.log.eraseRangeAligned", {
               fromStart: start,
               fromEnd: end,
               toStart: eraseStartAddr.value,
               toEnd: eraseEndAddr.value,
-            })
+            }),
           );
         }
       }
     }
 
     // ── 3. Read file existence check ───────────────────────────────
-    if (kind === 'read' && isTauriRuntime()) {
+    if (kind === "read" && isTauriRuntime()) {
       try {
         const fullPath = readFilePath.value;
-        const { invoke } = await import('@tauri-apps/api/core');
-        const exists = await invoke<boolean>('check_file_exists', {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const exists = await invoke<boolean>("check_file_exists", {
           path: fullPath,
         });
         if (exists) {
           const overwrite = await showConfirmDialog({
-            title: t('flash.confirm.readFileExistsTitle'),
-            message: t('flash.confirm.readFileExistsBody', { path: fullPath }),
-            kind: 'warning',
-            okLabel: t('flash.confirm.readOverwrite'),
-            cancelLabel: t('flash.confirm.readTimestamp'),
+            title: t("flash.confirm.readFileExistsTitle"),
+            message: t("flash.confirm.readFileExistsBody", { path: fullPath }),
+            kind: "warning",
+            okLabel: t("flash.confirm.readOverwrite"),
+            cancelLabel: t("flash.confirm.readTimestamp"),
           });
           if (overwrite) {
-            appendLog(t('flash.log.readOverwriting', { path: fullPath }));
+            appendLog(t("flash.log.readOverwriting", { path: fullPath }));
           } else {
             readFileName.value = addTimestampSuffix(readFileName.value.trim());
             readFileNameModified.value = true;
-            appendLog(t('flash.log.readTimestamped', { path: readFilePath.value }));
+            appendLog(
+              t("flash.log.readTimestamped", { path: readFilePath.value }),
+            );
           }
         }
       } catch {
@@ -1042,7 +1152,7 @@ export const useFlashStore = defineStore('flash', () => {
     }
 
     // ── 4. Commit to the operation — gives immediate visual feedback ──
-    flashPhase.value = 'running';
+    flashPhase.value = "running";
     operationStartTime = Date.now();
     runningOp.value = kind;
     flashProgress.value = 0;
@@ -1050,16 +1160,18 @@ export const useFlashStore = defineStore('flash', () => {
     currentBackendPhase.value = null;
     phaseIndeterminate.value = false;
     cancelIndeterminateCheck();
-    flashMessage.value = '';
+    flashMessage.value = "";
 
     // ── 4b. Auto-connect if not manually connected ─────────────────
     if (!connected.value) {
-      appendLog(t('flash.log.autoConnecting', { port: selectedSerialPort.value }));
+      appendLog(
+        t("flash.log.autoConnecting", { port: selectedSerialPort.value }),
+      );
       await connect();
       if (!connected.value) {
         // connect() failed (port busy etc.) — error already logged
-        flashMessage.value = t('flash.err.portUnavailable');
-        flashPhase.value = 'error';
+        flashMessage.value = t("flash.err.portUnavailable");
+        flashPhase.value = "error";
         runningOp.value = null;
         return;
       }
@@ -1067,42 +1179,55 @@ export const useFlashStore = defineStore('flash', () => {
     }
 
     // ── 4b. Authorize write: probe device auth in UI, confirm overwrite if different ──
-    if (kind === 'authorize' && authorizeUuid.value.trim() && authorizeAuthKey.value.trim() && !authOpIsRead.value) {
+    if (
+      kind === "authorize" &&
+      authorizeUuid.value.trim() &&
+      authorizeAuthKey.value.trim() &&
+      !authOpIsRead.value
+    ) {
       const nu = authorizeUuid.value.trim();
       const nk = authorizeAuthKey.value.trim();
       try {
         let existing: { uuid: string; authkey: string } | null = null;
         if (isTauriRuntime()) {
-          const { invoke } = await import('@tauri-apps/api/core');
-          existing = await invoke<{ uuid: string; authkey: string } | null>('authorize_probe_cmd', {
-            port: selectedSerialPort.value,
-          });
+          const { invoke } = await import("@tauri-apps/api/core");
+          existing = await invoke<{ uuid: string; authkey: string } | null>(
+            "authorize_probe_cmd",
+            {
+              port: selectedSerialPort.value,
+            },
+          );
         } else {
           existing = await wsTransport.authorizeProbe(
             selectedSerialPort.value,
             rustPluginIdForChip(selectedChipId.value),
-            selectedAuthBaudRate.value
+            selectedAuthBaudRate.value,
           );
         }
         if (existing) {
           const eu = existing.uuid.trim();
           const ek = existing.authkey.trim();
-          if (eu && ek && eu !== AUTHORIZE_PLACEHOLDER_UUID && (eu !== nu || ek !== nk)) {
+          if (
+            eu &&
+            ek &&
+            eu !== AUTHORIZE_PLACEHOLDER_UUID &&
+            (eu !== nu || ek !== nk)
+          ) {
             const confirmed = await showConfirmDialog({
-              title: t('flash.confirm.authOverwriteTitle'),
-              message: t('flash.confirm.authOverwriteBody', {
+              title: t("flash.confirm.authOverwriteTitle"),
+              message: t("flash.confirm.authOverwriteBody", {
                 existingUuid: eu,
                 existingAuthkey: ek,
                 newUuid: nu,
                 newAuthkey: nk,
               }),
-              kind: 'warning',
-              okLabel: t('flash.confirm.authOverwriteOk'),
-              cancelLabel: t('flash.confirm.authOverwriteCancel'),
+              kind: "warning",
+              okLabel: t("flash.confirm.authOverwriteOk"),
+              cancelLabel: t("flash.confirm.authOverwriteCancel"),
             });
             if (!confirmed) {
-              appendLog(t('flash.log.authOverwriteCancelled'));
-              flashPhase.value = 'idle';
+              appendLog(t("flash.log.authOverwriteCancelled"));
+              flashPhase.value = "idle";
               runningOp.value = null;
               return;
             }
@@ -1110,51 +1235,53 @@ export const useFlashStore = defineStore('flash', () => {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        appendLog(t('flash.log.authProbeSkipped', { msg }));
+        appendLog(t("flash.log.authProbeSkipped", { msg }));
       }
     }
 
     // ── 5. Start operation ─────────────────────────────────────────
     rLog.info(
-      `[Flash] Starting '${kind}' — chip=${selectedChipId.value}, port=${selectedSerialPort.value}, baud=${selectedBaudRate.value}`
+      `[Flash] Starting '${kind}' — chip=${selectedChipId.value}, port=${selectedSerialPort.value}, baud=${selectedBaudRate.value}`,
     );
 
     const chip = selectedChipLabel.value;
-    appendLog(t('flash.log.targetChip', { chip }));
-    appendLog(t('flash.log.operation', { op: opTitle(kind) }));
+    appendLog(t("flash.log.targetChip", { chip }));
+    appendLog(t("flash.log.operation", { op: opTitle(kind) }));
 
-    if (kind === 'flash') {
+    if (kind === "flash") {
       flashSegments.value.forEach((seg, i) => {
-        appendLog(t('flash.log.segmentLog', { n: i + 1 }));
-        appendLog(t('flash.log.firmware', { path: seg.firmwarePath }));
+        appendLog(t("flash.log.segmentLog", { n: i + 1 }));
+        appendLog(t("flash.log.firmware", { path: seg.firmwarePath }));
         appendLog(
-          t('flash.log.flashRangeLog', {
+          t("flash.log.flashRangeLog", {
             start: formatAddrHex(seg.startAddr),
             end: formatAddrHex(seg.endAddr),
-          })
+          }),
         );
       });
-      appendLog(t('flash.log.baud', { n: String(selectedBaudRate.value) }));
-    } else if (kind === 'erase') {
+      appendLog(t("flash.log.baud", { n: String(selectedBaudRate.value) }));
+    } else if (kind === "erase") {
       appendLog(
-        t('flash.log.eraseRangeLog', {
+        t("flash.log.eraseRangeLog", {
           start: formatAddrHex(eraseStartAddr.value),
           end: formatAddrHex(eraseEndAddr.value),
-        })
+        }),
       );
-      appendLog(t('flash.log.erasePrep'));
-    } else if (kind === 'read') {
+      appendLog(t("flash.log.erasePrep"));
+    } else if (kind === "read") {
       appendLog(
-        t('flash.log.readRangeLog', {
+        t("flash.log.readRangeLog", {
           start: formatAddrHex(readStartAddr.value),
           end: formatAddrHex(readEndAddr.value),
-        })
+        }),
       );
-      appendLog(t('flash.log.readSave', { path: readFilePath.value }));
-      appendLog(t('flash.log.readPrep'));
-    } else if (kind === 'authorize') {
+      appendLog(t("flash.log.readSave", { path: readFilePath.value }));
+      appendLog(t("flash.log.readPrep"));
+    } else if (kind === "authorize") {
       const hasCredentials = !!authorizeUuid.value.trim();
-      appendLog(t(hasCredentials ? 'flash.log.authPrep' : 'flash.log.authReadPrep'));
+      appendLog(
+        t(hasCredentials ? "flash.log.authPrep" : "flash.log.authReadPrep"),
+      );
     }
 
     if (isTauriRuntime()) {
@@ -1165,10 +1292,10 @@ export const useFlashStore = defineStore('flash', () => {
         currentBackendPhase.value = null;
         phaseIndeterminate.value = false;
         runningOp.value = null;
-        flashPhase.value = 'error';
+        flashPhase.value = "error";
         const msg = e instanceof Error ? e.message : String(e);
         flashMessage.value = msg;
-        appendLog(t('flash.err.withMsg', { msg }));
+        appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
       }
     } else {
@@ -1179,10 +1306,10 @@ export const useFlashStore = defineStore('flash', () => {
         currentBackendPhase.value = null;
         phaseIndeterminate.value = false;
         runningOp.value = null;
-        flashPhase.value = 'error';
+        flashPhase.value = "error";
         const msg = e instanceof Error ? e.message : String(e);
         flashMessage.value = msg;
-        appendLog(t('flash.err.withMsg', { msg }));
+        appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
       }
     }
@@ -1195,13 +1322,13 @@ export const useFlashStore = defineStore('flash', () => {
     }
     stopFlash();
     runningOp.value = null;
-    flashPhase.value = 'idle';
+    flashPhase.value = "idle";
     flashProgress.value = 0;
     phaseProgress.value = 0;
     currentBackendPhase.value = null;
     phaseIndeterminate.value = false;
     cancelIndeterminateCheck();
-    flashMessage.value = '';
+    flashMessage.value = "";
   }
 
   /** Call from component's onUnmounted to release timers and listeners. */
@@ -1223,7 +1350,7 @@ export const useFlashStore = defineStore('flash', () => {
       selectedSerialPort: selectedSerialPort.value,
       selectedBaudRate: selectedBaudRate.value,
       selectedChipId: selectedChipId.value,
-      flashSegments: flashSegments.value.map(s => ({
+      flashSegments: flashSegments.value.map((s) => ({
         id: s.id,
         firmwarePath: s.firmwarePath,
         startAddr: s.startAddr,
@@ -1258,7 +1385,7 @@ export const useFlashStore = defineStore('flash', () => {
       selectedChipId.value = data.selectedChipId;
       selectedBaudRate.value = data.selectedBaudRate;
       activeTab.value = data.activeTab;
-      flashSegments.value = data.flashSegments.map(s => ({
+      flashSegments.value = data.flashSegments.map((s) => ({
         id: s.id,
         firmwarePath: s.firmwarePath,
         firmwareFile: null,
@@ -1288,15 +1415,15 @@ export const useFlashStore = defineStore('flash', () => {
           continue;
         }
         try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          const size = await invoke<number>('get_file_size', { path: p });
+          const { invoke } = await import("@tauri-apps/api/core");
+          const size = await invoke<number>("get_file_size", { path: p });
           updateFlashEndAddr(i, size);
         } catch {
           /* ignore */
         }
       }
     }
-    rLog.info('[Flash] Workspace restored from last session');
+    rLog.info("[Flash] Workspace restored from last session");
   }
 
   /** Debounced auto-save of workspace; call once at app startup after `loadWorkspace`. */
@@ -1314,7 +1441,7 @@ export const useFlashStore = defineStore('flash', () => {
         selectedSerialPort: selectedSerialPort.value,
         selectedBaudRate: selectedBaudRate.value,
         selectedChipId: selectedChipId.value,
-        flashSegments: flashSegments.value.map(s => ({
+        flashSegments: flashSegments.value.map((s) => ({
           id: s.id,
           firmwarePath: s.firmwarePath,
           startAddr: s.startAddr,
@@ -1334,15 +1461,15 @@ export const useFlashStore = defineStore('flash', () => {
         authBaudRate: selectedAuthBaudRate.value,
       }),
       debounced,
-      { deep: true }
+      { deep: true },
     );
   }
 
-  const busy = computed(() => flashPhase.value === 'running');
+  const busy = computed(() => flashPhase.value === "running");
 
   const canFlash = computed(() => {
     if (busy.value || !selectedSerialPort.value) return false;
-    return flashSegments.value.every(s => !!s.firmwarePath.trim());
+    return flashSegments.value.every((s) => !!s.firmwarePath.trim());
   });
 
   const canErase = computed(() => !busy.value && !!selectedSerialPort.value);
@@ -1352,31 +1479,39 @@ export const useFlashStore = defineStore('flash', () => {
       !busy.value &&
       (isTauriRuntime() ? !!readDir.value.trim() : true) &&
       !!readFileName.value.trim() &&
-      !!selectedSerialPort.value
+      !!selectedSerialPort.value,
   );
 
   const canAuthorize = computed(
-    () => !busy.value && !!selectedSerialPort.value && !!authorizeUuid.value.trim() && !!authorizeAuthKey.value.trim()
+    () =>
+      !busy.value &&
+      !!selectedSerialPort.value &&
+      !!authorizeUuid.value.trim() &&
+      !!authorizeAuthKey.value.trim(),
   );
 
   /** Read-only auth — only needs a connected port. */
   const canReadAuth = computed(() => !busy.value && !!selectedSerialPort.value);
 
   const progressCaption = computed(() => {
-    if (flashPhase.value !== 'running' || !runningOp.value) {
-      return t('flash.progress');
+    if (flashPhase.value !== "running" || !runningOp.value) {
+      return t("flash.progress");
     }
-    return t('flash.progressWith', { op: opTitle(runningOp.value) });
+    return t("flash.progressWith", { op: opTitle(runningOp.value) });
   });
 
-  const statusText = computed(() => (connected.value ? t('flash.statusConnected') : t('flash.statusDisconnected')));
+  const statusText = computed(() =>
+    connected.value
+      ? t("flash.statusConnected")
+      : t("flash.statusDisconnected"),
+  );
 
   const tabList = computed(() => [
-    { id: 'flash' as const, label: t('flash.tabs.flash') },
-    { id: 'erase' as const, label: t('flash.tabs.erase') },
-    { id: 'read' as const, label: t('flash.tabs.read') },
+    { id: "flash" as const, label: t("flash.tabs.flash") },
+    { id: "erase" as const, label: t("flash.tabs.erase") },
+    { id: "read" as const, label: t("flash.tabs.read") },
     // UART-only TuyaOpen authorization — same for all chip platforms in the UI
-    { id: 'authorize' as const, label: t('flash.tabs.authorize') },
+    { id: "authorize" as const, label: t("flash.tabs.authorize") },
   ]);
 
   return {

@@ -1,17 +1,23 @@
 import { getRuntime } from './runtime'
 
+export interface PickFileResult {
+  path: string
+  file: File | null
+}
+
 export interface Platform {
-  /** Returns absolute local file path, or null if cancelled / unsupported. */
-  pickFile(requestId: string, accept: string): Promise<string | null>
+  /** Returns picked file info, or null if cancelled / unsupported. */
+  pickFile(requestId: string, accept: string): Promise<PickFileResult | null>
   getWsUrl(): string
 }
 
 class TauriPlatform implements Platform {
-  async pickFile(_requestId: string, accept: string): Promise<string | null> {
+  async pickFile(_requestId: string, accept: string): Promise<PickFileResult | null> {
     const { open } = await import('@tauri-apps/plugin-dialog')
     const extensions = accept.split(',').map(e => e.trim().replace(/^\./, ''))
     const selected = await open({ multiple: false, filters: [{ name: 'Firmware', extensions }] })
-    return selected ?? null
+    if (!selected) return null
+    return { path: selected, file: null }
   }
   getWsUrl(): string { return '' }
 }
@@ -23,9 +29,9 @@ class VscodePlatform implements Platform {
     this._api = (window as any).acquireVsCodeApi?.() ?? null
   }
 
-  async pickFile(requestId: string, accept: string): Promise<string | null> {
+  async pickFile(requestId: string, accept: string): Promise<PickFileResult | null> {
     if (!this._api) return null
-    return new Promise<string | null>(resolve => {
+    return new Promise<PickFileResult | null>(resolve => {
       const timer = setTimeout(() => {
         window.removeEventListener('message', handler)
         resolve(null)
@@ -35,7 +41,18 @@ class VscodePlatform implements Platform {
         if (e.data?.type === 'pickFileResult' && e.data.requestId === requestId) {
           clearTimeout(timer)
           window.removeEventListener('message', handler)
-          resolve(e.data.path ?? null)
+          const path: string | null = e.data.path ?? null
+          const content: string | null = e.data.content ?? null
+          if (!path) { resolve(null); return }
+          let file: File | null = null
+          if (content) {
+            // Extension sends file bytes as base64; create a File so ws-transport
+            // can encode it as file content when sending to tyutool_cli.
+            const bytes = Uint8Array.from(atob(content), c => c.charCodeAt(0))
+            const name = path.split(/[\\/]/).pop() ?? 'firmware.bin'
+            file = new File([bytes], name)
+          }
+          resolve({ path, file })
         }
       }
       window.addEventListener('message', handler)
@@ -51,7 +68,7 @@ class VscodePlatform implements Platform {
 class WebPlatform implements Platform {
   // Web mode uses a hidden <input type="file"> element triggered by the caller;
   // pickFile() returns null to signal "use DOM input fallback".
-  async pickFile(_requestId: string, _accept: string): Promise<string | null> { return null }
+  async pickFile(_requestId: string, _accept: string): Promise<PickFileResult | null> { return null }
   getWsUrl(): string { return '' }
 }
 
