@@ -1,6 +1,8 @@
 export interface PhaseStyle {
   /** CSS background gradient, used directly in inline style */
   gradient: string
+  /** CSS color value for the glow box-shadow (a CSS variable reference) */
+  glowColor: string
   /** vue-i18n key for displaying the phase name */
   labelKey: string
 }
@@ -13,21 +15,25 @@ export const PHASE_STYLES: Record<string, PhaseStyle> = {
   erase: {
     gradient:
       'linear-gradient(90deg, var(--ty-accent), color-mix(in srgb, var(--ty-accent) 70%, var(--ty-primary)))',
+    glowColor: 'var(--ty-accent)',
     labelKey: 'flash.phaseErase',
   },
   write: {
     gradient:
       'linear-gradient(90deg, var(--ty-primary), color-mix(in srgb, var(--ty-primary) 70%, var(--ty-accent)))',
+    glowColor: 'var(--ty-primary)',
     labelKey: 'flash.phaseWrite',
   },
   verify: {
     gradient:
       'linear-gradient(90deg, var(--ty-success), color-mix(in srgb, var(--ty-success) 80%, var(--ty-primary)))',
+    glowColor: 'var(--ty-success)',
     labelKey: 'flash.phaseVerify',
   },
   read: {
     gradient:
       'linear-gradient(90deg, var(--ty-primary), color-mix(in srgb, var(--ty-primary) 60%, var(--ty-success)))',
+    glowColor: 'var(--ty-primary)',
     labelKey: 'flash.phaseRead',
   },
 }

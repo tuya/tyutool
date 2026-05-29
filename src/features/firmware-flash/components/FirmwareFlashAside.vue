@@ -67,7 +67,13 @@ watch(
       :aria-label="ctx.progressCaption"
     >
       <div class="mb-2 flex items-center justify-between text-xs">
-        <span class="font-medium text-[var(--ty-text-muted)]">
+        <!-- 阶段名 + 活跃点 -->
+        <span class="flex items-center gap-1.5 font-medium text-[var(--ty-text-muted)]">
+          <span
+            v-if="ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]"
+            class="aside-progress-dot"
+            :style="{ background: PHASE_STYLES[ctx.currentBackendPhase].glowColor }"
+          />
           {{
             ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
               ? t(PHASE_STYLES[ctx.currentBackendPhase].labelKey)
@@ -77,12 +83,15 @@ watch(
         <span
           v-if="!ctx.phaseIndeterminate"
           class="aside-progress-pct tabular-nums font-bold"
+          :style="ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
+            ? { color: PHASE_STYLES[ctx.currentBackendPhase].glowColor }
+            : {}"
         >
           {{ ctx.phaseProgress }}%
         </span>
       </div>
       <div
-        class="aside-progress-track h-2 overflow-hidden rounded-full"
+        class="aside-progress-track h-3 overflow-hidden rounded-full"
         role="progressbar"
         :aria-busy="ctx.phaseIndeterminate"
         :aria-valuenow="ctx.phaseIndeterminate ? undefined : ctx.phaseProgress"
@@ -91,19 +100,25 @@ watch(
       >
         <div
           v-if="!ctx.phaseIndeterminate"
-          class="aside-progress-fill h-full rounded-full ease-out"
+          class="aside-progress-fill relative h-full overflow-hidden rounded-full ease-out"
           :class="
             skipWidthTransition
-              ? 'transition-[background-color] duration-300'
-              : 'transition-[width,background-color] duration-300'
+              ? 'transition-[background-color,box-shadow] duration-300'
+              : 'transition-[width,background-color,box-shadow] duration-300'
           "
           :style="{
             width: `${ctx.phaseProgress}%`,
             background: ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
               ? PHASE_STYLES[ctx.currentBackendPhase].gradient
               : 'linear-gradient(90deg, var(--ty-primary), var(--ty-accent))',
+            boxShadow: ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
+              ? `0 0 8px color-mix(in srgb, ${PHASE_STYLES[ctx.currentBackendPhase].glowColor} 60%, transparent),
+                 0 0 20px color-mix(in srgb, ${PHASE_STYLES[ctx.currentBackendPhase].glowColor} 22%, transparent)`
+              : 'none',
           }"
-        />
+        >
+          <div class="aside-progress-shimmer" aria-hidden="true" />
+        </div>
         <div v-else class="aside-progress-indeterminate h-full w-full rounded-full" />
       </div>
     </section>

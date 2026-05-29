@@ -752,6 +752,44 @@
   .aside-progress-fill {
   }
 
+  /* Shimmer sweep — runs inside the fill, clipped to its width */
+  .aside-progress-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.22) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer-sweep 1.8s ease-in-out infinite;
+  }
+
+  @keyframes shimmer-sweep {
+    from { background-position: -200% 0; }
+    to   { background-position:  200% 0; }
+  }
+
+  /* Pulsing activity dot next to phase label */
+  .aside-progress-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    animation: dot-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes dot-pulse {
+    0%, 100% { opacity: 1;   transform: scale(1);   }
+    50%       { opacity: 0.3; transform: scale(0.75); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aside-progress-shimmer { animation: none; }
+    .aside-progress-dot     { animation: none; }
+  }
+
   .aside-progress-indeterminate {
     background: repeating-linear-gradient(
       90deg,
