@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::sync::Mutex;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -14,8 +15,9 @@ struct Inner {
     is_plain: bool,
     current_phase_label: Option<String>,
     next_milestone: u8,
-    inline: bool,       // phase label printed but no newline yet (plain mode)
-    show_percent: bool, // current phase emits Percent events
+    inline: bool,           // phase label printed but no newline yet (plain mode)
+    show_percent: bool,     // current phase emits Percent events
+    percent_on_line: bool,  // a milestone was eprint!-ed without a trailing newline
 }
 
 impl CliReporter {
@@ -44,6 +46,7 @@ impl CliReporter {
                 next_milestone: 10,
                 inline: false,
                 show_percent: false,
+                percent_on_line: false,
             }),
         }
     }
@@ -161,7 +164,11 @@ impl Inner {
     fn finish_current_phase(&mut self) {
         if let Some(label) = self.current_phase_label.take() {
             if self.is_plain {
-                if !self.show_percent {
+                if self.percent_on_line {
+                    // Close the horizontal percent line started by on_percent.
+                    eprintln!();
+                    self.percent_on_line = false;
+                } else if !self.show_percent {
                     eprintln!("  OK");
                 }
                 // Percent phases: do NOT flush milestones here. Each plugin is required to emit
@@ -181,6 +188,11 @@ impl Inner {
             eprintln!();
             self.inline = false;
         }
+        // Also close an open horizontal percent line (milestone arriving mid-phase).
+        if self.percent_on_line {
+            eprintln!();
+            self.percent_on_line = false;
+        }
     }
 
     fn on_percent(&mut self, value: u8) {
@@ -192,8 +204,11 @@ impl Inner {
             if self.show_percent {
                 let milestones = pop_milestones(&mut self.next_milestone, value);
                 for m in milestones {
-                    eprintln!("  {}%", m);
+                    eprint!("  {}%", m);
+                    self.percent_on_line = true;
                 }
+                // Flush so pipe-based readers (CI, scripts) see intermediate progress.
+                let _ = std::io::stderr().flush();
             }
         } else {
             self.pb.set_position(value as u64);
@@ -237,7 +252,11 @@ impl Inner {
         // Only on Ok — must not claim 100% completion when the operation failed or was cancelled.
         if matches!(result, FlashResult::Ok { .. }) && self.is_plain && self.show_percent {
             for m in pop_milestones(&mut self.next_milestone, 100) {
-                eprintln!("  {}%", m);
+                eprint!("  {}%", m);
+                self.percent_on_line = true;
+            }
+            if self.percent_on_line {
+                let _ = std::io::stderr().flush();
             }
         }
         self.finish_current_phase();
