@@ -1,10 +1,14 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHistory, createMemoryHistory } from 'vue-router';
 import FirmwareFlashPage from '@/features/firmware-flash/FirmwareFlashPage.vue';
 import SerialDebugPage from '@/features/serial-debug/SerialDebugPage.vue';
 import { SettingsPage } from '@/features/settings';
+import { getRuntime } from '../runtime';
 
 export const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  // createMemoryHistory for VS Code webview: the vscode-webview:// URL scheme
+  // confuses createWebHistory base resolution, preventing the / → /flash redirect.
+  // Memory history keeps all navigation in-process and works in any URL scheme.
+  history: getRuntime() === 'vscode' ? createMemoryHistory() : createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', redirect: '/flash' },
     { path: '/flash', name: 'flash', component: FirmwareFlashPage, meta: { title: '固件烧录', layout: 'fullBleed' } },
