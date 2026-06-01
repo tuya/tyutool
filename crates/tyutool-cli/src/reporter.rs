@@ -208,9 +208,9 @@ impl Inner {
                         eprint!("  {}%", m);
                         self.percent_on_line = true;
                     }
+                    // Flush so pipe-based readers (CI, scripts) see intermediate progress.
+                    let _ = std::io::stderr().flush();
                 }
-                // Flush so pipe-based readers (CI, scripts) see intermediate progress.
-                let _ = std::io::stderr().flush();
             }
         } else {
             self.pb.set_position(value as u64);
