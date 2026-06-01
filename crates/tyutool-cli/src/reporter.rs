@@ -203,9 +203,11 @@ impl Inner {
         if self.is_plain {
             if self.show_percent {
                 let milestones = pop_milestones(&mut self.next_milestone, value);
-                for m in milestones {
-                    eprint!("  {}%", m);
-                    self.percent_on_line = true;
+                if !milestones.is_empty() {
+                    for m in milestones {
+                        eprint!("  {}%", m);
+                        self.percent_on_line = true;
+                    }
                 }
                 // Flush so pipe-based readers (CI, scripts) see intermediate progress.
                 let _ = std::io::stderr().flush();
