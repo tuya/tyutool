@@ -71,11 +71,12 @@ describe('chipManifest', () => {
     expect(chipManifest('esp32').rustPluginId).toBe('ESP32');
     expect(chipManifest('esp32c3').rustPluginId).toBe('ESP32C3');
     expect(chipManifest('esp32c6').rustPluginId).toBe('ESP32C6');
+    expect(chipManifest('esp32p4').rustPluginId).toBe('ESP32P4');
     expect(chipManifest('esp32s3').rustPluginId).toBe('ESP32S3');
   });
 
   it('ESP chips have 460800 default baud', () => {
-    for (const id of ['esp32', 'esp32c3', 'esp32c6', 'esp32s3'] as const) {
+    for (const id of ['esp32', 'esp32c3', 'esp32c6', 'esp32p4', 'esp32s3'] as const) {
       expect(chipManifest(id).defaultBaudRate).toBe(460800);
     }
   });
@@ -93,6 +94,7 @@ describe('rustPluginIdForChip', () => {
     expect(rustPluginIdForChip('bk7231n')).toBe('BK7231N');
     expect(rustPluginIdForChip('esp32')).toBe('ESP32');
     expect(rustPluginIdForChip('esp32c3')).toBe('ESP32C3');
+    expect(rustPluginIdForChip('esp32p4')).toBe('ESP32P4');
     expect(rustPluginIdForChip('esp32s3')).toBe('ESP32S3');
   });
 

@@ -13,5 +13,7 @@ thiserror = "1"
 serialport = { version = "4", features = ["usbportinfo-interface"] }
 crc32fast = "1"
 log = "0.4"
-espflash = { version = "4.3", default-features = false, features = ["serialport"] }
+# espflash fork: extended FlashDefl timeouts for large raw BIN (e.g. ESP32-P4).
+# https://github.com/shiliu-yang/espflash — branch `tyutool-extended-timeouts`
+espflash = { git = "https://github.com/shiliu-yang/espflash", branch = "tyutool-extended-timeouts", default-features = false, features = ["serialport"] }
 md-5 = "0.10"

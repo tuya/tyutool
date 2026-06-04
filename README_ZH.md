@@ -12,7 +12,7 @@
 |---------|------|
 | Tuya    | T1、T2、T3、T5 |
 | Beken   | BK7231N |
-| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-S3 |
+| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-P4、ESP32-S3 |
 
 ## 下载
 

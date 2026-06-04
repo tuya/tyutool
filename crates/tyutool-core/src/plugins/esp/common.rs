@@ -200,13 +200,24 @@ pub(crate) fn run_esp(
         Ok(info) => {
             progress(FlashEvent::Milestone {
                 milestone: FlashMilestone::Connected {
-                    chip_info: Some(format!("{} (revision {:?})", info.chip, info.revision)),
+                    chip_info: Some(format!(
+                        "{} (revision {:?}, flash {})",
+                        info.chip, info.revision, info.flash_size
+                    )),
                 },
             });
         }
         Err(e) => {
             log::warn!("Failed to read ESP device info: {}", e);
         }
+    }
+
+    // Long writes need a generous serial read timeout between stub blocks.
+    if let Err(e) = flasher
+        .connection()
+        .set_timeout(Duration::from_secs(30))
+    {
+        log::warn!("Failed to extend ESP connection timeout: {e}");
     }
 
     // Switch to user-requested baud rate if higher than default
@@ -286,6 +297,20 @@ fn run_flash(
         }
 
         let flash_addr = parse_hex(Some(&seg.start_addr), "start_addr")?;
+
+        if let Ok(info) = flasher.device_info() {
+            let flash_bytes = info.flash_size.size();
+            let end = flash_addr.saturating_add(firmware.len() as u32);
+            if end > flash_bytes {
+                return Err(FlashError::Plugin(format!(
+                    "firmware {} bytes at 0x{flash_addr:08X} exceeds detected flash {} ({} bytes); \
+                     use a smaller image or verify flash size",
+                    firmware.len(),
+                    info.flash_size,
+                    flash_bytes
+                )));
+            }
+        }
 
         log::info!(
             "Flashing {} bytes at 0x{:08X}",

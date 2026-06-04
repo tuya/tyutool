@@ -1,5 +1,5 @@
 /** Supported chip identifiers (UI list sorted by ASCII string order). */
-export const CHIP_IDS = ['bk7231n', 'esp32', 'esp32c3', 'esp32c6', 'esp32s3', 'ln882h', 't1', 't2', 't3', 't5'] as const;
+export const CHIP_IDS = ['bk7231n', 'esp32', 'esp32c3', 'esp32c6', 'esp32p4', 'esp32s3', 'ln882h', 't1', 't2', 't3', 't5'] as const;
 
 export type ChipId = (typeof CHIP_IDS)[number];
 

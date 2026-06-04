@@ -31,7 +31,7 @@ enum Commands {
     /// Flash firmware to device
     Write {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3"]))]
+        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s3"]))]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -52,7 +52,7 @@ enum Commands {
     /// Read flash from device
     Read {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3"]))]
+        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s3"]))]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -117,7 +117,7 @@ enum Commands {
 fn default_baud(device: &str) -> u32 {
     match device.to_ascii_lowercase().as_str() {
         "ln882h" => 115200,
-        "esp32" | "esp32c3" | "esp32c6" | "esp32s3" => 460800,
+        "esp32" | "esp32c3" | "esp32c6" | "esp32p4" | "esp32s3" => 460800,
         _ => 921600,
     }
 }
