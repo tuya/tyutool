@@ -13,6 +13,12 @@
 - Plugin-internal errors are wrapped in `FlashError::Plugin(String)`; do not add new variants
 - Never use `unwrap()` or `panic!()`; cancellation checks read `cancel.load(Ordering::Relaxed)` and return `FlashError::Cancelled`
 
+## espflash (ESP chip family)
+
+- Dependency: git fork [shiliu-yang/espflash](https://github.com/shiliu-yang/espflash), branch `tyutool-extended-timeouts` (see `tyutool-core/Cargo.toml`). Extends FlashDefl command timeouts for large raw BIN writes.
+- Do not vendor `patches/espflash` in this repo; change timeouts in the fork, then `cargo update -p espflash`.
+- Revert to `espflash = { version = "…", … }` from crates.io when upstream defaults are enough.
+
 ## Serial I/O
 
 - Serial I/O goes through utility functions in `crates/tyutool-core/src/serial.rs`; do not use the `serialport` crate directly

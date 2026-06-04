@@ -157,6 +157,7 @@ Outputs JSON with raw USB metadata for all ports. Used for cross-OS debugging.
 | `esp32` | ESP32 | 460800 |
 | `esp32c3` | ESP32-C3 | 460800 |
 | `esp32c6` | ESP32-C6 | 460800 |
+| `esp32p4` | ESP32-P4 | 460800 |
 | `esp32s3` | ESP32-S3 | 460800 |
 
 ---
