@@ -1,6 +1,6 @@
 [package]
 name = "tyutool-cli"
-version = "3.0.12"
+version = "3.0.13"
 edition = "2021"
 description = "tyutool CLI — shared tyutool-core flash API (no Tauri)"
 
