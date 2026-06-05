@@ -517,6 +517,16 @@ static FLASH_TABLE: &[FlashParams] = &[
         block_size: 64 * KB,
         wp: wp2(SR12_READ, SR12_WRITE_SINGLE, 0x407c, 0x0007),
     },
+    // ── ZG ─────────────────────────────────────────
+    FlashParams {
+        mid: 0x1760cd,
+        name: "ZG25Q64B",
+        vendor: "ZG",
+        total_size: 64 * MB / 8,
+        sector_size: 4 * KB,
+        block_size: 64 * KB,
+        wp: wp2(SR12_READ, SR12_WRITE, 0x0038, 0x0038),
+    },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -582,5 +592,22 @@ mod tests {
         assert_eq!(p.mid, 0xABCDEF);
         assert_eq!(p.total_size, 2 * 1024 * 1024);
         assert!(p.wp.is_none());
+    }
+
+    #[test]
+    fn lookup_zg25q64b() {
+        let p = lookup(0x1760cd).unwrap();
+        assert_eq!(p.name, "ZG25Q64B");
+        assert_eq!(p.vendor, "ZG");
+        assert_eq!(p.total_size, 8 * 1024 * 1024); // 64 Mbit = 8 MiB
+        assert_eq!(p.sector_size, 4096);
+        assert_eq!(p.block_size, 65536);
+        let wp = p.wp.unwrap();
+        assert_eq!(wp.sr_bytes, 2);
+        assert_eq!(wp.read_sr_cmds, &[0x05, 0x35]);
+        assert_eq!(wp.write_sr_cmds, &[0x01, 0x31]);
+        assert_eq!(wp.protect_mask, 0x0038);
+        assert_eq!(wp.unprotect_value, 0x0000);
+        assert_eq!(wp.protect_value, 0x0038);
     }
 }
