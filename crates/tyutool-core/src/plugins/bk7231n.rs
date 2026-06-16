@@ -3,9 +3,9 @@
 use std::sync::atomic::AtomicBool;
 
 use crate::error::FlashError;
+use crate::flash_event::{FlashEvent, FlashPhase};
 use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
-use crate::flash_event::{FlashEvent, FlashPhase};
 
 use super::beken::chip::Bk7231nSpec;
 use super::beken::ops;
@@ -88,9 +88,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     let pct = |v: u8| progress(FlashEvent::Percent { value: v });
-    let phase = |p: FlashPhase| {
-        progress(FlashEvent::Phase { phase: p })
-    };
+    let phase = |p: FlashPhase| progress(FlashEvent::Phase { phase: p });
 
     // Collect segments: either from job.segments or from legacy fields
     let segments = if let Some(ref s) = job.segments {
@@ -192,7 +190,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
                 0
             };
             let mut padded = firmware.to_vec();
-            padded.extend(std::iter::repeat(0xFFu8).take(padding_len));
+            padded.extend(std::iter::repeat_n(0xFFu8, padding_len));
             let expected_crc = ops::crc32_ver2(&padded);
             ops::crc_check(transport, base_addr, padded.len() as u32, expected_crc)
                 .map_err(to_flash_err)?;
@@ -220,9 +218,7 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     let pct = |v: u8| progress(FlashEvent::Percent { value: v });
-    let phase = |p: FlashPhase| {
-        progress(FlashEvent::Phase { phase: p })
-    };
+    let phase = |p: FlashPhase| progress(FlashEvent::Phase { phase: p });
 
     let start = ops::parse_hex_addr(job.erase_start_hex.as_deref()).map_err(to_flash_err)?;
     let end = ops::parse_hex_addr(job.erase_end_hex.as_deref()).map_err(to_flash_err)?;
@@ -282,9 +278,7 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     let pct = |v: u8| progress(FlashEvent::Percent { value: v });
-    let phase = |p: FlashPhase| {
-        progress(FlashEvent::Phase { phase: p })
-    };
+    let phase = |p: FlashPhase| progress(FlashEvent::Phase { phase: p });
 
     let start = ops::parse_hex_addr(job.read_start_hex.as_deref()).unwrap_or(0);
     let end = ops::parse_hex_addr(job.read_end_hex.as_deref()).map_err(to_flash_err)?;
@@ -304,7 +298,12 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
 
     // Read
     phase(FlashPhase::Read);
-    log::info!("Reading {:#010x}..{:#010x} ({} KiB)", start, end, length / 1024);
+    log::info!(
+        "Reading {:#010x}..{:#010x} ({} KiB)",
+        start,
+        end,
+        length / 1024
+    );
     let data = ops::read(
         transport,
         flash_params,

@@ -29,8 +29,3 @@ pub(crate) static ESP32S3_DEF: EspChipDef = EspChipDef {
     id: "ESP32S3",
     chip: Chip::Esp32s3,
 };
-
-pub(crate) static ESP32P4_DEF: EspChipDef = EspChipDef {
-    id: "ESP32P4",
-    chip: Chip::Esp32p4,
-};

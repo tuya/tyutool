@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use crate::error::FlashError;
+use crate::flash_event::{FlashEvent, FlashResult, JobSummary};
 use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
-use crate::flash_event::{FlashEvent, FlashResult, JobSummary};
 use crate::plugins::{
-    Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32p4Plugin, Esp32s3Plugin,
-    Ln882hPlugin,
+    Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32s3Plugin, Ln882hPlugin,
     T1Plugin, T2Plugin, T3Plugin, T5Plugin,
 };
 
@@ -36,8 +35,6 @@ impl FlashPluginRegistry {
         log::debug!("Registered flash plugin: ESP32C3");
         plugins.insert("ESP32C6".to_string(), Arc::new(Esp32c6Plugin));
         log::debug!("Registered flash plugin: ESP32C6");
-        plugins.insert("ESP32P4".to_string(), Arc::new(Esp32p4Plugin));
-        log::debug!("Registered flash plugin: ESP32P4");
         plugins.insert("ESP32S3".to_string(), Arc::new(Esp32s3Plugin));
         log::debug!("Registered flash plugin: ESP32S3");
         plugins.insert("LN882H".to_string(), Arc::new(Ln882hPlugin));
@@ -48,9 +45,7 @@ impl FlashPluginRegistry {
 
     pub fn get(&self, chip_id: &str) -> Result<&Arc<dyn FlashPlugin>, FlashError> {
         let key = chip_id.trim().to_ascii_uppercase();
-        self.plugins
-            .get(&key)
-            .ok_or_else(|| FlashError::UnknownChip(key))
+        self.plugins.get(&key).ok_or(FlashError::UnknownChip(key))
     }
 
     pub fn list_chip_ids(&self) -> Vec<String> {
@@ -156,8 +151,6 @@ mod tests {
         assert!(r.get("ESP32C3").is_ok());
         assert!(r.get("esp32c6").is_ok());
         assert!(r.get("ESP32C6").is_ok());
-        assert!(r.get("esp32p4").is_ok());
-        assert!(r.get("ESP32P4").is_ok());
         assert!(r.get("esp32s3").is_ok());
         assert!(r.get("ESP32S3").is_ok());
         assert!(r.get("ln882h").is_ok());
@@ -169,7 +162,7 @@ mod tests {
     fn list_chip_ids_only_real_plugins() {
         let r = FlashPluginRegistry::new();
         let ids = r.list_chip_ids();
-        assert_eq!(ids.len(), 11);
+        assert_eq!(ids.len(), 10);
         assert!(ids.contains(&"BK7231N".to_string()));
         assert!(ids.contains(&"T2".to_string()));
         assert!(ids.contains(&"T3".to_string()));
@@ -178,7 +171,6 @@ mod tests {
         assert!(ids.contains(&"ESP32".to_string()));
         assert!(ids.contains(&"ESP32C3".to_string()));
         assert!(ids.contains(&"ESP32C6".to_string()));
-        assert!(ids.contains(&"ESP32P4".to_string()));
         assert!(ids.contains(&"ESP32S3".to_string()));
         assert!(ids.contains(&"LN882H".to_string()));
     }
@@ -235,18 +227,18 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let saw_done = AtomicBool::new(false);
         let res = run_job(&job, &cancel, |p| {
-            if let FlashEvent::Done { result: FlashResult::Err { .. } } = p {
+            if let FlashEvent::Done {
+                result: FlashResult::Err { .. },
+            } = p
+            {
                 saw_done.store(true, Ordering::SeqCst);
             }
         });
         assert!(res.is_err());
         assert!(saw_done.load(Ordering::SeqCst), "expected Done progress");
         // Error must NOT be UnknownChip — confirms chip lookup was bypassed.
-        match res {
-            Err(FlashError::UnknownChip(_)) => {
-                panic!("authorize mode must not reach chip registry");
-            }
-            _ => {}
+        if let Err(FlashError::UnknownChip(_)) = res {
+            panic!("authorize mode must not reach chip registry");
         }
     }
 }

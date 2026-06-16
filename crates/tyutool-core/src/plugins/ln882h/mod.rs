@@ -1,17 +1,17 @@
 mod protocol;
 
+use serialport::SerialPort;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use serialport::SerialPort;
 
 use crate::error::FlashError;
+use crate::flash_event::{FlashEvent, FlashMilestone, FlashPhase};
 use crate::job::{FlashJob, FlashMode, FlashSegment};
 use crate::plugin::FlashPlugin;
-use crate::flash_event::{FlashEvent, FlashMilestone, FlashPhase};
 
 use protocol::{
-    flush_buffers, send_command, read_response, wait_for_response_containing,
-    XmodemSend, read_flash_chunk,
+    flush_buffers, read_flash_chunk, read_response, send_command, wait_for_response_containing,
+    XmodemSend,
 };
 
 const RAM_BIN: &[u8] = include_bytes!("ram.bin");
@@ -93,7 +93,9 @@ fn boot(
         // Step 1: show_version — wait up to 20 s for device to respond.
         // flush/write/read errors are ignored: CH340 briefly disconnects during device reset
         // (EIO from tcflush), so we keep retrying until the device responds or time runs out.
-        progress(FlashEvent::Phase { phase: FlashPhase::Connect });
+        progress(FlashEvent::Phase {
+            phase: FlashPhase::Connect,
+        });
         let mut connected = false;
         for _ in 0..20 {
             if cancel.load(Ordering::Relaxed) {
@@ -125,7 +127,9 @@ fn boot(
             break;
         }
 
-        progress(FlashEvent::Phase { phase: FlashPhase::LoadRam });
+        progress(FlashEvent::Phase {
+            phase: FlashPhase::LoadRam,
+        });
         let cmd = format!("download [rambin] [0x20000000] [{}]", RAM_BIN.len());
         send_command(port, &cmd)?;
 
@@ -166,7 +170,9 @@ fn boot(
     if !switch_baud {
         return Ok(());
     }
-    progress(FlashEvent::Phase { phase: FlashPhase::SwitchBaud });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::SwitchBaud,
+    });
     for _ in 0..3 {
         if cancel.load(Ordering::Relaxed) {
             return Err(FlashError::Cancelled);
@@ -181,7 +187,9 @@ fn boot(
             return Ok(());
         }
     }
-    Err(FlashError::Plugin("LN882H: baud rate switch to 921600 failed".into()))
+    Err(FlashError::Plugin(
+        "LN882H: baud rate switch to 921600 failed".into(),
+    ))
 }
 
 fn run_read(
@@ -212,12 +220,14 @@ fn run_read(
     let mut port = open_port(&job.port, 115200)?;
     boot(&mut port, cancel, progress, false)?;
 
-    progress(FlashEvent::Phase { phase: FlashPhase::Read });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::Read,
+    });
     log::info!("Reading 0x{start:08x}..0x{end:08x} ({length} bytes)");
 
     // Read in CHUNK-aligned passes; trim to [start, end) at byte level
     let aligned_start = (start / CHUNK) * CHUNK;
-    let aligned_end = ((end + CHUNK - 1) / CHUNK) * CHUNK;
+    let aligned_end = end.div_ceil(CHUNK) * CHUNK;
     let mut buf: Vec<u8> = Vec::with_capacity(length as usize);
     let mut addr = aligned_start;
 
@@ -236,7 +246,10 @@ fn run_read(
                     std::thread::sleep(Duration::from_millis(200));
                 }
                 match read_flash_chunk(&mut port, addr) {
-                    Ok(d) => { data = Some(d); break; }
+                    Ok(d) => {
+                        data = Some(d);
+                        break;
+                    }
                     Err(FlashError::Cancelled) => return Err(FlashError::Cancelled),
                     Err(e) => {
                         log::warn!("flash_read retry {attempt} at 0x{addr:x}: {e}");
@@ -260,7 +273,9 @@ fn run_read(
         addr += CHUNK;
         let done = (addr.min(aligned_end) - aligned_start) as u64;
         let total = (aligned_end - aligned_start) as u64;
-        progress(FlashEvent::Percent { value: (done * 100 / total) as u8 });
+        progress(FlashEvent::Percent {
+            value: (done * 100 / total) as u8,
+        });
     }
 
     // Switch back to 115200 so device is in a predictable state
@@ -268,7 +283,9 @@ fn run_read(
     let _ = read_response(&mut port, 64, 1);
     port.set_baud_rate(115200)?;
 
-    progress(FlashEvent::Phase { phase: FlashPhase::Save });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::Save,
+    });
     std::fs::write(file_path, &buf)
         .map_err(|e| FlashError::Plugin(format!("cannot write '{file_path}': {e}")))?;
 
@@ -308,13 +325,17 @@ fn run_erase(
     let mut port = open_port(&job.port, 115200)?;
     boot(&mut port, cancel, progress, true)?;
 
-    progress(FlashEvent::Phase { phase: FlashPhase::Erase });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::Erase,
+    });
     log::info!("Erasing 0x{start:08x}..0x{end:08x} ({length} bytes)");
 
     send_command(&mut port, &format!("ferase 0x{start:x} 0x{length:x}"))?;
     wait_for_response_containing(&mut port, b"pppp", 120)?;
 
-    progress(FlashEvent::Milestone { milestone: FlashMilestone::EraseComplete });
+    progress(FlashEvent::Milestone {
+        milestone: FlashMilestone::EraseComplete,
+    });
 
     send_command(&mut port, "reboot")?;
     let _ = read_response(&mut port, 128, 1);
@@ -356,10 +377,13 @@ fn run_flash(
 
         // Align erase length to 4 KiB sector
         const SECTOR: u32 = 0x1000;
-        let erase_len = ((data.len() as u32 + SECTOR - 1) / SECTOR) * SECTOR;
+        let erase_len = (data.len() as u32).div_ceil(SECTOR) * SECTOR;
 
         progress(FlashEvent::Phase {
-            phase: FlashPhase::WriteSegment { current: (idx + 1) as u32, total: total_segs as u32 },
+            phase: FlashPhase::WriteSegment {
+                current: (idx + 1) as u32,
+                total: total_segs as u32,
+            },
         });
         log::info!(
             "Segment {}/{}: erasing 0x{start:08x}..0x{:08x}",
@@ -380,16 +404,14 @@ fn run_flash(
 
         log::info!("Writing {} bytes at 0x{:08x}", data.len(), start);
 
-        progress(FlashEvent::Phase { phase: FlashPhase::Write });
+        progress(FlashEvent::Phase {
+            phase: FlashPhase::Write,
+        });
 
-        XmodemSend::new(&mut port, &data, 16 * 1024).send(
-            "qio.bin",
-            cancel,
-            &|sent, total| {
-                let pct = (sent as u64 * 100 / total.max(1) as u64) as u8;
-                progress(FlashEvent::Percent { value: pct });
-            },
-        )?;
+        XmodemSend::new(&mut port, &data, 16 * 1024).send("qio.bin", cancel, &|sent, total| {
+            let pct = (sent as u64 * 100 / total.max(1) as u64) as u8;
+            progress(FlashEvent::Percent { value: pct });
+        })?;
         // Emit 100% explicitly — XMODEM callback may not land exactly on 100
         progress(FlashEvent::Percent { value: 100 });
 
@@ -401,7 +423,9 @@ fn run_flash(
         });
     }
 
-    progress(FlashEvent::Phase { phase: FlashPhase::Reboot });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::Reboot,
+    });
     send_command(&mut port, "reboot")?;
     let _ = read_response(&mut port, 128, 1);
 
@@ -419,8 +443,14 @@ fn resolve_segments(job: &FlashJob) -> Result<Vec<FlashSegment>, FlashError> {
         .firmware_path
         .as_deref()
         .ok_or_else(|| FlashError::InvalidJob("missing firmware_path".into()))?;
-    let start = job.flash_start_hex.clone().unwrap_or_else(|| "0x00000000".into());
-    let end = job.flash_end_hex.clone().unwrap_or_else(|| "0x00200000".into());
+    let start = job
+        .flash_start_hex
+        .clone()
+        .unwrap_or_else(|| "0x00000000".into());
+    let end = job
+        .flash_end_hex
+        .clone()
+        .unwrap_or_else(|| "0x00200000".into());
     Ok(vec![FlashSegment {
         firmware_path: fw.to_string(),
         start_addr: start,

@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::error::FlashError;
-use crate::job::FlashJob;
 use crate::flash_event::{FlashEvent, FlashMilestone};
+use crate::job::FlashJob;
 
 // ── Timing (aligned with auth_handler.py) ────────────────────────────────
 
@@ -266,7 +266,7 @@ impl AuthSession {
                         while let Some(pos) = raw_buf.iter().position(|&b| b == b'\n') {
                             let chunk: Vec<u8> = raw_buf.drain(..=pos).collect();
                             let s = String::from_utf8_lossy(&chunk)
-                                .trim_end_matches(|c| c == '\r' || c == '\n')
+                                .trim_end_matches(['\r', '\n'])
                                 .to_string();
                             let s = strip_ansi(&s).trim().to_string();
                             if !s.is_empty() {
@@ -339,6 +339,74 @@ impl AuthSession {
         }
         self.read_response_idle(Duration::from_millis(2000))
     }
+
+    /// Send `read_mac` and parse the MAC address from the response.
+    /// Returns `Some("XX:XX:XX:XX:XX:XX")` (uppercase colon-separated) or `None`.
+    fn read_mac(&mut self) -> Option<String> {
+        self.send_cmd("read_mac").ok()?;
+        let lines = self.read_response();
+        for line in &lines {
+            if let Some(mac) = parse_mac_from_str(line) {
+                return Some(mac);
+            }
+        }
+        None
+    }
+}
+
+fn parse_mac_from_str(s: &str) -> Option<String> {
+    s.split_whitespace().find_map(|token| {
+        let parts: Vec<&str> = token.split(':').collect();
+        // Handle "AA:BB:CC:DD:EE:FF" (6 parts) and
+        // "LABEL:AA:BB:CC:DD:EE:FF" (7 parts, first is non-hex label like "ADDR")
+        let hex_parts: &[&str] = if parts.len() == 6 {
+            &parts
+        } else if parts.len() == 7 && !parts[0].chars().all(|c| c.is_ascii_hexdigit()) {
+            &parts[1..]
+        } else {
+            return None;
+        };
+        if hex_parts
+            .iter()
+            .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+        {
+            Some(hex_parts.join(":").to_uppercase())
+        } else {
+            None
+        }
+    })
+}
+
+// ── Batch auth types ──────────────────────────────────────────────────────
+
+/// Outcome of a single batch-auth UART session.
+#[derive(Debug)]
+pub enum BatchAuthSlotResult {
+    /// Auth written and verified successfully.
+    Done { mac: String },
+    /// Device already had the exact credentials — nothing written.
+    AlreadyDone { mac: String },
+    /// Auth on device didn't match but conflict_policy=Skip — nothing written.
+    Skipped { mac: String },
+    /// Operation was cancelled.
+    Cancelled,
+}
+
+/// What to do when device already has conflicting auth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictPolicy {
+    Skip,
+    Overwrite,
+}
+
+/// Per-step progress marker emitted during a batch auth slot.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchAuthStep {
+    ReadingMac,
+    ReadingAuth,
+    WritingAuth,
+    Verifying,
 }
 
 // ── Public entry point ────────────────────────────────────────────────────
@@ -390,7 +458,10 @@ where
     }
 
     // ── Step 4: Wait for boot ─────────────────────────────────────────
-    log::info!("flash.log.auth.waitBoot: seconds={}", POST_RESET_WAIT.as_secs());
+    log::info!(
+        "flash.log.auth.waitBoot: seconds={}",
+        POST_RESET_WAIT.as_secs()
+    );
     let wait_end = Instant::now() + POST_RESET_WAIT;
     while Instant::now() < wait_end {
         if cancel.load(Ordering::Relaxed) {
@@ -453,7 +524,10 @@ where
         }
 
         // ── Step 6: Wait for device to settle after possible reboot ───
-        log::info!("flash.log.auth.waitSettle: seconds={}", POST_RESET_WAIT.as_secs());
+        log::info!(
+            "flash.log.auth.waitSettle: seconds={}",
+            POST_RESET_WAIT.as_secs()
+        );
         let wait_end = Instant::now() + POST_RESET_WAIT;
         while Instant::now() < wait_end {
             if cancel.load(Ordering::Relaxed) {
@@ -520,6 +594,123 @@ where
     }
 }
 
+/// Single-device batch authorization slot: open UART, read MAC, read/write auth, verify.
+///
+/// The caller pre-allocates `uuid`/`authkey` from an Excel row. On return:
+/// - `Done`/`AlreadyDone` → caller should confirm the Excel row (mark USED).
+/// - `Skipped`/`Err`/`Cancelled` → caller should release the Excel row.
+pub fn run_batch_auth_slot<F>(
+    port: &str,
+    uuid: &str,
+    authkey: &str,
+    conflict_policy: ConflictPolicy,
+    cancel: &AtomicBool,
+    progress: F,
+) -> Result<BatchAuthSlotResult, FlashError>
+where
+    F: Fn(BatchAuthStep),
+{
+    macro_rules! check_cancel {
+        () => {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::Cancelled);
+            }
+        };
+    }
+
+    let mut sess = AuthSession::open(port)?;
+    check_cancel!();
+
+    sess.drain_boot_output();
+    check_cancel!();
+    sess.hardware_reset()?;
+    check_cancel!();
+
+    let wait_end = Instant::now() + POST_RESET_WAIT;
+    while Instant::now() < wait_end {
+        check_cancel!();
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    sess.drain_boot_output();
+    check_cancel!();
+    sess.wake_shell();
+    check_cancel!();
+
+    // Read MAC
+    progress(BatchAuthStep::ReadingMac);
+    let mac = {
+        let mut mac_opt = None;
+        for _ in 0..3u8 {
+            check_cancel!();
+            mac_opt = sess.read_mac();
+            if mac_opt.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
+    };
+
+    // Read existing auth
+    progress(BatchAuthStep::ReadingAuth);
+    let existing_auth = {
+        let mut auth = None;
+        for _ in 0..3u8 {
+            check_cancel!();
+            auth = sess.auth_read();
+            if auth.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(800));
+        }
+        auth
+    };
+
+    // Check if device already has the credentials we want to write
+    if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
+        // Factory-fresh devices carry this placeholder — treat as uninitialized
+        if ex_uuid != PLACEHOLDER_UUID {
+            if ex_uuid == uuid && ex_key == authkey {
+                return Ok(BatchAuthSlotResult::AlreadyDone { mac });
+            }
+            if conflict_policy == ConflictPolicy::Skip {
+                return Ok(BatchAuthSlotResult::Skipped { mac });
+            }
+        }
+        // Overwrite (or placeholder device): fall through to write
+    }
+
+    // Write auth
+    progress(BatchAuthStep::WritingAuth);
+    let _lines = sess.auth_write(uuid, authkey);
+    check_cancel!();
+
+    // Wait for device to settle after possible reboot
+    let wait_end = Instant::now() + POST_RESET_WAIT;
+    while Instant::now() < wait_end {
+        check_cancel!();
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    sess.drain_boot_output();
+    sess.wake_shell();
+    check_cancel!();
+
+    // Verify
+    progress(BatchAuthStep::Verifying);
+    match sess.auth_read() {
+        Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
+            Ok(BatchAuthSlotResult::Done { mac })
+        }
+        Some((rb_uuid, rb_key)) => Err(FlashError::Plugin(format!(
+            "Verification failed: wrote ({}, {}), read back ({}, {})",
+            uuid, authkey, rb_uuid, rb_key
+        ))),
+        None => Err(FlashError::Plugin(
+            "Verification failed: no response from auth-read".into(),
+        )),
+    }
+}
+
 // ── Unit tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -551,5 +742,37 @@ mod tests {
         assert!(is_shell_prompt("  tuya>  "));
         assert!(is_shell_prompt("tuya> read_mac"));
         assert!(!is_shell_prompt("[04-24] log line"));
+    }
+
+    #[test]
+    fn parse_mac_detects_colon_format() {
+        // "ADDR:11:22:33:AA:BB:CC" is 7 colon-parts; first "ADDR" is non-hex label
+        assert_eq!(
+            parse_mac_from_str("WIFI MAC ADDR:11:22:33:AA:BB:CC"),
+            Some("11:22:33:AA:BB:CC".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_mac_space_separated() {
+        // MAC whitespace-separated from all context
+        assert_eq!(
+            parse_mac_from_str("mac 11:22:33:aa:bb:cc here"),
+            Some("11:22:33:AA:BB:CC".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_mac_case_insensitive_input() {
+        assert_eq!(
+            parse_mac_from_str("mac: aa:bb:cc:dd:ee:ff"),
+            Some("AA:BB:CC:DD:EE:FF".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_mac_returns_none_for_no_mac() {
+        assert_eq!(parse_mac_from_str("no mac here"), None);
+        assert_eq!(parse_mac_from_str(""), None);
     }
 }
