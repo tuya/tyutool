@@ -544,6 +544,8 @@
     }
   },
   "toolbox": {
+    "section": "工具",
+    "subtitle": "面向批量生产与调试的实用工具集合",
     "batchFlashAuth": {
       "name": "批量烧录授权",
       "desc": "同时向多个串口并行烧录固件并写入授权码，最多 32 个"

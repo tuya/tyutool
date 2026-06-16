@@ -83,8 +83,10 @@ const nav = computed(() =>
       tabindex="-1"
     >
       <div
-        class="mx-auto w-full min-w-0 max-w-5xl"
-        :class="fullBleedMain ? 'flex min-h-0 flex-1 flex-col' : ''"
+        class="w-full min-w-0"
+        :class="
+          fullBleedMain ? 'flex min-h-0 flex-1 flex-col' : 'mx-auto max-w-5xl'
+        "
       >
         <div
           class="min-w-0"
