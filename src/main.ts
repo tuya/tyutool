@@ -1,103 +1,25 @@
 import { createApp, watch } from 'vue';
 import { createPinia } from 'pinia';
-import { library } from '@fortawesome/fontawesome-svg-core';
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
-import {
-  faArrowDown,
-  faArrowsRotate,
-  faArrowUpRightFromSquare,
-  faChevronDown,
-  faChevronUp,
-  faCircle,
-  faCircleArrowUp,
-  faCircleCheck,
-  faCircleExclamation,
-  faCircleInfo,
-  faCircleXmark,
-  faClock,
-  faClockRotateLeft,
-  faCopy,
-  faDownload,
-  faExpand,
-  faFolderOpen,
-  faGear,
-  faKey,
-  faMagnifyingGlass,
-  faMagnifyingGlassMinus,
-  faMagnifyingGlassPlus,
-  faMicrochip,
-  faPlug,
-  faPlugCircleXmark,
-  faPlus,
-  faPowerOff,
-  faRotate,
-  faScroll,
-  faTag,
-  faTerminal,
-  faTrash,
-  faTrashCan,
-  faTriangleExclamation,
-  faXmark,
-} from '@fortawesome/free-solid-svg-icons';
 import '@fontsource-variable/inter/index.css';
 import './assets/main.css';
 import App from './App.vue';
+import { bootstrapApp } from './app-init';
 import { i18n } from './i18n';
+import { registerFontAwesome } from './icons';
 import { router } from './router';
 import { useSettingsStore, resolveLocale } from './stores/settings';
-
-library.add(
-  faArrowDown,
-  faArrowsRotate,
-  faArrowUpRightFromSquare,
-  faChevronDown,
-  faChevronUp,
-  faCircle,
-  faCircleArrowUp,
-  faCircleCheck,
-  faCircleExclamation,
-  faCircleInfo,
-  faCircleXmark,
-  faClock,
-  faClockRotateLeft,
-  faCopy,
-  faDownload,
-  faExpand,
-  faFolderOpen,
-  faGear,
-  faKey,
-  faMagnifyingGlass,
-  faMagnifyingGlassMinus,
-  faMagnifyingGlassPlus,
-  faMicrochip,
-  faPlug,
-  faPlugCircleXmark,
-  faPlus,
-  faPowerOff,
-  faRotate,
-  faScroll,
-  faTag,
-  faTerminal,
-  faTrash,
-  faTrashCan,
-  faTriangleExclamation,
-  faXmark
-);
 
 const app = createApp(App);
 const pinia = createPinia();
 
-app.component('FontAwesomeIcon', FontAwesomeIcon);
+registerFontAwesome(app);
 app.use(pinia);
 app.use(i18n);
 app.use(router);
 
-// Initialize settings store (theme + locale side-effects)
 const settings = useSettingsStore();
 settings.init();
 
-// Sync i18n locale with settings store on startup and change
-// settings.locale may be 'auto' | 'zh-CN' | 'en'; resolve to concrete locale
 watch(
   () => settings.locale,
   v => {
@@ -105,17 +27,8 @@ watch(
     i18n.global.locale.value = resolved;
     document.documentElement.lang = resolved === 'zh-CN' ? 'zh-CN' : 'en';
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 app.mount('#app');
-
-// Scan serial ports once at startup, after settings (including locale) are fully loaded
-// so that log messages use the correct language from the start.
-import { useFlashStore } from './stores/flash';
-void settings.ready().then(async () => {
-  const flash = useFlashStore();
-  await flash.loadWorkspace();
-  flash.startWorkspacePersistence();
-  void flash.refreshDevice();
-});
+void bootstrapApp();
