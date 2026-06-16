@@ -1,24 +1,42 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { faCircleNotch, faFloppyDisk } from '@fortawesome/free-solid-svg-icons';
-import { useSerialDebugStore } from '@/stores/serial-debug';
-import { formatHexDump } from '@/features/serial-debug/hex-format';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { parseAnsi, stripAnsi, type AnsiStyle } from '@/features/serial-debug/ansi-parse';
-import { makeStamp, formatTs } from '@/features/serial-debug/context';
-import type { DebugLogLine, HexBytesPerRow } from '@/features/serial-debug/types';
-import SerialDebugChipBar from './SerialDebugChipBar.vue';
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onDeactivated,
+  reactive,
+  ref,
+  watch,
+} from "vue";
+import { useI18n } from "vue-i18n";
+import { faCircleNotch, faFloppyDisk } from "@fortawesome/free-solid-svg-icons";
+import { useSerialDebugStore } from "@/stores/serial-debug";
+import { formatHexDump } from "@/features/serial-debug/hex-format";
+import { isTauriRuntime } from "@/runtime";
+import {
+  parseAnsi,
+  stripAnsi,
+  type AnsiStyle,
+} from "@/features/serial-debug/ansi-parse";
+import { makeStamp, formatTs } from "@/features/serial-debug/utils";
+import type {
+  DebugLogLine,
+  HexBytesPerRow,
+} from "@/features/serial-debug/types";
+import SerialDebugChipBar from "./SerialDebugChipBar.vue";
 
-const props = withDefaults(defineProps<{
-  lines: DebugLogLine[];
-  hexView: boolean;
-  hexBytesPerRow: HexBytesPerRow;
-  ansiEnabled: boolean;
-  exportTitle?: string;
-}>(), {
-  exportTitle: 'serial-debug',
-});
+const props = withDefaults(
+  defineProps<{
+    lines: DebugLogLine[];
+    hexView: boolean;
+    hexBytesPerRow: HexBytesPerRow;
+    ansiEnabled: boolean;
+    exportTitle?: string;
+  }>(),
+  {
+    exportTitle: "serial-debug",
+  },
+);
 
 const emit = defineEmits<{
   clear: [];
@@ -28,7 +46,9 @@ const s = useSerialDebugStore();
 const { t } = useI18n();
 
 const activeChip = computed(() =>
-  s.activeChipId ? s.watchChips.find((c) => c.id === s.activeChipId) ?? null : null,
+  s.activeChipId
+    ? (s.watchChips.find((c) => c.id === s.activeChipId) ?? null)
+    : null,
 );
 
 const displayLines = computed(() => {
@@ -44,7 +64,9 @@ const lockByTab = reactive(new Map<string | null, boolean>());
 
 const lockAutoScroll = computed({
   get: (): boolean => lockByTab.get(s.activeChipId ?? null) ?? false,
-  set: (val: boolean) => { lockByTab.set(s.activeChipId ?? null, val); },
+  set: (val: boolean) => {
+    lockByTab.set(s.activeChipId ?? null, val);
+  },
 });
 
 async function scrollToBottom(): Promise<void> {
@@ -54,27 +76,46 @@ async function scrollToBottom(): Promise<void> {
   el.scrollTop = el.scrollHeight;
 }
 
-watch(() => displayLines.value.length, () => { void scrollToBottom(); });
+watch(
+  () => displayLines.value.length,
+  () => {
+    void scrollToBottom();
+  },
+);
 
 // Tab change: scroll to bottom for the newly active tab (respects its own lock state).
-watch(() => s.activeChipId, () => { void scrollToBottom(); });
+watch(
+  () => s.activeChipId,
+  () => {
+    void scrollToBottom();
+  },
+);
 
 // hexView toggle swaps the scrollRef DOM node (v-if/v-else); scroll into the new element.
-watch(() => props.hexView, () => { void scrollToBottom(); });
+watch(
+  () => props.hexView,
+  () => {
+    void scrollToBottom();
+  },
+);
 
 // Layout changes (font size, search bar open/close) shift scrollHeight or clientHeight,
 // which can fire a spurious scroll event that falsely locks auto-scroll.
 // Capture the lock state before the DOM update and restore it after.
 function watchLayoutChange(source: () => unknown): void {
-  watch(source, () => {
-    const wasLocked = lockAutoScroll.value;
-    void nextTick().then(() => {
-      if (!wasLocked) {
-        lockAutoScroll.value = false;
-        void scrollToBottom();
-      }
-    });
-  }, { flush: 'sync' });
+  watch(
+    source,
+    () => {
+      const wasLocked = lockAutoScroll.value;
+      void nextTick().then(() => {
+        if (!wasLocked) {
+          lockAutoScroll.value = false;
+          void scrollToBottom();
+        }
+      });
+    },
+    { flush: "sync" },
+  );
 }
 
 watchLayoutChange(() => s.logFontSize);
@@ -102,16 +143,24 @@ const hexRendered = computed(() => {
 });
 
 function renderSpans(text: string): Array<{ text: string; style: AnsiStyle }> {
-  return props.ansiEnabled ? parseAnsi(text) : [{ text: stripAnsi(text), style: {} }];
+  return props.ansiEnabled
+    ? parseAnsi(text)
+    : [{ text: stripAnsi(text), style: {} }];
 }
 
-function splitByKeyword(text: string, q: string): Array<{ text: string; isMatch: boolean }> {
+function splitByKeyword(
+  text: string,
+  q: string,
+): Array<{ text: string; isMatch: boolean }> {
   const parts: Array<{ text: string; isMatch: boolean }> = [];
   const lower = text.toLowerCase();
   let pos = 0;
   while (pos < text.length) {
     const idx = lower.indexOf(q, pos);
-    if (idx === -1) { parts.push({ text: text.slice(pos), isMatch: false }); break; }
+    if (idx === -1) {
+      parts.push({ text: text.slice(pos), isMatch: false });
+      break;
+    }
     if (idx > pos) parts.push({ text: text.slice(pos, idx), isMatch: false });
     parts.push({ text: text.slice(idx, idx + q.length), isMatch: true });
     pos = idx + q.length;
@@ -123,17 +172,20 @@ function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
   return {
     color: style.fg,
     backgroundColor: style.bg,
-    fontWeight: style.bold ? 'bold' : undefined,
-    fontStyle: style.italic ? 'italic' : undefined,
-    textDecoration: style.underline ? 'underline' : undefined,
+    fontWeight: style.bold ? "bold" : undefined,
+    fontStyle: style.italic ? "italic" : undefined,
+    textDecoration: style.underline ? "underline" : undefined,
   };
 }
 
 const ctxMenu = ref<{ x: number; y: number; selected: string } | null>(null);
 
 function onContextMenu(ev: MouseEvent): void {
-  const sel = window.getSelection()?.toString() ?? '';
-  if (!sel) { ctxMenu.value = null; return; }
+  const sel = window.getSelection()?.toString() ?? "";
+  if (!sel) {
+    ctxMenu.value = null;
+    return;
+  }
   ev.preventDefault();
   ctxMenu.value = { x: ev.clientX, y: ev.clientY, selected: sel };
 }
@@ -144,14 +196,16 @@ function copy(): void {
   ctxMenu.value = null;
 }
 
-function showCtxPopup(mode: 'hex' | 'ascii'): void {
+function showCtxPopup(mode: "hex" | "ascii"): void {
   if (!ctxMenu.value) return;
   const bytes = new TextEncoder().encode(ctxMenu.value.selected);
   s.showHexPopup(bytes, mode);
   ctxMenu.value = null;
 }
 
-function dismissCtx(): void { ctxMenu.value = null; }
+function dismissCtx(): void {
+  ctxMenu.value = null;
+}
 
 let savedScrollTop: number | null = null;
 
@@ -175,7 +229,7 @@ onActivated(async () => {
 const containerRef = ref<HTMLDivElement | null>(null);
 const searchOpen = ref(false);
 watchLayoutChange(() => searchOpen.value);
-const searchText = ref('');
+const searchText = ref("");
 const searchIndex = ref(0);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
@@ -190,7 +244,9 @@ const matchingLineIdList = computed<number[]>(() => {
     .map((l) => l.id);
 });
 
-const matchingLineIds = computed<Set<number>>(() => new Set(matchingLineIdList.value));
+const matchingLineIds = computed<Set<number>>(
+  () => new Set(matchingLineIdList.value),
+);
 const matchCount = computed(() => matchingLineIdList.value.length);
 
 const currentMatchLineId = computed<number | null>(() => {
@@ -215,7 +271,7 @@ async function openSearch(): Promise<void> {
 
 function closeSearch(): void {
   searchOpen.value = false;
-  searchText.value = '';
+  searchText.value = "";
   searchIndex.value = 0;
   containerRef.value?.focus();
 }
@@ -223,7 +279,7 @@ function closeSearch(): void {
 async function navigateSearch(delta: number): Promise<void> {
   const count = matchCount.value;
   if (!count) return;
-  searchIndex.value = ((searchIndex.value + delta) % count + count) % count;
+  searchIndex.value = (((searchIndex.value + delta) % count) + count) % count;
   await scrollToMatch();
 }
 
@@ -232,39 +288,44 @@ async function scrollToMatch(): Promise<void> {
   if (id === null) return;
   await nextTick();
   const el = scrollRef.value?.querySelector(`[data-line-id="${id}"]`);
-  el?.scrollIntoView({ block: 'nearest' });
+  el?.scrollIntoView({ block: "nearest" });
 }
 
 function onContainerKeydown(ev: KeyboardEvent): void {
-  if (ev.ctrlKey && ev.key === 'f') {
+  if (ev.ctrlKey && ev.key === "f") {
     ev.preventDefault();
     void openSearch();
   }
 }
 
 function onSearchKeydown(ev: KeyboardEvent): void {
-  if (ev.key === 'Escape') {
+  if (ev.key === "Escape") {
     ev.preventDefault();
     closeSearch();
-  } else if (ev.key === 'Enter') {
+  } else if (ev.key === "Enter") {
     ev.preventDefault();
     void navigateSearch(ev.shiftKey ? -1 : 1);
   }
 }
 
-async function writeFile(defaultName: string, content: string, ext: string, mimeType: string): Promise<void> {
+async function writeFile(
+  defaultName: string,
+  content: string,
+  ext: string,
+  mimeType: string,
+): Promise<void> {
   if (isTauriRuntime()) {
-    const { save } = await import('@tauri-apps/plugin-dialog');
-    const { invoke } = await import('@tauri-apps/api/core');
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
     const path = await save({
       defaultPath: defaultName,
       filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
     });
-    if (path) await invoke('write_text_file', { path, content });
+    if (path) await invoke("write_text_file", { path, content });
   } else {
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = defaultName;
     a.click();
@@ -273,14 +334,20 @@ async function writeFile(defaultName: string, content: string, ext: string, mime
 }
 
 async function saveLog(): Promise<void> {
-  const content = props.lines.map((l) => {
-    const dir = l.direction === 'tx' ? 'TX ' : l.direction === 'rx' ? 'RX ' : 'SYS';
-    return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
-  }).join('\n');
-  await writeFile(`${props.exportTitle}-${makeStamp()}.txt`, content, 'txt', 'text/plain');
+  const content = props.lines
+    .map((l) => {
+      const dir =
+        l.direction === "tx" ? "TX " : l.direction === "rx" ? "RX " : "SYS";
+      return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
+    })
+    .join("\n");
+  await writeFile(
+    `${props.exportTitle}-${makeStamp()}.txt`,
+    content,
+    "txt",
+    "text/plain",
+  );
 }
-
-
 </script>
 
 <template>
@@ -291,8 +358,10 @@ async function saveLog(): Promise<void> {
     @keydown="onContainerKeydown"
   >
     <!-- toolbar -->
-    <div class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5">
-      <span class="toolbar-title">{{ t('serialDebug.log.title') }}</span>
+    <div
+      class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5"
+    >
+      <span class="toolbar-title">{{ t("serialDebug.log.title") }}</span>
 
       <!-- display toggles: timestamp & direction badge — left side, next to title -->
       <button
@@ -303,7 +372,7 @@ async function saveLog(): Promise<void> {
         @click="s.showTimestamp = !s.showTimestamp"
       >
         <FontAwesomeIcon :icon="['fas', 'clock']" class="size-3 shrink-0" />
-        {{ t('serialDebug.log.toggleTimestamp') }}
+        {{ t("serialDebug.log.toggleTimestamp") }}
       </button>
       <button
         type="button"
@@ -313,35 +382,71 @@ async function saveLog(): Promise<void> {
         @click="s.showDirBadge = !s.showDirBadge"
       >
         <FontAwesomeIcon :icon="['fas', 'tag']" class="size-3 shrink-0" />
-        {{ t('serialDebug.log.toggleDirBadge') }}
+        {{ t("serialDebug.log.toggleDirBadge") }}
       </button>
 
-      <button v-if="lockAutoScroll" type="button" class="paused-badge" :aria-label="t('serialDebug.log.pausedScroll')" @click="resumeScroll">
-        <FontAwesomeIcon :icon="['fas', 'arrow-down']" class="size-3 shrink-0" />
-        {{ t('serialDebug.log.pausedScroll') }}
+      <button
+        v-if="lockAutoScroll"
+        type="button"
+        class="paused-badge"
+        :aria-label="t('serialDebug.log.pausedScroll')"
+        @click="resumeScroll"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'arrow-down']"
+          class="size-3 shrink-0"
+        />
+        {{ t("serialDebug.log.pausedScroll") }}
       </button>
 
       <div class="ml-auto flex items-center gap-1">
         <!-- status: autosave -->
-        <span class="autosave-indicator" :class="{ 'autosave-indicator--active': s.sessionAutoSavePath }">
+        <span
+          class="autosave-indicator"
+          :class="{ 'autosave-indicator--active': s.sessionAutoSavePath }"
+        >
           <FontAwesomeIcon
             :icon="s.sessionAutoSavePath ? faCircleNotch : faFloppyDisk"
             class="size-3 shrink-0"
             :class="{ 'fa-spin': s.sessionAutoSavePath }"
           />
-          {{ s.sessionAutoSavePath ? t('serialDebug.autoSave.active') : t('serialDebug.autoSave.off') }}
+          {{
+            s.sessionAutoSavePath
+              ? t("serialDebug.autoSave.active")
+              : t("serialDebug.autoSave.off")
+          }}
         </span>
 
         <span class="toolbar-divider" />
 
         <!-- font size stepper -->
         <div class="font-size-stepper">
-          <button type="button" class="stepper-btn" :disabled="s.logFontSize <= 10" :aria-label="t('serialDebug.log.fontDecrease')" @click="s.decreaseFontSize">
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass-minus']" class="size-3 shrink-0" />
+          <button
+            type="button"
+            class="stepper-btn"
+            :disabled="s.logFontSize <= 10"
+            :aria-label="t('serialDebug.log.fontDecrease')"
+            @click="s.decreaseFontSize"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'magnifying-glass-minus']"
+              class="size-3 shrink-0"
+            />
           </button>
-          <span class="font-size-label">{{ t('serialDebug.log.fontSize') }} {{ s.logFontSize }}</span>
-          <button type="button" class="stepper-btn" :disabled="s.logFontSize >= 18" :aria-label="t('serialDebug.log.fontIncrease')" @click="s.increaseFontSize">
-            <FontAwesomeIcon :icon="['fas', 'magnifying-glass-plus']" class="size-3 shrink-0" />
+          <span class="font-size-label"
+            >{{ t("serialDebug.log.fontSize") }} {{ s.logFontSize }}</span
+          >
+          <button
+            type="button"
+            class="stepper-btn"
+            :disabled="s.logFontSize >= 18"
+            :aria-label="t('serialDebug.log.fontIncrease')"
+            @click="s.increaseFontSize"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'magnifying-glass-plus']"
+              class="size-3 shrink-0"
+            />
           </button>
         </div>
 
@@ -355,8 +460,11 @@ async function saveLog(): Promise<void> {
           :aria-label="t('serialDebug.log.filterToggle')"
           @click="openSearch"
         >
-          <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" class="size-3 shrink-0" />
-          {{ t('serialDebug.log.filterToggle') }}
+          <FontAwesomeIcon
+            :icon="['fas', 'magnifying-glass']"
+            class="size-3 shrink-0"
+          />
+          {{ t("serialDebug.log.filterToggle") }}
         </button>
 
         <span class="toolbar-divider" />
@@ -369,8 +477,11 @@ async function saveLog(): Promise<void> {
           :disabled="lines.length === 0"
           @click="saveLog"
         >
-          <FontAwesomeIcon :icon="['fas', 'download']" class="size-3 shrink-0" />
-          {{ t('serialDebug.log.saveLog') }}
+          <FontAwesomeIcon
+            :icon="['fas', 'download']"
+            class="size-3 shrink-0"
+          />
+          {{ t("serialDebug.log.saveLog") }}
         </button>
         <button
           type="button"
@@ -378,8 +489,11 @@ async function saveLog(): Promise<void> {
           :aria-label="t('serialDebug.conn.clear')"
           @click="emit('clear')"
         >
-          <FontAwesomeIcon :icon="['fas', 'trash-can']" class="size-3 shrink-0" />
-          {{ t('serialDebug.conn.clear') }}
+          <FontAwesomeIcon
+            :icon="['fas', 'trash-can']"
+            class="size-3 shrink-0"
+          />
+          {{ t("serialDebug.conn.clear") }}
         </button>
       </div>
     </div>
@@ -402,10 +516,15 @@ async function saveLog(): Promise<void> {
       />
       <span class="match-count">
         <template v-if="matchCount > 0">
-          {{ t('serialDebug.search.count', { current: (searchIndex % matchCount) + 1, total: matchCount }) }}
+          {{
+            t("serialDebug.search.count", {
+              current: (searchIndex % matchCount) + 1,
+              total: matchCount,
+            })
+          }}
         </template>
         <template v-else-if="searchText.trim()">
-          {{ t('serialDebug.search.noMatch') }}
+          {{ t("serialDebug.search.noMatch") }}
         </template>
       </span>
       <button
@@ -415,8 +534,11 @@ async function saveLog(): Promise<void> {
         :disabled="matchCount === 0"
         @click="navigateSearch(-1)"
       >
-        <FontAwesomeIcon :icon="['fas', 'chevron-up']" class="size-3 shrink-0" />
-        {{ t('serialDebug.search.prev') }}
+        <FontAwesomeIcon
+          :icon="['fas', 'chevron-up']"
+          class="size-3 shrink-0"
+        />
+        {{ t("serialDebug.search.prev") }}
       </button>
       <button
         type="button"
@@ -425,12 +547,20 @@ async function saveLog(): Promise<void> {
         :disabled="matchCount === 0"
         @click="navigateSearch(1)"
       >
-        <FontAwesomeIcon :icon="['fas', 'chevron-down']" class="size-3 shrink-0" />
-        {{ t('serialDebug.search.next') }}
+        <FontAwesomeIcon
+          :icon="['fas', 'chevron-down']"
+          class="size-3 shrink-0"
+        />
+        {{ t("serialDebug.search.next") }}
       </button>
-      <button type="button" class="btn-tool" :aria-label="t('serialDebug.search.close')" @click="closeSearch">
+      <button
+        type="button"
+        class="btn-tool"
+        :aria-label="t('serialDebug.search.close')"
+        @click="closeSearch"
+      >
         <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-3 shrink-0" />
-        {{ t('serialDebug.search.close') }}
+        {{ t("serialDebug.search.close") }}
       </button>
     </div>
 
@@ -461,16 +591,22 @@ async function saveLog(): Promise<void> {
         class="line"
         :data-dir="line.direction"
         :class="{
-          'line-search-match': matchingLineIds.has(line.id) && line.id !== currentMatchLineId,
+          'line-search-match':
+            matchingLineIds.has(line.id) && line.id !== currentMatchLineId,
           'line-search-current': line.id === currentMatchLineId,
         }"
       >
         <span v-if="s.showTimestamp || s.showDirBadge" class="prefix">
-          <span v-if="s.showTimestamp" class="ts">{{ formatTs(line.tsMs) }}</span>
-          <span
-            v-if="s.showDirBadge"
-            class="dir-badge"
-          >{{ line.direction === 'tx' ? 'TX' : line.direction === 'rx' ? 'RX' : 'SYS' }}</span>
+          <span v-if="s.showTimestamp" class="ts">{{
+            formatTs(line.tsMs)
+          }}</span>
+          <span v-if="s.showDirBadge" class="dir-badge">{{
+            line.direction === "tx"
+              ? "TX"
+              : line.direction === "rx"
+                ? "RX"
+                : "SYS"
+          }}</span>
         </span>
         <span class="text">
           <span
@@ -479,16 +615,25 @@ async function saveLog(): Promise<void> {
             :style="spanStyle(span.style)"
           >
             <template v-if="searchQuery && matchingLineIds.has(line.id)">
-              <template v-for="(seg, sj) in splitByKeyword(span.text, searchQuery)" :key="sj">
-                <mark v-if="seg.isMatch" class="search-keyword-mark">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+              <template
+                v-for="(seg, sj) in splitByKeyword(span.text, searchQuery)"
+                :key="sj"
+              >
+                <mark v-if="seg.isMatch" class="search-keyword-mark">{{
+                  seg.text
+                }}</mark
+                ><template v-else>{{ seg.text }}</template>
               </template>
             </template>
             <template v-else>{{ span.text }}</template>
           </span>
         </span>
       </div>
-      <div v-if="displayLines.length === 0" class="px-3 py-2 text-[var(--ty-text-muted)]">
-        {{ t('serialDebug.log.waitingData') }}
+      <div
+        v-if="displayLines.length === 0"
+        class="px-3 py-2 text-[var(--ty-text-muted)]"
+      >
+        {{ t("serialDebug.log.waitingData") }}
       </div>
     </div>
 
@@ -499,19 +644,43 @@ async function saveLog(): Promise<void> {
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
       @click.stop
     >
-      <button type="button" class="menu-item" @click="copy">{{ t('serialDebug.hexPopup.copy') }}</button>
-      <button type="button" class="menu-item" @click="showCtxPopup('hex')">{{ t('serialDebug.hexPopup.toHex') }}</button>
-      <button type="button" class="menu-item" @click="showCtxPopup('ascii')">{{ t('serialDebug.hexPopup.toAscii') }}</button>
+      <button type="button" class="menu-item" @click="copy">
+        {{ t("serialDebug.hexPopup.copy") }}
+      </button>
+      <button type="button" class="menu-item" @click="showCtxPopup('hex')">
+        {{ t("serialDebug.hexPopup.toHex") }}
+      </button>
+      <button type="button" class="menu-item" @click="showCtxPopup('ascii')">
+        {{ t("serialDebug.hexPopup.toAscii") }}
+      </button>
     </div>
-    <div v-if="ctxMenu" class="fixed inset-0 z-40" @click="dismissCtx" @contextmenu.prevent="dismissCtx" />
+    <div
+      v-if="ctxMenu"
+      class="fixed inset-0 z-40"
+      @click="dismissCtx"
+      @contextmenu.prevent="dismissCtx"
+    />
   </div>
 </template>
 
 <style scoped>
 /* toolbar */
-.log-toolbar { background: var(--ty-surface); }
-.toolbar-title { font-size: 0.8125rem; font-weight: 600; color: var(--ty-text-muted); white-space: nowrap; }
-.toolbar-divider { width: 1px; height: 1rem; background: var(--ty-border); flex-shrink: 0; margin: 0 0.125rem; }
+.log-toolbar {
+  background: var(--ty-surface);
+}
+.toolbar-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ty-text-muted);
+  white-space: nowrap;
+}
+.toolbar-divider {
+  width: 1px;
+  height: 1rem;
+  background: var(--ty-border);
+  flex-shrink: 0;
+  margin: 0 0.125rem;
+}
 .font-size-stepper {
   display: inline-flex;
   align-items: center;
@@ -528,11 +697,29 @@ async function saveLog(): Promise<void> {
   border: none;
   cursor: pointer;
   color: var(--ty-text-muted);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
-.stepper-btn:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
-.stepper-btn:disabled { cursor: not-allowed; opacity: 0.4; }
-.font-size-label { font-size: 0.75rem; color: var(--ty-text-muted); min-width: 4rem; text-align: center; font-variant-numeric: tabular-nums; border-left: 1px solid var(--ty-border); border-right: 1px solid var(--ty-border); padding: 0 0.375rem; white-space: nowrap; }
+.stepper-btn:hover {
+  background: var(--ty-surface-muted);
+  color: var(--ty-text);
+}
+.stepper-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.font-size-label {
+  font-size: 0.75rem;
+  color: var(--ty-text-muted);
+  min-width: 4rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--ty-border);
+  border-right: 1px solid var(--ty-border);
+  padding: 0 0.375rem;
+  white-space: nowrap;
+}
 .btn-tool {
   display: inline-flex;
   align-items: center;
@@ -545,11 +732,24 @@ async function saveLog(): Promise<void> {
   font-size: 0.8125rem;
   color: var(--ty-text-muted);
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
-.btn-tool:hover { background: var(--ty-surface-muted); color: var(--ty-text); }
-.btn-tool:disabled { cursor: not-allowed; opacity: 0.4; }
-.btn-tool-active { color: var(--ty-primary); border-color: var(--ty-primary); }.paused-badge {
+.btn-tool:hover {
+  background: var(--ty-surface-muted);
+  color: var(--ty-text);
+}
+.btn-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.btn-tool-active {
+  color: var(--ty-primary);
+  border-color: var(--ty-primary);
+}
+.paused-badge {
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
   border-radius: 9999px;
@@ -558,9 +758,13 @@ async function saveLog(): Promise<void> {
   border: 1px solid var(--ty-accent, #f97316);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s ease, opacity 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
 }
-.paused-badge:hover { background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent); }
+.paused-badge:hover {
+  background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent);
+}
 .autosave-indicator {
   display: inline-flex;
   align-items: center;
@@ -578,7 +782,9 @@ async function saveLog(): Promise<void> {
   opacity: 1;
 }
 /* search bar */
-.search-bar { background: var(--ty-surface); }
+.search-bar {
+  background: var(--ty-surface);
+}
 .search-input {
   flex: 1;
   min-width: 0;
@@ -589,8 +795,15 @@ async function saveLog(): Promise<void> {
   font-size: 0.8125rem;
   outline: none;
 }
-.search-input:focus { border-color: var(--ty-primary); }
-.match-count { font-size: 0.75rem; color: var(--ty-text-muted); white-space: nowrap; min-width: 5rem; }
+.search-input:focus {
+  border-color: var(--ty-primary);
+}
+.match-count {
+  font-size: 0.75rem;
+  color: var(--ty-text-muted);
+  white-space: nowrap;
+  min-width: 5rem;
+}
 /* log lines */
 .line {
   display: flex;
@@ -599,13 +812,35 @@ async function saveLog(): Promise<void> {
   padding: 0.1875rem 0.625rem;
   font-size: inherit;
 }
-.line[data-dir="tx"] { }
-.line[data-dir="rx"] { }
-.line[data-dir="sys"] { color: var(--ty-text-muted); font-style: italic; }
-.line-search-match { background: color-mix(in srgb, var(--ty-primary) 12%, transparent) !important; }
-.line-search-current { background: color-mix(in srgb, var(--ty-primary) 28%, transparent) !important; outline: 1px solid color-mix(in srgb, var(--ty-primary) 45%, transparent); outline-offset: -1px; }
-.prefix { display: flex; align-items: baseline; gap: 0.25rem; flex-shrink: 0; white-space: nowrap; }
-.ts { color: var(--ty-text-muted); font-size: 0.85em; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.line[data-dir="tx"] {
+}
+.line[data-dir="rx"] {
+}
+.line[data-dir="sys"] {
+  color: var(--ty-text-muted);
+  font-style: italic;
+}
+.line-search-match {
+  background: color-mix(in srgb, var(--ty-primary) 12%, transparent) !important;
+}
+.line-search-current {
+  background: color-mix(in srgb, var(--ty-primary) 28%, transparent) !important;
+  outline: 1px solid color-mix(in srgb, var(--ty-primary) 45%, transparent);
+  outline-offset: -1px;
+}
+.prefix {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.ts {
+  color: var(--ty-text-muted);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
 .dir-badge {
   font-size: 0.7em;
   font-weight: 700;
@@ -616,11 +851,39 @@ async function saveLog(): Promise<void> {
   width: 2rem;
   text-align: center;
 }
-.line[data-dir="tx"] .dir-badge { background: color-mix(in srgb, var(--ty-primary) 20%, transparent); color: var(--ty-primary); }
-.line[data-dir="rx"] .dir-badge { background: color-mix(in srgb, var(--ty-success) 20%, transparent); color: var(--ty-success); }
-.line[data-dir="sys"] .dir-badge { background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent); color: var(--ty-text-muted); }
-.text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
-mark.search-keyword-mark { background: #fbbf24; color: #1c1917; border-radius: 0.125rem; padding: 0 0.1rem; }
-.menu-item { display: block; width: 100%; text-align: left; padding: 0.375rem 0.75rem; font-size: 0.8125rem; cursor: pointer; }
-.menu-item:hover { background: var(--ty-surface-muted); }
+.line[data-dir="tx"] .dir-badge {
+  background: color-mix(in srgb, var(--ty-primary) 20%, transparent);
+  color: var(--ty-primary);
+}
+.line[data-dir="rx"] .dir-badge {
+  background: color-mix(in srgb, var(--ty-success) 20%, transparent);
+  color: var(--ty-success);
+}
+.line[data-dir="sys"] .dir-badge {
+  background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent);
+  color: var(--ty-text-muted);
+}
+.text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+mark.search-keyword-mark {
+  background: #fbbf24;
+  color: #1c1917;
+  border-radius: 0.125rem;
+  padding: 0 0.1rem;
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: var(--ty-surface-muted);
+}
 </style>

@@ -1,14 +1,18 @@
 <script setup lang="ts">
-defineOptions({ name: 'SerialDebugPage' })
-import { onActivated, onDeactivated, watch } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { useSerialDebugStore } from '@/stores/serial-debug';
-import { sanitizePortName, makeStamp, formatTs } from '@/features/serial-debug/context';
-import { stripAnsi } from '@/features/serial-debug/ansi-parse';
-import SerialDebugConnectionBar from './components/SerialDebugConnectionBar.vue';
-import SerialDebugLogView from './components/SerialDebugLogView.vue';
-import SerialDebugSendBar from './components/SerialDebugSendBar.vue';
-import RxSelectionHexPopup from './components/RxSelectionHexPopup.vue';
+defineOptions({ name: "SerialDebugPage" });
+import { onActivated, onDeactivated, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { useSerialDebugStore } from "@/stores/serial-debug";
+import {
+  sanitizePortName,
+  makeStamp,
+  formatTs,
+} from "@/features/serial-debug/utils";
+import { stripAnsi } from "@/features/serial-debug/ansi-parse";
+import SerialDebugConnectionBar from "./components/SerialDebugConnectionBar.vue";
+import SerialDebugLogView from "./components/SerialDebugLogView.vue";
+import SerialDebugSendBar from "./components/SerialDebugSendBar.vue";
+import SerialDebugRxSelectionHexPopup from "./components/SerialDebugRxSelectionHexPopup.vue";
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
@@ -35,23 +39,27 @@ async function flush(): Promise<void> {
   if (newLines.length === 0) return;
 
   flushInFlight = true;
-  const content = newLines.map((l) => {
-    const dir = l.direction === 'tx' ? 'TX ' : l.direction === 'rx' ? 'RX ' : 'SYS';
-    if (s.autoSaveTimestamp) {
-      return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
-    }
-    return stripAnsi(l.text);
-  }).join('\n') + '\n';
+  const content =
+    newLines
+      .map((l) => {
+        const dir =
+          l.direction === "tx" ? "TX " : l.direction === "rx" ? "RX " : "SYS";
+        if (s.autoSaveTimestamp) {
+          return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
+        }
+        return stripAnsi(l.text);
+      })
+      .join("\n") + "\n";
 
   const flushedUpToId = newLines[newLines.length - 1].id;
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('append_text_file', { path, content });
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("append_text_file", { path, content });
     // Only advance the watermark — never roll it back if onActivated already moved it forward.
     if (flushedUpToId > lastFlushedLineId) lastFlushedLineId = flushedUpToId;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    s.appendSysLine(t('serialDebug.autoSave.errWrite', { msg }));
+    s.appendSysLine(t("serialDebug.autoSave.errWrite", { msg }));
     stopInterval();
     s.sessionAutoSavePath = null;
   } finally {
@@ -67,7 +75,9 @@ function startAutoSave(): void {
   // path separator: Tauri on all platforms accepts forward slash
   s.sessionAutoSavePath = `${s.autoSaveDir}/${portDir}/${filename}`;
   lastFlushedLineId = 0;
-  autoSaveInterval = setInterval(() => { void flush(); }, 5000);
+  autoSaveInterval = setInterval(() => {
+    void flush();
+  }, 5000);
 }
 
 async function finalFlushAndStop(keepSession = false): Promise<void> {
@@ -84,7 +94,9 @@ onActivated(() => {
     // Restore the watermark so the next flush only picks up lines that arrived while away.
     lastFlushedLineId = s.lines.length > 0 ? s.lines[s.lines.length - 1].id : 0;
     stopInterval();
-    autoSaveInterval = setInterval(() => { void flush(); }, 5000);
+    autoSaveInterval = setInterval(() => {
+      void flush();
+    }, 5000);
   } else if (s.open) {
     startAutoSave();
   }
@@ -132,6 +144,6 @@ watch(
       @clear="s.clear()"
     />
     <SerialDebugSendBar />
-    <RxSelectionHexPopup />
+    <SerialDebugRxSelectionHexPopup />
   </div>
 </template>
