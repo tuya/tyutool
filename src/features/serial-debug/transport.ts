@@ -1,6 +1,6 @@
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { wsTransport } from '@/features/firmware-flash/ws-transport';
-import type { DebugChunk, DebugConfig, DisconnectPayload } from './types';
+import { isTauriRuntime } from "@/runtime";
+import { wsTransport } from "@/transport/ws-transport";
+import type { DebugChunk, DebugConfig, DisconnectPayload } from "./types";
 
 type ChunkListener = (chunk: DebugChunk) => void;
 type DisconnectListener = (p: DisconnectPayload) => void;
@@ -9,7 +9,7 @@ export interface SerialDebugTransport {
   open(cfg: DebugConfig): Promise<void>;
   close(): Promise<void>;
   send(bytes: Uint8Array): Promise<void>;
-  onChunk(cb: ChunkListener): () => void;      // returns unsubscribe
+  onChunk(cb: ChunkListener): () => void; // returns unsubscribe
   onDisconnect(cb: DisconnectListener): () => void;
 }
 
@@ -22,39 +22,49 @@ class TauriTransport implements SerialDebugTransport {
 
   private async ensureListeners(): Promise<void> {
     if (this.unlistenChunk && this.unlistenDisconnect) return;
-    const { listen } = await import('@tauri-apps/api/event');
-    this.unlistenChunk = await listen<DebugChunk>('serial-debug-chunk', (ev) => {
-      this.chunkListeners.forEach((l) => l(ev.payload));
-    });
-    this.unlistenDisconnect = await listen<DisconnectPayload>('serial-debug-disconnected', (ev) => {
-      this.disconnectListeners.forEach((l) => l(ev.payload));
-    });
+    const { listen } = await import("@tauri-apps/api/event");
+    this.unlistenChunk = await listen<DebugChunk>(
+      "serial-debug-chunk",
+      (ev) => {
+        this.chunkListeners.forEach((l) => l(ev.payload));
+      },
+    );
+    this.unlistenDisconnect = await listen<DisconnectPayload>(
+      "serial-debug-disconnected",
+      (ev) => {
+        this.disconnectListeners.forEach((l) => l(ev.payload));
+      },
+    );
   }
 
   async open(cfg: DebugConfig): Promise<void> {
     await this.ensureListeners();
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('serial_debug_open', { cfg });
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("serial_debug_open", { cfg });
   }
 
   async close(): Promise<void> {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('serial_debug_close');
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("serial_debug_close");
   }
 
   async send(bytes: Uint8Array): Promise<void> {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('serial_debug_send', { bytes: Array.from(bytes) });
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("serial_debug_send", { bytes: Array.from(bytes) });
   }
 
   onChunk(cb: ChunkListener): () => void {
     this.chunkListeners.add(cb);
-    return () => { this.chunkListeners.delete(cb); };
+    return () => {
+      this.chunkListeners.delete(cb);
+    };
   }
 
   onDisconnect(cb: DisconnectListener): () => void {
     this.disconnectListeners.add(cb);
-    return () => { this.disconnectListeners.delete(cb); };
+    return () => {
+      this.disconnectListeners.delete(cb);
+    };
   }
 }
 
@@ -107,6 +117,8 @@ export function serialDebugTransport(): SerialDebugTransport {
 }
 
 // Test helper — tests can inject a fake.
-export function __setSerialDebugTransportForTest(t: SerialDebugTransport | null) {
+export function __setSerialDebugTransportForTest(
+  t: SerialDebugTransport | null,
+) {
   singleton = t;
 }
