@@ -1,6 +1,7 @@
 {
   "common": {
     "closeDialog": "Close",
+    "copy": "Copy",
     "dialogIconPurposeInfo": "Dialog type: information",
     "dialogIconPurposeWarning": "Dialog type: warning — please review the risk",
     "dialogIconPurposeDanger": "Dialog type: danger — confirm carefully",
@@ -504,7 +505,11 @@
       "noExcel": "No auth table selected",
       "conflictPolicy": "Already-authorized device",
       "skip": "Skip (recommended)",
-      "overwrite": "Overwrite"
+      "overwrite": "Overwrite",
+      "excelTotal": "Total",
+      "excelUsed": "Used",
+      "excelRemaining": "Remaining",
+      "excelExhausted": "All auth codes used — please add more to the Excel"
     },
     "toolbar": {
       "autoAssign": "Auto Assign",
@@ -522,7 +527,9 @@
       "retry": "Retry",
       "remove": "Remove",
       "empty": "No ports",
-      "emptyHint": "Click Auto Assign to scan available ports"
+      "emptyHint": "Click Auto Assign to scan available ports",
+      "viewError": "View full error",
+      "errorTitle": "Flash error"
     },
     "status": {
       "idle": "Idle",

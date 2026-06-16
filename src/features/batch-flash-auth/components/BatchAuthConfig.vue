@@ -88,15 +88,18 @@ watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
         >
           {{ excelError }}
         </div>
-        <div v-else-if="excelStats" class="flex gap-3 text-xs">
+        <div
+          v-else-if="excelStats"
+          class="flex flex-wrap items-center gap-3 text-xs"
+        >
           <span class="text-[var(--ty-text-muted)]">
-            总计
+            {{ t("batchFlashAuth.config.excelTotal") }}
             <strong class="text-[var(--ty-text)]">{{
               excelStats.total
             }}</strong>
           </span>
           <span class="text-[var(--ty-text-muted)]">
-            已用
+            {{ t("batchFlashAuth.config.excelUsed") }}
             <strong class="text-[var(--ty-text)]">{{ excelStats.used }}</strong>
           </span>
           <span
@@ -107,14 +110,21 @@ watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
                   : 'var(--ty-success)',
             }"
           >
-            剩余 <strong>{{ excelStats.remaining }}</strong>
+            {{ t("batchFlashAuth.config.excelRemaining") }}
+            <strong>{{ excelStats.remaining }}</strong>
           </span>
           <span
             v-if="excelStats.remaining === 0"
-            class="font-medium"
+            class="flex items-center gap-1 font-medium"
             :style="{ color: 'var(--ty-accent)' }"
-            >⚠ 授权码已全部使用，请补充 Excel</span
           >
+            <FontAwesomeIcon
+              :icon="['fas', 'triangle-exclamation']"
+              class="size-3 shrink-0"
+              aria-hidden="true"
+            />
+            {{ t("batchFlashAuth.config.excelExhausted") }}
+          </span>
         </div>
       </div>
 

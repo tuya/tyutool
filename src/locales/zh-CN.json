@@ -1,6 +1,7 @@
 {
   "common": {
     "closeDialog": "关闭",
+    "copy": "复制",
     "dialogIconPurposeInfo": "对话框类型图标：信息提示",
     "dialogIconPurposeWarning": "对话框类型图标：警告，请留意风险",
     "dialogIconPurposeDanger": "对话框类型图标：危险操作，请谨慎确认",
@@ -504,7 +505,11 @@
       "noExcel": "未选择授权表",
       "conflictPolicy": "遇到已授权设备",
       "skip": "跳过（推荐）",
-      "overwrite": "覆盖"
+      "overwrite": "覆盖",
+      "excelTotal": "总计",
+      "excelUsed": "已用",
+      "excelRemaining": "剩余",
+      "excelExhausted": "授权码已全部使用，请补充 Excel"
     },
     "toolbar": {
       "autoAssign": "自动分配",
@@ -522,7 +527,9 @@
       "retry": "重试",
       "remove": "删除",
       "empty": "暂无串口",
-      "emptyHint": "点击「自动分配」扫描可用串口，或手动添加"
+      "emptyHint": "点击「自动分配」扫描可用串口，或手动添加",
+      "viewError": "查看完整错误",
+      "errorTitle": "烧录错误"
     },
     "status": {
       "idle": "空闲",

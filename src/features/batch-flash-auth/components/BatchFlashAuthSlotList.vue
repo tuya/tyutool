@@ -39,7 +39,12 @@ function onRemove(port: string) {
     </div>
 
     <!-- Slot rows -->
-    <div v-if="store.slots.length > 0" class="min-h-0 flex-1 overflow-y-auto">
+    <div
+      v-if="store.slots.length > 0"
+      class="min-h-0 flex-1 overflow-y-auto"
+      aria-live="polite"
+      aria-relevant="text"
+    >
       <BatchFlashAuthSlotRow
         v-for="s in store.slots"
         :key="s.port"
