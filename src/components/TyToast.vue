@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { watch, ref, onUnmounted } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { useRouter } from 'vue-router';
-import { toastState } from '@/composables/toastState';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
+import { watch, ref, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
+import { toastState } from "@/composables/toastState";
+import { isTauriRuntime } from "@/runtime";
 
-const { t } = useI18n({ useScope: 'global' });
+const { t } = useI18n({ useScope: "global" });
 const router = useRouter();
 
 const visible = ref(false);
@@ -13,14 +13,14 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
   () => toastState.visible,
-  val => {
+  (val) => {
     if (val) {
       visible.value = true;
       timer = setTimeout(() => {
         dismiss();
       }, 6000);
     }
-  }
+  },
 );
 
 function dismiss(): void {
@@ -34,24 +34,25 @@ function dismiss(): void {
 
 function goToSettings(): void {
   dismiss();
-  router.push('/settings');
+  router.push("/settings");
   // Note: auto-opening UpdateDialog from here is complex (cross-component);
   // The toast just navigates to settings, user clicks the button there.
 }
 
 async function openPortableDownload(): Promise<void> {
   dismiss();
-  const url = toastState.portableUrl || 'https://github.com/tuya/tyutool/releases/latest';
+  const url =
+    toastState.portableUrl || "https://github.com/tuya/tyutool/releases/latest";
   if (isTauriRuntime()) {
     try {
-      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
       return;
     } catch {
       // fall through to window.open
     }
   }
-  window.open(url, '_blank');
+  window.open(url, "_blank");
 }
 
 onUnmounted(() => {
@@ -65,19 +66,33 @@ onUnmounted(() => {
       <div v-if="visible" class="ty-toast" role="alert" aria-live="polite">
         <span class="ty-toast-text">
           <template v-if="toastState.isPortable">
-            {{ t('settings.update.toastPortable', { version: toastState.version }) }}
+            {{
+              t("settings.update.toastPortable", {
+                version: toastState.version,
+              })
+            }}
           </template>
           <template v-else>
-            {{ t('settings.update.toastNew', { version: toastState.version }) }}
+            {{ t("settings.update.toastNew", { version: toastState.version }) }}
           </template>
         </span>
-        <button v-if="toastState.isPortable" class="ty-toast-action" @click="openPortableDownload">
-          {{ t('settings.update.portableDownload') }}
+        <button
+          v-if="toastState.isPortable"
+          class="ty-toast-action"
+          @click="openPortableDownload"
+        >
+          {{ t("settings.update.portableDownload") }}
         </button>
         <button v-else class="ty-toast-action" @click="goToSettings">
-          {{ t('settings.update.toastAction') }}
+          {{ t("settings.update.toastAction") }}
         </button>
-        <button class="ty-toast-close" :aria-label="t('settings.update.toastClose')" @click="dismiss">×</button>
+        <button
+          class="ty-toast-close"
+          :aria-label="t('settings.update.toastClose')"
+          @click="dismiss"
+        >
+          ×
+        </button>
       </div>
     </Transition>
   </Teleport>
