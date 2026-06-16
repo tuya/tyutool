@@ -2,7 +2,7 @@
  * Types aligned with `tyutool_core::FlashJob` / `FlashEvent` (snake_case JSON tag "kind").
  */
 
-export type FlashJobMode = 'flash' | 'erase' | 'read' | 'authorize';
+export type FlashJobMode = "flash" | "erase" | "read" | "authorize";
 
 export interface FlashSegmentPayload {
   firmwarePath: string;
@@ -31,19 +31,33 @@ export interface FlashJobPayload {
 // Types aligned with tyutool_core::FlashEvent (snake_case JSON tag "kind")
 
 export type FlashPhase =
-  | 'handshake' | 'read_flash_id' | 'unprotect' | 'erase'
-  | 'write' | 'verify' | 'protect' | 'reboot' | 'read' | 'save'
-  | 'load_ram' | 'switch_baud' | 'connect'
+  | "handshake"
+  | "read_flash_id"
+  | "unprotect"
+  | "erase"
+  | "write"
+  | "verify"
+  | "protect"
+  | "reboot"
+  | "read"
+  | "save"
+  | "load_ram"
+  | "switch_baud"
+  | "connect"
   | { write_segment: { current: number; total: number } }
   | { other: string };
 
 export type FlashMilestone =
-  | 'handshake_complete' | 'erase_complete' | 'write_complete' | 'verify_passed' | 'rebooted'
+  | "handshake_complete"
+  | "erase_complete"
+  | "write_complete"
+  | "verify_passed"
+  | "rebooted"
   | { connected: { chip_info: string | null } }
   | { flash_id_read: { mid: number | null } }
   | { segment_written: { current: number; total: number } }
   | { auth_read_complete: { uuid: string; authkey: string } }
-  | 'auth_read_empty';
+  | "auth_read_empty";
 
 export type FlashResultPayload =
   | { ok: { elapsed_secs: number } }
@@ -51,10 +65,21 @@ export type FlashResultPayload =
   | { cancelled: { elapsed_secs: number } };
 
 export type JobDetails =
-  | { type: 'flash'; firmware_path: string; firmware_size: number | null; range_start: string; range_end: string }
-  | { type: 'read'; output_path: string; range_start: string; range_end: string }
-  | { type: 'erase'; range_start: string; range_end: string }
-  | { type: 'authorize'; write: boolean };
+  | {
+      type: "flash";
+      firmware_path: string;
+      firmware_size: number | null;
+      range_start: string;
+      range_end: string;
+    }
+  | {
+      type: "read";
+      output_path: string;
+      range_start: string;
+      range_end: string;
+    }
+  | { type: "erase"; range_start: string; range_end: string }
+  | { type: "authorize"; write: boolean };
 
 export type JobSummaryPayload = {
   port: string;
@@ -64,17 +89,9 @@ export type JobSummaryPayload = {
 };
 
 export type FlashProgressPayload =
-  | { kind: 'job_summary' } & JobSummaryPayload
-  | { kind: 'phase'; phase: FlashPhase }
-  | { kind: 'percent'; value: number }
-  | { kind: 'milestone'; milestone: FlashMilestone }
-  | { kind: 'warning'; message: string }
-  | { kind: 'done'; result: FlashResultPayload };
-
-export function isTauriRuntime(): boolean {
-  // Tauri 2 injects `window.__TAURI_INTERNALS__` into the WebView at runtime.
-  // `import.meta.env.TAURI_ENV_PLATFORM` is only set during `tauri dev` (Vite dev
-  // server) but NOT during production builds, so it gets compiled away by Vite and
-  // the Tauri code branch is tree-shaken out.  Use runtime detection instead.
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
+  | ({ kind: "job_summary" } & JobSummaryPayload)
+  | { kind: "phase"; phase: FlashPhase }
+  | { kind: "percent"; value: number }
+  | { kind: "milestone"; milestone: FlashMilestone }
+  | { kind: "warning"; message: string }
+  | { kind: "done"; result: FlashResultPayload };

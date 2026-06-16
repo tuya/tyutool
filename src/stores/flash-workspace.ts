@@ -4,18 +4,19 @@
  */
 
 import {
+  AUTH_ONLY_CHIP_ID,
   BAUD_RATE_OPTIONS,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
-} from '@/features/firmware-flash/constants';
-import { chipManifest } from '@/features/firmware-flash/chip-manifests';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import type { OpKind } from '@/features/firmware-flash/types';
+} from "@/features/firmware-flash/constants";
+import { chipManifest } from "@/features/firmware-flash/chip-manifests";
+import { isTauriRuntime } from "@/runtime";
+import type { OpKind } from "@/features/firmware-flash/types";
 
 /** Same file as `settings.ts` — single JSON store on disk. */
-const STORE_FILE = 'settings.json';
+const STORE_FILE = "settings.json";
 
-export const WORKSPACE_JSON_KEY = 'tyutool-flash-workspace-json';
+export const WORKSPACE_JSON_KEY = "tyutool-flash-workspace-json";
 
 export const WORKSPACE_VERSION = 1 as const;
 
@@ -46,14 +47,24 @@ export interface FlashWorkspaceSerialized {
   authorizeAuthKey: string;
 }
 
-const OP_KINDS: OpKind[] = ['flash', 'erase', 'read', 'authorize'];
+const OP_KINDS: OpKind[] = ["flash", "erase", "read", "authorize"];
 
 function isOpKind(x: unknown): x is OpKind {
-  return typeof x === 'string' && (OP_KINDS as string[]).includes(x);
+  return typeof x === "string" && (OP_KINDS as string[]).includes(x);
+}
+
+function isValidWorkspaceChipId(chipId: string, activeTab: OpKind): boolean {
+  if ((CHIP_IDS as readonly string[]).includes(chipId)) {
+    return true;
+  }
+  return activeTab === "authorize" && chipId === AUTH_ONLY_CHIP_ID;
 }
 
 function normalizeBaud(chipId: string, baud: unknown): number {
-  const n = typeof baud === 'number' && Number.isFinite(baud) ? baud : chipManifest(DEFAULT_CHIP_ID).defaultBaudRate;
+  const n =
+    typeof baud === "number" && Number.isFinite(baud)
+      ? baud
+      : chipManifest(DEFAULT_CHIP_ID).defaultBaudRate;
   if ((BAUD_RATE_OPTIONS as readonly number[]).includes(n)) {
     return n;
   }
@@ -66,14 +77,18 @@ function normalizeBaud(chipId: string, baud: unknown): number {
 
 function normalizeAuthBaud(chipId: string, baud: unknown): number {
   const fallback = (() => {
-    try { return chipManifest(chipId).defaultAuthBaudRate; } catch { return chipManifest(DEFAULT_CHIP_ID).defaultAuthBaudRate; }
+    try {
+      return chipManifest(chipId).defaultAuthBaudRate;
+    } catch {
+      return chipManifest(DEFAULT_CHIP_ID).defaultAuthBaudRate;
+    }
   })();
-  const n = typeof baud === 'number' && Number.isFinite(baud) ? baud : fallback;
+  const n = typeof baud === "number" && Number.isFinite(baud) ? baud : fallback;
   return (BAUD_RATE_OPTIONS as readonly number[]).includes(n) ? n : fallback;
 }
 
 function clampSegmentIndex(index: unknown, len: number): number {
-  if (typeof index !== 'number' || !Number.isFinite(index)) {
+  if (typeof index !== "number" || !Number.isFinite(index)) {
     return 0;
   }
   const i = Math.floor(index);
@@ -86,63 +101,92 @@ function clampSegmentIndex(index: unknown, len: number): number {
 /**
  * Parse and validate workspace JSON. Returns null if invalid or unsupported version.
  */
-export function parseFlashWorkspaceJson(raw: string | null): FlashWorkspaceSerialized | null {
-  if (raw === null || raw === undefined || raw.trim() === '') {
+export function parseFlashWorkspaceJson(
+  raw: string | null,
+): FlashWorkspaceSerialized | null {
+  if (raw === null || raw === undefined || raw.trim() === "") {
     return null;
   }
   try {
     const o = JSON.parse(raw) as unknown;
-    if (!o || typeof o !== 'object') {
+    if (!o || typeof o !== "object") {
       return null;
     }
     const rec = o as Record<string, unknown>;
     if (rec.v !== WORKSPACE_VERSION) {
       return null;
     }
-    const chipId = typeof rec.selectedChipId === 'string' ? rec.selectedChipId : '';
-    if (!(CHIP_IDS as readonly string[]).includes(chipId)) {
+    const activeTab: OpKind = isOpKind(rec.activeTab) ? rec.activeTab : "flash";
+    const chipId =
+      typeof rec.selectedChipId === "string" ? rec.selectedChipId : "";
+    if (!isValidWorkspaceChipId(chipId, activeTab)) {
       return null;
     }
-    const activeTab: OpKind = isOpKind(rec.activeTab) ? rec.activeTab : 'flash';
     const segsIn = rec.flashSegments;
     if (!Array.isArray(segsIn) || segsIn.length < 1 || segsIn.length > 10) {
       return null;
     }
-    const flashSegments: FlashWorkspaceSerialized['flashSegments'] = [];
+    const flashSegments: FlashWorkspaceSerialized["flashSegments"] = [];
     for (let i = 0; i < segsIn.length; i++) {
       const s = segsIn[i];
-      if (!s || typeof s !== 'object') {
+      if (!s || typeof s !== "object") {
         return null;
       }
       const seg = s as Record<string, unknown>;
-      const firmwarePath = typeof seg.firmwarePath === 'string' ? seg.firmwarePath : '';
-      const startAddr = typeof seg.startAddr === 'string' ? seg.startAddr : '0x00000000';
-      const endAddr = typeof seg.endAddr === 'string' ? seg.endAddr : '0x00000000';
-      const id = typeof seg.id === 'string' && seg.id.length > 0 ? seg.id : Math.random().toString(36).substring(2, 9);
+      const firmwarePath =
+        typeof seg.firmwarePath === "string" ? seg.firmwarePath : "";
+      const startAddr =
+        typeof seg.startAddr === "string" ? seg.startAddr : "0x00000000";
+      const endAddr =
+        typeof seg.endAddr === "string" ? seg.endAddr : "0x00000000";
+      const id =
+        typeof seg.id === "string" && seg.id.length > 0
+          ? seg.id
+          : Math.random().toString(36).substring(2, 9);
       flashSegments.push({ id, firmwarePath, startAddr, endAddr });
     }
     const baud = normalizeBaud(chipId, rec.selectedBaudRate);
     const authBaud = normalizeAuthBaud(chipId, rec.authBaudRate);
-    const activeSegmentIndex = clampSegmentIndex(rec.activeSegmentIndex, flashSegments.length);
+    const activeSegmentIndex = clampSegmentIndex(
+      rec.activeSegmentIndex,
+      flashSegments.length,
+    );
     return {
       v: WORKSPACE_VERSION,
       activeTab,
-      selectedSerialPort: typeof rec.selectedSerialPort === 'string' ? rec.selectedSerialPort : '',
+      selectedSerialPort:
+        typeof rec.selectedSerialPort === "string"
+          ? rec.selectedSerialPort
+          : "",
       selectedBaudRate: baud,
       selectedChipId: chipId,
       flashSegments,
       activeSegmentIndex,
       eraseAdvancedOpen: rec.eraseAdvancedOpen === true,
-      eraseStartAddr: typeof rec.eraseStartAddr === 'string' ? rec.eraseStartAddr : '0x00000000',
-      eraseEndAddr: typeof rec.eraseEndAddr === 'string' ? rec.eraseEndAddr : '0x00000000',
-      readStartAddr: typeof rec.readStartAddr === 'string' ? rec.readStartAddr : '0x00000000',
-      readEndAddr: typeof rec.readEndAddr === 'string' ? rec.readEndAddr : chipManifest(chipId).flashSize,
-      readDir: typeof rec.readDir === 'string' ? rec.readDir : '',
+      eraseStartAddr:
+        typeof rec.eraseStartAddr === "string"
+          ? rec.eraseStartAddr
+          : "0x00000000",
+      eraseEndAddr:
+        typeof rec.eraseEndAddr === "string" ? rec.eraseEndAddr : "0x00000000",
+      readStartAddr:
+        typeof rec.readStartAddr === "string"
+          ? rec.readStartAddr
+          : "0x00000000",
+      readEndAddr:
+        typeof rec.readEndAddr === "string"
+          ? rec.readEndAddr
+          : chipManifest(chipId).flashSize,
+      readDir: typeof rec.readDir === "string" ? rec.readDir : "",
       readFileName:
-        typeof rec.readFileName === 'string' ? rec.readFileName : `tyutool_read_${chipId.toLowerCase()}.bin`,
+        typeof rec.readFileName === "string"
+          ? rec.readFileName
+          : `tyutool_read_${chipId.toLowerCase()}.bin`,
       readFileNameModified: rec.readFileNameModified === true,
-      authorizeUuid: typeof rec.authorizeUuid === 'string' ? rec.authorizeUuid : '',
-      authorizeAuthKey: typeof rec.authorizeAuthKey === 'string' ? rec.authorizeAuthKey : '',
+      authorizeUuid:
+        typeof rec.authorizeUuid === "string" ? rec.authorizeUuid : "",
+      authorizeAuthKey:
+        typeof rec.authorizeAuthKey === "string" ? rec.authorizeAuthKey : "",
       authBaudRate: authBaud,
     };
   } catch {
@@ -155,7 +199,7 @@ export async function loadFlashWorkspaceFromStorage(): Promise<FlashWorkspaceSer
   let raw: string | null = null;
   if (isTauriRuntime()) {
     try {
-      const { Store } = await import('@tauri-apps/plugin-store');
+      const { Store } = await import("@tauri-apps/plugin-store");
       const store = await Store.load(STORE_FILE);
       const v = await store.get<string>(WORKSPACE_JSON_KEY);
       raw = v ?? null;
@@ -169,11 +213,13 @@ export async function loadFlashWorkspaceFromStorage(): Promise<FlashWorkspaceSer
 }
 
 /** Save workspace JSON. */
-export async function saveFlashWorkspaceToStorage(data: FlashWorkspaceSerialized): Promise<void> {
+export async function saveFlashWorkspaceToStorage(
+  data: FlashWorkspaceSerialized,
+): Promise<void> {
   const json = JSON.stringify(data);
   if (isTauriRuntime()) {
     try {
-      const { Store } = await import('@tauri-apps/plugin-store');
+      const { Store } = await import("@tauri-apps/plugin-store");
       const store = await Store.load(STORE_FILE);
       await store.set(WORKSPACE_JSON_KEY, json);
       await store.save();

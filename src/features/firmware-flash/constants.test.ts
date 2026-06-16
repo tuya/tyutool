@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTH_CHIP_IDS,
+  AUTH_ONLY_CHIP_ID,
   BAUD_RATE_OPTIONS,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
@@ -25,11 +27,20 @@ describe("CHIP_IDS", () => {
     expect(CHIP_IDS).toContain("esp32");
     expect(CHIP_IDS).toContain("esp32c3");
     expect(CHIP_IDS).toContain("esp32c6");
-    expect(CHIP_IDS).toContain("esp32p4");
     expect(CHIP_IDS).toContain("esp32s3");
     expect(CHIP_IDS).toContain("t5");
     expect(CHIP_IDS).toContain("t2");
     expect(CHIP_IDS).toContain("bk7231n");
+  });
+});
+
+describe("AUTH_CHIP_IDS", () => {
+  it("includes all flash chips plus the auth-only other option", () => {
+    expect(AUTH_CHIP_IDS).toEqual([...CHIP_IDS, AUTH_ONLY_CHIP_ID]);
+  });
+
+  it("does not include other in CHIP_IDS", () => {
+    expect(CHIP_IDS).not.toContain(AUTH_ONLY_CHIP_ID);
   });
 });
 
