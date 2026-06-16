@@ -17,7 +17,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'vite/**/*.test.ts'],
     passWithNoTests: false,
     coverage: {
       provider: 'v8',

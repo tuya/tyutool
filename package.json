@@ -1,7 +1,7 @@
 {
   "name": "tyutool",
   "private": true,
-  "version": "3.0.13",
+  "version": "3.0.11",
   "type": "module",
   "scripts": {
     "clean": "node -e \"try { require('fs').rmSync('dist', { recursive: true, force: true }); } catch (e) { if (e && e.code !== 'ENOENT') throw e; }\"",
@@ -22,13 +22,7 @@
     "release:cli": "pnpm exec tsx scripts/release-cli.ts",
     "release:gui": "pnpm exec tsx scripts/release-gui.ts",
     "version:set": "node scripts/bump-version.mjs",
-    "dev:web": "bash scripts/dev-web.sh"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lefthook"
-    ]
+    "dev:web": "pnpm exec tsx scripts/dev-web.ts"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
