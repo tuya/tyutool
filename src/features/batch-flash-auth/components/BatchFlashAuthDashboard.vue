@@ -57,11 +57,15 @@ const bannerTextColor = computed(() => {
       <span>{{ store.completionBanner.message }}</span>
       <button
         type="button"
-        class="ml-3 cursor-pointer text-lg leading-none opacity-60 hover:opacity-100"
-        aria-label="关闭"
+        class="ml-3 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded opacity-60 transition-opacity hover:opacity-100"
+        :aria-label="t('common.closeDialog')"
         @click="store.dismissBanner()"
       >
-        ×
+        <FontAwesomeIcon
+          :icon="['fas', 'xmark']"
+          class="size-3.5"
+          aria-hidden="true"
+        />
       </button>
     </div>
 

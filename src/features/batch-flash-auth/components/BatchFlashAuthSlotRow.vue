@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { showConfirmDialog } from "@/composables/confirmDialog";
 import type { BatchSlotState } from "../types";
 
 const props = defineProps<{ portSlot: BatchSlotState }>();
@@ -62,6 +63,20 @@ const isActive = computed(() =>
 const showProgress = computed(
   () => isActive.value && props.portSlot.progress > 0,
 );
+
+function showErrorDetail(): void {
+  const error = props.portSlot.error;
+  if (!error) return;
+  void showConfirmDialog({
+    title: `${props.portSlot.port} — ${t("batchFlashAuth.slot.errorTitle")}`,
+    message: error,
+    kind: "danger",
+    showCancel: false,
+    okLabel: t("common.closeDialog"),
+    extraActionLabel: t("common.copy"),
+    onExtraAction: () => navigator.clipboard?.writeText(error),
+  });
+}
 </script>
 
 <template>
@@ -116,11 +131,16 @@ const showProgress = computed(
       }}</span>
       <button
         type="button"
-        class="ml-1 shrink-0 cursor-pointer text-[var(--ty-text-muted)] hover:text-[var(--ty-text)]"
-        :title="portSlot.error"
-        aria-label="查看完整错误"
+        class="ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
+        :title="t('batchFlashAuth.slot.viewError')"
+        :aria-label="t('batchFlashAuth.slot.viewError')"
+        @click="showErrorDetail"
       >
-        ⓘ
+        <FontAwesomeIcon
+          :icon="['fas', 'circle-info']"
+          class="size-3.5"
+          aria-hidden="true"
+        />
       </button>
     </div>
 
