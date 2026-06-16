@@ -13,6 +13,7 @@
     "nav": {
       "flash": "Firmware flash",
       "serialDebug": "Serial debug",
+      "toolbox": "Toolbox",
       "settings": "Settings"
     },
     "mainNav": "Main navigation",
@@ -69,6 +70,7 @@
       "installing": "Installing…",
       "toastNew": "New version v{version} available. Go to Settings to update.",
       "toastAction": "View Details",
+      "toastClose": "Close",
       "sourceGithub": "GitHub Releases",
       "sourceGitee": "Gitee Releases",
       "portableHint": "This installation does not support in-app updates. Download a matching package from the releases page.",
@@ -86,6 +88,7 @@
     "serial": "Port",
     "baud": "Baud rate",
     "baudCustom": "Custom",
+    "chip": "Chip platform",
     "refresh": "Refresh devices",
     "deviceReset": "Reset device",
     "deviceResetHints": {
@@ -97,7 +100,6 @@
       "esp32": "USB–UART hard-reset sequence (same as after a flash completes; line mapping depends on the board). Free the serial port first.",
       "esp32c3": "Reset follows the detected USB serial/JTAG path—same as post-flash reset. Free the serial port first.",
       "esp32c6": "Hard reset matches post-flash reset; interface type is auto-detected. Free the serial port first.",
-      "esp32p4": "Hard reset matches post-flash reset; interface type is auto-detected. Free the serial port first.",
       "esp32s3": "Some boards use a USB-JTAG/serial bridge; reset timing matches post-flash reset. Free the serial port first."
     },
     "connect": "Connect",
@@ -115,14 +117,14 @@
       "esp32": "ESP32",
       "esp32c3": "ESP32-C3",
       "esp32c6": "ESP32-C6",
-      "esp32p4": "ESP32-P4",
       "esp32s3": "ESP32-S3",
       "bk7231n": "BK7231N",
       "ln882h": "LN882H",
       "t2": "T2",
       "t3": "T3",
       "t5": "T5",
-      "t1": "T1"
+      "t1": "T1",
+      "other": "Other"
     },
     "portRoles": {
       "flash_auth": "Flash / authorize",
@@ -224,7 +226,8 @@
       "flashDone": "Flash complete; device restarted.",
       "eraseDone": "Erase complete.",
       "readDone": "Read complete.",
-      "authDone": "Authorization succeeded."
+      "authDone": "Authorization succeeded.",
+      "cancelled": "Cancelled."
     },
     "confirm": {
       "eraseTitle": "Confirm Erase",
@@ -475,6 +478,66 @@
       "openFailedWith": "Open failed: {msg}",
       "sendFailed": "Send failed: {msg}",
       "portDenied": "Port is busy; open cancelled"
+    }
+  },
+  "batchFlashAuth": {
+    "title": "Batch Flash & Auth",
+    "subtitle": "Flash firmware and write auth codes to up to 32 ports in parallel",
+    "dashboard": {
+      "flashStats": "Flash Stats",
+      "authStats": "Auth Stats",
+      "currentBatch": "Current Batch",
+      "active": "Active",
+      "success": "Success",
+      "fail": "Failed",
+      "reset": "Reset",
+      "elapsed": "Elapsed"
+    },
+    "config": {
+      "chip": "Chip",
+      "baud": "Baud Rate",
+      "firmware": "Firmware File",
+      "browse": "Browse",
+      "noFile": "No file selected",
+      "authTitle": "Batch Auth Config",
+      "excelFile": "Auth Table (.xlsx)",
+      "noExcel": "No auth table selected",
+      "conflictPolicy": "Already-authorized device",
+      "skip": "Skip (recommended)",
+      "overwrite": "Overwrite"
+    },
+    "toolbar": {
+      "autoAssign": "Auto Assign",
+      "filter": "Port Filter",
+      "start": "Start All",
+      "cancel": "Cancel",
+      "retry": "Retry Failed"
+    },
+    "slot": {
+      "port": "Port",
+      "status": "Status",
+      "progress": "Progress",
+      "action": "Action",
+      "cancel": "Cancel",
+      "retry": "Retry",
+      "remove": "Remove",
+      "empty": "No ports",
+      "emptyHint": "Click Auto Assign to scan available ports"
+    },
+    "status": {
+      "idle": "Idle",
+      "flashing": "Flashing",
+      "reading_mac": "Reading MAC",
+      "authorizing": "Writing Auth",
+      "done": "Done",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    }
+  },
+  "toolbox": {
+    "batchFlashAuth": {
+      "name": "Batch Flash & Auth",
+      "desc": "Flash firmware and write auth codes to up to 32 ports in parallel"
     }
   }
 }
