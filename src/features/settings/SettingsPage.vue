@@ -82,9 +82,12 @@ async function toggleAutoSave(): Promise<void> {
 async function openOpensourceLicenses(): Promise<void> {
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl("https://github.com/tuya/tyutool/blob/main/LICENSE");
+    await openUrl("https://github.com/tuya/tyutool/blob/HEAD/LICENSE.txt");
   } catch (_e) {
-    window.open("https://github.com/tuya/tyutool/blob/main/LICENSE", "_blank");
+    window.open(
+      "https://github.com/tuya/tyutool/blob/HEAD/LICENSE.txt",
+      "_blank",
+    );
   }
 }
 </script>
