@@ -60,6 +60,8 @@
       "available": "可更新到 v{version}（耗时 {time}s）",
       "upToDate": "已是最新版本（耗时 {time}s）",
       "failed": "检查失败",
+      "releaseNotes": "v{version} 更新说明",
+      "releaseNotesEmpty": "该版本暂无更新说明。",
       "btnUpdate": "更新",
       "downloading": "从 {source} 下载 v{version}",
       "downloadProgress": "{percent}%   {downloaded}/{total}",

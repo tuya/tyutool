@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { APP_VERSION } from "@/config/app";
 import { isTauriRuntime } from "@/runtime";
@@ -136,6 +136,15 @@ async function checkSource(
 async function runChecks(): Promise<void> {
   await Promise.all(UPDATE_SOURCES.map((src, i) => checkSource(src, i)));
 }
+
+// ── Release notes ───────────────────────────────────────────────────────────
+// Notes are version-level (identical across sources), so surface them once from
+// the first source that reports an available update.
+const availableUpdate = computed(() => {
+  const src = sourceStates.value.find((s) => s.status === "available");
+  if (!src) return null;
+  return { version: src.version, notes: src.manifest?.notes?.trim() ?? "" };
+});
 
 // ── Watch open ────────────────────────────────────────────────────────────────
 
@@ -459,6 +468,32 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
                 </p>
               </div>
             </div>
+
+            <!-- Release notes (shown when an update is available) -->
+            <section
+              v-if="availableUpdate && !downloading && !downloadReady"
+              class="ud-notes"
+              aria-labelledby="ud-notes-title"
+            >
+              <h3 id="ud-notes-title" class="ud-notes-title">
+                <FontAwesomeIcon
+                  :icon="['fas', 'scroll']"
+                  class="size-3.5"
+                  aria-hidden="true"
+                />
+                {{
+                  t("settings.update.releaseNotes", {
+                    version: availableUpdate.version,
+                  })
+                }}
+              </h3>
+              <p v-if="availableUpdate.notes" class="ud-notes-body">
+                {{ availableUpdate.notes }}
+              </p>
+              <p v-else class="ud-notes-empty">
+                {{ t("settings.update.releaseNotesEmpty") }}
+              </p>
+            </section>
 
             <!-- Manual update hint (portable or distro package) -->
             <div
@@ -800,6 +835,44 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
   font-size: 0.75rem;
   color: var(--ty-text-muted);
   line-height: 1.5;
+}
+
+/* ── Release notes ── */
+.ud-notes {
+  border-radius: 0.625rem;
+  border: 1px solid var(--ty-border);
+  background-color: var(--ty-surface-muted);
+  padding: 0.625rem 0.875rem;
+}
+
+.ud-notes-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ty-text);
+}
+
+.ud-notes-title svg {
+  color: var(--ty-primary);
+}
+
+.ud-notes-body {
+  max-height: 9rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--ty-text-muted);
+}
+
+.ud-notes-empty {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--ty-text-muted);
 }
 
 /* ── Update button ── */
