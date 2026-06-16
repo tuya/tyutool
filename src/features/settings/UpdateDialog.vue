@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { APP_VERSION } from '@/config/app';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { canUseInAppUpdater, getManualUpdateFlags } from '@/utils/install-type';
-import { UPDATE_SOURCES, fetchLatestJson, isNewerVersion, type LatestJson } from './update-sources';
+import { ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { APP_VERSION } from "@/config/app";
+import { isTauriRuntime } from "@/runtime";
+import { canUseInAppUpdater, getManualUpdateFlags } from "@/utils/install-type";
+import {
+  UPDATE_SOURCES,
+  fetchLatestJson,
+  isNewerVersion,
+  type LatestJson,
+} from "./update-sources";
 
 const props = defineProps<{ open: boolean }>();
-const emit = defineEmits<{ (e: 'close'): void }>();
+const emit = defineEmits<{ (e: "close"): void }>();
 
 const { t } = useI18n();
 
 // ── Source state ──────────────────────────────────────────────────────────────
 
-type SourceStatus = 'idle' | 'checking' | 'available' | 'upToDate' | 'failed';
+type SourceStatus = "idle" | "checking" | "available" | "upToDate" | "failed";
 
 interface SourceState {
-  id: 'github' | 'gitee';
+  id: "github" | "gitee";
   labelKey: string;
   status: SourceStatus;
   version: string;
@@ -25,11 +30,24 @@ interface SourceState {
   error: string;
 }
 
-function makeSourceState(s: { id: 'github' | 'gitee'; labelKey: string }, status: SourceStatus = 'idle'): SourceState {
-  return { id: s.id, labelKey: s.labelKey, status, version: '', elapsed: 0, manifest: null, error: '' };
+function makeSourceState(
+  s: { id: "github" | "gitee"; labelKey: string },
+  status: SourceStatus = "idle",
+): SourceState {
+  return {
+    id: s.id,
+    labelKey: s.labelKey,
+    status,
+    version: "",
+    elapsed: 0,
+    manifest: null,
+    error: "",
+  };
 }
 
-const sourceStates = ref<SourceState[]>(UPDATE_SOURCES.map(s => makeSourceState(s)));
+const sourceStates = ref<SourceState[]>(
+  UPDATE_SOURCES.map((s) => makeSourceState(s)),
+);
 
 // ── Download state ────────────────────────────────────────────────────────────
 
@@ -38,12 +56,14 @@ const downloadReady = ref(false);
 const downloadPercent = ref(0);
 const downloadedBytes = ref(0);
 const totalBytes = ref(0);
-const downloadingSource = ref('');
-const downloadingVersion = ref('');
+const downloadingSource = ref("");
+const downloadingVersion = ref("");
 const installing = ref(false);
 
 // Hold the Update object so we can call install() later after user confirms
-let pendingUpdate: Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>> = null;
+let pendingUpdate: Awaited<
+  ReturnType<typeof import("@tauri-apps/plugin-updater").check>
+> = null;
 
 // ── Install types without Tauri in-app updater (portable, .deb/.rpm) ─────────
 
@@ -61,14 +81,16 @@ function formatBytes(bytes: number): string {
 }
 
 function resetState(): void {
-  sourceStates.value = UPDATE_SOURCES.map(s => makeSourceState(s, 'checking'));
+  sourceStates.value = UPDATE_SOURCES.map((s) =>
+    makeSourceState(s, "checking"),
+  );
   downloading.value = false;
   downloadReady.value = false;
   downloadPercent.value = 0;
   downloadedBytes.value = 0;
   totalBytes.value = 0;
-  downloadingSource.value = '';
-  downloadingVersion.value = '';
+  downloadingSource.value = "";
+  downloadingVersion.value = "";
   installing.value = false;
   pendingUpdate = null;
   installTypeReady.value = false;
@@ -78,7 +100,10 @@ function resetState(): void {
 
 // ── Check updates (parallel) ──────────────────────────────────────────────────
 
-async function checkSource(source: (typeof UPDATE_SOURCES)[number], idx: number): Promise<void> {
+async function checkSource(
+  source: (typeof UPDATE_SOURCES)[number],
+  idx: number,
+): Promise<void> {
   const start = Date.now();
   try {
     const manifest = await fetchLatestJson(source.url);
@@ -87,11 +112,11 @@ async function checkSource(source: (typeof UPDATE_SOURCES)[number], idx: number)
     sourceStates.value[idx] = {
       id: source.id,
       labelKey: source.labelKey,
-      status: newer ? 'available' : 'upToDate',
+      status: newer ? "available" : "upToDate",
       version: manifest.version,
       elapsed,
       manifest,
-      error: '',
+      error: "",
     };
   } catch (e: unknown) {
     const elapsed = parseFloat(((Date.now() - start) / 1000).toFixed(1));
@@ -99,8 +124,8 @@ async function checkSource(source: (typeof UPDATE_SOURCES)[number], idx: number)
     sourceStates.value[idx] = {
       id: source.id,
       labelKey: source.labelKey,
-      status: 'failed',
-      version: '',
+      status: "failed",
+      version: "",
       elapsed,
       manifest: null,
       error: errMsg,
@@ -126,14 +151,19 @@ watch(
       });
       void runChecks();
     }
-  }
+  },
 );
 
 // ── Download & install ────────────────────────────────────────────────────────
 
 async function startDownload(srcState: SourceState): Promise<void> {
   if (!isTauriRuntime()) return;
-  if (!canUseInAppUpdater(installTypeReady.value, { manualOnly: manualUpdateOnly.value, debRpm: debRpmInstall.value })) {
+  if (
+    !canUseInAppUpdater(installTypeReady.value, {
+      manualOnly: manualUpdateOnly.value,
+      debRpm: debRpmInstall.value,
+    })
+  ) {
     return;
   }
   downloading.value = true;
@@ -144,21 +174,27 @@ async function startDownload(srcState: SourceState): Promise<void> {
   downloadingSource.value = t(srcState.labelKey);
   downloadingVersion.value = srcState.version;
 
-  const { info, error: logError } = await import('@tauri-apps/plugin-log');
+  const { info, error: logError } = await import("@tauri-apps/plugin-log");
 
   try {
-    await info(`[Update] startDownload: source=${srcState.id}, version=${srcState.version}`);
-    const { check } = await import('@tauri-apps/plugin-updater');
-    await info('[Update] calling check()...');
+    await info(
+      `[Update] startDownload: source=${srcState.id}, version=${srcState.version}`,
+    );
+    const { check } = await import("@tauri-apps/plugin-updater");
+    await info("[Update] calling check()...");
     const update = await check();
     await info(
-      `[Update] check() returned: available=${update?.available}, version=${update?.version}, currentVersion=${update?.currentVersion}`
+      `[Update] check() returned: available=${update?.available}, version=${update?.version}, currentVersion=${update?.currentVersion}`,
     );
     if (update) {
-      await info(`[Update] update details: date=${update.date}, body=${update.body?.substring(0, 200)}`);
+      await info(
+        `[Update] update details: date=${update.date}, body=${update.body?.substring(0, 200)}`,
+      );
     }
     if (!update?.available) {
-      await info('[Update] no update available from plugin-updater, aborting download');
+      await info(
+        "[Update] no update available from plugin-updater, aborting download",
+      );
       downloading.value = false;
       return;
     }
@@ -166,23 +202,30 @@ async function startDownload(srcState: SourceState): Promise<void> {
     // On Windows, downloadAndInstall() launches NSIS immediately after download,
     // giving the user no chance to choose "restart later". By splitting into
     // download() + install(), we can show the restart prompt first.
-    await info('[Update] starting download...');
-    await update.download(evt => {
-      if (evt.event === 'Started') {
-        totalBytes.value = (evt.data as { contentLength?: number }).contentLength ?? 0;
-        void info(`[Update] download Started: contentLength=${totalBytes.value}`);
-      } else if (evt.event === 'Progress') {
-        downloadedBytes.value += (evt.data as { chunkLength: number }).chunkLength;
+    await info("[Update] starting download...");
+    await update.download((evt) => {
+      if (evt.event === "Started") {
+        totalBytes.value =
+          (evt.data as { contentLength?: number }).contentLength ?? 0;
+        void info(
+          `[Update] download Started: contentLength=${totalBytes.value}`,
+        );
+      } else if (evt.event === "Progress") {
+        downloadedBytes.value += (
+          evt.data as { chunkLength: number }
+        ).chunkLength;
         if (totalBytes.value > 0) {
-          downloadPercent.value = Math.round((downloadedBytes.value / totalBytes.value) * 100);
+          downloadPercent.value = Math.round(
+            (downloadedBytes.value / totalBytes.value) * 100,
+          );
         }
-      } else if (evt.event === 'Finished') {
+      } else if (evt.event === "Finished") {
         downloadPercent.value = 100;
-        void info('[Update] download Finished');
+        void info("[Update] download Finished");
       }
     });
     // Download finished — hold the update object for later install
-    await info('[Update] download complete, ready to install');
+    await info("[Update] download complete, ready to install");
     pendingUpdate = update;
     downloading.value = false;
     downloadReady.value = true;
@@ -190,7 +233,7 @@ async function startDownload(srcState: SourceState): Promise<void> {
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? `${e.message}\n${e.stack}` : String(e);
     await logError(`[Update] startDownload failed: ${errMsg}`);
-    console.error('[Update] startDownload failed:', e);
+    console.error("[Update] startDownload failed:", e);
     downloading.value = false;
   }
 }
@@ -198,30 +241,32 @@ async function startDownload(srcState: SourceState): Promise<void> {
 async function restartNow(): Promise<void> {
   if (!isTauriRuntime()) return;
   installing.value = true;
-  const { info, error: logError } = await import('@tauri-apps/plugin-log');
+  const { info, error: logError } = await import("@tauri-apps/plugin-log");
   try {
-    await info('[Update] restartNow: starting install...');
+    await info("[Update] restartNow: starting install...");
     // Install the previously downloaded update, then relaunch
     if (pendingUpdate) {
-      await info('[Update] calling pendingUpdate.install()...');
+      await info("[Update] calling pendingUpdate.install()...");
       await pendingUpdate.install();
-      await info('[Update] install() completed, relaunching...');
+      await info("[Update] install() completed, relaunching...");
       pendingUpdate = null;
     } else {
-      await info('[Update] restartNow: pendingUpdate is null, skipping install');
+      await info(
+        "[Update] restartNow: pendingUpdate is null, skipping install",
+      );
     }
-    const { relaunch } = await import('@tauri-apps/plugin-process');
+    const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? `${e.message}\n${e.stack}` : String(e);
     await logError(`[Update] restartNow failed: ${errMsg}`);
-    console.error('[Update] restartNow failed:', e);
+    console.error("[Update] restartNow failed:", e);
     installing.value = false;
   }
 }
 
 function handleClose(): void {
-  if (!downloading.value && !installing.value) emit('close');
+  if (!downloading.value && !installing.value) emit("close");
 }
 
 // ── Portable download ────────────────────────────────────────────────────────
@@ -229,15 +274,16 @@ function handleClose(): void {
 /** Detect current platform key for portable manifest lookup */
 function getPortablePlatformKey(): string {
   const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes('win')) return 'windows-x86_64';
-  if (ua.includes('mac')) {
+  if (ua.includes("win")) return "windows-x86_64";
+  if (ua.includes("mac")) {
     // Apple Silicon detection is best-effort; arm64 via navigator.platform or userAgentData
     const isArm =
-      navigator.userAgent.includes('ARM') ||
-      (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform === 'macOS';
-    return isArm ? 'darwin-aarch64' : 'darwin-x86_64';
+      navigator.userAgent.includes("ARM") ||
+      (navigator as { userAgentData?: { platform?: string } }).userAgentData
+        ?.platform === "macOS";
+    return isArm ? "darwin-aarch64" : "darwin-x86_64";
   }
-  return 'linux-x86_64';
+  return "linux-x86_64";
 }
 
 async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
@@ -245,21 +291,28 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 
   let url: string;
   if (debRpmInstall.value) {
-    const releasePageUrl = UPDATE_SOURCES.find(s => s.id === srcState.id)?.releasePageUrl;
-    url = releasePageUrl || 'https://github.com/tuya/tyutool/releases/latest';
+    const releasePageUrl = UPDATE_SOURCES.find(
+      (s) => s.id === srcState.id,
+    )?.releasePageUrl;
+    url = releasePageUrl || "https://github.com/tuya/tyutool/releases/latest";
   } else {
     const platformKey = getPortablePlatformKey();
     const portableUrl = srcState.manifest?.portable?.[platformKey]?.url;
-    const releasePageUrl = UPDATE_SOURCES.find(s => s.id === srcState.id)?.releasePageUrl;
-    url = portableUrl || releasePageUrl || 'https://github.com/tuya/tyutool/releases/latest';
+    const releasePageUrl = UPDATE_SOURCES.find(
+      (s) => s.id === srcState.id,
+    )?.releasePageUrl;
+    url =
+      portableUrl ||
+      releasePageUrl ||
+      "https://github.com/tuya/tyutool/releases/latest";
   }
 
   try {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
   } catch {
     // Last resort: window.open
-    window.open(url, '_blank');
+    window.open(url, "_blank");
   }
 }
 </script>
@@ -274,13 +327,21 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
         @click.self="handleClose"
         @keydown.esc.window="handleClose"
       >
-        <div class="ty-dialog-container" role="dialog" aria-modal="true" aria-labelledby="ty-update-dialog-title">
-          <div class="ty-dialog-accent-bar ty-dialog-accent-info" aria-hidden="true" />
+        <div
+          class="ty-dialog-container"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ty-update-dialog-title"
+        >
+          <div
+            class="ty-dialog-accent-bar ty-dialog-accent-info"
+            aria-hidden="true"
+          />
 
           <div class="ty-dialog-header">
             <div class="ty-dialog-header-main">
               <h2 id="ty-update-dialog-title" class="ty-dialog-title">
-                {{ t('settings.update.dialogTitle') }}
+                {{ t("settings.update.dialogTitle") }}
               </h2>
             </div>
             <button
@@ -290,14 +351,20 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
               :aria-label="t('common.closeDialog')"
               @click="handleClose"
             >
-              <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-4" aria-hidden="true" />
+              <FontAwesomeIcon
+                :icon="['fas', 'xmark']"
+                class="size-4"
+                aria-hidden="true"
+              />
             </button>
           </div>
 
           <div class="ty-dialog-body--update">
             <!-- Current version -->
             <p class="ud-current-version">
-              {{ t('settings.update.currentVersion', { version: APP_VERSION }) }}
+              {{
+                t("settings.update.currentVersion", { version: APP_VERSION })
+              }}
             </p>
 
             <!-- Source cards -->
@@ -312,9 +379,18 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
                   <!-- Status icon -->
                   <span class="ud-source-icon" aria-hidden="true">
                     <span v-if="src.status === 'checking'" class="ud-spinner" />
-                    <FontAwesomeIcon v-else-if="src.status === 'available'" :icon="['fas', 'circle-arrow-up']" />
-                    <FontAwesomeIcon v-else-if="src.status === 'upToDate'" :icon="['fas', 'circle-check']" />
-                    <FontAwesomeIcon v-else-if="src.status === 'failed'" :icon="['fas', 'circle-xmark']" />
+                    <FontAwesomeIcon
+                      v-else-if="src.status === 'available'"
+                      :icon="['fas', 'circle-arrow-up']"
+                    />
+                    <FontAwesomeIcon
+                      v-else-if="src.status === 'upToDate'"
+                      :icon="['fas', 'circle-check']"
+                    />
+                    <FontAwesomeIcon
+                      v-else-if="src.status === 'failed'"
+                      :icon="['fas', 'circle-xmark']"
+                    />
                     <FontAwesomeIcon v-else :icon="['fas', 'circle']" />
                   </span>
                   <!-- Source label -->
@@ -324,7 +400,10 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
                     v-if="
                       src.status === 'available' &&
                       isTauriRuntime() &&
-                      canUseInAppUpdater(installTypeReady, { manualOnly: manualUpdateOnly, debRpm: debRpmInstall }) &&
+                      canUseInAppUpdater(installTypeReady, {
+                        manualOnly: manualUpdateOnly,
+                        debRpm: debRpmInstall,
+                      }) &&
                       !downloading &&
                       !downloadReady
                     "
@@ -332,7 +411,7 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
                     class="ud-update-btn"
                     @click="startDownload(src)"
                   >
-                    {{ t('settings.update.btnUpdate') }}
+                    {{ t("settings.update.btnUpdate") }}
                   </button>
                   <!-- Portable / .deb / .rpm: releases page (or portable asset) instead of plugin-updater -->
                   <button
@@ -348,26 +427,34 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
                     class="ud-update-btn"
                     @click="openManualReleaseDownload(src)"
                   >
-                    {{ t('settings.update.portableDownload') }}
+                    {{ t("settings.update.portableDownload") }}
                   </button>
                 </div>
                 <!-- Status text -->
                 <p class="ud-source-status-text">
                   <template v-if="src.status === 'checking'">
-                    {{ t('settings.update.checking') }}
+                    {{ t("settings.update.checking") }}
                   </template>
                   <template v-else-if="src.status === 'available'">
-                    {{ t('settings.update.available', { version: src.version, time: src.elapsed }) }}
+                    {{
+                      t("settings.update.available", {
+                        version: src.version,
+                        time: src.elapsed,
+                      })
+                    }}
                   </template>
                   <template v-else-if="src.status === 'upToDate'">
-                    {{ t('settings.update.upToDate', { time: src.elapsed }) }}
+                    {{ t("settings.update.upToDate", { time: src.elapsed }) }}
                   </template>
                   <template v-else-if="src.status === 'failed'">
-                    {{ t('settings.update.failed') }}
+                    {{ t("settings.update.failed") }}
                   </template>
                 </p>
                 <!-- Error details (shown when failed) -->
-                <p v-if="src.status === 'failed' && src.error" class="ud-source-error">
+                <p
+                  v-if="src.status === 'failed' && src.error"
+                  class="ud-source-error"
+                >
                   {{ src.error }}
                 </p>
               </div>
@@ -375,29 +462,45 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 
             <!-- Manual update hint (portable or distro package) -->
             <div
-              v-if="manualUpdateOnly && sourceStates.some(s => s.status === 'available')"
+              v-if="
+                manualUpdateOnly &&
+                sourceStates.some((s) => s.status === 'available')
+              "
               class="ud-portable-hint"
             >
               <div class="ud-portable-icon" aria-hidden="true">
-                <FontAwesomeIcon :icon="['fas', 'circle-info']" class="size-4" />
+                <FontAwesomeIcon
+                  :icon="['fas', 'circle-info']"
+                  class="size-4"
+                />
               </div>
-              <p class="ud-portable-text">{{ t('settings.update.portableHint') }}</p>
+              <p class="ud-portable-text">
+                {{ t("settings.update.portableHint") }}
+              </p>
             </div>
 
             <!-- Download progress -->
             <div v-if="downloading" class="ud-download-section">
               <p class="ud-download-label">
-                {{ t('settings.update.downloading', { source: downloadingSource, version: downloadingVersion }) }}
+                {{
+                  t("settings.update.downloading", {
+                    source: downloadingSource,
+                    version: downloadingVersion,
+                  })
+                }}
               </p>
               <div class="ud-progress-bar-wrap">
-                <div class="ud-progress-bar" :style="{ width: `${downloadPercent}%` }" />
+                <div
+                  class="ud-progress-bar"
+                  :style="{ width: `${downloadPercent}%` }"
+                />
               </div>
               <p class="ud-download-sub">
                 {{
-                  t('settings.update.downloadProgress', {
+                  t("settings.update.downloadProgress", {
                     percent: downloadPercent,
                     downloaded: formatBytes(downloadedBytes),
-                    total: totalBytes > 0 ? formatBytes(totalBytes) : '…',
+                    total: totalBytes > 0 ? formatBytes(totalBytes) : "…",
                   })
                 }}
               </p>
@@ -406,19 +509,38 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
             <!-- Ready to restart -->
             <div v-if="downloadReady" class="ud-ready-section">
               <div class="ud-ready-icon" aria-hidden="true">
-                <FontAwesomeIcon :icon="['fas', 'circle-check']" class="size-5" />
+                <FontAwesomeIcon
+                  :icon="['fas', 'circle-check']"
+                  class="size-5"
+                />
               </div>
               <p class="ud-ready-title">
-                {{ t('settings.update.ready', { version: downloadingVersion }) }}
+                {{
+                  t("settings.update.ready", { version: downloadingVersion })
+                }}
               </p>
-              <p class="ud-ready-hint">{{ t('settings.update.readyHint') }}</p>
+              <p class="ud-ready-hint">{{ t("settings.update.readyHint") }}</p>
               <div class="ud-ready-actions">
-                <button type="button" class="ud-btn-secondary" :disabled="installing" @click="emit('close')">
-                  {{ t('settings.update.restartLater') }}
+                <button
+                  type="button"
+                  class="ud-btn-secondary"
+                  :disabled="installing"
+                  @click="emit('close')"
+                >
+                  {{ t("settings.update.restartLater") }}
                 </button>
-                <button type="button" class="ud-btn-primary" :disabled="installing" @click="restartNow">
+                <button
+                  type="button"
+                  class="ud-btn-primary"
+                  :disabled="installing"
+                  @click="restartNow"
+                >
                   <span v-if="installing" class="ud-spinner ud-spinner--sm" />
-                  {{ installing ? t('settings.update.installing') : t('settings.update.restartNow') }}
+                  {{
+                    installing
+                      ? t("settings.update.installing")
+                      : t("settings.update.restartNow")
+                  }}
                 </button>
               </div>
             </div>
@@ -471,7 +593,11 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 }
 
 .ty-dialog-accent-info {
-  background: linear-gradient(90deg, var(--ty-primary), color-mix(in srgb, var(--ty-primary) 60%, transparent));
+  background: linear-gradient(
+    90deg,
+    var(--ty-primary),
+    color-mix(in srgb, var(--ty-primary) 60%, transparent)
+  );
 }
 
 .ty-dialog-header {
@@ -524,7 +650,11 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 }
 
 .ty-dialog-close:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--ty-danger) 12%, var(--ty-surface-muted));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-danger) 12%,
+    var(--ty-surface-muted)
+  );
   border-color: color-mix(in srgb, var(--ty-danger) 40%, var(--ty-border));
   color: var(--ty-danger);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
@@ -569,11 +699,19 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 
 .ud-source-card--available {
   border-color: color-mix(in srgb, var(--ty-primary) 50%, var(--ty-border));
-  background-color: color-mix(in srgb, var(--ty-primary) 5%, var(--ty-surface-muted));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-primary) 5%,
+    var(--ty-surface-muted)
+  );
 }
 
 .ud-source-card--upToDate {
-  border-color: color-mix(in srgb, var(--ty-success, #22c55e) 40%, var(--ty-border));
+  border-color: color-mix(
+    in srgb,
+    var(--ty-success, #22c55e) 40%,
+    var(--ty-border)
+  );
 }
 
 .ud-source-card--failed {
@@ -631,7 +769,8 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
   color: var(--ty-danger);
   padding-left: 1.5rem;
   word-break: break-all;
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   opacity: 0.85;
 }
 
@@ -642,8 +781,13 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
   gap: 0.5rem;
   padding: 0.625rem 0.875rem;
   border-radius: 0.625rem;
-  border: 1px solid color-mix(in srgb, var(--ty-warning, #f59e0b) 40%, var(--ty-border));
-  background-color: color-mix(in srgb, var(--ty-warning, #f59e0b) 6%, var(--ty-surface-muted));
+  border: 1px solid
+    color-mix(in srgb, var(--ty-warning, #f59e0b) 40%, var(--ty-border));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-warning, #f59e0b) 6%,
+    var(--ty-surface-muted)
+  );
 }
 
 .ud-portable-icon {
@@ -664,7 +808,11 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
   padding: 0.25rem 0.75rem;
   border-radius: 0.5rem;
   border: none;
-  background: linear-gradient(135deg, var(--ty-primary) 0%, var(--ty-primary-hover) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--ty-primary) 0%,
+    var(--ty-primary-hover) 100%
+  );
   color: #fff;
   font-size: 0.75rem;
   font-weight: 600;
@@ -732,7 +880,11 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 .ud-progress-bar {
   height: 100%;
   border-radius: 9999px;
-  background: linear-gradient(90deg, var(--ty-primary), var(--ty-primary-hover));
+  background: linear-gradient(
+    90deg,
+    var(--ty-primary),
+    var(--ty-primary-hover)
+  );
   transition: width 0.3s ease;
 }
 
@@ -750,8 +902,13 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
   gap: 0.375rem;
   padding: 1rem 0.875rem 0.75rem;
   border-radius: 0.625rem;
-  border: 1px solid color-mix(in srgb, var(--ty-success, #22c55e) 40%, var(--ty-border));
-  background-color: color-mix(in srgb, var(--ty-success, #22c55e) 5%, var(--ty-surface-muted));
+  border: 1px solid
+    color-mix(in srgb, var(--ty-success, #22c55e) 40%, var(--ty-border));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-success, #22c55e) 5%,
+    var(--ty-surface-muted)
+  );
   text-align: center;
 }
 
@@ -812,7 +969,11 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 
 .ud-btn-primary {
   border: none;
-  background: linear-gradient(135deg, var(--ty-primary) 0%, var(--ty-primary-hover) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--ty-primary) 0%,
+    var(--ty-primary-hover) 100%
+  );
   color: #fff;
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.12),

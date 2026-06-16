@@ -1,7 +1,7 @@
-import { ref, watch } from 'vue';
-import { defineStore } from 'pinia';
-import { isTauriRuntime } from '@/features/firmware-flash/flash-tauri';
-import { rLog } from '@/utils/log';
+import { ref, watch } from "vue";
+import { defineStore } from "pinia";
+import { isTauriRuntime } from "@/runtime";
+import { rLog } from "@/utils/log";
 import {
   applyThemeToDom,
   loadStoredLocale,
@@ -14,28 +14,28 @@ import {
   LOCALE_KEY,
   THEME_KEY,
   THEME_STYLE_KEY,
-} from './settings-utils';
+} from "./settings-utils";
 
-export type ThemePreference = 'light' | 'dark' | 'system';
-export type ThemeStyle = 'default' | 'tuyaopen-ide';
-export type LocaleId = 'zh-CN' | 'en';
-export type LocalePreference = LocaleId | 'auto';
-export type LogLevelId = 'error' | 'warn' | 'info' | 'debug' | 'trace';
+export type ThemePreference = "light" | "dark" | "system";
+export type ThemeStyle = "default" | "tuyaopen-ide";
+export type LocaleId = "zh-CN" | "en";
+export type LocalePreference = LocaleId | "auto";
+export type LogLevelId = "error" | "warn" | "info" | "debug" | "trace";
 
-const STORE_FILE = 'settings.json';
+const STORE_FILE = "settings.json";
 
 /** Resolve a locale preference to a concrete locale id. */
 export function resolveLocale(pref: LocalePreference): LocaleId {
-  if (pref === 'auto') {
-    const lang = navigator.language ?? '';
-    return lang.startsWith('zh') ? 'zh-CN' : 'en';
+  if (pref === "auto") {
+    const lang = navigator.language ?? "";
+    return lang.startsWith("zh") ? "zh-CN" : "en";
   }
   return pref;
 }
 
 async function persistSetting(key: string, value: string): Promise<void> {
   if (isTauriRuntime()) {
-    const { Store } = await import('@tauri-apps/plugin-store');
+    const { Store } = await import("@tauri-apps/plugin-store");
     const store = await Store.load(STORE_FILE);
     await store.set(key, value);
     await store.save();
@@ -44,7 +44,7 @@ async function persistSetting(key: string, value: string): Promise<void> {
   }
 }
 
-export const useSettingsStore = defineStore('settings', () => {
+export const useSettingsStore = defineStore("settings", () => {
   const theme = ref<ThemePreference>(loadStoredTheme());
   const themeStyle = ref<ThemeStyle>(loadStoredThemeStyle());
   const locale = ref<LocalePreference>(loadStoredLocale());
@@ -74,35 +74,46 @@ export const useSettingsStore = defineStore('settings', () => {
   async function applyLogLevel(): Promise<void> {
     if (!isTauriRuntime()) return;
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const level = logEnabled.value ? logLevel.value : 'off';
-      await invoke('set_log_level', { level });
+      const { invoke } = await import("@tauri-apps/api/core");
+      const level = logEnabled.value ? logLevel.value : "off";
+      await invoke("set_log_level", { level });
     } catch (e) {
-      console.warn('[tyutool] Failed to set log level:', e);
+      console.warn("[tyutool] Failed to set log level:", e);
     }
   }
 
   async function loadFromTauriStore(): Promise<void> {
-    const { Store } = await import('@tauri-apps/plugin-store');
+    const { Store } = await import("@tauri-apps/plugin-store");
     const store = await Store.load(STORE_FILE);
     const storedTheme = await store.get<ThemePreference>(THEME_KEY);
     const storedThemeStyle = await store.get<string>(THEME_STYLE_KEY);
     const storedLocale = await store.get<LocalePreference>(LOCALE_KEY);
-    if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') {
+    if (
+      storedTheme === "light" ||
+      storedTheme === "dark" ||
+      storedTheme === "system"
+    ) {
       theme.value = storedTheme;
     }
-    if (storedThemeStyle === 'default' || storedThemeStyle === 'tuyaopen-ide') {
+    if (storedThemeStyle === "default" || storedThemeStyle === "tuyaopen-ide") {
       themeStyle.value = storedThemeStyle;
     }
-    if (storedLocale === 'zh-CN' || storedLocale === 'en' || storedLocale === 'auto') {
+    if (
+      storedLocale === "zh-CN" ||
+      storedLocale === "en" ||
+      storedLocale === "auto"
+    ) {
       locale.value = storedLocale;
     }
     const storedLogEnabled = await store.get<string>(LOG_ENABLED_KEY);
     if (storedLogEnabled !== null && storedLogEnabled !== undefined) {
-      logEnabled.value = storedLogEnabled === 'true';
+      logEnabled.value = storedLogEnabled === "true";
     }
     const storedLogLevel = await store.get<string>(LOG_LEVEL_KEY);
-    if (storedLogLevel && ['error', 'warn', 'info', 'debug', 'trace'].includes(storedLogLevel)) {
+    if (
+      storedLogLevel &&
+      ["error", "warn", "info", "debug", "trace"].includes(storedLogLevel)
+    ) {
       logLevel.value = storedLogLevel as LogLevelId;
     }
   }
@@ -122,35 +133,35 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     // Persist theme and re-apply on change
-    watch(theme, v => {
+    watch(theme, (v) => {
       void persistSetting(THEME_KEY, v);
       applyThemeToDom(v, themeStyle.value);
       rLog.debug(`[Settings] Theme changed to: ${v}`);
     });
 
     // Persist themeStyle and re-apply on change
-    watch(themeStyle, v => {
+    watch(themeStyle, (v) => {
       void persistSetting(THEME_STYLE_KEY, v);
       applyThemeToDom(theme.value, v);
       rLog.debug(`[Settings] Theme style changed to: ${v}`);
     });
 
     // Persist locale on change
-    watch(locale, v => {
+    watch(locale, (v) => {
       void persistSetting(LOCALE_KEY, v);
       const resolved = resolveLocale(v);
-      document.documentElement.lang = resolved === 'zh-CN' ? 'zh-CN' : 'en';
+      document.documentElement.lang = resolved === "zh-CN" ? "zh-CN" : "en";
       rLog.debug(`[Settings] Locale changed to: ${v} (resolved: ${resolved})`);
     });
 
     // Log settings — watch handles applyLogLevel on change;
     // initial apply happens once via Tauri store load or the startup call below.
-    watch(logEnabled, v => {
+    watch(logEnabled, (v) => {
       void persistSetting(LOG_ENABLED_KEY, String(v));
       void applyLogLevel();
       rLog.info(`[Settings] Log enabled: ${v}`);
     });
-    watch(logLevel, v => {
+    watch(logLevel, (v) => {
       void persistSetting(LOG_LEVEL_KEY, v);
       if (logEnabled.value) void applyLogLevel();
       rLog.info(`[Settings] Log level changed to: ${v}`);
@@ -162,11 +173,13 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     // Handle system theme changes
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (theme.value === 'system') {
-        applyThemeToDom(theme.value, themeStyle.value);
-      }
-    });
+    window
+      .matchMedia("(prefers-color-scheme: dark)")
+      .addEventListener("change", () => {
+        if (theme.value === "system") {
+          applyThemeToDom(theme.value, themeStyle.value);
+        }
+      });
   }
 
   return {
