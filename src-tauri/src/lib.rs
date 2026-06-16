@@ -1,3 +1,6 @@
+mod batch_auth;
+
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -23,6 +26,21 @@ struct FlashState {
 
 struct DebugState {
     session: StdMutex<Option<SerialDebugSession>>,
+}
+
+struct BatchSlot {
+    cancel: Arc<AtomicBool>,
+    thread: JoinHandle<()>,
+}
+
+struct BatchFlashState {
+    /// key = port name (OS-native format, as received from frontend)
+    slots: StdMutex<HashMap<String, BatchSlot>>,
+}
+
+struct BatchAuthState {
+    slots: StdMutex<HashMap<String, BatchSlot>>,
+    allocator: StdMutex<Option<std::sync::Arc<batch_auth::ExcelRowAllocator>>>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -218,6 +236,359 @@ fn flash_run(
     Ok(())
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchFlashStartConfig {
+    chip_id: String,
+    baud_rate: u32,
+    firmware_path: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchAuthStartConfig {
+    chip_id: String,
+    baud_rate: u32,
+    firmware_path: Option<String>,
+    excel_path: String,
+    conflict_policy: String,
+}
+
+#[tauri::command]
+fn batch_flash_start(
+    app: AppHandle,
+    state: State<'_, BatchFlashState>,
+    config: BatchFlashStartConfig,
+    ports: Vec<String>,
+) -> Result<(), String> {
+    for port in ports {
+        // Step 1: Remove old slot under lock (brief)
+        let old_slot = {
+            let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
+            slots.remove(&port)
+        };
+
+        // Step 2: Wait for old thread OUTSIDE the lock
+        if let Some(old) = old_slot {
+            old.cancel.store(true, Ordering::SeqCst);
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                let _ = old.thread.join();
+                let _ = tx.send(());
+            });
+            if rx.recv_timeout(Duration::from_secs(3)).is_err() {
+                return Err(format!(
+                    "port {} previous operation not stopped; retry in a few seconds",
+                    port
+                ));
+            }
+        }
+
+        // Step 3: Spawn thread (outside lock)
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_clone = cancel.clone();
+        let app_clone = app.clone();
+        let port_clone = port.clone();
+        let config_clone = config.clone();
+
+        let handle = std::thread::spawn(move || {
+            if !std::path::Path::new(&config_clone.firmware_path).exists() {
+                let _ = app_clone.emit(
+                    "batch-flash-progress",
+                    serde_json::json!({
+                        "port": port_clone,
+                        "event": { "kind": "done", "result": { "err": { "message": "firmware file not found", "elapsed_secs": 0 } } }
+                    }),
+                );
+                return;
+            }
+
+            let job = tyutool_core::FlashJob {
+                mode: tyutool_core::FlashMode::Flash,
+                chip_id: config_clone.chip_id.clone(),
+                port: port_clone.clone(),
+                baud_rate: config_clone.baud_rate,
+                firmware_path: Some(config_clone.firmware_path.clone()),
+                segments: None,
+                flash_start_hex: None,
+                flash_end_hex: None,
+                erase_start_hex: None,
+                erase_end_hex: None,
+                read_start_hex: None,
+                read_end_hex: None,
+                read_file_path: None,
+                authorize_uuid: None,
+                authorize_key: None,
+            };
+
+            let _ = tyutool_core::run_job(&job, &cancel_clone, |p| {
+                let _ = app_clone.emit(
+                    "batch-flash-progress",
+                    serde_json::json!({ "port": port_clone, "event": p }),
+                );
+            });
+        });
+
+        // Step 4: Insert under lock (brief)
+        {
+            let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
+            slots.insert(
+                port,
+                BatchSlot {
+                    cancel,
+                    thread: handle,
+                },
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_flash_cancel_port(state: State<'_, BatchFlashState>, port: String) -> Result<(), String> {
+    let slots = state.slots.lock().map_err(|e| e.to_string())?;
+    if let Some(slot) = slots.get(&port) {
+        slot.cancel.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_flash_cancel_all(state: State<'_, BatchFlashState>) -> Result<(), String> {
+    let slots = state.slots.lock().map_err(|e| e.to_string())?;
+    for slot in slots.values() {
+        slot.cancel.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn validate_excel_cmd(path: String) -> Result<batch_auth::ExcelStats, String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err("文件不存在".into());
+    }
+    if p.extension().and_then(|e| e.to_str()) != Some("xlsx") {
+        return Err("请选择 .xlsx 格式文件".into());
+    }
+    let alloc = batch_auth::ExcelRowAllocator::load(p)?;
+    Ok(alloc.stats())
+}
+
+#[tauri::command]
+fn batch_auth_start(
+    app: AppHandle,
+    state: State<'_, BatchAuthState>,
+    config: BatchAuthStartConfig,
+    ports: Vec<String>,
+) -> Result<(), String> {
+    let conflict_policy = match config.conflict_policy.as_str() {
+        "overwrite" => tyutool_core::ConflictPolicy::Overwrite,
+        _ => tyutool_core::ConflictPolicy::Skip,
+    };
+
+    let allocator = {
+        let path = std::path::Path::new(&config.excel_path);
+        let mut alloc_guard = state.allocator.lock().map_err(|e| e.to_string())?;
+        // Reuse existing allocator if present; otherwise load from disk
+        if let Some(ref existing) = *alloc_guard {
+            existing.clone()
+        } else {
+            let alloc = std::sync::Arc::new(batch_auth::ExcelRowAllocator::load(path)?);
+            *alloc_guard = Some(alloc.clone());
+            alloc
+        }
+    };
+
+    for port in ports {
+        // 1. Remove old slot and wait for it (under lock, but quickly)
+        let old_slot = {
+            let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
+            slots.remove(&port)
+        };
+
+        // 2. Wait for old thread OUTSIDE the lock
+        if let Some(old) = old_slot {
+            old.cancel.store(true, Ordering::SeqCst);
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                let _ = old.thread.join();
+                let _ = tx.send(());
+            });
+            if rx.recv_timeout(Duration::from_secs(3)).is_err() {
+                return Err(format!("port {} not stopped; retry in a few seconds", port));
+            }
+        }
+
+        // 3. Allocate row (outside lock)
+        let row = match allocator.allocate_row() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = app.emit(
+                    "batch-auth-progress",
+                    serde_json::json!({
+                        "port": port,
+                        "step": "failed",
+                        "error": e
+                    }),
+                );
+                continue;
+            }
+        };
+
+        // 4. Set up cancel + spawn thread
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_clone = cancel.clone();
+        let app_clone = app.clone();
+        let port_clone = port.clone();
+        let config_clone = config.clone();
+        let alloc_clone = allocator.clone();
+        let row_idx = row.row_idx;
+        let uuid = row.uuid.clone();
+        let authkey = row.authkey.clone();
+
+        let handle = std::thread::spawn(move || {
+            if let Some(ref fw_path) = config_clone.firmware_path {
+                if !fw_path.is_empty() {
+                    let job = tyutool_core::FlashJob {
+                        mode: tyutool_core::FlashMode::Flash,
+                        chip_id: config_clone.chip_id.clone(),
+                        port: port_clone.clone(),
+                        baud_rate: config_clone.baud_rate,
+                        firmware_path: Some(fw_path.clone()),
+                        segments: None,
+                        flash_start_hex: None,
+                        flash_end_hex: None,
+                        erase_start_hex: None,
+                        erase_end_hex: None,
+                        read_start_hex: None,
+                        read_end_hex: None,
+                        read_file_path: None,
+                        authorize_uuid: None,
+                        authorize_key: None,
+                    };
+                    let app2 = app_clone.clone();
+                    let port2 = port_clone.clone();
+                    let flash_result = tyutool_core::run_job(&job, &cancel_clone, |p| {
+                        let _ = app2.emit(
+                            "batch-auth-progress",
+                            serde_json::json!({
+                                "port": port2,
+                                "step": "flashing",
+                                "event": p
+                            }),
+                        );
+                    });
+                    if flash_result.is_err() || cancel_clone.load(Ordering::Relaxed) {
+                        alloc_clone.release_row(row_idx);
+                        let _ = app_clone.emit(
+                            "batch-auth-progress",
+                            serde_json::json!({
+                                "port": port_clone,
+                                "step": "failed",
+                                "error": flash_result.err().map(|e| e.to_string())
+                                    .unwrap_or_else(|| "cancelled".into())
+                            }),
+                        );
+                        return;
+                    }
+                }
+            }
+
+            let result = tyutool_core::run_batch_auth_slot(
+                &port_clone,
+                &uuid,
+                &authkey,
+                conflict_policy,
+                &cancel_clone,
+                |step| {
+                    let step_str = match step {
+                        tyutool_core::BatchAuthStep::ReadingMac => "reading_mac",
+                        tyutool_core::BatchAuthStep::ReadingAuth => "reading_auth",
+                        tyutool_core::BatchAuthStep::WritingAuth => "writing_auth",
+                        tyutool_core::BatchAuthStep::Verifying => "verifying",
+                    };
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": step_str }),
+                    );
+                },
+            );
+
+            match result {
+                Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
+                    let _ = alloc_clone.confirm_row(row_idx, mac.clone());
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
+                    );
+                }
+                Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
+                    let _ = alloc_clone.confirm_row(row_idx, mac.clone());
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
+                    );
+                }
+                Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac }) => {
+                    alloc_clone.release_row(row_idx);
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac }),
+                    );
+                }
+                Ok(tyutool_core::BatchAuthSlotResult::Cancelled) => {
+                    alloc_clone.release_row(row_idx);
+                }
+                Err(e) => {
+                    alloc_clone.release_row(row_idx);
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({
+                            "port": port_clone,
+                            "step": "failed",
+                            "error": e.to_string()
+                        }),
+                    );
+                }
+            }
+        });
+
+        // 5. Insert new slot (under lock, briefly)
+        {
+            let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
+            slots.insert(
+                port,
+                BatchSlot {
+                    cancel,
+                    thread: handle,
+                },
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_auth_cancel_port(state: State<'_, BatchAuthState>, port: String) -> Result<(), String> {
+    let slots = state.slots.lock().map_err(|e| e.to_string())?;
+    if let Some(slot) = slots.get(&port) {
+        slot.cancel.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_auth_cancel_all(state: State<'_, BatchAuthState>) -> Result<(), String> {
+    let slots = state.slots.lock().map_err(|e| e.to_string())?;
+    for slot in slots.values() {
+        slot.cancel.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
 /// Read current UART authorization (for GUI overwrite prompt). Does not emit `flash-progress`.
 #[tauri::command]
 fn authorize_probe_cmd(port: String) -> Result<Option<tyutool_core::DeviceAuthorization>, String> {
@@ -240,7 +611,10 @@ async fn serial_debug_open(
     cfg: DebugConfig,
 ) -> Result<(), String> {
     {
-        let guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+        let guard = state
+            .session
+            .lock()
+            .map_err(|_| "debug state poisoned".to_string())?;
         if guard.is_some() {
             return Err("already open".into());
         }
@@ -264,7 +638,10 @@ async fn serial_debug_open(
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
-    let mut guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
     if guard.is_some() {
         // Another open won the race while we were in spawn_blocking; discard this session.
         session.close();
@@ -277,7 +654,10 @@ async fn serial_debug_open(
 #[tauri::command]
 async fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> {
     let session = {
-        let mut guard = state.session.lock().map_err(|_| "debug state poisoned".to_string())?;
+        let mut guard = state
+            .session
+            .lock()
+            .map_err(|_| "debug state poisoned".to_string())?;
         guard.take()
     };
     if let Some(session) = session {
@@ -326,7 +706,6 @@ fn serial_debug_state(state: State<'_, DebugState>) -> Result<Option<DebugConfig
         .map_err(|_| "debug state poisoned".to_string())?;
     Ok(guard.as_ref().map(|s| s.config().clone()))
 }
-
 
 #[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
@@ -561,7 +940,8 @@ fn append_text_file(path: String, content: String) -> Result<(), String> {
         .create(true)
         .open(&path)
         .map_err(|e| e.to_string())?;
-    file.write_all(content.as_bytes()).map_err(|e| e.to_string())
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -591,6 +971,13 @@ pub fn run() {
         .manage(DebugState {
             session: StdMutex::new(None),
         })
+        .manage(BatchFlashState {
+            slots: StdMutex::new(HashMap::new()),
+        })
+        .manage(BatchAuthState {
+            slots: StdMutex::new(HashMap::new()),
+            allocator: StdMutex::new(None),
+        })
         .setup(|app| {
             let version = app.package_info().version.to_string();
             let name = &app.package_info().name;
@@ -616,6 +1003,13 @@ pub fn run() {
             flash_run,
             authorize_probe_cmd,
             flash_cancel,
+            batch_flash_start,
+            batch_flash_cancel_port,
+            batch_flash_cancel_all,
+            validate_excel_cmd,
+            batch_auth_start,
+            batch_auth_cancel_port,
+            batch_auth_cancel_all,
             device_reset_cmd,
             get_file_size,
             check_port_available_cmd,
@@ -651,6 +1045,49 @@ pub fn run() {
                             let _ = apply_default_main_window_layout(&h2);
                         });
                     });
+                }
+                RunEvent::ExitRequested { .. } => {
+                    // Signal cancel for all batch flash threads and collect handles
+                    let flash_threads: Vec<JoinHandle<()>> = {
+                        let mut v = Vec::new();
+                        if let Some(batch_state) = app_handle.try_state::<BatchFlashState>() {
+                            if let Ok(mut slots) = batch_state.slots.lock() {
+                                for (_, slot) in slots.drain() {
+                                    slot.cancel.store(true, Ordering::SeqCst);
+                                    v.push(slot.thread);
+                                }
+                            }
+                        }
+                        v
+                    };
+                    let auth_threads: Vec<JoinHandle<()>> = {
+                        let mut v = Vec::new();
+                        if let Some(auth_state) = app_handle.try_state::<BatchAuthState>() {
+                            if let Ok(mut slots) = auth_state.slots.lock() {
+                                for (_, slot) in slots.drain() {
+                                    slot.cancel.store(true, Ordering::SeqCst);
+                                    v.push(slot.thread);
+                                }
+                            }
+                        }
+                        v
+                    };
+                    // Join with 5s total timeout — gives threads time to release serial ports
+                    // and finish Excel writes before the process exits
+                    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                    for t in flash_threads.into_iter().chain(auth_threads) {
+                        let remaining =
+                            deadline.saturating_duration_since(std::time::Instant::now());
+                        if remaining.is_zero() {
+                            break;
+                        }
+                        let (tx, rx) = std::sync::mpsc::channel::<()>();
+                        std::thread::spawn(move || {
+                            let _ = t.join();
+                            let _ = tx.send(());
+                        });
+                        let _ = rx.recv_timeout(remaining);
+                    }
                 }
                 _ => {}
             }
