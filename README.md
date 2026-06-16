@@ -12,7 +12,7 @@ Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform de
 |--------|-------|
 | Tuya   | T1, T2, T3, T5 |
 | Beken  | BK7231N |
-| Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-P4, ESP32-S3 |
+| Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-S3 |
 
 ## Download
 
@@ -137,6 +137,28 @@ RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
 
 **Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+
 
+> Use **pnpm** to install dependencies (`pnpm-lock.yaml`). Do not run `npm install` — it creates a conflicting `package-lock.json`.
+
+### Windows development
+
+| Dependency | Notes |
+|------------|-------|
+| Node.js 22+ | v24 works; enough for frontend-only builds |
+| pnpm 10+ | If missing: `npm install -g pnpm`, then restart the terminal |
+| Rust (stable) | Required for GUI / CLI / `dev:web` — [rustup.rs](https://rustup.rs/) |
+| VS Build Tools | Tauri needs MSVC — install [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **Desktop development with C++** |
+
+```powershell
+pnpm install
+pnpm run build          # Verify frontend (Node + pnpm only)
+pnpm run tauri:dev      # GUI dev (also needs Rust)
+```
+
+**Common issues:**
+
+- **`pnpm install` → `ERR_PNPM_IGNORED_BUILDS`** — pnpm 10+ blocks postinstall scripts by default. This repo whitelists `esbuild` and `lefthook` in `pnpm-workspace.yaml`; if it still fails, run `pnpm approve-builds esbuild lefthook` and retry.
+- **`cargo` / `program not found`** — Rust not installed, or the terminal was opened before rustup; install Rust and open a new terminal.
+
 ### CLI only
 
 ```bash
@@ -155,8 +177,9 @@ pnpm run tauri:build
 
 ```bash
 pnpm install
-pnpm run tauri:dev   # GUI dev server with hot-reload
-pnpm run dev:web     # Frontend-only dev server (no Tauri)
+pnpm run tauri:dev   # GUI dev (Tauri + hot-reload; requires Rust)
+pnpm run dev         # Vite frontend only (no Tauri, no CLI serve)
+pnpm run dev:web     # Browser dev: tyutool-cli serve + Vite (cross-platform)
 ```
 
 ## Architecture

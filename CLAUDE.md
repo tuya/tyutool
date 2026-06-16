@@ -70,14 +70,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Project: tyutool
 
-Firmware flash tool for Tuya-class IoT devices. Supports a desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary. **Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+.
+Firmware flash tool for Tuya-class IoT devices. Supports a desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary. **Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+. Use pnpm only (`pnpm-lock.yaml`); do not `npm install`. On Windows: Rust + VS Build Tools (MSVC) for Tauri. Postinstall allowlist: `pnpm-workspace.yaml` (`esbuild`, `lefthook`).
 
 ### Commands
 
 ```bash
 # Frontend
 pnpm install           # install JS deps
-pnpm run dev:web       # frontend-only dev server (no Tauri)
+pnpm run dev           # Vite only (no Tauri, no CLI serve)
+pnpm run dev:web       # tyutool-cli serve + Vite (cross-platform Node script)
 pnpm run tauri:dev     # full GUI dev server with hot-reload
 pnpm run build         # type-check + vite build
 pnpm run test          # run frontend tests (vitest)
@@ -107,14 +108,21 @@ tyutool/
 │   └── tyutool-cli/    # Standalone CLI binary (uses tyutool-core only)
 ├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
 │   └── src/lib.rs      # Tauri commands bridging the WebView to tyutool-core
-└── src/                # Vue 3 frontend (Vite, Pinia, Tailwind CSS v4, DaisyUI)
-    ├── features/firmware-flash/  # Flash feature: UI logic, chip manifests, Tauri/WS transport
-    ├── stores/          # Pinia stores (flash state, workspace persistence)
-    ├── components/      # Shared Vue components
-    ├── composables/     # Shared Vue composables
-    ├── locales/         # i18n strings (vue-i18n)
-    └── router/          # Vue Router routes
+├── scripts/            # Build/release orchestration only (not runtime shared code)
+├── vite/               # Vite plugins and Node helpers (dev toolchain, not bundled)
+├── src/                # Vue 3 frontend (Vite, Pinia, Tailwind CSS v4, DaisyUI)
+│   ├── app-init.ts     # Post-mount bootstrap (workspace restore, device refresh)
+│   ├── runtime.ts      # isTauriRuntime(), getRuntime()
+│   ├── transport/      # WebSocket client (dev:web / browser mode)
+│   ├── features/       # firmware-flash, serial-debug, settings, toolbox (hub) + batch-flash-auth
+│   ├── stores/         # Pinia stores + *-workspace.ts persistence
+│   ├── components/     # Cross-feature Ty* components + AppShell.vue
+│   ├── config/         # Static app constants (version, Tauri path hints)
+│   └── router/         # Vue Router routes
+└── vite.config.ts      # Vite entry (imports from `vite/`)
 ```
+
+**Layer boundaries:** `scripts/` orchestrates cargo/pnpm/tauri for CI and release — do not put frontend-importable application constants there. Dev-only Vite plugins and Node helpers live under `vite/`; shared dev constants (e.g. middleware paths) stay in `src/config/`.
 
 **`tyutool-core` is the single source of truth for flash logic** — it is shared by both the CLI and the GUI Tauri backend. Flash logic must never be duplicated into the frontend.
 
@@ -126,13 +134,21 @@ Each supported chip is a `FlashPlugin` (`crates/tyutool-core/src/plugin.rs`). Pl
 
 `src/features/firmware-flash/chip-manifests.ts` is the **single source of truth for per-chip UI parameters** (baud rate, flash size, erase presets, 4 KiB alignment requirement). The `rustPluginId` field maps each frontend `ChipId` to the Rust registry key. When adding a chip, update both the Rust registry and `CHIP_MANIFEST`.
 
+**Auth-only chip (`AUTH_ONLY_CHIP_ID = "other"`):** a frontend-only chip option on the authorize tab for devices that only need authorization, not flashing. It has no flash plugin — its `rustPluginId` is `"OTHER"` and authorization runs via `FlashMode::Authorize`, which bypasses the chip registry entirely (`run_job` in `registry.rs`). Flash/erase/read are disabled for it in the UI.
+
 #### GUI ↔ Rust bridge
 
-The frontend calls Rust via Tauri commands defined in `src-tauri/src/lib.rs` (e.g. `flash_run`, `list_serial_ports_cmd`). Progress is streamed back as `flash-progress` events via `app.emit(...)`. In web-only dev mode (`dev:web`), `src/features/firmware-flash/ws-transport.ts` provides a WebSocket shim instead of real Tauri IPC.
+The frontend calls Rust via Tauri commands defined in `src-tauri/src/lib.rs` (e.g. `flash_run`, `list_serial_ports_cmd`). Progress is streamed back as `flash-progress` events via `app.emit(...)`. In web-only dev mode (`dev:web`), `src/transport/ws-transport.ts` provides a WebSocket shim instead of real Tauri IPC.
 
 #### Frontend state
 
 All flash UI state lives in the Pinia store at `src/stores/flash.ts` (`useFlashStore`). Workspace persistence (serialized form fields) is handled by `src/stores/flash-workspace.ts` using `@tauri-apps/plugin-store`.
+
+Other stores follow the same pattern (store + matching `*-workspace.ts`): `serial-debug.ts`, `settings.ts`, and `batch-flash-auth.ts` (state for the batch-flash-auth toolbox tool). `port-manager.ts` (`usePortManagerStore`) is the **cross-feature serial-port ownership coordinator** — any feature that opens a serial port must claim/release it through this store rather than opening ports independently.
+
+#### Toolbox hub
+
+`/toolbox` is a hub landing page (`features/toolbox/`) listing tools defined in `features/toolbox/tools.ts`. Each tool is its own feature directory mounted at `/toolbox/<tool-id>` (e.g. `batch-flash-auth`). Sub-tool pages render `features/toolbox/components/ToolboxBreadcrumb.vue`.
 
 ### Key conventions
 
@@ -210,7 +226,7 @@ PRs that modify `crates/tyutool-cli/src/main.rs` (command definitions) without u
 - Event names: kebab-case, `feature-noun` format (`serial-debug-chunk`, `flash-progress`)
 - Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`)
 - Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
-- All Tauri-only code must be gated behind `isTauriRuntime()`; never invoke Tauri commands in web mode
+- All Tauri-only code must be gated behind `isTauriRuntime()` from `src/runtime.ts`; never invoke Tauri commands in web mode
 
 ### Testing
 
