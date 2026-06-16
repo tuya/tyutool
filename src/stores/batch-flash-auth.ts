@@ -1,0 +1,446 @@
+import { ref, computed } from "vue";
+import { defineStore } from "pinia";
+import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
+import { isTauriRuntime } from "@/runtime";
+import {
+  BATCH_FLASH_CAPABLE_CHIPS,
+  type BatchSlotState,
+  type BatchSlotStatus,
+  type CumulativeStats,
+  type PortFilterConfig,
+  type BatchAuthConfigData,
+  type BatchFlashProgressEvent,
+  type BatchOpMode,
+  type CompletionBanner,
+  type BatchAuthProgressEvent,
+  type BatchAuthStartConfig,
+} from "@/features/batch-flash-auth/types";
+import {
+  applyPortFilter,
+  normalizePortName,
+} from "@/features/batch-flash-auth/port-filter";
+import {
+  loadBatchFlashAuthWorkspace,
+  saveBatchFlashAuthCumulative,
+  saveBatchFlashAuthFilterConfig,
+} from "@/stores/batch-flash-auth-workspace";
+
+const ACTIVE_STATUSES: BatchSlotStatus[] = [
+  "flashing",
+  "reading_mac",
+  "authorizing",
+];
+
+export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
+  // ── Persisted config ──────────────────────────────────────────────────────
+  const filterConfig = ref<PortFilterConfig>({ blockedPorts: [] });
+  const cumulativeStats = ref<CumulativeStats>({
+    flash: { total: 0, success: 0, fail: 0 },
+    auth: { total: 0, success: 0, fail: 0 },
+  });
+
+  // ── Session state ─────────────────────────────────────────────────────────
+  const slots = ref<BatchSlotState[]>([]);
+  const chipId = ref<string>("esp32");
+  const baudRate = ref<number>(115200);
+  const firmwarePath = ref<string>("");
+  const authConfig = ref<BatchAuthConfigData>({
+    excelPath: "",
+    conflictPolicy: "skip",
+  });
+  const batchStartTime = ref<number | null>(null);
+  const completionBanner = ref<CompletionBanner | null>(null);
+  const currentBatchPorts = ref<string[]>([]);
+
+  let unlisten: (() => void) | undefined;
+  let unlistenAuth: (() => void) | undefined;
+
+  // ── Computed ──────────────────────────────────────────────────────────────
+  const canFlash = computed(() =>
+    (BATCH_FLASH_CAPABLE_CHIPS as readonly string[]).includes(chipId.value),
+  );
+
+  const opMode = computed<BatchOpMode>(() =>
+    canFlash.value && !!firmwarePath.value ? "flash-then-auth" : "auth-only",
+  );
+
+  const currentStats = computed(() => ({
+    active: slots.value.filter((s) => ACTIVE_STATUSES.includes(s.status))
+      .length,
+    done: slots.value.filter((s) => s.status === "done").length,
+    failed: slots.value.filter((s) => s.status === "failed").length,
+    skipped: slots.value.filter((s) => s.status === "skipped").length,
+  }));
+
+  const inputsValid = computed(() => !!authConfig.value.excelPath);
+
+  const isBusy = computed(() => currentStats.value.active > 0);
+  const canStart = computed(
+    () => slots.value.some((s) => s.status === "idle") && inputsValid.value,
+  );
+  const canCancel = computed(() => isBusy.value);
+  const canRetry = computed(() =>
+    slots.value.some((s) => s.status === "failed"),
+  );
+  const filterActive = computed(
+    () => filterConfig.value.blockedPorts.length > 0,
+  );
+
+  // ── Slot helpers ──────────────────────────────────────────────────────────
+  function findSlot(port: string): BatchSlotState | undefined {
+    return slots.value.find((s) => s.port === port);
+  }
+
+  function updateSlot(port: string, patch: Partial<BatchSlotState>) {
+    const slot = findSlot(port);
+    if (slot) Object.assign(slot, patch);
+  }
+
+  // ── Port management ───────────────────────────────────────────────────────
+  function addPorts(ports: string[]) {
+    const existing = new Set(slots.value.map((s) => s.port));
+    for (const port of ports) {
+      if (!existing.has(port)) {
+        slots.value.push({
+          port,
+          status: "idle",
+          progress: 0,
+          currentPhase: "",
+        });
+        existing.add(port);
+      }
+    }
+  }
+
+  function removeSlot(port: string) {
+    const slot = findSlot(port);
+    if (!slot) return;
+    if (
+      slot.status === "idle" ||
+      slot.status === "done" ||
+      slot.status === "skipped"
+    ) {
+      slots.value = slots.value.filter((s) => s.port !== port);
+    }
+  }
+
+  async function autoAssign() {
+    if (!isTauriRuntime()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const all: Array<{ path: string }> = await invoke("list_serial_ports_cmd");
+    const filtered = applyPortFilter(
+      all.map((p) => p.path),
+      filterConfig.value.blockedPorts,
+    );
+    addPorts(filtered);
+  }
+
+  // ── Flash actions ─────────────────────────────────────────────────────────
+  async function startAuth() {
+    if (!canStart.value) return;
+    if (!isTauriRuntime()) return;
+    batchStartTime.value = Date.now();
+    completionBanner.value = null;
+
+    const idlePorts = slots.value
+      .filter((s) => s.status === "idle")
+      .map((s) => s.port);
+    currentBatchPorts.value = idlePorts;
+    for (const port of idlePorts) {
+      updateSlot(port, {
+        status: "reading_mac",
+        progress: 0,
+        currentPhase: "读取MAC",
+        error: undefined,
+      });
+    }
+
+    const { invoke } = await import("@tauri-apps/api/core");
+    const config: BatchAuthStartConfig = {
+      chipId: chipId.value,
+      baudRate: baudRate.value,
+      firmwarePath: firmwarePath.value || undefined,
+      excelPath: authConfig.value.excelPath,
+      conflictPolicy: authConfig.value.conflictPolicy,
+    };
+    await invoke("batch_auth_start", { config, ports: idlePorts });
+  }
+
+  async function startBatch() {
+    await startAuth();
+  }
+
+  async function retryFailed() {
+    if (!canRetry.value) return;
+    completionBanner.value = null;
+    for (const slot of slots.value.filter((s) => s.status === "failed")) {
+      updateSlot(slot.port, {
+        status: "idle",
+        progress: 0,
+        currentPhase: "",
+        error: undefined,
+      });
+    }
+    await startBatch();
+  }
+
+  async function cancelPort(port: string) {
+    if (!isTauriRuntime()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("batch_auth_cancel_port", { port });
+  }
+
+  async function cancelAll() {
+    if (!isTauriRuntime()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("batch_auth_cancel_all");
+  }
+
+  // ── Progress event handler ────────────────────────────────────────────────
+  function handleFlashProgress(ev: BatchFlashProgressEvent) {
+    const { port, event: e } = ev;
+    if (!findSlot(port)) return;
+
+    if (e.kind === "percent") {
+      updateSlot(port, { progress: e.value });
+    } else if (e.kind === "phase") {
+      updateSlot(port, { currentPhase: String(e.phase) });
+    } else if (e.kind === "done") {
+      const r = e.result;
+      if ("ok" in r) {
+        updateSlot(port, { status: "done", progress: 100, currentPhase: "" });
+        cumulativeStats.value.flash.total++;
+        cumulativeStats.value.flash.success++;
+      } else if ("err" in r) {
+        updateSlot(port, { status: "failed", error: r.err.message });
+        cumulativeStats.value.flash.total++;
+        cumulativeStats.value.flash.fail++;
+      } else {
+        // cancelled — not counted in cumulative
+        updateSlot(port, { status: "idle", progress: 0, currentPhase: "" });
+      }
+      void saveCumulativeStats();
+      checkBatchCompletion();
+    }
+  }
+
+  function handleAuthProgress(ev: BatchAuthProgressEvent) {
+    const { port, step } = ev;
+    if (!findSlot(port)) return;
+
+    if (step === "reading_mac") {
+      updateSlot(port, { status: "reading_mac", currentPhase: "读取MAC" });
+    } else if (
+      step === "reading_auth" ||
+      step === "writing_auth" ||
+      step === "verifying"
+    ) {
+      updateSlot(port, { status: "authorizing", currentPhase: step });
+    } else if (step === "done") {
+      updateSlot(port, {
+        status: "done",
+        progress: 100,
+        currentPhase: "",
+        mac: ev.mac,
+      });
+      cumulativeStats.value.auth.total++;
+      cumulativeStats.value.auth.success++;
+      void saveCumulativeStats();
+      checkBatchCompletion();
+    } else if (step === "failed") {
+      updateSlot(port, {
+        status: "failed",
+        error: ev.error ?? "Unknown auth error",
+      });
+      cumulativeStats.value.auth.total++;
+      cumulativeStats.value.auth.fail++;
+      void saveCumulativeStats();
+      checkBatchCompletion();
+    } else if (step === "skipped") {
+      updateSlot(port, { status: "skipped", currentPhase: "" });
+      checkBatchCompletion();
+    } else if (step === "flashing" && ev.event) {
+      const e = ev.event as FlashProgressPayload;
+      if (e.kind === "percent") {
+        updateSlot(port, { progress: e.value });
+      } else if (e.kind === "phase") {
+        updateSlot(port, { status: "flashing", currentPhase: String(e.phase) });
+      } else if (e.kind === "done" && "ok" in e.result) {
+        // Flash sub-step completed; transition to auth phase while waiting for auth events.
+        updateSlot(port, {
+          status: "reading_mac",
+          progress: 0,
+          currentPhase: "读取MAC",
+        });
+      }
+      // err/cancelled: the subsequent auth 'failed'/'skipped' step handles final state.
+    }
+  }
+
+  function checkBatchCompletion() {
+    const anyActive = slots.value.some((s) =>
+      ACTIVE_STATUSES.includes(s.status),
+    );
+    if (anyActive || batchStartTime.value === null) return;
+
+    // Count only slots from the current run to avoid prior-run done slots skewing
+    // the banner. currentBatchPorts is set by startAuth; when empty
+    // (e.g. direct test calls), fall back to all slots.
+    const batchPortSet = new Set(currentBatchPorts.value);
+    const batchSlots =
+      batchPortSet.size > 0
+        ? slots.value.filter((s) => batchPortSet.has(s.port))
+        : slots.value;
+    const done = batchSlots.filter((s) => s.status === "done").length;
+    const failed = batchSlots.filter((s) => s.status === "failed").length;
+    const skipped = batchSlots.filter((s) => s.status === "skipped").length;
+
+    if (done === 0 && failed === 0 && skipped > 0) {
+      // All devices were already authorized and skipped
+      completionBanner.value = {
+        kind: "partial",
+        message: `本次批次完成：${skipped} 台已跳过（设备已授权）`,
+      };
+    } else if (failed === 0) {
+      completionBanner.value = {
+        kind: "success",
+        message: `本次批次完成：${done} 台全部成功`,
+      };
+    } else if (done === 0) {
+      completionBanner.value = {
+        kind: "all-failed",
+        message: `本次批次全部失败，请检查连接后重试`,
+      };
+    } else {
+      completionBanner.value = {
+        kind: "partial",
+        message: `本次批次完成：${done} 成功，${failed} 失败，可点击「重试失败」`,
+      };
+    }
+  }
+
+  function dismissBanner() {
+    completionBanner.value = null;
+  }
+
+  // ── Port filter ───────────────────────────────────────────────────────────
+  function addBlockedPort(port: string) {
+    const normalized = normalizePortName(port);
+    if (!filterConfig.value.blockedPorts.includes(normalized)) {
+      filterConfig.value.blockedPorts.push(normalized);
+    }
+    // Remove idle slots that are now filtered
+    slots.value = slots.value.filter(
+      (s) =>
+        s.status !== "idle" ||
+        !filterConfig.value.blockedPorts.includes(normalizePortName(s.port)),
+    );
+    void saveFilterConfig();
+  }
+
+  function removeBlockedPort(port: string) {
+    const normalized = normalizePortName(port);
+    filterConfig.value.blockedPorts = filterConfig.value.blockedPorts.filter(
+      (p) => p !== normalized,
+    );
+    void saveFilterConfig();
+  }
+
+  // ── Cumulative stats reset ────────────────────────────────────────────────
+  function resetFlashStats() {
+    cumulativeStats.value.flash = { total: 0, success: 0, fail: 0 };
+    void saveCumulativeStats();
+  }
+
+  function resetAuthStats() {
+    cumulativeStats.value.auth = { total: 0, success: 0, fail: 0 };
+    void saveCumulativeStats();
+  }
+
+  // ── Persistence ───────────────────────────────────────────────────────────
+  async function loadPersistedData() {
+    const { cumulative, filter } = await loadBatchFlashAuthWorkspace();
+    if (cumulative) cumulativeStats.value = cumulative;
+    if (filter) filterConfig.value = filter;
+  }
+
+  async function saveCumulativeStats() {
+    await saveBatchFlashAuthCumulative(cumulativeStats.value);
+  }
+
+  async function saveFilterConfig() {
+    await saveBatchFlashAuthFilterConfig(filterConfig.value);
+  }
+
+  // ── Event listener lifecycle ──────────────────────────────────────────────
+  async function ensureListener() {
+    if (!isTauriRuntime()) return;
+    const { listen } = await import("@tauri-apps/api/event");
+    if (!unlisten) {
+      unlisten = await listen<BatchFlashProgressEvent>(
+        "batch-flash-progress",
+        ({ payload }) => {
+          handleFlashProgress(payload);
+        },
+      );
+    }
+    if (!unlistenAuth) {
+      unlistenAuth = await listen<BatchAuthProgressEvent>(
+        "batch-auth-progress",
+        ({ payload }) => {
+          handleAuthProgress(payload);
+        },
+      );
+    }
+  }
+
+  function cleanup() {
+    unlisten?.();
+    unlisten = undefined;
+    unlistenAuth?.();
+    unlistenAuth = undefined;
+  }
+
+  return {
+    // State
+    slots,
+    chipId,
+    baudRate,
+    firmwarePath,
+    authConfig,
+    filterConfig,
+    cumulativeStats,
+    completionBanner,
+    // Computed
+    canFlash,
+    opMode,
+    currentStats,
+    inputsValid,
+    isBusy,
+    canStart,
+    canCancel,
+    canRetry,
+    filterActive,
+    batchStartTime,
+    // Actions
+    addPorts,
+    removeSlot,
+    autoAssign,
+    startAuth,
+    startBatch,
+    retryFailed,
+    cancelPort,
+    cancelAll,
+    addBlockedPort,
+    removeBlockedPort,
+    resetFlashStats,
+    resetAuthStats,
+    dismissBanner,
+    loadPersistedData,
+    ensureListener,
+    cleanup,
+    // Internal (exposed for testing)
+    handleFlashProgress,
+    handleAuthProgress,
+  };
+});
