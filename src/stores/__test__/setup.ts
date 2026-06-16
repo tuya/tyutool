@@ -2,8 +2,8 @@
  * Test helper: creates a fresh Pinia + flash store in jsdom environment.
  * Mocks isTauriRuntime() → false so all Tauri branches are skipped.
  */
-import { createPinia, setActivePinia } from 'pinia';
-import { vi } from 'vitest';
+import { createPinia, setActivePinia } from "pinia";
+import { vi } from "vitest";
 
 /**
  * Call in beforeEach to set up a fresh Pinia instance and mock Tauri runtime.
@@ -11,8 +11,8 @@ import { vi } from 'vitest';
  */
 export async function createTestFlashStore() {
   // Mock isTauriRuntime before importing the store
-  vi.mock('@/features/firmware-flash/flash-tauri', async importOriginal => {
-    const actual = await importOriginal<typeof import('@/features/firmware-flash/flash-tauri')>();
+  vi.mock("@/runtime", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/runtime")>();
     return {
       ...actual,
       isTauriRuntime: vi.fn(() => false),
@@ -23,6 +23,6 @@ export async function createTestFlashStore() {
   setActivePinia(pinia);
 
   // Dynamic import after mock is set up
-  const { useFlashStore } = await import('../flash');
+  const { useFlashStore } = await import("../flash");
   return useFlashStore();
 }

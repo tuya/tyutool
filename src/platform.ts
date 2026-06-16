@@ -26,7 +26,12 @@ class VscodePlatform implements Platform {
   private readonly _api: { postMessage: (msg: unknown) => void } | null
 
   constructor() {
-    this._api = (window as any).acquireVsCodeApi?.() ?? null
+    this._api =
+      (
+        window as Window & {
+          acquireVsCodeApi?: () => { postMessage: (msg: unknown) => void }
+        }
+      ).acquireVsCodeApi?.() ?? null
   }
 
   async pickFile(requestId: string, accept: string): Promise<PickFileResult | null> {
@@ -61,7 +66,10 @@ class VscodePlatform implements Platform {
   }
 
   getWsUrl(): string {
-    return (window as any).__TUYAOPEN_IDE_CONFIG?.wsUrl ?? ''
+    return (
+      (window as Window & { __TUYAOPEN_IDE_CONFIG?: { wsUrl?: string } })
+        .__TUYAOPEN_IDE_CONFIG?.wsUrl ?? ''
+    )
   }
 }
 

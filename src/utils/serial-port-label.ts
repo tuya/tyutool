@@ -13,16 +13,18 @@ export const TUYA_DUAL_SERIAL_PROBE_PID = 0x55d2;
 /**
  * Coerce VID/PID from IPC/JSON (sometimes strings) to a 16-bit value for comparisons.
  */
-export function coerceUsbU16(value: number | string | null | undefined): number | null {
+export function coerceUsbU16(
+  value: number | string | null | undefined,
+): number | null {
   if (value == null) {
     return null;
   }
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return Number.isFinite(value) ? value & 0xffff : null;
   }
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const s = value.trim();
-    if (s === '') {
+    if (s === "") {
       return null;
     }
     const n = /^0x/i.test(s) ? Number.parseInt(s, 16) : Number(s);
@@ -31,16 +33,18 @@ export function coerceUsbU16(value: number | string | null | undefined): number 
   return null;
 }
 
-function coerceUsbInterface(value: number | string | null | undefined): number | null | undefined {
+function coerceUsbInterface(
+  value: number | string | null | undefined,
+): number | null | undefined {
   if (value == null) {
     return value as null | undefined;
   }
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return Number.isFinite(value) ? value : undefined;
   }
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const s = value.trim();
-    if (s === '') {
+    if (s === "") {
       return undefined;
     }
     const n = Number(s);
@@ -74,27 +78,33 @@ export function tuyaDualSerialHoverTooltip(
   usbVid: number | string | null | undefined,
   usbPid: number | string | null | undefined,
   usbInterface: number | string | null | undefined,
-  t: (key: string) => string
+  t: (key: string) => string,
 ): string | null {
   const vid = coerceUsbU16(usbVid);
   const pid = coerceUsbU16(usbPid);
-  if (vid !== TUYA_DUAL_SERIAL_PROBE_VID || pid !== TUYA_DUAL_SERIAL_PROBE_PID) {
+  if (
+    vid !== TUYA_DUAL_SERIAL_PROBE_VID ||
+    pid !== TUYA_DUAL_SERIAL_PROBE_PID
+  ) {
     return null;
   }
   const iface = coerceUsbInterface(usbInterface);
   if (iface === 0 || iface === 1) {
-    return t('flash.tuyaPortHint.maybeFlashAuth');
+    return t("flash.tuyaPortHint.maybeFlashAuth");
   }
   if (iface === 2 || iface === 3) {
-    return t('flash.tuyaPortHint.maybeLog');
+    return t("flash.tuyaPortHint.maybeLog");
   }
   if (iface == null) {
-    return t('flash.tuyaPortHint.interfaceUnknown');
+    return t("flash.tuyaPortHint.interfaceUnknown");
   }
   return null;
 }
 
-export function formatSerialPortLabel(p: TauriSerialPortRow, t: (key: string) => string): string {
+export function formatSerialPortLabel(
+  p: TauriSerialPortRow,
+  t: (key: string) => string,
+): string {
   const base = p.name ? `${p.path} (${p.name})` : p.path;
   const role = p.portRole?.trim();
   if (!role) {

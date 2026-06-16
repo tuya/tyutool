@@ -4,7 +4,6 @@ export const CHIP_IDS = [
   "esp32",
   "esp32c3",
   "esp32c6",
-  "esp32p4",
   "esp32s3",
   "ln882h",
   "t1",
@@ -14,6 +13,15 @@ export const CHIP_IDS = [
 ] as const;
 
 export type ChipId = (typeof CHIP_IDS)[number];
+
+/**
+ * UART-only authorization placeholder for platforms without a flash plugin.
+ * Shown in the authorize tab chip list only — not in flash/erase/read tabs.
+ */
+export const AUTH_ONLY_CHIP_ID = "other" as const;
+
+/** Chip options on the authorize tab (standard chips + {@link AUTH_ONLY_CHIP_ID}). */
+export const AUTH_CHIP_IDS = [...CHIP_IDS, AUTH_ONLY_CHIP_ID] as const;
 
 /** Default chip when no saved workspace exists (first launch). */
 export const DEFAULT_CHIP_ID: ChipId = "t5";

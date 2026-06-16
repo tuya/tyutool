@@ -1,4 +1,4 @@
-import type { ChipId } from "./constants";
+import { AUTH_ONLY_CHIP_ID, type ChipId } from "./constants";
 import type { ErasePresetKind } from "./types";
 
 export interface ChipManifest {
@@ -56,17 +56,6 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
     eraseRequires4KAlignment: true,
     erasePresets: {
       fullChip: { start: "0x00000000", end: "0x007FFFFF" },
-    },
-  },
-  esp32p4: {
-    rustPluginId: "ESP32P4",
-    defaultBaudRate: 460800,
-    defaultAuthBaudRate: 115200,
-    defaultLogBaudRate: 115200,
-    flashSize: "0x01000000", // 16 MiB
-    eraseRequires4KAlignment: true,
-    erasePresets: {
-      fullChip: { start: "0x00000000", end: "0x00FFFFFF" },
     },
   },
   esp32s3: {
@@ -153,8 +142,22 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
   },
 };
 
+/** Manifest for {@link AUTH_ONLY_CHIP_ID} — authorize tab only (no flash plugin). */
+const AUTH_ONLY_CHIP_MANIFEST: ChipManifest = {
+  rustPluginId: "OTHER",
+  defaultBaudRate: 115200,
+  defaultAuthBaudRate: 115200,
+  defaultLogBaudRate: 115200,
+  flashSize: "0x00000000",
+  eraseRequires4KAlignment: false,
+  erasePresets: {},
+};
+
 /** Get manifest for a chip id; throws if unknown. */
 export function chipManifest(chipId: string): ChipManifest {
+  if (chipId === AUTH_ONLY_CHIP_ID) {
+    return AUTH_ONLY_CHIP_MANIFEST;
+  }
   const m = CHIP_MANIFEST[chipId as ChipId];
   if (!m) throw new Error(`Unknown chip: ${chipId}`);
   return m;
@@ -162,6 +165,9 @@ export function chipManifest(chipId: string): ChipManifest {
 
 /** Maps UI chip id to Rust registry id. */
 export function rustPluginIdForChip(uiId: string): string {
+  if (uiId === AUTH_ONLY_CHIP_ID) {
+    return chipManifest(AUTH_ONLY_CHIP_ID).rustPluginId;
+  }
   return (
     CHIP_MANIFEST[uiId as ChipId]?.rustPluginId ??
     uiId.toUpperCase().replace(/-/g, "")
