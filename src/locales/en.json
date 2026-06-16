@@ -60,6 +60,8 @@
       "available": "Update to v{version} available ({time}s)",
       "upToDate": "Up to date ({time}s)",
       "failed": "Check failed",
+      "releaseNotes": "What's new in v{version}",
+      "releaseNotesEmpty": "No release notes provided for this version.",
       "btnUpdate": "Update",
       "downloading": "Downloading v{version} from {source}",
       "downloadProgress": "{percent}%   {downloaded}/{total}",
