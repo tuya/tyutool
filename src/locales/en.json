@@ -544,6 +544,8 @@
     }
   },
   "toolbox": {
+    "section": "TOOLS",
+    "subtitle": "A collection of utilities for batch production and debugging",
     "batchFlashAuth": {
       "name": "Batch Flash & Auth",
       "desc": "Flash firmware and write auth codes to up to 32 ports in parallel"
