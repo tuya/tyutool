@@ -2,7 +2,9 @@
  * Must stay in sync with `identifier` in `src-tauri/tauri.conf.json`.
  * Matches Tauri `PathResolver::app_log_dir` (see tauri `path/desktop.rs`).
  */
-export const TAURI_APP_IDENTIFIER = 'com.tyutool.desktop';
+export { TAURI_APP_IDENTIFIER } from "./app-identifier";
+
+import { TAURI_APP_IDENTIFIER } from "./app-identifier";
 
 /**
  * Human-readable hint for where desktop tyutool log files live, for UI copy when
@@ -10,7 +12,7 @@ export const TAURI_APP_IDENTIFIER = 'com.tyutool.desktop';
  * OS cannot be guessed, returns the Linux default.
  */
 export function desktopAppLogDirHint(): string {
-  if (typeof navigator === 'undefined') {
+  if (typeof navigator === "undefined") {
     return `~/.local/share/${TAURI_APP_IDENTIFIER}/logs`;
   }
   const ua = navigator.userAgent;
