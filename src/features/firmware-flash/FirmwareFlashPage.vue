@@ -23,7 +23,7 @@ async function resetWindowSize(): Promise<void> {
 <template>
   <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 md:gap-3">
     <header
-      class="page-header relative flex min-w-0 flex-col gap-3 overflow-hidden p-3 sm:flex-row sm:items-center sm:p-3.5"
+      class="page-header relative flex min-w-0 shrink-0 flex-col gap-3 overflow-hidden p-3 sm:flex-row sm:items-center sm:p-3.5"
     >
       <!-- 背景装饰（与 conn-bar 统一） -->
       <div
@@ -72,7 +72,7 @@ async function resetWindowSize(): Promise<void> {
     <FirmwareFlashConnection />
 
     <div
-      class="flex min-h-0 flex-1 flex-col gap-2 lg:min-h-0 lg:flex-row lg:gap-3 lg:items-stretch"
+      class="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row lg:gap-3 lg:items-stretch"
     >
       <FirmwareFlashOperations />
       <FirmwareFlashAside />

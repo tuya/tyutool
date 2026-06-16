@@ -93,7 +93,7 @@ const chipValue = computed({
 
 <template>
   <section
-    class="conn-bar relative flex min-w-0 flex-col gap-3 overflow-hidden rounded-2xl p-3 sm:flex-row sm:items-center sm:gap-4 sm:p-3.5"
+    class="conn-bar relative flex min-w-0 shrink-0 flex-col gap-3 overflow-hidden rounded-2xl p-3 sm:flex-row sm:items-center sm:gap-4 sm:p-3.5"
     :aria-label="t('flash.connectionAria')"
   >
     <!-- 背景装饰 -->
