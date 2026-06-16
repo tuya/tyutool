@@ -10,6 +10,7 @@ import {
   isNewerVersion,
   type LatestJson,
 } from "./update-sources";
+import { renderMarkdown } from "./render-markdown";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -145,6 +146,14 @@ const availableUpdate = computed(() => {
   if (!src) return null;
   return { version: src.version, notes: src.manifest?.notes?.trim() ?? "" };
 });
+
+// Safe by construction: renderMarkdown HTML-escapes all input first, then emits
+// only a fixed tag whitelist — so the result is safe for v-html.
+const renderedNotes = computed(() =>
+  availableUpdate.value?.notes
+    ? renderMarkdown(availableUpdate.value.notes)
+    : "",
+);
 
 // ── Watch open ────────────────────────────────────────────────────────────────
 
@@ -487,9 +496,12 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
                   })
                 }}
               </h3>
-              <p v-if="availableUpdate.notes" class="ud-notes-body">
-                {{ availableUpdate.notes }}
-              </p>
+              <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown escapes all input and emits a fixed tag whitelist (see render-markdown.ts) -->
+              <div
+                v-if="availableUpdate.notes"
+                class="ud-notes-body md-content"
+                v-html="renderedNotes"
+              />
               <p v-else class="ud-notes-empty">
                 {{ t("settings.update.releaseNotesEmpty") }}
               </p>
@@ -862,11 +874,68 @@ async function openManualReleaseDownload(srcState: SourceState): Promise<void> {
 .ud-notes-body {
   max-height: 9rem;
   overflow-y: auto;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 0.75rem;
   line-height: 1.55;
   color: var(--ty-text-muted);
+}
+
+/* ── Rendered markdown content (see render-markdown.ts) ──
+   v-html output gets no scope attribute, so target it via :deep(). */
+.md-content :deep(:first-child) {
+  margin-top: 0;
+}
+.md-content :deep(:last-child) {
+  margin-bottom: 0;
+}
+.md-content :deep(p) {
+  margin: 0 0 0.5rem;
+}
+.md-content :deep(.md-h) {
+  margin: 0.625rem 0 0.375rem;
+  font-weight: 600;
+  color: var(--ty-text);
+}
+.md-content :deep(.md-h1),
+.md-content :deep(.md-h2) {
+  font-size: 0.8125rem;
+}
+.md-content :deep(ul),
+.md-content :deep(ol) {
+  margin: 0 0 0.5rem;
+  padding-left: 1.1rem;
+}
+.md-content :deep(li) {
+  margin: 0.125rem 0;
+}
+.md-content :deep(a) {
+  color: var(--ty-primary);
+  text-decoration: underline;
+}
+.md-content :deep(code) {
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+  background-color: color-mix(in srgb, var(--ty-text) 8%, transparent);
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.md-content :deep(pre) {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  background-color: color-mix(in srgb, var(--ty-text) 8%, transparent);
+  overflow-x: auto;
+}
+.md-content :deep(pre code) {
+  padding: 0;
+  background: none;
+  white-space: pre;
+}
+.md-content :deep(hr) {
+  margin: 0.625rem 0;
+  border: none;
+  border-top: 1px solid var(--ty-border);
 }
 
 .ud-notes-empty {
