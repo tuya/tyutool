@@ -4,6 +4,8 @@ pre-commit:
     frontend:
       glob: 'src/**/*.{ts,vue}'
       run: npx prettier --write {staged_files}
+      stage_fixed: true
     backend:
-      glob: 'src-tauri/**/*.rs'
-      run: cargo fmt --manifest-path src-tauri/Cargo.toml
+      glob: '**/*.rs'
+      run: cargo fmt --all
+      stage_fixed: true

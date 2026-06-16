@@ -2,6 +2,7 @@
 node_modules/
 dist/
 .pnpm-store/
+package-lock.json
 
 # ── Rust / Cargo ──────────────────────────────────────────────────────────────
 target/
@@ -22,10 +23,6 @@ logs/
 
 # ── Temp / scratch ────────────────────────────────────────────────────────────
 tmp/
-.worktrees/
-
-# ── Removed vendor trees (use git deps instead) ───────────────────────────────
-patches/
 
 # ── Environment overrides (never commit secrets) ──────────────────────────────
 .env.local
@@ -44,6 +41,9 @@ patches/
 .idea/
 *.swp
 *.swo
+
+# ── Scripts generated assets ──────────────────────────────────────────────────
+scripts/icon-source.png
 
 # ── Superpowers ───────────────────────────────────────────────────────────────
 docs/superpowers/

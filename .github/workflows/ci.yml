@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [refactor/v3, yj/toolbox]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Rust core + CLI tests ───────────────────────────────────────────────────
+  # Only tyutool-core and tyutool-cli are tested here: they hold the flash logic
+  # and have no GTK/WebKit system dependency, so the job stays fast. src-tauri is
+  # exercised by the GUI build in release.yml.
+  rust:
+    name: Rust (core + cli)
+    runs-on: ubuntu-latest
+    env:
+      # serialport needs libudev on Linux unless this is set (same as release.yml).
+      SERIALPORT_SKIP_LIBUDEV: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "ci-rust" }
+      - name: Format check
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy -p tyutool-core -p tyutool-cli --all-targets -- -D warnings
+      - name: Test
+        run: cargo test -p tyutool-core -p tyutool-cli
+
+  # ── Frontend lint + tests + type-checked build ──────────────────────────────
+  frontend:
+    name: Frontend (lint + test + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with: { version: 10 }
+      - uses: actions/setup-node@v6
+        with: { node-version: "22", cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run test
+      - run: pnpm run build
