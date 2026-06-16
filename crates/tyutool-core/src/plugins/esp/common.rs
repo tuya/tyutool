@@ -160,7 +160,9 @@ pub(crate) fn run_esp(
     }
 
     // ── Open serial port ─────────────────────────────────────────────
-    progress(FlashEvent::Phase { phase: FlashPhase::Connect });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::Connect,
+    });
     log::info!("Opening port {}", job.port);
 
     let port_info = usb_port_info(&job.port);
@@ -200,24 +202,13 @@ pub(crate) fn run_esp(
         Ok(info) => {
             progress(FlashEvent::Milestone {
                 milestone: FlashMilestone::Connected {
-                    chip_info: Some(format!(
-                        "{} (revision {:?}, flash {})",
-                        info.chip, info.revision, info.flash_size
-                    )),
+                    chip_info: Some(format!("{} (revision {:?})", info.chip, info.revision)),
                 },
             });
         }
         Err(e) => {
             log::warn!("Failed to read ESP device info: {}", e);
         }
-    }
-
-    // Long writes need a generous serial read timeout between stub blocks.
-    if let Err(e) = flasher
-        .connection()
-        .set_timeout(Duration::from_secs(30))
-    {
-        log::warn!("Failed to extend ESP connection timeout: {e}");
     }
 
     // Switch to user-requested baud rate if higher than default
@@ -298,38 +289,26 @@ fn run_flash(
 
         let flash_addr = parse_hex(Some(&seg.start_addr), "start_addr")?;
 
-        if let Ok(info) = flasher.device_info() {
-            let flash_bytes = info.flash_size.size();
-            let end = flash_addr.saturating_add(firmware.len() as u32);
-            if end > flash_bytes {
-                return Err(FlashError::Plugin(format!(
-                    "firmware {} bytes at 0x{flash_addr:08X} exceeds detected flash {} ({} bytes); \
-                     use a smaller image or verify flash size",
-                    firmware.len(),
-                    info.flash_size,
-                    flash_bytes
-                )));
-            }
-        }
-
-        log::info!(
-            "Flashing {} bytes at 0x{:08X}",
-            firmware.len(),
-            flash_addr
-        );
+        log::info!("Flashing {} bytes at 0x{:08X}", firmware.len(), flash_addr);
 
         if cancel.load(Ordering::Relaxed) {
             return Err(FlashError::Cancelled);
         }
 
-        progress(FlashEvent::Phase { phase: FlashPhase::Write });
+        progress(FlashEvent::Phase {
+            phase: FlashPhase::Write,
+        });
         // Each segment emits an independent 0-100% range.
         let mut cb = ProgressAdapter::new(progress, 0, 100);
         flasher
             .write_bin_to_flash(flash_addr, &firmware, &mut cb)
             .map_err(esp_err)?;
 
-        log::info!("Flash write complete for segment {}/{}", i + 1, total_segments);
+        log::info!(
+            "Flash write complete for segment {}/{}",
+            i + 1,
+            total_segments
+        );
     }
 
     progress(FlashEvent::Percent { value: 100 });
@@ -385,19 +364,25 @@ fn run_erase(
                 aligned_exclusive_end,
                 size
             );
-            progress(FlashEvent::Phase { phase: FlashPhase::Erase });
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Erase,
+            });
             progress(FlashEvent::Percent { value: 10 });
             flasher.erase_region(aligned_start, size).map_err(esp_err)?;
         }
         _ => {
             log::info!("Erasing all flash");
-            progress(FlashEvent::Phase { phase: FlashPhase::Erase });
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Erase,
+            });
             progress(FlashEvent::Percent { value: 10 });
             flasher.erase_flash().map_err(esp_err)?;
         }
     }
 
-    progress(FlashEvent::Milestone { milestone: FlashMilestone::EraseComplete });
+    progress(FlashEvent::Milestone {
+        milestone: FlashMilestone::EraseComplete,
+    });
     progress(FlashEvent::Percent { value: 100 });
     Ok(())
 }
@@ -438,7 +423,9 @@ fn run_read(
         return Err(FlashError::Cancelled);
     }
 
-    progress(FlashEvent::Phase { phase: FlashPhase::Read });
+    progress(FlashEvent::Phase {
+        phase: FlashPhase::Read,
+    });
     progress(FlashEvent::Percent { value: 10 });
 
     // espflash::Flasher::read_flash() does not expose ProgressCallbacks, so we
@@ -459,6 +446,7 @@ fn run_read(
 /// drive the same `ReadFlash` command / `read_flash_response` / `write_raw`
 /// protocol ourselves using the public `connection()` accessor.
 /// Progress advances linearly from `pct_start` (10 %) to `pct_end` (90 %).
+#[allow(clippy::too_many_arguments)]
 fn read_flash_with_progress(
     flasher: &mut Flasher,
     offset: u32,

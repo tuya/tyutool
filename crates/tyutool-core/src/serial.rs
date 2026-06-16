@@ -55,10 +55,11 @@ fn is_phantom_port(path: &str, pt: &serialport::SerialPortType) -> bool {
     // On Linux, /dev/ttyS* ports with type Unknown are legacy 8250/16550 UARTs
     // that exist in every kernel config but are rarely wired to anything.
     // Real USB/ACM/PCI serial devices have a known type.
-    if cfg!(target_os = "linux") {
-        if matches!(pt, serialport::SerialPortType::Unknown) && path.starts_with("/dev/ttyS") {
-            return true;
-        }
+    if cfg!(target_os = "linux")
+        && matches!(pt, serialport::SerialPortType::Unknown)
+        && path.starts_with("/dev/ttyS")
+    {
+        return true;
     }
     false
 }

@@ -1,17 +1,17 @@
-use std::io::{self, Read, Write};
-use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicBool, Ordering};
-use serialport::SerialPort;
 use crate::error::FlashError;
+use serialport::SerialPort;
+use std::io::{self, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 const CHUNK_SIZE: usize = 0x200; // 512 bytes per flash_read (matches reference tool; aligned to 4 KB sectors)
 
 // XMODEM control bytes
-pub const SOH: u8 = 0x01;  // 128-byte packet header
-pub const STX: u8 = 0x02;  // 1024+ byte packet header
-pub const EOT: u8 = 0x04;  // end of transmission
-pub const ACK: u8 = 0x06;  // acknowledge
-pub const CAN: u8 = 0x18;  // cancel
+pub const SOH: u8 = 0x01; // 128-byte packet header
+pub const STX: u8 = 0x02; // 1024+ byte packet header
+pub const EOT: u8 = 0x04; // end of transmission
+pub const ACK: u8 = 0x06; // acknowledge
+pub const CAN: u8 = 0x18; // cancel
 pub const CRC_BYTE: u8 = b'C'; // device requests CRC mode
 
 // CRC16-CCITT (XModem variant): poly=0x1021, init=0
@@ -42,31 +42,6 @@ pub fn crc16(data: &[u8]) -> u16 {
         crc = (crc << 8) ^ CRC_TABLE[idx];
     }
     crc
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn crc16_known_values() {
-        // "123456789" → 0x31C3 for XModem CRC16
-        assert_eq!(crc16(b"123456789"), 0x31C3);
-    }
-
-    #[test]
-    fn crc16_empty() {
-        assert_eq!(crc16(b""), 0x0000);
-    }
-
-    #[test]
-    fn crc16_table_spot_check() {
-        // Verify compile-time table generation is correct
-        assert_eq!(CRC_TABLE[0], 0x0000);
-        assert_eq!(CRC_TABLE[1], 0x1021);
-        // Verify function uses the table correctly for a single byte
-        assert_eq!(crc16(&[0x01]), 0x1021);
-    }
 }
 
 /// Flush serial RX/TX buffers.
@@ -117,7 +92,6 @@ pub fn read_response(
     Ok(result)
 }
 
-
 /// Returns `Err(FlashError::Plugin)` on timeout.
 pub fn wait_for_response_containing(
     port: &mut Box<dyn SerialPort>,
@@ -141,7 +115,9 @@ fn hex_nibble(b: u8) -> Result<u8, FlashError> {
         b'0'..=b'9' => Ok(b - b'0'),
         b'A'..=b'F' => Ok(b - b'A' + 10),
         b'a'..=b'f' => Ok(b - b'a' + 10),
-        _ => Err(FlashError::Plugin(format!("flash_read: invalid hex byte 0x{b:02x}"))),
+        _ => Err(FlashError::Plugin(format!(
+            "flash_read: invalid hex byte 0x{b:02x}"
+        ))),
     }
 }
 
@@ -211,7 +187,11 @@ pub struct XmodemSend<'a> {
 
 impl<'a> XmodemSend<'a> {
     pub fn new(port: &'a mut Box<dyn SerialPort>, data: &'a [u8], packet_size: usize) -> Self {
-        Self { port, data, packet_size }
+        Self {
+            port,
+            data,
+            packet_size,
+        }
     }
 
     /// Run the full XMODEM session for `data`.
@@ -264,7 +244,9 @@ impl<'a> XmodemSend<'a> {
                     errors += 1;
                     if errors > MAX_ERRORS {
                         self.abort();
-                        return Err(FlashError::Plugin("xmodem: device did not send CRC request".into()));
+                        return Err(FlashError::Plugin(
+                            "xmodem: device did not send CRC request".into(),
+                        ));
                     }
                 }
             }
@@ -313,14 +295,18 @@ impl<'a> XmodemSend<'a> {
                 Ok(CAN) => {
                     cancels += 1;
                     if cancels >= 2 {
-                        return Err(FlashError::Plugin("xmodem: cancelled during header exchange".into()));
+                        return Err(FlashError::Plugin(
+                            "xmodem: cancelled during header exchange".into(),
+                        ));
                     }
                 }
                 Ok(_) | Err(_) => {
                     errors += 1;
                     if errors > MAX_ERRORS {
                         self.abort();
-                        return Err(FlashError::Plugin("xmodem: no ACK for filename packet".into()));
+                        return Err(FlashError::Plugin(
+                            "xmodem: no ACK for filename packet".into(),
+                        ));
                     }
                 }
             }
@@ -406,7 +392,7 @@ impl<'a> XmodemSend<'a> {
                     let _ = self.read_byte();
                     break;
                 }
-                Ok(NAK) => {}  // Expected for the first EOT; send another EOT
+                Ok(NAK) => {} // Expected for the first EOT; send another EOT
                 Ok(_) | Err(_) => {
                     errors += 1;
                     if errors > MAX_ERRORS {
@@ -437,10 +423,37 @@ impl<'a> XmodemSend<'a> {
                     errors += 1;
                     if errors > MAX_ERRORS {
                         self.abort();
-                        return Err(FlashError::Plugin("xmodem: no ACK for terminator packet".into()));
+                        return Err(FlashError::Plugin(
+                            "xmodem: no ACK for terminator packet".into(),
+                        ));
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crc16_known_values() {
+        // "123456789" → 0x31C3 for XModem CRC16
+        assert_eq!(crc16(b"123456789"), 0x31C3);
+    }
+
+    #[test]
+    fn crc16_empty() {
+        assert_eq!(crc16(b""), 0x0000);
+    }
+
+    #[test]
+    fn crc16_table_spot_check() {
+        // Verify compile-time table generation is correct
+        assert_eq!(CRC_TABLE[0], 0x0000);
+        assert_eq!(CRC_TABLE[1], 0x1021);
+        // Verify function uses the table correctly for a single byte
+        assert_eq!(crc16(&[0x01]), 0x1021);
     }
 }

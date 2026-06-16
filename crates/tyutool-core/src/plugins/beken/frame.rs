@@ -89,10 +89,7 @@ impl From<std::io::Error> for ProtocolError {
 
 impl From<serialport::Error> for ProtocolError {
     fn from(e: serialport::Error) -> Self {
-        Self::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
+        Self::Io(std::io::Error::other(e.to_string()))
     }
 }
 
@@ -255,12 +252,7 @@ pub fn decode(buf: &[u8]) -> Option<(RxFrame, usize)> {
 
 /// Find the byte offset of the next `[04 0e]` magic in `buf`, skipping position 0.
 fn find_rx_magic(buf: &[u8]) -> Option<usize> {
-    for i in 1..buf.len().saturating_sub(1) {
-        if buf[i] == RX_MAGIC[0] && buf[i + 1] == RX_MAGIC[1] {
-            return Some(i);
-        }
-    }
-    None
+    (1..buf.len().saturating_sub(1)).find(|&i| buf[i] == RX_MAGIC[0] && buf[i + 1] == RX_MAGIC[1])
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -633,8 +633,9 @@ pub fn erase<T: IoTransport>(
         // and there's enough remaining data to fill a full block.
         // All current chips (BK7231N, T5, T2) support 64K block erase.
         // CRC verification after erase catches any failure, with 4K fallback.
-        let use_block_erase =
-            chip.use_block_erase_64k() && addr % block_size == 0 && remaining >= block_size;
+        let use_block_erase = chip.use_block_erase_64k()
+            && addr.is_multiple_of(block_size)
+            && remaining >= block_size;
 
         if use_block_erase {
             // 64K block erase

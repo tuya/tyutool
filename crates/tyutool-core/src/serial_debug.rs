@@ -125,16 +125,16 @@ impl SerialDebugSession {
             .flow_control(serialport::FlowControl::None)
             .timeout(Duration::from_millis(50));
         let read_port = builder.open().map_err(|e| {
-            FlashError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("open {} failed: {}", cfg.port, e),
-            ))
+            FlashError::Io(std::io::Error::other(format!(
+                "open {} failed: {}",
+                cfg.port, e
+            )))
         })?;
         let write_port = read_port.try_clone().map_err(|e| {
-            FlashError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("clone port handle failed: {}", e),
-            ))
+            FlashError::Io(std::io::Error::other(format!(
+                "clone port handle failed: {}",
+                e
+            )))
         })?;
 
         let write_port = Arc::new(Mutex::new(write_port));
@@ -153,10 +153,10 @@ impl SerialDebugSession {
                     }
                 })
                 .map_err(|e| {
-                    FlashError::Io(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("spawn reader thread failed: {}", e),
-                    ))
+                    FlashError::Io(std::io::Error::other(format!(
+                        "spawn reader thread failed: {}",
+                        e
+                    )))
                 })?
         };
 
@@ -178,12 +178,10 @@ impl SerialDebugSession {
     }
 
     pub fn write(&self, bytes: &[u8]) -> Result<(), FlashError> {
-        let mut guard = self.write_port.lock().map_err(|_| {
-            FlashError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "serial debug mutex poisoned",
-            ))
-        })?;
+        let mut guard = self
+            .write_port
+            .lock()
+            .map_err(|_| FlashError::Io(std::io::Error::other("serial debug mutex poisoned")))?;
         guard.write_all(bytes).map_err(FlashError::Io)?;
         Ok(())
     }

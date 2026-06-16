@@ -43,7 +43,7 @@ impl SerialIo {
         let port = serialport::new(port_name, baud)
             .timeout(Duration::from_millis(100))
             .open()
-            .map_err(|e| ProtocolError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| ProtocolError::Io(io::Error::other(e.to_string())))?;
         Ok(Self { port })
     }
 
@@ -53,7 +53,7 @@ impl SerialIo {
         let port = serialport::new(port_name, baud)
             .timeout(Duration::from_millis(100))
             .open()
-            .map_err(|e| ProtocolError::Io(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| ProtocolError::Io(io::Error::other(e.to_string())))?;
         self.port = port;
         Ok(())
     }
@@ -75,19 +75,19 @@ impl IoTransport for SerialIo {
     fn set_baud_rate(&mut self, baud: u32) -> io::Result<()> {
         self.port
             .set_baud_rate(baud)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     fn set_dtr(&mut self, level: bool) -> io::Result<()> {
         self.port
             .write_data_terminal_ready(level)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     fn set_rts(&mut self, level: bool) -> io::Result<()> {
         self.port
             .write_request_to_send(level)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     fn clear_buffers(&mut self) -> io::Result<()> {
@@ -95,7 +95,7 @@ impl IoTransport for SerialIo {
         // data that hasn't been sent yet.
         self.port
             .clear(serialport::ClearBuffer::Input)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -105,7 +105,7 @@ impl IoTransport for SerialIo {
     fn set_timeout(&mut self, timeout: Duration) -> io::Result<()> {
         self.port
             .set_timeout(timeout)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
@@ -464,6 +464,12 @@ pub mod mock {
         responses: VecDeque<Vec<u8>>,
         current: Vec<u8>,
         pub sent: Vec<Vec<u8>>,
+    }
+
+    impl Default for MockIo {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl MockIo {

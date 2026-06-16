@@ -3,9 +3,9 @@
 use std::sync::atomic::AtomicBool;
 
 use crate::error::FlashError;
+use crate::flash_event::FlashEvent;
 use crate::job::FlashJob;
 use crate::plugin::FlashPlugin;
-use crate::flash_event::FlashEvent;
 
 use super::esp::chips::ESP32C6_DEF;
 use super::esp::common::run_esp;

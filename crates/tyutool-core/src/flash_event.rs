@@ -8,12 +8,22 @@ use crate::job::{FlashJob, FlashMode};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FlashEvent {
     JobSummary(JobSummary),
-    Phase { phase: FlashPhase },
-    Percent { value: u8 },
-    Milestone { milestone: FlashMilestone },
+    Phase {
+        phase: FlashPhase,
+    },
+    Percent {
+        value: u8,
+    },
+    Milestone {
+        milestone: FlashMilestone,
+    },
     /// User-actionable warning (e.g. LN882H: "hold BOOT/A9 pin LOW").
-    Warning { message: String },
-    Done { result: FlashResult },
+    Warning {
+        message: String,
+    },
+    Done {
+        result: FlashResult,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +67,10 @@ pub enum FlashPhase {
     Unprotect,
     Erase,
     /// Multi-segment flash: segment N of M.
-    WriteSegment { current: u32, total: u32 },
+    WriteSegment {
+        current: u32,
+        total: u32,
+    },
     Write,
     Verify,
     Protect,
@@ -76,15 +89,25 @@ pub enum FlashPhase {
 pub enum FlashMilestone {
     HandshakeComplete,
     /// chip_info: human-readable chip name + revision (ESP only; None for Beken).
-    Connected { chip_info: Option<String> },
-    FlashIdRead { mid: Option<u32> },
+    Connected {
+        chip_info: Option<String>,
+    },
+    FlashIdRead {
+        mid: Option<u32>,
+    },
     EraseComplete,
-    SegmentWritten { current: u32, total: u32 },
+    SegmentWritten {
+        current: u32,
+        total: u32,
+    },
     WriteComplete,
     VerifyPassed,
     Rebooted,
     /// TuyaOpen auth read result. GUI MUST display this in a secure modal, not plain log.
-    AuthReadComplete { uuid: String, authkey: String },
+    AuthReadComplete {
+        uuid: String,
+        authkey: String,
+    },
     /// Auth read completed but device has no valid authorization.
     /// Covers both placeholder UUID and no-data cases.
     AuthReadEmpty,
@@ -109,12 +132,10 @@ impl JobSummary {
                     } else {
                         format!("{} (+{} more)", first.firmware_path, segs.len() - 1)
                     };
-                    let firmware_size = segs.iter().fold(Some(0u64), |acc, seg| {
-                        acc.and_then(|total| {
-                            std::fs::metadata(&seg.firmware_path)
-                                .ok()
-                                .map(|m| total + m.len())
-                        })
+                    let firmware_size = segs.iter().try_fold(0u64, |total, seg| {
+                        std::fs::metadata(&seg.firmware_path)
+                            .ok()
+                            .map(|m| total + m.len())
                     });
                     JobDetails::Flash {
                         firmware_path,
@@ -124,10 +145,7 @@ impl JobSummary {
                     }
                 } else {
                     JobDetails::Flash {
-                        firmware_path: job
-                            .firmware_path
-                            .clone()
-                            .unwrap_or_else(|| "?".into()),
+                        firmware_path: job.firmware_path.clone().unwrap_or_else(|| "?".into()),
                         firmware_size: job
                             .firmware_path
                             .as_deref()
@@ -179,7 +197,9 @@ mod tests {
 
     #[test]
     fn flash_event_phase_serializes_to_snake_case() {
-        let e = FlashEvent::Phase { phase: FlashPhase::Handshake };
+        let e = FlashEvent::Phase {
+            phase: FlashPhase::Handshake,
+        };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["kind"], "phase");
         assert_eq!(v["phase"], "handshake");
@@ -188,7 +208,10 @@ mod tests {
     #[test]
     fn write_segment_nested_correctly() {
         let e = FlashEvent::Phase {
-            phase: FlashPhase::WriteSegment { current: 1, total: 3 },
+            phase: FlashPhase::WriteSegment {
+                current: 1,
+                total: 3,
+            },
         };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["kind"], "phase");
@@ -203,7 +226,12 @@ mod tests {
         };
         let json = serde_json::to_string(&e).unwrap();
         let back: FlashEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back, FlashEvent::Done { result: FlashResult::Ok { .. } }));
+        assert!(matches!(
+            back,
+            FlashEvent::Done {
+                result: FlashResult::Ok { .. }
+            }
+        ));
     }
 
     #[test]
@@ -282,8 +310,16 @@ mod tests {
         let s = JobSummary::from_job(&job);
         assert_eq!(s.device, Some("BK7231N".into()));
         match &s.details {
-            JobDetails::Flash { firmware_path, range_start, range_end, .. } => {
-                assert!(firmware_path.contains("app.bin"), "should show first segment path");
+            JobDetails::Flash {
+                firmware_path,
+                range_start,
+                range_end,
+                ..
+            } => {
+                assert!(
+                    firmware_path.contains("app.bin"),
+                    "should show first segment path"
+                );
                 assert_eq!(range_start, "0x00010000");
                 assert_eq!(range_end, "0x00200000");
             }
