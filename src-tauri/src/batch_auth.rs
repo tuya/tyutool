@@ -369,3 +369,102 @@ fn save_workbook(state: &AllocatorState) -> Result<(), String> {
     wb.save(&state.path)
         .map_err(|e| format!("Failed to save Excel: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Write a minimal .xlsx with the given headers + string data rows.
+    fn write_xlsx(path: &Path, headers: &[&str], rows: &[Vec<&str>]) {
+        let mut wb = XlsxWorkbook::new();
+        let ws = wb.add_worksheet();
+        for (c, h) in headers.iter().enumerate() {
+            ws.write(0, c as u16, *h).unwrap();
+        }
+        for (r, row) in rows.iter().enumerate() {
+            for (c, val) in row.iter().enumerate() {
+                ws.write((r + 1) as u32, c as u16, *val).unwrap();
+            }
+        }
+        wb.save(path).unwrap();
+    }
+
+    #[test]
+    fn unix_to_utc_epoch() {
+        assert_eq!(unix_to_utc(0), (1970, 1, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn unix_to_utc_known_dates() {
+        // Exact day boundary.
+        assert_eq!(unix_to_utc(1_609_459_200), (2021, 1, 1, 0, 0, 0));
+        // Day after a leap day — exercises month_days[1] == 29.
+        assert_eq!(unix_to_utc(1_583_020_800), (2020, 3, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn is_leap_cases() {
+        assert!(is_leap(2000)); // divisible by 400
+        assert!(!is_leap(1900)); // divisible by 100, not 400
+        assert!(is_leap(2024)); // divisible by 4
+        assert!(!is_leap(2023));
+    }
+
+    #[test]
+    fn allocator_round_trip_and_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.xlsx");
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY", "STATUS", "MAC", "TIMESTAMP"],
+            &[
+                vec!["uuid-a", "key-a", "", "", ""],
+                vec!["uuid-b", "key-b", "", "", ""],
+                vec!["uuid-c", "key-c", "USED", "AA:BB", "2024-01-01T00:00:00Z"],
+            ],
+        );
+
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+        let s = alloc.stats();
+        assert_eq!((s.total, s.used, s.remaining), (3, 1, 2));
+
+        // Allocate returns the first Available row; Allocated counts as neither
+        // used nor remaining, so remaining drops while used stays.
+        let row_a = alloc.allocate_row().unwrap();
+        assert_eq!(row_a.uuid, "uuid-a");
+        let s = alloc.stats();
+        assert_eq!((s.used, s.remaining), (1, 1));
+
+        let row_b = alloc.allocate_row().unwrap();
+        assert_eq!(row_b.uuid, "uuid-b");
+        assert_eq!(alloc.stats().remaining, 0);
+
+        // Exhausted — no Available rows left.
+        assert!(alloc.allocate_row().is_err());
+
+        // Releasing returns an Allocated row to Available.
+        alloc.release_row(row_b.row_idx);
+        assert_eq!(alloc.stats().remaining, 1);
+
+        // Confirm marks Used and persists to disk (+ creates a .bak backup).
+        alloc
+            .confirm_row(row_a.row_idx, "11:22:33:44:55:66".into())
+            .unwrap();
+        assert_eq!(alloc.stats().used, 2);
+        assert!(path.with_extension("xlsx.bak").exists());
+
+        // Reload from disk: uuid-a's USED status and MAC survived the round trip.
+        let reloaded = ExcelRowAllocator::load(&path).unwrap();
+        let s = reloaded.stats();
+        assert_eq!((s.total, s.used), (3, 2));
+    }
+
+    #[test]
+    fn load_rejects_missing_uuid_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.xlsx");
+        write_xlsx(&path, &["AUTHKEY", "STATUS"], &[vec!["key-a", ""]]);
+        let err = ExcelRowAllocator::load(&path).err().unwrap();
+        assert!(err.contains("UUID"), "unexpected error: {err}");
+    }
+}
