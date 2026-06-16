@@ -12,7 +12,7 @@
 |---------|------|
 | Tuya    | T1、T2、T3、T5 |
 | Beken   | BK7231N |
-| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-P4、ESP32-S3 |
+| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-S3 |
 
 ## 下载
 
@@ -137,6 +137,28 @@ RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
 
 **前置依赖：** Rust（stable）、Node.js 22+、pnpm 10+
 
+> 请使用 **pnpm** 安装依赖（`pnpm-lock.yaml`）。不要用 `npm install`，否则可能生成 `package-lock.json` 且与锁文件不一致。
+
+### Windows 开发环境
+
+| 依赖 | 说明 |
+|------|------|
+| Node.js 22+ | 含 v24 均可；仅构建前端时足够 |
+| pnpm 10+ | 未安装时：`npm install -g pnpm`，安装后重开终端 |
+| Rust（stable） | GUI / CLI / `dev:web` 必需，见 [rustup.rs](https://rustup.rs/) |
+| VS Build Tools | Tauri 编译需要 MSVC，安装 [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 并勾选「使用 C++ 的桌面开发」 |
+
+```powershell
+pnpm install
+pnpm run build          # 验证前端（仅需 Node + pnpm）
+pnpm run tauri:dev      # GUI 开发（还需 Rust）
+```
+
+**常见问题：**
+
+- **`pnpm install` 报 `ERR_PNPM_IGNORED_BUILDS`** — pnpm 10+ 默认拦截 postinstall。本项目已在 `pnpm-workspace.yaml` 中允许 `esbuild`、`lefthook`；若仍报错，执行 `pnpm approve-builds esbuild lefthook` 后重试。
+- **`cargo` / `program not found`** — 未安装 Rust，或终端未加载 rustup 环境；安装 Rust 后重开终端。
+
 ### 仅构建 CLI
 
 ```bash
@@ -155,8 +177,9 @@ pnpm run tauri:build
 
 ```bash
 pnpm install
-pnpm run tauri:dev   # GUI 开发服务器（支持热重载）
-pnpm run dev:web     # 仅前端开发服务器（不启动 Tauri）
+pnpm run tauri:dev   # GUI 开发（Tauri + 热重载，需 Rust）
+pnpm run dev         # 仅 Vite 前端（无 Tauri、无 CLI serve）
+pnpm run dev:web     # 浏览器联调：tyutool-cli serve + Vite（跨平台）
 ```
 
 ## 项目结构
