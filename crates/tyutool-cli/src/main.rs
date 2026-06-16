@@ -1,7 +1,9 @@
-use std::io::Write as _;
-use std::sync::atomic::AtomicBool;
+use std::io::{IsTerminal as _, Write as _};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use clap::{builder::PossibleValuesParser, Parser, Subcommand};
+use clap::{builder::PossibleValuesParser, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use tyutool_core::{
     device_reset_dtr_rts, list_serial_ports, run_job, usb_port_survey, FlashJob, FlashMode,
 };
@@ -31,7 +33,7 @@ enum Commands {
     /// Flash firmware to device
     Write {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s3"]))]
+        #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -52,7 +54,7 @@ enum Commands {
     /// Read flash from device
     Read {
         /// Soc name
-        #[arg(short = 'd', long = "device", value_parser = PossibleValuesParser::new(["bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s3"]))]
+        #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
         device: String,
         /// Target port
         #[arg(short = 'p', long = "port")]
@@ -70,8 +72,30 @@ enum Commands {
         #[arg(short = 'f', long = "file")]
         file: String,
     },
+    /// Erase flash on device
+    Erase {
+        /// Soc name
+        #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
+        device: String,
+        /// Target port
+        #[arg(short = 'p', long = "port")]
+        port: Option<String>,
+        /// Uart baud rate
+        #[arg(short = 'b', long = "baud")]
+        baud: Option<u32>,
+        /// Erase address of start (hex, e.g. 0x0)
+        #[arg(short = 's', long = "start")]
+        start: Option<String>,
+        /// Erase length (hex, default 0x200000)
+        #[arg(short = 'l', long = "length", default_value = "0x200000")]
+        length: String,
+    },
     /// List serial ports
-    ListPorts,
+    ListPorts {
+        /// Output as JSON (array of port objects) instead of tab-separated columns
+        #[arg(long)]
+        json: bool,
+    },
     /// Dump raw USB/serial metadata for cross-OS survey (JSON). See `tmp/usb-port-survey.md`.
     UsbPortSurvey,
     /// Hardware-reset the device via DTR/RTS (UART)
@@ -110,6 +134,24 @@ enum Commands {
         #[arg(long)]
         authkey: Option<String>,
     },
+    /// Generate a shell completion script and print it to stdout
+    Completions {
+        /// Target shell
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+}
+
+// Single list of accepted `--device` values for write/read/erase. clap needs
+// `'static` strings, so we can't build this straight from the core registry at
+// runtime — instead `device_list_matches_registry` asserts the two agree, so a
+// chip added to the registry can't silently drift out of the CLI.
+const SUPPORTED_DEVICES: &[&str] = &[
+    "bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3",
+];
+
+fn chip_value_parser() -> PossibleValuesParser {
+    PossibleValuesParser::new(SUPPORTED_DEVICES)
 }
 
 // Must stay in sync with `defaultBaudRate` in src/features/firmware-flash/chip-manifests.ts.
@@ -117,7 +159,7 @@ enum Commands {
 fn default_baud(device: &str) -> u32 {
     match device.to_ascii_lowercase().as_str() {
         "ln882h" => 115200,
-        "esp32" | "esp32c3" | "esp32c6" | "esp32p4" | "esp32s3" => 460800,
+        "esp32" | "esp32c3" | "esp32c6" | "esp32s3" => 460800,
         _ => 921600,
     }
 }
@@ -142,6 +184,16 @@ fn choose_port() -> Result<String, Box<dyn std::error::Error>> {
         } else {
             eprintln!("  [{}] {}", i, p.path);
         }
+    }
+    // Without an interactive terminal (CI, pipes) there is no one to answer the
+    // prompt; reading stdin would just hit EOF and surface a confusing parse
+    // error. Tell the caller to pick a port explicitly instead.
+    if !std::io::stdin().is_terminal() {
+        return Err(format!(
+            "multiple serial ports found; specify one with -p/--port (e.g. -p {})",
+            ports[0].path
+        )
+        .into());
     }
     eprint!("Select port [0-{}]: ", ports.len() - 1);
     let _ = std::io::stderr().flush();
@@ -223,14 +275,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let force_plain = cli.plain;
 
-    // Init file logging (+ stderr if --verbose)
-    let survey_json_only = matches!(cli.command, Commands::UsbPortSurvey);
-    if !survey_json_only {
+    // Commands whose stdout is machine-consumed (survey JSON, completion
+    // scripts): suppress the banner and log-file setup so nothing pollutes the
+    // surrounding `eval`/pipe.
+    let quiet = matches!(
+        cli.command,
+        Commands::UsbPortSurvey | Commands::Completions { .. }
+    );
+    if !quiet {
         init_logging(cli.verbose)?;
     }
 
     // User-facing startup banner (not a log::info! call)
-    if !survey_json_only {
+    if !quiet {
         eprintln!(
             "tyutool v{}  {}/{}",
             env!("CARGO_PKG_VERSION"),
@@ -241,7 +298,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Developer diagnostics → log file (not shown to user)
-    if !survey_json_only {
+    if !quiet {
         log::info!("========================================");
         log::info!("[App] tyutool-cli v{} starting", env!("CARGO_PKG_VERSION"));
         log::info!("[App] Type: CLI");
@@ -257,22 +314,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::info!("========================================");
     }
 
+    // Shared cancellation flag wired to Ctrl+C, so a flash/read/erase/authorize
+    // job can unwind gracefully (close the port, emit Cancelled) instead of the
+    // process being killed mid-transfer.
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let cancel = Arc::clone(&cancel);
+        if let Err(e) = ctrlc::set_handler(move || {
+            cancel.store(true, Ordering::SeqCst);
+        }) {
+            log::warn!("failed to install Ctrl+C handler: {}", e);
+        }
+    }
+
     match cli.command {
-        Commands::ListPorts => {
+        Commands::ListPorts { json } => {
             let ports = list_serial_ports()?;
-            // Tab-separated: path, vid:pid, usb_if, port_role, display_name
-            for p in ports {
-                let vidpid = match (p.usb_vid, p.usb_pid) {
-                    (Some(v), Some(pid)) => format!("{:04x}:{:04x}", v, pid),
-                    _ => "-".to_string(),
-                };
-                let ifs = p
-                    .usb_interface
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                let role = p.port_role.as_deref().unwrap_or("-");
-                let name = p.name.as_deref().unwrap_or("");
-                println!("{}\t{}\t{}\t{}\t{}", p.path, vidpid, ifs, role, name);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&ports)?);
+            } else {
+                // Tab-separated: path, vid:pid, usb_if, port_role, display_name
+                for p in ports {
+                    let vidpid = match (p.usb_vid, p.usb_pid) {
+                        (Some(v), Some(pid)) => format!("{:04x}:{:04x}", v, pid),
+                        _ => "-".to_string(),
+                    };
+                    let ifs = p
+                        .usb_interface
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let role = p.port_role.as_deref().unwrap_or("-");
+                    let name = p.name.as_deref().unwrap_or("");
+                    println!("{}\t{}\t{}\t{}\t{}", p.path, vidpid, ifs, role, name);
+                }
             }
         }
         Commands::UsbPortSurvey => {
@@ -297,7 +371,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve::run_serve(port))?;
         }
-        Commands::Authorize { port, uuid, authkey } => {
+        Commands::Authorize {
+            port,
+            uuid,
+            authkey,
+        } => {
+            // Writing requires both halves; one without the other would silently
+            // fall back to read-only in core, so reject the ambiguous case here.
+            if uuid.is_some() != authkey.is_some() {
+                return Err(
+                    "authorize: provide both --uuid and --authkey to write, or neither to read"
+                        .into(),
+                );
+            }
             let port = match port {
                 Some(p) => p,
                 None => choose_port()?,
@@ -319,10 +405,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_uuid: uuid,
                 authorize_key: authkey,
             };
-            let cancel = AtomicBool::new(false);
             let reporter = CliReporter::new(force_plain);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
         }
         Commands::Write {
             device,
@@ -363,7 +453,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_uuid: None,
                 authorize_key: None,
             };
-            let cancel = AtomicBool::new(false);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
@@ -405,10 +494,114 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 authorize_uuid: None,
                 authorize_key: None,
             };
-            let cancel = AtomicBool::new(false);
+            run_job(&job, &cancel, reporter.callback())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+        }
+        Commands::Erase {
+            device,
+            port,
+            baud,
+            start,
+            length,
+        } => {
+            let baud = baud.unwrap_or_else(|| default_baud(&device));
+            let start = start.unwrap_or_else(|| default_start(&device));
+            let port = match port {
+                Some(p) => p,
+                None => choose_port()?,
+            };
+            let start_val = parse_hex_addr(&start)?;
+            let length_val = parse_hex_addr(&length)?;
+            let end = format!("0x{:08X}", start_val + length_val);
+            let chip_id = device.to_ascii_uppercase();
+
+            let reporter = CliReporter::new(force_plain);
+
+            let job = FlashJob {
+                mode: FlashMode::Erase,
+                chip_id,
+                port,
+                baud_rate: baud,
+                segments: None,
+                flash_start_hex: None,
+                flash_end_hex: None,
+                erase_start_hex: Some(start),
+                erase_end_hex: Some(end),
+                read_start_hex: None,
+                read_end_hex: None,
+                read_file_path: None,
+                firmware_path: None,
+                authorize_uuid: None,
+                authorize_key: None,
+            };
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tyutool_core::default_registry;
+
+    #[test]
+    fn device_list_matches_registry() {
+        let mut from_cli: Vec<String> = SUPPORTED_DEVICES.iter().map(|s| s.to_string()).collect();
+        from_cli.sort();
+        let mut from_registry: Vec<String> = default_registry()
+            .list_chip_ids()
+            .into_iter()
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+        from_registry.sort();
+        assert_eq!(
+            from_cli, from_registry,
+            "SUPPORTED_DEVICES drifted from the core FlashPluginRegistry"
+        );
+    }
+
+    #[test]
+    fn parse_hex_addr_accepts_prefixes_and_trims() {
+        assert_eq!(parse_hex_addr("0x200000").unwrap(), 0x200000);
+        assert_eq!(parse_hex_addr("0X1CE400").unwrap(), 0x1CE400);
+        assert_eq!(parse_hex_addr("ff").unwrap(), 0xff);
+        assert_eq!(parse_hex_addr("  0x10  ").unwrap(), 0x10);
+        assert_eq!(parse_hex_addr("0").unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_hex_addr_rejects_invalid() {
+        assert!(parse_hex_addr("0xZZ").is_err());
+        assert!(parse_hex_addr("not_hex").is_err());
+        assert!(parse_hex_addr("").is_err());
+    }
+
+    #[test]
+    fn default_baud_per_chip_family() {
+        assert_eq!(default_baud("ln882h"), 115200);
+        assert_eq!(default_baud("LN882H"), 115200);
+        assert_eq!(default_baud("esp32"), 460800);
+        assert_eq!(default_baud("esp32c3"), 460800);
+        assert_eq!(default_baud("esp32c6"), 460800);
+        assert_eq!(default_baud("esp32s3"), 460800);
+        assert_eq!(default_baud("bk7231n"), 921600);
+        assert_eq!(default_baud("t5"), 921600);
+    }
+
+    #[test]
+    fn default_start_is_zero() {
+        assert_eq!(default_start("bk7231n"), "0x00000000");
+    }
+
+    #[test]
+    fn compute_end_from_file_adds_size_to_start() {
+        let path = std::env::temp_dir().join("tyutool_compute_end_test.bin");
+        std::fs::write(&path, vec![0u8; 16]).unwrap();
+        let end = compute_end_from_file("0x100", path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        // 0x100 + 16 = 0x110, formatted as 8-wide upper hex.
+        assert_eq!(end, "0x00000110");
+    }
 }
