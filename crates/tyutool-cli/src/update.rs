@@ -1,6 +1,5 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -156,9 +155,9 @@ fn extract_binary_from_zip(data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::E
 fn replace_self(new_binary: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
     // Write to temp file
     let tmp_path = if is_windows() {
-        PathBuf::from(std::env::temp_dir()).join("tyutool_cli_new.exe")
+        std::env::temp_dir().join("tyutool_cli_new.exe")
     } else {
-        PathBuf::from(std::env::temp_dir()).join("tyutool_cli_new")
+        std::env::temp_dir().join("tyutool_cli_new")
     };
 
     let mut tmp_file = fs::File::create(&tmp_path)?;
@@ -262,4 +261,43 @@ pub fn run_update(
 
     eprintln!("✓ Updated to v{}", manifest.version);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_newer_basic_ordering() {
+        assert!(is_newer("1.0.1", "1.0.0"));
+        assert!(is_newer("1.1.0", "1.0.9"));
+        assert!(is_newer("2.0.0", "1.9.9"));
+        assert!(!is_newer("1.0.0", "1.0.1"));
+        assert!(!is_newer("1.0.0", "1.0.0"));
+    }
+
+    #[test]
+    fn is_newer_is_numeric_not_lexical() {
+        // 10 > 2 numerically, even though "10" < "2" lexically.
+        assert!(is_newer("1.10.0", "1.2.0"));
+        assert!(!is_newer("1.2.0", "1.10.0"));
+    }
+
+    #[test]
+    fn is_newer_tolerates_v_prefix_and_missing_components() {
+        assert!(is_newer("v1.0.1", "v1.0.0"));
+        assert!(is_newer("v2", "1.9.9")); // "2" -> [2], compared as 2.0.0
+        assert!(!is_newer("1.0", "1.0.0")); // missing patch treated as 0
+    }
+
+    #[test]
+    fn verify_sha256_matches_known_digest() {
+        // SHA-256 of "abc".
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(verify_sha256(b"abc", expected));
+        // Case-insensitive comparison.
+        assert!(verify_sha256(b"abc", &expected.to_uppercase()));
+        // Wrong data must not match.
+        assert!(!verify_sha256(b"abcd", expected));
+    }
 }

@@ -25,6 +25,7 @@ use tyutool_core::{
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ClientMessage {
     ListPorts,
     DeviceReset {
@@ -54,15 +55,23 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    Ports { ports: Vec<SerialPortEntry> },
+    Ports {
+        ports: Vec<SerialPortEntry>,
+    },
     DeviceResetResult {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
-    Progress { payload: serde_json::Value },
-    Error { message: String },
-    SerialDebugChunk { chunk: DebugChunk },
+    Progress {
+        payload: serde_json::Value,
+    },
+    Error {
+        message: String,
+    },
+    SerialDebugChunk {
+        chunk: DebugChunk,
+    },
     SerialDebugOpened,
     SerialDebugClosed,
     SerialDebugStateInfo {
@@ -70,7 +79,9 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         cfg: Option<DebugConfig>,
     },
-    SerialDebugDisconnected { reason: String },
+    SerialDebugDisconnected {
+        reason: String,
+    },
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -125,7 +136,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 })
                 .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"serialize failed\"}".into())
             });
-            if sink_moved.send(Message::Text(text.into())).await.is_err() {
+            if sink_moved.send(Message::Text(text)).await.is_err() {
                 break;
             }
         }
@@ -158,7 +169,8 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
             }
             ClientMessage::DeviceReset { port, chip_id } => {
                 // Run on blocking pool so serial `open()` / DTR/RTS never stalls the WS task.
-                let join = tokio::task::spawn_blocking(move || device_reset_dtr_rts(&port, &chip_id));
+                let join =
+                    tokio::task::spawn_blocking(move || device_reset_dtr_rts(&port, &chip_id));
                 let outcome = tokio::time::timeout(Duration::from_secs(15), join).await;
                 let msg = match outcome {
                     Ok(Ok(Ok(()))) => ServerMessage::DeviceResetResult {
@@ -191,8 +203,14 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 file_contents,
             } => {
                 cancel.store(false, Ordering::Relaxed);
-                handle_run_job(&sink_tx, Arc::clone(&cancel), &mut job, file_content, file_contents)
-                    .await;
+                handle_run_job(
+                    &sink_tx,
+                    Arc::clone(&cancel),
+                    &mut job,
+                    file_content,
+                    file_contents,
+                )
+                .await;
             }
             ClientMessage::SerialDebugOpen { cfg } => {
                 let mut guard = debug_session.lock().unwrap();
@@ -460,10 +478,9 @@ mod tests {
 
     #[test]
     fn deserialize_device_reset() {
-        let msg: ClientMessage = serde_json::from_str(
-            r#"{"type":"device_reset","port":"/dev/ttyUSB0","chip_id":"T5"}"#,
-        )
-        .unwrap();
+        let msg: ClientMessage =
+            serde_json::from_str(r#"{"type":"device_reset","port":"/dev/ttyUSB0","chip_id":"T5"}"#)
+                .unwrap();
         assert!(matches!(msg, ClientMessage::DeviceReset { .. }));
     }
 
@@ -495,8 +512,14 @@ mod tests {
         };
         let s = serde_json::to_string(&msg).unwrap();
         assert!(s.contains(r#""type":"ports""#), "unexpected JSON: {s}");
-        assert!(s.contains(r#""usbVid":6790"#), "usb VID metadata missing: {s}");
-        assert!(s.contains(r#""usbPid":21970"#), "usb PID metadata missing: {s}");
+        assert!(
+            s.contains(r#""usbVid":6790"#),
+            "usb VID metadata missing: {s}"
+        );
+        assert!(
+            s.contains(r#""usbPid":21970"#),
+            "usb PID metadata missing: {s}"
+        );
     }
 
     #[test]

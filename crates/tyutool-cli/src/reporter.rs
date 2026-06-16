@@ -2,9 +2,7 @@ use std::io::Write as _;
 use std::sync::Mutex;
 
 use indicatif::{ProgressBar, ProgressStyle};
-use tyutool_core::{
-    FlashEvent, FlashMilestone, FlashPhase, FlashResult, JobDetails, JobSummary,
-};
+use tyutool_core::{FlashEvent, FlashMilestone, FlashPhase, FlashResult, JobDetails, JobSummary};
 
 pub struct CliReporter {
     inner: Mutex<Inner>,
@@ -15,9 +13,9 @@ struct Inner {
     is_plain: bool,
     current_phase_label: Option<String>,
     next_milestone: u8,
-    inline: bool,           // phase label printed but no newline yet (plain mode)
-    show_percent: bool,     // current phase emits Percent events
-    percent_on_line: bool,  // a milestone was eprint!-ed without a trailing newline
+    inline: bool,          // phase label printed but no newline yet (plain mode)
+    show_percent: bool,    // current phase emits Percent events
+    percent_on_line: bool, // a milestone was eprint!-ed without a trailing newline
 }
 
 impl CliReporter {
@@ -119,7 +117,10 @@ impl Inner {
                 eprintln!("  Output {}", output_path);
                 eprintln!("  Range  {} {} {}", range_start, sep, range_end);
             }
-            JobDetails::Erase { range_start, range_end } => {
+            JobDetails::Erase {
+                range_start,
+                range_end,
+            } => {
                 let device = s.device.as_deref().unwrap_or("?");
                 if self.is_plain {
                     eprintln!("erase  {}  {}  {}", device, s.port, s.baud);
@@ -268,7 +269,10 @@ impl Inner {
                 FlashResult::Ok { elapsed_secs } => {
                     eprintln!("Flash OK  {:.1}s", elapsed_secs);
                 }
-                FlashResult::Err { message, elapsed_secs } => {
+                FlashResult::Err {
+                    message,
+                    elapsed_secs,
+                } => {
                     eprintln!("Flash FAILED: {}  {:.1}s", message, elapsed_secs);
                 }
                 FlashResult::Cancelled { elapsed_secs } => {
@@ -281,7 +285,10 @@ impl Inner {
                 FlashResult::Ok { elapsed_secs } => {
                     eprintln!("  \x1b[32m✓\x1b[0m Flash complete  {:.1}s", elapsed_secs);
                 }
-                FlashResult::Err { message, elapsed_secs } => {
+                FlashResult::Err {
+                    message,
+                    elapsed_secs,
+                } => {
                     eprintln!(
                         "  \x1b[31m✗\x1b[0m Flash failed: {}  {:.1}s",
                         message, elapsed_secs
@@ -318,7 +325,9 @@ pub(crate) fn phase_label(phase: &FlashPhase) -> String {
 fn milestone_text(m: &FlashMilestone) -> String {
     match m {
         FlashMilestone::HandshakeComplete => "Handshake complete".into(),
-        FlashMilestone::Connected { chip_info: Some(info) } => format!("Connected: {}", info),
+        FlashMilestone::Connected {
+            chip_info: Some(info),
+        } => format!("Connected: {}", info),
         FlashMilestone::Connected { chip_info: None } => "Connected".into(),
         FlashMilestone::FlashIdRead { mid: Some(mid) } => format!("Flash ID: {:#010x}", mid),
         FlashMilestone::FlashIdRead { mid: None } => "Flash ID read".into(),
@@ -366,7 +375,10 @@ mod tests {
 
     #[test]
     fn phase_label_write_segment() {
-        let label = phase_label(&FlashPhase::WriteSegment { current: 2, total: 3 });
+        let label = phase_label(&FlashPhase::WriteSegment {
+            current: 2,
+            total: 3,
+        });
         assert_eq!(label, "Write [2/3]");
     }
 
@@ -375,7 +387,10 @@ mod tests {
         assert_eq!(phase_label(&FlashPhase::Handshake), "Handshake");
         assert_eq!(phase_label(&FlashPhase::LoadRam), "Load RAM");
         assert_eq!(phase_label(&FlashPhase::SwitchBaud), "Switch Baud");
-        assert_eq!(phase_label(&FlashPhase::Other("NewPhase".into())), "NewPhase");
+        assert_eq!(
+            phase_label(&FlashPhase::Other("NewPhase".into())),
+            "NewPhase"
+        );
     }
 
     #[test]
@@ -384,7 +399,10 @@ mod tests {
         assert!(is_percent_phase(&FlashPhase::Erase));
         assert!(is_percent_phase(&FlashPhase::Read));
         assert!(is_percent_phase(&FlashPhase::Verify));
-        assert!(!is_percent_phase(&FlashPhase::WriteSegment { current: 1, total: 3 }));
+        assert!(!is_percent_phase(&FlashPhase::WriteSegment {
+            current: 1,
+            total: 3
+        }));
         assert!(!is_percent_phase(&FlashPhase::Handshake));
     }
 
@@ -425,8 +443,13 @@ mod tests {
     fn plain_erase_phase_not_inline() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Erase });
-        assert!(!r.is_inline(), "Erase is a percent phase — must NOT be inline");
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Erase,
+        });
+        assert!(
+            !r.is_inline(),
+            "Erase is a percent phase — must NOT be inline"
+        );
         assert!(r.show_percent_flag());
     }
 
@@ -434,8 +457,13 @@ mod tests {
     fn plain_write_phase_not_inline() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Write });
-        assert!(!r.is_inline(), "Write is a percent phase — must NOT be inline");
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Write,
+        });
+        assert!(
+            !r.is_inline(),
+            "Write is a percent phase — must NOT be inline"
+        );
         assert!(r.show_percent_flag());
     }
 
@@ -443,15 +471,22 @@ mod tests {
     fn plain_read_phase_not_inline() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Read });
-        assert!(!r.is_inline(), "Read is a percent phase — must NOT be inline");
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Read,
+        });
+        assert!(
+            !r.is_inline(),
+            "Read is a percent phase — must NOT be inline"
+        );
     }
 
     #[test]
     fn plain_handshake_phase_is_inline() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Handshake });
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Handshake,
+        });
         assert!(r.is_inline(), "Handshake is non-percent — must be inline");
         assert!(!r.show_percent_flag());
     }
@@ -460,7 +495,9 @@ mod tests {
     fn plain_protect_phase_is_inline() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Protect });
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Protect,
+        });
         assert!(r.is_inline(), "Protect is non-percent — must be inline");
     }
 
@@ -468,7 +505,9 @@ mod tests {
     fn plain_reboot_phase_is_inline() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Reboot });
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Reboot,
+        });
         assert!(r.is_inline(), "Reboot is non-percent — must be inline");
     }
 
@@ -478,23 +517,28 @@ mod tests {
     fn percent_phase_show_percent_flag_remains_after_phase_start() {
         let r = CliReporter::new(true);
         let cb = r.callback();
-        cb(FlashEvent::Phase { phase: FlashPhase::Erase });
-        assert!(r.show_percent_flag(), "show_percent must be true while Erase is active");
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Erase,
+        });
+        assert!(
+            r.show_percent_flag(),
+            "show_percent must be true while Erase is active"
+        );
         // Verify is also a percent phase
-        cb(FlashEvent::Phase { phase: FlashPhase::Verify });
-        assert!(r.show_percent_flag(), "show_percent must be true for Verify");
-        cb(FlashEvent::Phase { phase: FlashPhase::Protect });
-        assert!(!r.show_percent_flag(), "show_percent must be false for Protect");
-    }
-
-    #[test]
-    fn write_segment_is_not_percent_phase() {
-        assert!(!is_percent_phase(&FlashPhase::WriteSegment { current: 1, total: 2 }));
-    }
-
-    #[test]
-    fn verify_is_percent_phase() {
-        assert!(is_percent_phase(&FlashPhase::Verify));
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Verify,
+        });
+        assert!(
+            r.show_percent_flag(),
+            "show_percent must be true for Verify"
+        );
+        cb(FlashEvent::Phase {
+            phase: FlashPhase::Protect,
+        });
+        assert!(
+            !r.show_percent_flag(),
+            "show_percent must be false for Protect"
+        );
     }
 
     // Milestones are emitted one by one at each 10% boundary.

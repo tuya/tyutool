@@ -18,6 +18,8 @@ Download the latest release binary from the GitHub Releases page. Place it on yo
 - macOS: `~/Library/Application Support/tyutool/tyutool.log`
 - Windows: `%APPDATA%\tyutool\tyutool.log`
 
+**Port selection** (commands that take `-p/--port`): when `-p` is omitted, a single available port is used automatically. If multiple ports are present, you are prompted to choose one on an interactive terminal; in a non-interactive context (CI, pipe) the command errors and asks you to pass `-p` explicitly.
+
 ## Subcommands
 
 ### `write` — Flash firmware to device
@@ -64,13 +66,42 @@ tyutool read -d bk7231n -f flash_dump.bin -l 0x200000
 
 ---
 
+### `erase` — Erase flash region on device
+
+```
+tyutool erase -d <DEVICE> [-p <PORT>] [-b <BAUD>] [-s <START>] [-l <LENGTH>]
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--device` | `-d` | Chip name | required |
+| `--port` | `-p` | Serial port | auto-detect |
+| `--baud` | `-b` | UART baud rate | chip-specific |
+| `--start` | `-s` | Erase start address (hex) | `0x00000000` |
+| `--length` | `-l` | Erase length (hex) | `0x200000` |
+
+The erase region is `start` … `start + length`. Some chips align the region to their sector size.
+
+**Example:**
+```bash
+tyutool erase -d bk7231n -s 0x0 -l 0x200000
+```
+
+---
+
 ### `list-ports` — List available serial ports
 
 ```
-tyutool list-ports
+tyutool list-ports [--json]
 ```
 
-Prints tab-separated columns: `path`, `vid:pid`, `usb_interface`, `port_role`, `display_name`.
+| Flag | Description |
+|------|-------------|
+| `--json` | Output a JSON array of port objects instead of tab-separated columns |
+
+Default output is tab-separated columns: `path`, `vid:pid`, `usb_interface`, `port_role`, `display_name`.
+
+With `--json`, each entry includes `path`, `name`, `usbVid`, `usbPid`, `usbSerial`, `usbInterface`, and `portRole` (fields that are unknown are `null`).
 
 ---
 
@@ -98,6 +129,8 @@ tyutool authorize [-p <PORT>] [--uuid <UUID>] [--authkey <AUTHKEY>]
 | `--port` | Serial port (default: auto-detect) |
 | `--uuid` | UUID to write (omit to read current authorization state only) |
 | `--authkey` | AuthKey to write (omit to read only) |
+
+To write authorization you must pass **both** `--uuid` and `--authkey`. Passing only one is rejected with an error. Passing neither performs a read-only `auth-read`.
 
 **Read current auth state:**
 ```bash
@@ -134,6 +167,28 @@ Starts a local WebSocket server for browser-based flash operations (used by tuya
 
 ---
 
+### `completions` — Generate a shell completion script
+
+```
+tyutool completions <SHELL>
+```
+
+`<SHELL>` is one of `bash`, `zsh`, `fish`, `powershell`, `elvish`. The script is printed to stdout (no banner/log noise), so it can be sourced directly.
+
+**Examples:**
+```bash
+# Bash (current shell)
+source <(tyutool completions bash)
+
+# Zsh (install to a completions dir on your $fpath)
+tyutool completions zsh > ~/.zfunc/_tyutool
+
+# PowerShell (Windows)
+tyutool completions powershell | Out-String | Invoke-Expression
+```
+
+---
+
 ### `usb-port-survey` — USB/serial metadata dump
 
 ```
@@ -157,7 +212,6 @@ Outputs JSON with raw USB metadata for all ports. Used for cross-OS debugging.
 | `esp32` | ESP32 | 460800 |
 | `esp32c3` | ESP32-C3 | 460800 |
 | `esp32c6` | ESP32-C6 | 460800 |
-| `esp32p4` | ESP32-P4 | 460800 |
 | `esp32s3` | ESP32-S3 | 460800 |
 
 ---
@@ -186,3 +240,5 @@ Flash OK  3.2s
 ```
 
 Exit code `0` on success, non-zero on failure or cancellation.
+
+**Cancellation:** during `write`, `read`, `erase`, or `authorize`, pressing `Ctrl+C` sets a cancellation flag so the job unwinds gracefully (closes the serial port and reports `Cancelled`) instead of the process being killed mid-transfer.

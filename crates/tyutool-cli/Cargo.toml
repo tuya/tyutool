@@ -1,6 +1,6 @@
 [package]
 name = "tyutool-cli"
-version = "3.0.13"
+version = "3.0.11"
 edition = "2021"
 description = "tyutool CLI — shared tyutool-core flash API (no Tauri)"
 
@@ -14,6 +14,8 @@ chrono = { version = "0.4", features = ["clock"] }
 dirs = "5"
 log = "0.4"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+ctrlc = "3"
 tyutool-core = { path = "../tyutool-core" }
 reqwest = { version = "0.12", features = ["rustls-tls", "blocking", "json"], default-features = false }
 serde = { version = "1", features = ["derive"] }
