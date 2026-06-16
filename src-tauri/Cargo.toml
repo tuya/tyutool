@@ -33,3 +33,6 @@ log = "0.4"
 calamine = { version = "0.26", features = ["dates"] }
 rust_xlsxwriter = "0.79"
 
+[dev-dependencies]
+tempfile = "3"
+
