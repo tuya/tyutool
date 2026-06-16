@@ -287,15 +287,22 @@ async function openOpensourceLicenses(): Promise<void> {
       aria-labelledby="serial-debug-heading"
     >
       <h2 id="serial-debug-heading" class="ty-section-title">
-        {{ t("serialDebug.pageTitle") }}
+        {{ t("settings.serialLogsSection") }}
       </h2>
       <div class="mt-4 space-y-4">
-        <div class="flex items-center justify-between">
-          <label class="ty-label">{{ t("serialDebug.autoSave.label") }}</label>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="ty-label">{{
+              t("serialDebug.autoSave.label")
+            }}</label>
+            <p class="mt-0.5 text-xs text-[var(--ty-text-muted)]">
+              {{ t("serialDebug.autoSave.description") }}
+            </p>
+          </div>
           <input
             type="checkbox"
             :checked="sd.autoSave"
-            class="size-4 cursor-pointer"
+            class="size-4 shrink-0 cursor-pointer"
             @change="toggleAutoSave"
           />
         </div>
