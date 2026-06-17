@@ -21,9 +21,6 @@ jobs:
   rust:
     name: Rust (core + cli)
     runs-on: ubuntu-latest
-    env:
-      # serialport needs libudev on Linux unless this is set (same as release.yml).
-      SERIALPORT_SKIP_LIBUDEV: "1"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
