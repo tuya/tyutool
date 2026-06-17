@@ -115,7 +115,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        env: { SERIALPORT_SKIP_LIBUDEV: "1" }
         run: ${{ matrix.use_cross && 'cross' || 'cargo' }} build --release -p tyutool-cli --target ${{ matrix.target }}
 
       - name: Package (Unix)
