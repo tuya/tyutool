@@ -84,14 +84,17 @@ export async function exportLogsAndReport(
   try {
     await navigator.clipboard.writeText(url);
   } catch {
-    /* clipboard unavailable — the openUrl attempt below is the only path */
+    /* clipboard unavailable — the open attempt below is the only path */
   }
+  // Use our own command (not the opener plugin): on Linux/AppImage it strips the
+  // AppImage env and uses the system xdg-open, and it reports real failures
+  // instead of detaching and silently "succeeding".
   try {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_external_url", { url });
   } catch (e) {
     rLog.error(
-      `[ReportIssue] openUrl failed: ${e instanceof Error ? e.message : String(e)}`,
+      `[ReportIssue] open_external_url failed: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
