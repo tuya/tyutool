@@ -3,6 +3,19 @@ import type { ComposerTranslation } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 
+/**
+ * Map a navigator.userAgent string to the same coarse OS vocabulary used by
+ * std::env::consts::OS on the Rust side ("windows" | "macos" | "linux").
+ * Pure helper — takes the UA as an arg so it is unit-testable.
+ */
+export function detectOs(userAgent: string): string {
+  const ua = userAgent.toLowerCase();
+  if (ua.includes("windows") || ua.includes("win")) return "windows";
+  if (ua.includes("mac") || ua.includes("darwin")) return "macos";
+  if (ua.includes("linux") || ua.includes("x11")) return "linux";
+  return "unknown";
+}
+
 /** Build a pre-filled GitHub "new issue" URL for the bug_report form. */
 export function buildIssueUrl(env: {
   version: string;
@@ -59,7 +72,10 @@ export async function exportLogsAndReport(
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke("export_logs_zip", { destPath: dest });
 
-  const url = buildIssueUrl({ version: APP_VERSION, os: navigator.userAgent });
+  const url = buildIssueUrl({
+    version: APP_VERSION,
+    os: detectOs(navigator.userAgent),
+  });
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
