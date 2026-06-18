@@ -980,6 +980,63 @@ fn read_log_tail(app: AppHandle, max_bytes: usize) -> Result<String, String> {
     tail_bytes(&path, max_bytes as u64).map_err(|e| e.to_string())
 }
 
+fn collect_log_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "log").unwrap_or(false))
+        .collect()
+}
+
+fn build_report_info(name: &str, version: &str, install: &str, session_id: &str) -> String {
+    format!(
+        "tyutool report-info\nname: {name}\nversion: {version}\nos: {}\narch: {}\nfamily: {}\ninstall: {install}\nsession: {session_id}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::env::consts::FAMILY,
+    )
+}
+
+fn write_logs_zip(
+    log_files: &[std::path::PathBuf],
+    report_info: &str,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let mut zw = zip::ZipWriter::new(file);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    zw.start_file("report-info.txt", opts)
+        .map_err(|e| e.to_string())?;
+    zw.write_all(report_info.as_bytes())
+        .map_err(|e| e.to_string())?;
+    for p in log_files {
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
+            zw.start_file(name, opts).map_err(|e| e.to_string())?;
+            zw.write_all(&bytes).map_err(|e| e.to_string())?;
+        }
+    }
+    zw.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let files = collect_log_files(&dir);
+    let info = build_report_info(
+        &app.package_info().name,
+        &app.package_info().version.to_string(),
+        &detect_install_type(),
+        SESSION_ID.get().map(String::as_str).unwrap_or(""),
+    );
+    write_logs_zip(&files, &info, std::path::Path::new(&dest_path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1053,6 +1110,7 @@ pub fn run() {
             write_text_file,
             append_text_file,
             read_log_tail,
+            export_logs_zip,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1204,5 +1262,23 @@ mod log_tools_tests {
         f.write_all(b"0123456789").unwrap();
         let tail = tail_bytes(&p, 4).unwrap();
         assert_eq!(tail, "6789");
+    }
+
+    #[test]
+    fn write_logs_zip_includes_logs_and_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_a = dir.path().join("tyutool.log");
+        std::fs::write(&log_a, b"hello log").unwrap();
+        let dest = dir.path().join("out.zip");
+
+        write_logs_zip(&[log_a], "report-body", &dest).unwrap();
+
+        let f = std::fs::File::open(&dest).unwrap();
+        let mut zip = zip::ZipArchive::new(f).unwrap();
+        let names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.contains(&"report-info.txt".to_string()));
+        assert!(names.contains(&"tyutool.log".to_string()));
     }
 }
