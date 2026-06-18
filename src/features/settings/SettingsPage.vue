@@ -12,6 +12,7 @@ import type {
 import { isTauriRuntime } from "@/runtime";
 import { openLogsFolder as openLogsFolderAction } from "./open-logs-folder";
 import UpdateDialog from "./UpdateDialog.vue";
+import LogViewerDialog from "./LogViewerDialog.vue";
 import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
 
 const { locale, t } = useI18n();
@@ -20,6 +21,7 @@ const sd = useSerialDebugStore();
 
 const appVersion = APP_VERSION;
 const showUpdateDialog = ref(false);
+const showLogViewer = ref(false);
 
 const logToggleOptions = computed(() => [
   { value: true, label: t("settings.logOn") },
@@ -278,6 +280,23 @@ async function openOpensourceLicenses(): Promise<void> {
               {{ t("settings.logsFolder") }}
             </button>
           </div>
+
+          <!-- View logs in-app -->
+          <div class="flex items-center justify-between">
+            <label class="ty-label">{{ t("settings.viewLogs") }}</label>
+            <button
+              type="button"
+              class="ty-btn-sm ty-btn-secondary"
+              @click="showLogViewer = true"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', 'file-lines']"
+                class="mr-1.5 size-3.5"
+                aria-hidden="true"
+              />
+              {{ t("settings.viewLogs") }}
+            </button>
+          </div>
         </div>
       </section>
     </div>
@@ -384,6 +403,7 @@ async function openOpensourceLicenses(): Promise<void> {
     </section>
 
     <UpdateDialog :open="showUpdateDialog" @close="showUpdateDialog = false" />
+    <LogViewerDialog :open="showLogViewer" @close="showLogViewer = false" />
   </div>
 </template>
 
