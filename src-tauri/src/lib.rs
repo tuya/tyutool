@@ -1069,6 +1069,14 @@ fn open_external_url_linux(url: &str) -> Result<(), String> {
         .find(|p| std::path::Path::new(p).exists())
         .unwrap_or("xdg-open");
 
+    let in_appimage = std::env::var_os("APPDIR").is_some();
+    log::info!(
+        "[OpenUrl] linux: appimage={}, opener={}, url_len={}",
+        in_appimage,
+        xdg,
+        url.len()
+    );
+
     let mut cmd = Command::new(xdg);
     cmd.arg(url);
 
@@ -1118,9 +1126,18 @@ fn open_external_url_linux(url: &str) -> Result<(), String> {
     // status() waits only for xdg-open (which returns once the browser is
     // launched), not for the browser itself — so this does not block the UI.
     match cmd.status() {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("xdg-open exited with status {s}")),
-        Err(e) => Err(format!("failed to spawn {xdg}: {e}")),
+        Ok(s) if s.success() => {
+            log::info!("[OpenUrl] {xdg} exited 0 (handed off to browser)");
+            Ok(())
+        }
+        Ok(s) => {
+            log::error!("[OpenUrl] {xdg} exited with {s}");
+            Err(format!("xdg-open exited with status {s}"))
+        }
+        Err(e) => {
+            log::error!("[OpenUrl] failed to spawn {xdg}: {e}");
+            Err(format!("failed to spawn {xdg}: {e}"))
+        }
     }
 }
 
