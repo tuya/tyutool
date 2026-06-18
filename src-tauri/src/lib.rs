@@ -1037,6 +1037,93 @@ fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), String> {
     write_logs_zip(&files, &info, std::path::Path::new(&dest_path))
 }
 
+/// Open an external URL in the system browser.
+///
+/// On Linux this must NOT go through the opener plugin's detached spawn: when
+/// the app runs from an AppImage, `AppRun` prepends `$APPDIR/usr/bin` to `PATH`
+/// (so `xdg-open` resolves to the *bundled* copy) and sets `LD_LIBRARY_PATH` /
+/// `GTK_PATH` / `XDG_DATA_DIRS` / … into the mount. A browser spawned with that
+/// environment loads the AppImage's bundled libraries and silently fails to
+/// start — and a detached spawn reports success regardless. Here we invoke the
+/// *system* `xdg-open`, strip the AppImage-injected vars, and capture the exit
+/// status so failures surface instead of vanishing.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        open_external_url_linux(&url)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_external_url_linux(url: &str) -> Result<(), String> {
+    use std::process::Command;
+
+    // Prefer the system xdg-open, bypassing any AppImage-bundled copy on PATH.
+    let xdg = ["/usr/bin/xdg-open", "/bin/xdg-open"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .unwrap_or("xdg-open");
+
+    let mut cmd = Command::new(xdg);
+    cmd.arg(url);
+
+    // Only sanitize when actually inside an AppImage (APPDIR is set by AppRun).
+    if let Some(appdir) = std::env::var_os("APPDIR") {
+        let appdir = appdir.to_string_lossy().into_owned();
+        for var in [
+            "LD_LIBRARY_PATH",
+            "GTK_PATH",
+            "GTK_EXE_PREFIX",
+            "GTK_DATA_PREFIX",
+            "GTK_IM_MODULE_FILE",
+            "GDK_PIXBUF_MODULE_FILE",
+            "GIO_EXTRA_MODULES",
+            "GSETTINGS_SCHEMA_DIR",
+            "GST_PLUGIN_SYSTEM_PATH",
+            "GST_PLUGIN_SYSTEM_PATH_1_0",
+            "QT_PLUGIN_PATH",
+            "PERLLIB",
+            "PYTHONPATH",
+            "PYTHONHOME",
+        ] {
+            cmd.env_remove(var);
+        }
+        // Reset PATH so the browser and its helpers resolve to system binaries.
+        cmd.env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
+        // Drop the $APPDIR entries from XDG_DATA_DIRS (handler/.desktop lookup).
+        if let Ok(dirs) = std::env::var("XDG_DATA_DIRS") {
+            let cleaned: Vec<&str> = dirs
+                .split(':')
+                .filter(|d| !d.is_empty() && !d.starts_with(&appdir))
+                .collect();
+            cmd.env(
+                "XDG_DATA_DIRS",
+                if cleaned.is_empty() {
+                    "/usr/local/share:/usr/share".to_string()
+                } else {
+                    cleaned.join(":")
+                },
+            );
+        }
+    }
+
+    // status() waits only for xdg-open (which returns once the browser is
+    // launched), not for the browser itself — so this does not block the UI.
+    match cmd.status() {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("xdg-open exited with status {s}")),
+        Err(e) => Err(format!("failed to spawn {xdg}: {e}")),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1111,6 +1198,7 @@ pub fn run() {
             append_text_file,
             read_log_tail,
             export_logs_zip,
+            open_external_url,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
