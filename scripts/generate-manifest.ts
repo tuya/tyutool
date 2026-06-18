@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
+import { assertManifestComplete } from './lib/release-check.js';
 import { findFilesUnderArtifacts } from './lib/artifacts-glob.js';
 
 const VERSION = process.env.VERSION;
@@ -117,6 +118,14 @@ const manifest = {
   cli,
   portable,
 };
+
+const completenessErrors = assertManifestComplete(manifest);
+if (completenessErrors.length > 0) {
+  console.error('ERROR: latest.json 不完整，缺少平台条目：');
+  for (const e of completenessErrors) console.error(`  - ${e}`);
+  console.error('（某些平台的产物或 .sig 在 artifacts/ 中缺失，见上方 WARN）');
+  process.exit(1);
+}
 
 writeFileSync('latest.json', `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
