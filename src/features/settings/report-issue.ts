@@ -77,25 +77,27 @@ export async function exportLogsAndReport(
     version: APP_VERSION,
     os: detectOs(navigator.userAgent),
   });
-  // window.open is a no-op inside the Tauri webview, so on failure we surface
-  // the URL in the dialog instead of silently doing nothing.
-  let opened = false;
+  // The opener plugin spawns the URL handler *detached* and reports success
+  // even when the browser never actually appears (e.g. a broken default-handler
+  // chain on Linux), so we cannot rely on openUrl alone. Always copy the URL to
+  // the clipboard as a reliable fallback the user can paste manually.
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    /* clipboard unavailable — the openUrl attempt below is the only path */
+  }
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
-    opened = true;
   } catch (e) {
     rLog.error(
       `[ReportIssue] openUrl failed: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
-  const savedTo = t("settings.reportIssue.savedTo", { path: dest });
   await showConfirmDialog({
     title: t("settings.reportIssue.title"),
-    message: opened
-      ? `${savedTo}\n\n${t("settings.reportIssue.issueOpened")}`
-      : `${savedTo}\n\n${t("settings.reportIssue.openFailed")}\n${url}`,
+    message: `${t("settings.reportIssue.savedTo", { path: dest })}\n\n${t("settings.reportIssue.linkCopied")}`,
     kind: "info",
     okLabel: t("common.ok"),
     showCancel: false,
