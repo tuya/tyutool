@@ -227,6 +227,44 @@ fn parse_hex_addr(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
     u64::from_str_radix(raw, 16).map_err(|e| format!("invalid hex address '{}': {}", s, e).into())
 }
 
+const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024; // 5 MB, matches the GUI cap
+const LOG_KEEP: usize = 3;
+
+/// `tyutool.log` -> `tyutool.log.1`, `.1` -> `.2`, ... up to `keep`.
+fn with_ext_num(log_path: &std::path::Path, n: usize) -> std::path::PathBuf {
+    let mut s = log_path.as_os_str().to_os_string();
+    s.push(format!(".{n}"));
+    std::path::PathBuf::from(s)
+}
+
+/// Ordered (from, to) renames to rotate `log_path`, oldest shifted out last.
+fn rotation_plan(
+    log_path: &std::path::Path,
+    keep: usize,
+) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
+    let mut moves = Vec::new();
+    for i in (1..keep).rev() {
+        moves.push((with_ext_num(log_path, i), with_ext_num(log_path, i + 1)));
+    }
+    moves.push((log_path.to_path_buf(), with_ext_num(log_path, 1)));
+    moves
+}
+
+/// Rotate the log if it exceeds `LOG_MAX_BYTES`. Best-effort: rotation failures
+/// are ignored so logging still proceeds.
+fn rotate_if_needed(log_path: &std::path::Path) {
+    let too_big = std::fs::metadata(log_path)
+        .map(|m| m.len() > LOG_MAX_BYTES)
+        .unwrap_or(false);
+    if !too_big {
+        return;
+    }
+    let _ = std::fs::remove_file(with_ext_num(log_path, LOG_KEEP));
+    for (from, to) in rotation_plan(log_path, LOG_KEEP) {
+        let _ = std::fs::rename(&from, &to);
+    }
+}
+
 fn init_logging(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -603,5 +641,39 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         // 0x100 + 16 = 0x110, formatted as 8-wide upper hex.
         assert_eq!(end, "0x00000110");
+    }
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn rotation_plan_keep_3_shifts_oldest_last() {
+        let base = Path::new("/tmp/tyutool.log");
+        let moves: Vec<(String, String)> = rotation_plan(base, 3)
+            .iter()
+            .map(|(a, b): &(std::path::PathBuf, std::path::PathBuf)| {
+                (a.display().to_string(), b.display().to_string())
+            })
+            .collect();
+        assert_eq!(
+            moves,
+            vec![
+                (
+                    "/tmp/tyutool.log.2".to_string(),
+                    "/tmp/tyutool.log.3".to_string()
+                ),
+                (
+                    "/tmp/tyutool.log.1".to_string(),
+                    "/tmp/tyutool.log.2".to_string()
+                ),
+                (
+                    "/tmp/tyutool.log".to_string(),
+                    "/tmp/tyutool.log.1".to_string()
+                ),
+            ]
+        );
     }
 }
