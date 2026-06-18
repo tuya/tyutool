@@ -2,25 +2,19 @@ import { describe, it, expect } from "vitest";
 import { buildIssueUrl, detectOs } from "./report-issue";
 
 describe("buildIssueUrl", () => {
-  it("targets the bug_report template with env in the body", () => {
-    const url = buildIssueUrl({
-      version: "3.0.11",
-      os: "linux",
-      install: "AppImage",
-    });
-    expect(url).toContain("https://github.com/tuya/tyutool/issues/new");
-    expect(url).toContain("template=bug_report.yml");
-    const decoded = decodeURIComponent(url);
-    expect(decoded).toContain("3.0.11");
-    expect(decoded).toContain("linux");
-    expect(decoded).toContain("AppImage");
+  it("prefills the bug_report form's version and os fields", () => {
+    const u = new URL(buildIssueUrl({ version: "3.0.11", os: "linux" }));
+    expect(u.pathname).toContain("/tuya/tyutool/issues/new");
+    expect(u.searchParams.get("template")).toBe("bug_report.yml");
+    expect(u.searchParams.get("version")).toBe("3.0.11");
+    expect(u.searchParams.get("os")).toBe("linux");
   });
 
-  it("omits the install line when not provided", () => {
-    const decoded = decodeURIComponent(
-      buildIssueUrl({ version: "1.0.0", os: "windows" }),
+  it("folds the install type into the os field when provided", () => {
+    const u = new URL(
+      buildIssueUrl({ version: "1.0.0", os: "linux", install: "AppImage" }),
     );
-    expect(decoded).not.toContain("安装方式");
+    expect(u.searchParams.get("os")).toBe("linux (AppImage)");
   });
 });
 

@@ -1,46 +1,59 @@
-name: Bug 报告 / Bug report
-description: 报告一个问题 / Report a problem with tyutool
+name: 🐞 Bug 报告 / Bug report
+description: 反馈一个问题，并附上日志帮助我们定位 / Report a problem and attach logs to help us debug
 title: "[Bug] "
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量填全下面的信息 —— 尤其是**日志**，它能极大帮助我们定位问题。
+        Thanks for the report! Please fill in as much as you can — the **logs** especially help us track things down.
   - type: input
     id: version
     attributes:
-      label: tyutool 版本 / Version
+      label: 版本 / Version
       description: 见 设置 → 关于 / See Settings → About
+      placeholder: "e.g. 3.0.11"
     validations:
       required: true
   - type: dropdown
     id: platform
     attributes:
-      label: 平台 / Platform
+      label: 使用方式 / Platform
       options:
-        - GUI (桌面应用 / desktop app)
-        - CLI (命令行 / command line)
+        - 桌面应用 GUI / Desktop app (GUI)
+        - 命令行 CLI / Command line (CLI)
     validations:
       required: true
   - type: input
     id: os
     attributes:
-      label: 操作系统 / OS
+      label: 操作系统 / Operating system
       placeholder: "e.g. Windows 11 / macOS 14 / Ubuntu 24.04"
     validations:
       required: true
   - type: input
     id: chip
     attributes:
-      label: 芯片 / Chip
+      label: 芯片型号 / Chip
+      description: 如适用 / If applicable
       placeholder: "e.g. BK7231N, T5"
   - type: textarea
     id: steps
     attributes:
       label: 复现步骤 / Steps to reproduce
+      description: 一步步说明如何触发这个问题 / How can we trigger the problem, step by step?
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
     validations:
       required: true
   - type: textarea
     id: expected_actual
     attributes:
-      label: 期望结果 / 实际结果 (Expected / Actual)
+      label: 期望结果与实际结果 / Expected vs. actual
+      description: 你期望发生什么？实际发生了什么？/ What did you expect, and what happened instead?
     validations:
       required: true
   - type: textarea
@@ -48,7 +61,9 @@ body:
     attributes:
       label: 日志 / Logs
       description: >
-        请附上导出的日志 zip。GUI：设置 → 应用日志 → 导出日志并反馈。
-        CLI：日志位于启动横幅打印的 `log:` 路径（如 `~/.local/share/tyutool/tyutool.log`）。
-        Please attach the exported log zip. GUI: Settings → Application Logs → Export Logs & Report Issue.
+        强烈建议附上日志：把导出的 zip 直接拖到此输入框即可上传。
+        GUI：设置 → 应用日志 → 导出日志并反馈；
+        CLI：日志路径见启动时打印的 `log:` 行（如 `~/.local/share/tyutool/tyutool.log`）。
+        Strongly recommended — drag the exported log zip into this box to upload it.
+        GUI: Settings → Application Logs → Export Logs & Report Issue.
         CLI: the log path is printed in the startup banner (`log:` line).
