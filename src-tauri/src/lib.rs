@@ -947,6 +947,39 @@ fn append_text_file(path: String, content: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Prefer the active log file by exact name; fall back to newest `*.log` by mtime.
+fn pick_active_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let active = dir.join("tyutool.log");
+    if active.is_file() {
+        return Some(active);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "log").unwrap_or(false))
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+}
+
+/// Read the last `max_bytes` bytes of `path` as UTF-8 (lossy).
+fn tail_bytes(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let len = std::fs::metadata(path)?.len();
+    let start = len.saturating_sub(max_bytes);
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+#[tauri::command]
+fn read_log_tail(app: AppHandle, max_bytes: usize) -> Result<String, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let path = pick_active_log(&dir).ok_or_else(|| "no log file found".to_string())?;
+    tail_bytes(&path, max_bytes as u64).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1019,6 +1052,7 @@ pub fn run() {
             serial_debug_state,
             write_text_file,
             append_text_file,
+            read_log_tail,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1145,5 +1179,30 @@ mod tests {
 
         assert_eq!(pos.x, 100);
         assert_eq!(pos.y, 100);
+    }
+}
+
+#[cfg(test)]
+mod log_tools_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn pick_active_log_prefers_exact_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool_2026-06-18_10-00-00.log"), b"old").unwrap();
+        std::fs::write(dir.path().join("tyutool.log"), b"current").unwrap();
+        let picked = pick_active_log(dir.path()).unwrap();
+        assert_eq!(picked.file_name().unwrap(), "tyutool.log");
+    }
+
+    #[test]
+    fn tail_bytes_returns_last_n() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.log");
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(b"0123456789").unwrap();
+        let tail = tail_bytes(&p, 4).unwrap();
+        assert_eq!(tail, "6789");
     }
 }
