@@ -51,30 +51,6 @@ jobs:
             echo "file_label=${RESOLVED}.beta" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Sync version to branch
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          VERSION: ${{ steps.v.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Switch to refactor/v3, apply version bump, push
-          git stash
-          git checkout "refactor/v3"
-          node scripts/bump-version.mjs "$VERSION"
-
-          if git diff --quiet; then
-            echo "Version already up to date, skipping commit."
-            exit 0
-          fi
-
-          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
-                 crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml \
-                 Cargo.lock
-          git commit -m "chore: bump version to ${VERSION} [skip ci]"
-          git push origin "refactor/v3"
-
   # ── CLI (5 platforms) ────────────────────────────────────────────────────────
   # Pure Rust binary, musl static linking (Linux), no Tauri / Node dependency
   # Artifacts: tyutool-cli_{platform}_{arch}_{ver}.tar.gz / .zip
@@ -315,6 +291,19 @@ jobs:
     outputs:
       notes: ${{ steps.notes.outputs.body }}
     steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with: { version: 10 }
+      - uses: actions/setup-node@v6
+        with: { node-version: "22", cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+
+      - name: Extract release body from CHANGELOG
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: pnpm exec tsx scripts/changelog-section.ts
+
       - uses: actions/download-artifact@v8
         with: { path: artifacts/ }
 
@@ -332,11 +321,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: tyutool ${{ github.ref_name }}
           draft: true
-          generate_release_notes: true
+          body_path: release-body.md
           files: release-assets/*
 
-      # Surface the auto-generated release body so the update manifest (latest.json)
-      # carries real release notes for the in-app updater, not just a version line.
       - name: Capture release notes
         id: notes
         env:
@@ -390,12 +377,34 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: latest.json
 
+  # ── Verify draft release, then publish ──────────────────────────────────────
+  publish:
+    name: Verify & Publish
+    needs: [prepare, create-release, generate-manifest]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with: { version: 10 }
+      - uses: actions/setup-node@v6
+        with: { node-version: "22", cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Verify assets + latest.json, then un-draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: pnpm exec tsx scripts/verify-release.ts
+
   # ── Sync to Gitee (non-blocking) ────────────────────────────────────────────
   # Requires repo secrets: GITEE_TOKEN, GITEE_USER (namespace), GITEE_REPO (path or owner/repo).
   # Optional repo variable: GITEE_TARGET_COMMITISH. Script: scripts/sync-gitee-release.sh
   sync-gitee:
     name: Sync to Gitee
-    needs: [generate-manifest, prepare, create-release]
+    needs: [publish, generate-manifest, prepare, create-release]
     runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/')
     continue-on-error: true
