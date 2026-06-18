@@ -2,6 +2,7 @@ import { GITHUB_NEW_ISSUE_URL, APP_VERSION } from "@/config/app";
 import type { ComposerTranslation } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { showConfirmDialog } from "@/composables/confirmDialog";
+import { rLog } from "@/utils/log";
 
 /**
  * Map a navigator.userAgent string to the same coarse OS vocabulary used by
@@ -76,16 +77,25 @@ export async function exportLogsAndReport(
     version: APP_VERSION,
     os: detectOs(navigator.userAgent),
   });
+  // window.open is a no-op inside the Tauri webview, so on failure we surface
+  // the URL in the dialog instead of silently doing nothing.
+  let opened = false;
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
-  } catch {
-    window.open(url, "_blank");
+    opened = true;
+  } catch (e) {
+    rLog.error(
+      `[ReportIssue] openUrl failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
+  const savedTo = t("settings.reportIssue.savedTo", { path: dest });
   await showConfirmDialog({
     title: t("settings.reportIssue.title"),
-    message: t("settings.reportIssue.savedTo", { path: dest }),
+    message: opened
+      ? `${savedTo}\n\n${t("settings.reportIssue.issueOpened")}`
+      : `${savedTo}\n\n${t("settings.reportIssue.openFailed")}\n${url}`,
     kind: "info",
     okLabel: t("common.ok"),
     showCancel: false,
