@@ -312,6 +312,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
+    outputs:
+      notes: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/download-artifact@v8
         with: { path: artifacts/ }
@@ -332,6 +334,22 @@ jobs:
           draft: true
           generate_release_notes: true
           files: release-assets/*
+
+      # Surface the auto-generated release body so the update manifest (latest.json)
+      # carries real release notes for the in-app updater, not just a version line.
+      - name: Capture release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          BODY="$(gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body)"
+          {
+            echo "body<<__TYUTOOL_NOTES_EOF__"
+            echo "$BODY"
+            echo "__TYUTOOL_NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
 
   # ── Generate latest.json update manifest ────────────────────────────────────
   generate-manifest:
@@ -364,6 +382,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           GITHUB_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          RELEASE_NOTES: ${{ needs.create-release.outputs.notes }}
         run: pnpm exec tsx scripts/generate-manifest.ts
 
       - uses: softprops/action-gh-release@v3
@@ -376,7 +395,7 @@ jobs:
   # Optional repo variable: GITEE_TARGET_COMMITISH. Script: scripts/sync-gitee-release.sh
   sync-gitee:
     name: Sync to Gitee
-    needs: [generate-manifest, prepare]
+    needs: [generate-manifest, prepare, create-release]
     runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/')
     continue-on-error: true
@@ -420,6 +439,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           GITHUB_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          RELEASE_NOTES: ${{ needs.create-release.outputs.notes }}
           GITEE_USER: ${{ secrets.GITEE_USER }}
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
         run: |

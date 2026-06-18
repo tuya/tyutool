@@ -104,9 +104,14 @@ for (const [platformKey, filename] of Object.entries(PORTABLE_PATTERNS)) {
 const now = new Date();
 const pubDate = `${now.toISOString().slice(0, 19)}Z`;
 
+// Release notes shown in the in-app updater (rendered as Markdown). CI passes the
+// GitHub-generated release body via RELEASE_NOTES; fall back to a bare version
+// line when unset (e.g. local manifest generation).
+const notes = process.env.RELEASE_NOTES?.trim() || `tyutool ${VERSION}`;
+
 const manifest = {
   version: VERSION,
-  notes: `tyutool ${VERSION}`,
+  notes,
   pub_date: pubDate,
   platforms,
   cli,
