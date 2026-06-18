@@ -1,6 +1,7 @@
 //! tyutool — shared flash plugin registry, jobs, and serial listing for GUI (Tauri) and CLI.
 
 mod authorize;
+pub mod diagnostics;
 mod error;
 pub mod flash_event;
 mod job;
