@@ -91,7 +91,7 @@ watch(
         </button>
         <button
           type="button"
-          class="ty-btn-sm ty-btn-primary"
+          class="ty-btn-sm ty-btn-primary-solid"
           @click="exportLogsAndReport(t)"
         >
           {{ t("settings.reportIssue.button") }}

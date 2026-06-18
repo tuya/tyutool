@@ -95,6 +95,8 @@
       "title": "报告问题",
       "button": "导出日志并反馈",
       "savedTo": "日志已导出到：{path}",
+      "issueOpened": "已在浏览器中打开预填的 GitHub issue，请附上刚保存的 zip。",
+      "openFailed": "无法自动打开浏览器，请手动打开此链接：",
       "webHint": "日志导出仅在桌面应用中可用。"
     }
   },

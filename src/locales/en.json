@@ -95,6 +95,8 @@
       "title": "Report an Issue",
       "button": "Export Logs & Report Issue",
       "savedTo": "Logs exported to: {path}",
+      "issueOpened": "A pre-filled GitHub issue was opened in your browser. Please attach the zip you just saved.",
+      "openFailed": "Couldn't open the browser automatically. Please open this URL manually:",
       "webHint": "Log export is only available in the desktop app."
     }
   },
