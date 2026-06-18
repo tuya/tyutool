@@ -200,6 +200,23 @@ Use `log::info!` / `log::debug!` / `log::warn!` / `log::error!` for diagnostic i
 | GUI (Tauri) | Tauri event → UI | tauri-plugin-log → file (level controlled by developer setting) |
 | Web/IDE | WebSocket JSON → browser UI | CLI-side log file |
 
+### Issue-reporting support
+
+Logs exist partly so users can file good bug reports. Preserve these guarantees:
+
+- **Locatable & exportable:** the GUI in-app log viewer (`read_log_tail`) and zip export
+  (`export_logs_zip`) must keep working. Don't break `appLogDir`/log-dir path assumptions,
+  and don't change the active log filename `tyutool.log` without updating
+  `pick_active_log` and the issue template.
+- **Startup banner parity:** CLI and GUI must emit the same banner via the single shared
+  helper `tyutool_core::diagnostics::log_session_banner` (name, type, version, OS, session
+  id). Never re-inline a per-platform banner.
+- **Bounded growth:** log files are size-capped and rotated (CLI: 5 MB, keep 3, matching
+  the GUI's `tauri-plugin-log` cap). New log sinks must rotate too.
+- **Custom-command ACL:** new Tauri commands for logs need no capability entry — register
+  them only in `invoke_handler`. Don't add redundant `fs`/`dialog` permissions.
+- Any change to log file locations must update `.github/ISSUE_TEMPLATE/bug_report.yml`.
+
 ### CLI Command Documentation
 
 `docs/cli.md` is the authoritative CLI reference. **Any change to CLI commands must include a `docs/cli.md` update in the same commit or PR:**
