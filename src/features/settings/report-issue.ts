@@ -17,30 +17,24 @@ export function detectOs(userAgent: string): string {
   return "unknown";
 }
 
-/** Build a pre-filled GitHub "new issue" URL for the bug_report form. */
+/**
+ * Build a GitHub "new issue" URL that opens the bug_report form with the
+ * environment fields pre-filled.
+ *
+ * Note: GitHub issue *forms* are pre-filled by field `id` query params (here
+ * `version` and `os`, matching `.github/ISSUE_TEMPLATE/bug_report.yml`) — a
+ * `body` param is ignored for forms, so we must not rely on it.
+ */
 export function buildIssueUrl(env: {
   version: string;
   os: string;
   install?: string;
 }): string {
-  const body = [
-    "<!-- 请描述问题，并附上导出的日志 zip / Please describe the issue and attach the exported log zip -->",
-    "",
-    `- tyutool 版本 / version: ${env.version}`,
-    `- 系统 / OS: ${env.os}`,
-    env.install ? `- 安装方式 / install: ${env.install}` : "",
-    "",
-    "## 复现步骤 / Steps to reproduce",
-    "",
-    "## 期望结果 / 实际结果 (Expected / Actual)",
-    "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const osField = env.install ? `${env.os} (${env.install})` : env.os;
   const params = new URLSearchParams({
     template: "bug_report.yml",
-    title: "[Bug] ",
-    body,
+    version: env.version,
+    os: osField,
   });
   return `${GITHUB_NEW_ISSUE_URL}?${params.toString()}`;
 }
