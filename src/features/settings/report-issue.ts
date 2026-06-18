@@ -64,14 +64,43 @@ export async function exportLogsAndReport(
     return;
   }
   const { save } = await import("@tauri-apps/plugin-dialog");
+  const { downloadDir, homeDir, join } = await import("@tauri-apps/api/path");
+  const filename = `tyutool-logs-${timestampForFilename()}.zip`;
+  // An AppImage's working directory is its read-only mount, so a bare filename
+  // makes the save dialog default *inside the mount* — where the write fails and
+  // aborts the whole flow. Anchor the default to a writable user directory.
+  let baseDir = "";
+  try {
+    baseDir = await downloadDir();
+  } catch {
+    try {
+      baseDir = await homeDir();
+    } catch {
+      /* fall back to a bare filename */
+    }
+  }
+  const defaultPath = baseDir ? await join(baseDir, filename) : filename;
   const dest = await save({
-    defaultPath: `tyutool-logs-${timestampForFilename()}.zip`,
+    defaultPath,
     filters: [{ name: "Zip", extensions: ["zip"] }],
   });
   if (!dest) return;
 
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("export_logs_zip", { destPath: dest });
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("export_logs_zip", { destPath: dest });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    rLog.error(`[ReportIssue] export_logs_zip failed: ${detail}`);
+    await showConfirmDialog({
+      title: t("settings.reportIssue.title"),
+      message: t("settings.reportIssue.exportFailed", { error: detail }),
+      kind: "warning",
+      okLabel: t("common.ok"),
+      showCancel: false,
+    });
+    return;
+  }
 
   const url = buildIssueUrl({
     version: APP_VERSION,

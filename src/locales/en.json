@@ -95,6 +95,7 @@
       "title": "Report an Issue",
       "button": "Export Logs & Report Issue",
       "savedTo": "Logs exported to: {path}",
+      "exportFailed": "Failed to save the log zip: {error}. Please choose a writable location (e.g. your Downloads folder) and try again.",
       "linkCopied": "We tried to open a pre-filled GitHub issue in your browser. If it didn't open, the issue link was copied to your clipboard — paste it into your browser. Please attach the zip you just saved.",
       "webHint": "Log export is only available in the desktop app."
     }
