@@ -107,7 +107,7 @@ if (preErrs.length) fail(preErrs);
 console.log('==> 前置检查通过');
 
 // ── Changelog: draft + interactive polish ───────────────────────────────────
-const today = cap('date', ['+%Y-%m-%d']);
+const today = new Date().toISOString().slice(0, 10);
 const cliffBody = tryCap('git', ['cliff', '--unreleased', '--strip', 'all']);
 if (!cliffBody) console.warn('警告: git-cliff 未产出内容（可能无新提交）；草稿将留空待手填。');
 
@@ -116,21 +116,39 @@ const existing = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf-8'
 const draft = buildDraftSection(version, today, cliffBody);
 writeFileSync(changelogPath, insertSection(existing, draft), 'utf-8');
 
+// Open $EDITOR (supports embedded args like "code --wait"); loop until the
+// curated section passes 4-B. On abort, restore the original CHANGELOG so a
+// rerun isn't blocked by a dirty working tree.
 const editor = process.env.EDITOR || process.env.VISUAL || 'vi';
+const [editorCmd, ...editorArgs] = editor.split(/\s+/).filter(Boolean);
 console.log(`==> 已生成 ${tag} 草稿，打开 ${editor} 润色（删除标记、补中文）…`);
-const ed = spawnSync(editor, [changelogPath], { stdio: 'inherit' });
-if (ed.status !== 0) {
-  console.error('编辑器异常退出，已中止（CHANGELOG.md 的草稿改动请手动 git checkout 还原）。');
+
+function restoreAndExit(msg: string): never {
+  writeFileSync(changelogPath, existing, 'utf-8');
+  console.error(msg);
+  console.error('已还原 CHANGELOG.md，修正后可重跑。');
   process.exit(1);
 }
 
-// ── Post-edit check (4-B) ────────────────────────────────────────────────────
-const polished = parseSection(readFileSync(changelogPath, 'utf-8'), version);
-const postErrs = validateCuratedSection(polished);
-if (postErrs.length) {
-  console.error('\nchangelog 未通过后置检查（CHANGELOG.md 改动保留，请修正后重跑）：');
+// ── Post-edit check (4-B), looped ────────────────────────────────────────────
+for (;;) {
+  const before = readFileSync(changelogPath, 'utf-8');
+  const ed = spawnSync(editorCmd, [...editorArgs, changelogPath], { stdio: 'inherit' });
+  if (ed.error || ed.status === null) {
+    restoreAndExit(`无法启动编辑器 "${editor}"：${ed.error?.message ?? '被信号终止'}`);
+  }
+  const after = readFileSync(changelogPath, 'utf-8');
+  const postErrs = validateCuratedSection(parseSection(after, version));
+  if (postErrs.length === 0) break;
+
+  console.error('\nchangelog 未通过后置检查：');
   for (const e of postErrs) console.error(`  ✗ ${e}`);
-  process.exit(1);
+  if (after === before) {
+    restoreAndExit(
+      '编辑器未修改文件即返回。若使用 GUI 编辑器，请设置带等待参数的 $EDITOR（如 EDITOR="code --wait"）。',
+    );
+  }
+  console.log('重新打开编辑器，请删除标记并补全中英文要点…');
 }
 console.log('==> changelog 后置检查通过');
 

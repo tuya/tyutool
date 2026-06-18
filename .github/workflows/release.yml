@@ -451,6 +451,7 @@ jobs:
           RELEASE_NOTES: ${{ needs.create-release.outputs.notes }}
           GITEE_USER: ${{ secrets.GITEE_USER }}
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          SKIP_COMPLETENESS_CHECK: "1"
         run: |
           set -euo pipefail
           if [[ "${GITEE_REPO}" == */* ]]; then

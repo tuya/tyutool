@@ -34,6 +34,25 @@ git tag -d v3.0.14                              # 删本地 tag
 pnpm run release 3.0.14
 ```
 
+## 撤回已发布的版本
+
+版本已正式发布（用户可见、`latest.json` 生效）后发现问题，按影响面处理：
+
+```bash
+# 1. 立即止血：把该 Release 改回草稿，其 latest.json 资源随之下线，
+#    应用内更新器拿不到 → 停止向用户推送该版本
+gh release edit v3.0.14 --draft=true
+
+# 2. 如需彻底移除（含 tag）
+gh release delete v3.0.14 --cleanup-tag --yes
+git tag -d v3.0.14
+```
+
+- 若要让更新器回退到上一版本：把上一版的 `latest.json` 重新作为"最新"发布
+  （在上一版 Release 上 `gh release upload <prev-tag> latest.json --clobber`，或重发上一版），
+  使更新器读到旧版本号、不再提示升级。
+- 已被用户下载/安装的安装包无法收回；撤回只能阻止尚未升级的用户继续装到问题版本。
+
 ## 范围说明
 
 - Beta：`workflow_dispatch` 仅构建产物自测，不创建 Release。
