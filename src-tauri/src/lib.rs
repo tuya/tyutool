@@ -12,6 +12,9 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
+/// Set once at startup; included in exported issue-report metadata.
+static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 struct FlashState {
     /// Cancel signal for the **current** operation. Wrapped in a Mutex so
     /// flash_run can atomically swap in a fresh Arc for the new operation while
@@ -980,22 +983,14 @@ pub fn run() {
         })
         .setup(|app| {
             let version = app.package_info().version.to_string();
-            let name = &app.package_info().name;
             let install_type = detect_install_type();
-            log::info!("========================================");
-            log::info!("[App] {} v{} starting", name, version);
-            log::info!("[App] Type: GUI");
-            log::info!(
-                "[App] OS: {}, Arch: {}, Family: {}",
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-                std::env::consts::FAMILY
+            let session_id = tyutool_core::diagnostics::log_session_banner(
+                &app.package_info().name,
+                "GUI",
+                &version,
+                Some(&install_type),
             );
-            log::info!("[App] Install: {}", install_type);
-            if let Ok(exe) = std::env::current_exe() {
-                log::info!("[App] Exe: {}", exe.display());
-            }
-            log::info!("========================================");
+            let _ = SESSION_ID.set(session_id);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
