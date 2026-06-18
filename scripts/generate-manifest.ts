@@ -119,12 +119,16 @@ const manifest = {
   portable,
 };
 
-const completenessErrors = assertManifestComplete(manifest);
-if (completenessErrors.length > 0) {
-  console.error('ERROR: latest.json 不完整，缺少平台条目：');
-  for (const e of completenessErrors) console.error(`  - ${e}`);
-  console.error('（某些平台的产物或 .sig 在 artifacts/ 中缺失，见上方 WARN）');
-  process.exit(1);
+// The Gitee sync step regenerates the manifest without artifacts present and
+// sets SKIP_COMPLETENESS_CHECK=1 to opt out; the primary GitHub path never sets it.
+if (process.env.SKIP_COMPLETENESS_CHECK !== '1') {
+  const completenessErrors = assertManifestComplete(manifest);
+  if (completenessErrors.length > 0) {
+    console.error('ERROR: latest.json 不完整，缺少平台条目：');
+    for (const e of completenessErrors) console.error(`  - ${e}`);
+    console.error('（某些平台的产物或 .sig 在 artifacts/ 中缺失，见上方 WARN）');
+    process.exit(1);
+  }
 }
 
 writeFileSync('latest.json', `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
