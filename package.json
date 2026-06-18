@@ -22,7 +22,8 @@
     "release:cli": "pnpm exec tsx scripts/release-cli.ts",
     "release:gui": "pnpm exec tsx scripts/release-gui.ts",
     "version:set": "node scripts/bump-version.mjs",
-    "dev:web": "pnpm exec tsx scripts/dev-web.ts"
+    "dev:web": "pnpm exec tsx scripts/dev-web.ts",
+    "release": "pnpm exec tsx scripts/release.ts"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
