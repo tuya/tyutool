@@ -1,0 +1,54 @@
+name: Bug 报告 / Bug report
+description: 报告一个问题 / Report a problem with tyutool
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: tyutool 版本 / Version
+      description: 见 设置 → 关于 / See Settings → About
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      options:
+        - GUI (桌面应用 / desktop app)
+        - CLI (命令行 / command line)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统 / OS
+      placeholder: "e.g. Windows 11 / macOS 14 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: chip
+    attributes:
+      label: 芯片 / Chip
+      placeholder: "e.g. BK7231N, T5"
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 期望结果 / 实际结果 (Expected / Actual)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: >
+        请附上导出的日志 zip。GUI：设置 → 应用日志 → 导出日志并反馈。
+        CLI：日志位于启动横幅打印的 `log:` 路径（如 `~/.local/share/tyutool/tyutool.log`）。
+        Please attach the exported log zip. GUI: Settings → Application Logs → Export Logs & Report Issue.
+        CLI: the log path is printed in the startup banner (`log:` line).

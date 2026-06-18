@@ -2,6 +2,7 @@
   "common": {
     "closeDialog": "Close",
     "copy": "Copy",
+    "ok": "OK",
     "dialogIconPurposeInfo": "Dialog type: information",
     "dialogIconPurposeWarning": "Dialog type: warning — please review the risk",
     "dialogIconPurposeDanger": "Dialog type: danger — confirm carefully",
@@ -80,6 +81,21 @@
       "portableHint": "This installation does not support in-app updates. Download a matching package from the releases page.",
       "portableDownload": "Open Releases Page",
       "toastPortable": "New version v{version} available. This install type cannot auto-update—open the releases page to download."
+    },
+    "viewLogs": "View Logs",
+    "logViewer": {
+      "title": "Application Logs",
+      "empty": "No log content available.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "refresh": "Refresh",
+      "close": "Close"
+    },
+    "reportIssue": {
+      "title": "Report an Issue",
+      "button": "Export Logs & Report Issue",
+      "savedTo": "Logs exported to: {path}",
+      "webHint": "Log export is only available in the desktop app."
     }
   },
   "flash": {

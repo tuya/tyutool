@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 项目主页 / Project README
+    url: https://github.com/tuya/tyutool
+    about: 使用与构建说明 / Usage and build instructions

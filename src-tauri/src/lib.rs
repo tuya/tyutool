@@ -12,6 +12,9 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
+/// Set once at startup; included in exported issue-report metadata.
+static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 struct FlashState {
     /// Cancel signal for the **current** operation. Wrapped in a Mutex so
     /// flash_run can atomically swap in a fresh Arc for the new operation while
@@ -944,6 +947,96 @@ fn append_text_file(path: String, content: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Prefer the active log file by exact name; fall back to newest `*.log` by mtime.
+fn pick_active_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let active = dir.join("tyutool.log");
+    if active.is_file() {
+        return Some(active);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "log").unwrap_or(false))
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+}
+
+/// Read the last `max_bytes` bytes of `path` as UTF-8 (lossy).
+fn tail_bytes(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let len = std::fs::metadata(path)?.len();
+    let start = len.saturating_sub(max_bytes);
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+#[tauri::command]
+fn read_log_tail(app: AppHandle, max_bytes: usize) -> Result<String, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let path = pick_active_log(&dir).ok_or_else(|| "no log file found".to_string())?;
+    tail_bytes(&path, max_bytes as u64).map_err(|e| e.to_string())
+}
+
+fn collect_log_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "log").unwrap_or(false))
+        .collect()
+}
+
+fn build_report_info(name: &str, version: &str, install: &str, session_id: &str) -> String {
+    format!(
+        "tyutool report-info\nname: {name}\nversion: {version}\nos: {}\narch: {}\nfamily: {}\ninstall: {install}\nsession: {session_id}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::env::consts::FAMILY,
+    )
+}
+
+fn write_logs_zip(
+    log_files: &[std::path::PathBuf],
+    report_info: &str,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let mut zw = zip::ZipWriter::new(file);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    zw.start_file("report-info.txt", opts)
+        .map_err(|e| e.to_string())?;
+    zw.write_all(report_info.as_bytes())
+        .map_err(|e| e.to_string())?;
+    for p in log_files {
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
+            zw.start_file(name, opts).map_err(|e| e.to_string())?;
+            zw.write_all(&bytes).map_err(|e| e.to_string())?;
+        }
+    }
+    zw.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let files = collect_log_files(&dir);
+    let info = build_report_info(
+        &app.package_info().name,
+        &app.package_info().version.to_string(),
+        &detect_install_type(),
+        SESSION_ID.get().map(String::as_str).unwrap_or(""),
+    );
+    write_logs_zip(&files, &info, std::path::Path::new(&dest_path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -980,22 +1073,14 @@ pub fn run() {
         })
         .setup(|app| {
             let version = app.package_info().version.to_string();
-            let name = &app.package_info().name;
             let install_type = detect_install_type();
-            log::info!("========================================");
-            log::info!("[App] {} v{} starting", name, version);
-            log::info!("[App] Type: GUI");
-            log::info!(
-                "[App] OS: {}, Arch: {}, Family: {}",
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-                std::env::consts::FAMILY
+            let session_id = tyutool_core::diagnostics::log_session_banner(
+                &app.package_info().name,
+                "GUI",
+                &version,
+                Some(&install_type),
             );
-            log::info!("[App] Install: {}", install_type);
-            if let Ok(exe) = std::env::current_exe() {
-                log::info!("[App] Exe: {}", exe.display());
-            }
-            log::info!("========================================");
+            let _ = SESSION_ID.set(session_id);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1024,6 +1109,8 @@ pub fn run() {
             serial_debug_state,
             write_text_file,
             append_text_file,
+            read_log_tail,
+            export_logs_zip,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1150,5 +1237,48 @@ mod tests {
 
         assert_eq!(pos.x, 100);
         assert_eq!(pos.y, 100);
+    }
+}
+
+#[cfg(test)]
+mod log_tools_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn pick_active_log_prefers_exact_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool_2026-06-18_10-00-00.log"), b"old").unwrap();
+        std::fs::write(dir.path().join("tyutool.log"), b"current").unwrap();
+        let picked = pick_active_log(dir.path()).unwrap();
+        assert_eq!(picked.file_name().unwrap(), "tyutool.log");
+    }
+
+    #[test]
+    fn tail_bytes_returns_last_n() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.log");
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(b"0123456789").unwrap();
+        let tail = tail_bytes(&p, 4).unwrap();
+        assert_eq!(tail, "6789");
+    }
+
+    #[test]
+    fn write_logs_zip_includes_logs_and_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_a = dir.path().join("tyutool.log");
+        std::fs::write(&log_a, b"hello log").unwrap();
+        let dest = dir.path().join("out.zip");
+
+        write_logs_zip(&[log_a], "report-body", &dest).unwrap();
+
+        let f = std::fs::File::open(&dest).unwrap();
+        let mut zip = zip::ZipArchive::new(f).unwrap();
+        let names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.contains(&"report-info.txt".to_string()));
+        assert!(names.contains(&"tyutool.log".to_string()));
     }
 }
