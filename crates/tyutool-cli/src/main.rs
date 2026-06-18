@@ -265,12 +265,14 @@ fn rotate_if_needed(log_path: &std::path::Path) {
     }
 }
 
-fn init_logging(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("tyutool");
     std::fs::create_dir_all(&log_dir)?;
     let log_path = log_dir.join("tyutool.log");
+
+    rotate_if_needed(&log_path);
 
     let fmt = |out: fern::FormatCallback<'_>,
                message: &std::fmt::Arguments<'_>,
@@ -306,7 +308,7 @@ fn init_logging(verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     dispatch.apply()?;
-    Ok(())
+    Ok(log_path)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -320,9 +322,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.command,
         Commands::UsbPortSurvey | Commands::Completions { .. }
     );
-    if !quiet {
-        init_logging(cli.verbose)?;
-    }
+    let log_path = if !quiet {
+        Some(init_logging(cli.verbose)?)
+    } else {
+        None
+    };
 
     // User-facing startup banner (not a log::info! call)
     if !quiet {
@@ -332,24 +336,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::env::consts::OS,
             std::env::consts::ARCH
         );
+        if let Some(ref p) = log_path {
+            eprintln!("log: {}", p.display());
+        }
         eprintln!();
     }
 
     // Developer diagnostics → log file (not shown to user)
     if !quiet {
-        log::info!("========================================");
-        log::info!("[App] tyutool-cli v{} starting", env!("CARGO_PKG_VERSION"));
-        log::info!("[App] Type: CLI");
-        log::info!(
-            "[App] OS: {}, Arch: {}, Family: {}",
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            std::env::consts::FAMILY
+        tyutool_core::diagnostics::log_session_banner(
+            "tyutool-cli",
+            "CLI",
+            env!("CARGO_PKG_VERSION"),
+            None,
         );
-        if let Ok(exe) = std::env::current_exe() {
-            log::info!("[App] Exe: {}", exe.display());
-        }
-        log::info!("========================================");
     }
 
     // Shared cancellation flag wired to Ctrl+C, so a flash/read/erase/authorize
