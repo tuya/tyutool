@@ -117,7 +117,8 @@ jobs:
           if-no-files-found: error
 
   # ── GUI (7 installers + 4 portables) ────────────────────────────────────────
-  # Tauri 2 desktop app, each distribution type as a separate artifact
+  # Tauri 2 desktop app. One job per platform/arch; a single compile emits every
+  # bundle format for that target (Linux deb+appimage+rpm share one build).
   # Binary name = tyutool_gui (set by src-tauri/Cargo.toml [package].name)
   # Artifacts: tyutool-gui_{platform}_{arch}_{type}_{ver}.ext
   build-gui:
@@ -128,17 +129,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
-          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: deb,       install_type: deb,      with_portable: true  }
-          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: appimage,  install_type: appimage, with_portable: false }
-          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: rpm,       install_type: rpm,      with_portable: false }
+          # Linux x86_64 — all bundle formats produced from a single compile
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux,   arch: x86_64,   bundles: "deb,appimage,rpm", install_types: "deb appimage rpm", install_type: installers, with_portable: true }
           # Linux aarch64 (native ARM runner — no cross-compilation needed)
-          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, platform: linux,   arch: aarch64,  bundles: deb,       install_type: deb,      with_portable: true  }
-          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, platform: linux,   arch: aarch64,  bundles: appimage,  install_type: appimage, with_portable: false }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, platform: linux,   arch: aarch64,  bundles: "deb,appimage",     install_types: "deb appimage",     install_type: installers, with_portable: true }
           # macOS Universal Binary (single build covers Intel + Apple Silicon)
           # bundle_prefix: Tauri places universal artifacts under target/universal-apple-darwin/release/
           # tauri_args:    passed verbatim to `npx @tauri-apps/cli build`
-          - { os: macos-latest, target: universal-apple-darwin, platform: macos, arch: universal, bundles: "dmg,app", install_type: dmg, with_portable: true, with_updater: true, bundle_prefix: "target/universal-apple-darwin/release", tauri_args: "--target universal-apple-darwin" }
+          - { os: macos-latest, target: universal-apple-darwin, platform: macos, arch: universal, bundles: "dmg,app", install_types: "dmg", install_type: dmg, with_portable: true, with_updater: true, bundle_prefix: "target/universal-apple-darwin/release", tauri_args: "--target universal-apple-darwin" }
           # Windows x86_64 — NSIS installer + portable (MSI removed; NSIS is simpler and matches sftool-gui)
           - { os: windows-2022,     target: x86_64-pc-windows-msvc,    platform: windows, arch: x86_64,   bundles: nsis,      install_type: nsis,     with_portable: true  }
     env:
@@ -175,9 +173,10 @@ jobs:
           targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: "gui-${{ matrix.target }}"
+          # shared-key replaces the per-job key suffix so a target's cache is reusable
+          # across runs; each target now compiles in a single job, so always persist it.
           shared-key: "gui-${{ matrix.target }}"
-          save-if: ${{ matrix.install_type == 'deb' || matrix.platform != 'linux' }}
+          save-if: true
 
       # ── Frontend + Tauri build ──
       - run: pnpm install --frozen-lockfile
@@ -190,28 +189,36 @@ jobs:
       # ── Installer: locate Tauri output and rename uniformly ──
       # Use release-pkg/ instead of dist/ to avoid collision with Vite build output.
       # bundle_prefix is set in the matrix for non-default layouts (e.g. universal-apple-darwin).
+      # A single Tauri compile can emit several bundle formats (e.g. deb+appimage+rpm
+      # on Linux), so loop over each one in matrix.install_types and rename uniformly.
       - name: Package installer (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p release-pkg
           BUNDLE_BASE="${{ matrix.bundle_prefix || 'target/release' }}"
-          BUNDLE_DIR="${BUNDLE_BASE}/bundle/${{ matrix.install_type }}"
-          case "${{ matrix.install_type }}" in
-            deb)      GLOB="*.deb" ;;
-            rpm)      GLOB="*.rpm" ;;
-            appimage) GLOB="*.AppImage" ;;
-            dmg)      GLOB="*.dmg" ;;
-            *)        GLOB="*" ;;
-          esac
-          SRC=$(find "$BUNDLE_DIR" -maxdepth 1 -name "$GLOB" -type f | head -1)
-          EXT="${SRC##*.}"
-          DEST="${PREFIX}_${{ matrix.install_type }}_${VERSION}.${EXT}"
-          cp "$SRC" "release-pkg/${DEST}"
-          # Copy .sig file if it exists (needed by generate-manifest.ts for GUI updater)
-          SIG="${SRC}.sig"
-          if [ -f "$SIG" ]; then
-            cp "$SIG" "release-pkg/${DEST}.sig"
-          fi
+          for IT in ${{ matrix.install_types }}; do
+            BUNDLE_DIR="${BUNDLE_BASE}/bundle/${IT}"
+            case "$IT" in
+              deb)      GLOB="*.deb" ;;
+              rpm)      GLOB="*.rpm" ;;
+              appimage) GLOB="*.AppImage" ;;
+              dmg)      GLOB="*.dmg" ;;
+              *)        GLOB="*" ;;
+            esac
+            SRC=$(find "$BUNDLE_DIR" -maxdepth 1 -name "$GLOB" -type f | head -1)
+            if [ -z "$SRC" ]; then
+              echo "::error::No ${IT} bundle found in ${BUNDLE_DIR}"
+              exit 1
+            fi
+            EXT="${SRC##*.}"
+            DEST="${PREFIX}_${IT}_${VERSION}.${EXT}"
+            cp "$SRC" "release-pkg/${DEST}"
+            # Copy .sig file if it exists (needed by generate-manifest.ts for GUI updater)
+            SIG="${SRC}.sig"
+            if [ -f "$SIG" ]; then
+              cp "$SIG" "release-pkg/${DEST}.sig"
+            fi
+          done
 
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
@@ -280,9 +287,9 @@ jobs:
           path: release-portable/
           if-no-files-found: error
 
-  # ── GitHub Release (tag trigger only) ───────────────────────────────────────
+  # ── GitHub Release + latest.json manifest (tag trigger only) ────────────────
   create-release:
-    name: Create GitHub Release
+    name: Create Release + manifest
     needs: [prepare, build-cli, build-gui]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
@@ -338,38 +345,15 @@ jobs:
             echo "__TYUTOOL_NOTES_EOF__"
           } >> "$GITHUB_OUTPUT"
 
-  # ── Generate latest.json update manifest ────────────────────────────────────
-  generate-manifest:
-    name: Generate latest.json
-    needs: [prepare, create-release]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/download-artifact@v8
-        with: { path: artifacts/ }
-
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
+      # ── latest.json update manifest ──
+      # Generated in this same job: artifacts/ is already downloaded and the draft
+      # release exists, so no second runner / artifact download / pnpm install is needed.
       - name: Generate manifest
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           GITHUB_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-          RELEASE_NOTES: ${{ needs.create-release.outputs.notes }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.body }}
         run: pnpm exec tsx scripts/generate-manifest.ts
 
       - uses: softprops/action-gh-release@v3
@@ -380,7 +364,7 @@ jobs:
   # ── Verify draft release, then publish ──────────────────────────────────────
   publish:
     name: Verify & Publish
-    needs: [prepare, create-release, generate-manifest]
+    needs: [prepare, create-release]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -404,7 +388,7 @@ jobs:
   # Optional repo variable: GITEE_TARGET_COMMITISH. Script: scripts/sync-gitee-release.sh
   sync-gitee:
     name: Sync to Gitee
-    needs: [publish, generate-manifest, prepare, create-release]
+    needs: [publish, prepare, create-release]
     runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/')
     continue-on-error: true
