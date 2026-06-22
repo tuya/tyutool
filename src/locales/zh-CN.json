@@ -516,6 +516,7 @@
       "elapsed": "已用时"
     },
     "config": {
+      "sharedConfig": "共享配置",
       "chip": "芯片型号",
       "baud": "波特率",
       "firmware": "固件文件",
