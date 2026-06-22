@@ -1,6 +1,9 @@
 <!-- src/features/batch-flash/components/BatchDonutChart.vue -->
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   total: number;
@@ -84,7 +87,7 @@ const pct = computed(() =>
       font-size="11"
       fill="var(--ty-text-muted)"
     >
-      成功率
+      {{ t("batchFlashAuth.dashboard.successRate") }}
     </text>
   </svg>
 </template>
