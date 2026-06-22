@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { useBatchFlashAuthStore } from "./batch-flash-auth";
+import type { BatchSlotState } from "@/features/batch-flash-auth/types";
 
 vi.mock("@/runtime", () => ({
   isTauriRuntime: () => false,
@@ -228,7 +229,7 @@ describe("completionBanner", () => {
       port: "COM5",
       event: { kind: "done", result: { ok: { elapsed_secs: 5 } } },
     });
-    expect(store.completionBanner?.kind).toBe("success");
+    expect(store.completionBanner?.kind).toBe("all-success");
   });
 
   it("shows partial banner on mixed outcome", () => {
@@ -264,6 +265,55 @@ describe("resetFlashStats", () => {
       total: 0,
       success: 0,
       fail: 0,
+    });
+  });
+});
+
+const slot = (
+  port: string,
+  status: BatchSlotState["status"],
+): BatchSlotState => ({
+  port,
+  status,
+  progress: 0,
+  currentPhase: "",
+});
+
+describe("checkBatchCompletion banner", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  function runWith(slots: BatchSlotState[]) {
+    const store = useBatchFlashAuthStore();
+    store.slots = slots;
+    store.batchStartTime = 1; // non-null so checkBatchCompletion proceeds
+    store.currentBatchPorts = slots.map((s) => s.port);
+    store.checkBatchCompletion();
+    return store.completionBanner;
+  }
+
+  it("all-success when every device done", () => {
+    expect(runWith([slot("a", "done"), slot("b", "done")])).toEqual({
+      kind: "all-success",
+      count: 2,
+    });
+  });
+
+  it("all-failed when every device failed", () => {
+    expect(runWith([slot("a", "failed")])).toEqual({ kind: "all-failed" });
+  });
+
+  it("all-skipped when only skipped", () => {
+    expect(runWith([slot("a", "skipped"), slot("b", "skipped")])).toEqual({
+      kind: "all-skipped",
+      count: 2,
+    });
+  });
+
+  it("partial when mixed done and failed", () => {
+    expect(runWith([slot("a", "done"), slot("b", "failed")])).toEqual({
+      kind: "partial",
+      done: 1,
+      failed: 1,
     });
   });
 });

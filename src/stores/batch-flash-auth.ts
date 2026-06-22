@@ -150,7 +150,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       updateSlot(port, {
         status: "reading_mac",
         progress: 0,
-        currentPhase: "读取MAC",
+        currentPhase: "reading_mac",
         error: undefined,
       });
     }
@@ -229,7 +229,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!findSlot(port)) return;
 
     if (step === "reading_mac") {
-      updateSlot(port, { status: "reading_mac", currentPhase: "读取MAC" });
+      updateSlot(port, { status: "reading_mac", currentPhase: "reading_mac" });
     } else if (
       step === "reading_auth" ||
       step === "writing_auth" ||
@@ -270,7 +270,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         updateSlot(port, {
           status: "reading_mac",
           progress: 0,
-          currentPhase: "读取MAC",
+          currentPhase: "reading_mac",
         });
       }
       // err/cancelled: the subsequent auth 'failed'/'skipped' step handles final state.
@@ -296,26 +296,13 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     const skipped = batchSlots.filter((s) => s.status === "skipped").length;
 
     if (done === 0 && failed === 0 && skipped > 0) {
-      // All devices were already authorized and skipped
-      completionBanner.value = {
-        kind: "partial",
-        message: `本次批次完成：${skipped} 台已跳过（设备已授权）`,
-      };
+      completionBanner.value = { kind: "all-skipped", count: skipped };
     } else if (failed === 0) {
-      completionBanner.value = {
-        kind: "success",
-        message: `本次批次完成：${done} 台全部成功`,
-      };
+      completionBanner.value = { kind: "all-success", count: done };
     } else if (done === 0) {
-      completionBanner.value = {
-        kind: "all-failed",
-        message: `本次批次全部失败，请检查连接后重试`,
-      };
+      completionBanner.value = { kind: "all-failed" };
     } else {
-      completionBanner.value = {
-        kind: "partial",
-        message: `本次批次完成：${done} 成功，${failed} 失败，可点击「重试失败」`,
-      };
+      completionBanner.value = { kind: "partial", done, failed };
     }
   }
 
@@ -442,5 +429,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     // Internal (exposed for testing)
     handleFlashProgress,
     handleAuthProgress,
+    checkBatchCompletion,
+    currentBatchPorts,
   };
 });
