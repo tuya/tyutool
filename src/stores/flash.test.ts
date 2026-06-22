@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { nextTick } from "vue";
 
 // Mock isTauriRuntime before any store import
 vi.mock("@/runtime", async (importOriginal) => {
@@ -568,6 +569,120 @@ describe("flash store", () => {
       store.runningOp = "flash";
       const runningCaption = store.progressCaption;
       expect(runningCaption).not.toBe(defaultCaption);
+    });
+  });
+
+  // ── selectedChipId watch: sync state on chip change ──────────────
+
+  describe("selectedChipId watch (chip-change side effects)", () => {
+    it("updates readFileName, readEndAddr and selectedBaudRate per the new chip manifest", async () => {
+      const store = useFlashStore();
+      // Default is t5 (baud 921600, flashSize 8 MiB)
+      expect(store.selectedChipId).toBe("t5");
+      expect(store.readFileName).toBe("tyutool_read_t5.bin");
+
+      // Switch to ln882h: baud 115200, flashSize 2 MiB
+      store.selectedChipId = "ln882h";
+      await nextTick();
+
+      expect(store.readFileName).toBe("tyutool_read_ln882h.bin");
+      expect(store.readEndAddr).toBe("0x00200000");
+      expect(store.selectedBaudRate).toBe(115200);
+    });
+
+    it("does NOT overwrite readFileName once the user has modified it", async () => {
+      const store = useFlashStore();
+      store.onReadFileNameInput("my-custom.bin");
+      expect(store.readFileNameModified).toBe(true);
+
+      store.selectedChipId = "esp32";
+      await nextTick();
+
+      // User-chosen name is preserved; addr/baud still sync
+      expect(store.readFileName).toBe("my-custom.bin");
+      expect(store.readEndAddr).toBe("0x00400000"); // esp32 flashSize 4 MiB
+      expect(store.selectedBaudRate).toBe(460800); // esp32 default baud
+    });
+
+    it("appends a chip-changed log line when chip changes", async () => {
+      const store = useFlashStore();
+      const before = store.logLines.length;
+      store.selectedChipId = "esp32";
+      await nextTick();
+      expect(store.logLines.length).toBeGreaterThan(before);
+    });
+  });
+
+  // ── AUTH_ONLY_CHIP_ID ("other") transitions ─────────────────────
+
+  describe('auth-only chip ("other") transitions', () => {
+    it("switching to the auth-only chip saves the previous flash chip as lastFlashChipId", async () => {
+      const store = useFlashStore();
+      store.selectedChipId = "esp32";
+      await nextTick();
+
+      store.selectedChipId = "other";
+      await nextTick();
+
+      // canFlash / canErase are disabled for the auth-only chip
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.flashSegments[0].firmwarePath = "/fw.bin";
+      expect(store.canFlash).toBe(false);
+      expect(store.canErase).toBe(false);
+      // auth-only auth baud comes from the auth-only manifest
+      expect(store.selectedAuthBaudRate).toBe(115200);
+    });
+
+    it("leaving the authorize tab restores the last flash chip when 'other' was selected", async () => {
+      const store = useFlashStore();
+      // Pick a flash chip, then move to authorize tab and select 'other'
+      store.selectedChipId = "esp32";
+      await nextTick();
+      store.activeTab = "authorize";
+      await nextTick();
+      store.selectedChipId = "other";
+      await nextTick();
+      expect(store.selectedChipId).toBe("other");
+
+      // Switch away from authorize → chip restored to the last flash-capable chip
+      store.activeTab = "flash";
+      await nextTick();
+      expect(store.selectedChipId).toBe("esp32");
+    });
+
+    it("does not change the chip when leaving authorize tab if a real chip is selected", async () => {
+      const store = useFlashStore();
+      store.selectedChipId = "esp32";
+      store.activeTab = "authorize";
+      await nextTick();
+      store.activeTab = "flash";
+      await nextTick();
+      expect(store.selectedChipId).toBe("esp32");
+    });
+  });
+
+  // ── startOperation: refusal / logged error branches ─────────────
+
+  describe("startOperation refusal branches", () => {
+    it("validation rejection logs a line and sets flashMessage", async () => {
+      const store = useFlashStore();
+      store.selectedSerialPort = ""; // missing port → validation fails
+      store.flashSegments[0].firmwarePath = "/fw.bin";
+      const before = store.logLines.length;
+      await store.startOperation("flash");
+      expect(store.flashPhase).toBe("error");
+      expect(store.flashMessage).not.toBe("");
+      expect(store.logLines.length).toBeGreaterThan(before);
+    });
+
+    it("erase with invalid segment is refused before any confirm dialog", async () => {
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.eraseStartAddr = "0xZZZZ"; // invalid hex → validation fails
+      store.eraseEndAddr = "0x1000";
+      await store.startOperation("erase");
+      expect(store.flashPhase).toBe("error");
+      expect(store.flashMessage).not.toBe("");
     });
   });
 });

@@ -1222,7 +1222,762 @@ pub fn parse_hex_addr(s: Option<&str>) -> Result<u32, ProtocolError> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::chip::{Bk7231nSpec, T5Spec};
+    use super::super::transport::mock::MockIo;
+    use super::super::transport::Transport;
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // ── Test scaffolding ──────────────────────────────────────────────
+
+    fn make_transport(mock: MockIo) -> Transport<'static, MockIo> {
+        static CANCEL: AtomicBool = AtomicBool::new(false);
+        CANCEL.store(false, Ordering::Relaxed);
+        Transport::new(mock, "/dev/mock", 115200, &CANCEL, &|_msg| {})
+    }
+
+    fn make_transport_cancelled(mock: MockIo) -> Transport<'static, MockIo> {
+        static CANCEL_T: AtomicBool = AtomicBool::new(true);
+        CANCEL_T.store(true, Ordering::Relaxed);
+        Transport::new(mock, "/dev/mock", 115200, &CANCEL_T, &|_msg| {})
+    }
+
+    /// Build a **standard** RX frame `[04 0e LEN 01 e0 fc CMD STATUS DATA…]`.
+    /// LEN counts the echo header (3) + CMD + STATUS + data = 5 + data.len().
+    fn std_resp(cmd: u8, status: u8, data: &[u8]) -> Vec<u8> {
+        let len = (5 + data.len()) as u8;
+        let mut v = vec![0x04, 0x0e, len, 0x01, 0xe0, 0xfc, cmd, status];
+        v.extend_from_slice(data);
+        v
+    }
+
+    /// Build an **extended** RX frame
+    /// `[04 0e ff 01 e0 fc f4 LEN_L LEN_H CMD STATUS DATA…]`.
+    /// LEN (LE u16) counts CMD + STATUS + data = 2 + data.len().
+    fn ext_resp(cmd: u8, status: u8, data: &[u8]) -> Vec<u8> {
+        let len = (2 + data.len()) as u16;
+        let mut v = vec![0x04, 0x0e, 0xff, 0x01, 0xe0, 0xfc, 0xf4];
+        v.push((len & 0xff) as u8);
+        v.push((len >> 8) as u8);
+        v.push(cmd);
+        v.push(status);
+        v.extend_from_slice(data);
+        v
+    }
+
+    /// A FlashGetMID extended-frame response (T5). `flash_mid_from_extended`
+    /// reads data[0..4] as LE u32 then `>> 8`, so to produce `mid` we place
+    /// `[0x00, mid_b0, mid_b1, mid_b2]` in data.
+    fn mid_ext_resp(mid: u32) -> Vec<u8> {
+        let b0 = (mid & 0xff) as u8;
+        let b1 = ((mid >> 8) & 0xff) as u8;
+        let b2 = ((mid >> 16) & 0xff) as u8;
+        ext_resp(command::CMD_FLASH_GET_MID, 0x00, &[0x00, b0, b1, b2])
+    }
+
+    /// A CheckCRC standard-frame response carrying `crc` (LE).
+    /// RxFrame: status = crc byte0, data = [crc1, crc2, crc3].
+    fn crc_resp(crc: u32) -> Vec<u8> {
+        let b = crc.to_le_bytes();
+        std_resp(command::CMD_CHECK_CRC, b[0], &[b[1], b[2], b[3]])
+    }
+
+    /// A FlashReadSR extended-frame response (T5). data = [reg_echo, sr_value].
+    fn sr_ext_resp(sr: u8) -> Vec<u8> {
+        ext_resp(command::CMD_FLASH_READ_SR, 0x00, &[0x00, sr])
+    }
+
+    /// A FlashRead4K extended response with `sector` (4096 bytes) as flash
+    /// data, prefixed by the 4-byte address echo.
+    fn read4k_resp(addr: u32, sector: &[u8]) -> Vec<u8> {
+        let mut data = addr.to_le_bytes().to_vec();
+        data.extend_from_slice(sector);
+        ext_resp(command::CMD_FLASH_READ_4K, 0x00, &data)
+    }
+
+    // ───────────────────────── reboot ────────────────────────────────
+
+    #[test]
+    fn reboot_sends_three_frames() {
+        let mut transport = make_transport(MockIo::new());
+        reboot(&mut transport).unwrap();
+        assert_eq!(transport.io.sent.len(), 3);
+        // Each frame is CMD 0x0e with payload [0xa5]:
+        // [01 e0 fc 02 0e a5]
+        let expected =
+            super::super::frame::encode_standard(command::CMD_FLASH_GET_MID, &build::reboot());
+        for frame in &transport.io.sent {
+            assert_eq!(frame, &expected);
+        }
+    }
+
+    // ──────────────────────── crc_check ──────────────────────────────
+
+    #[test]
+    fn crc_check_ok() {
+        let mut mock = MockIo::new();
+        mock.add_response(crc_resp(0xDEAD_BEEF));
+        let mut transport = make_transport(mock);
+        let r = crc_check(&mut transport, 0x10000, 0x1000, 0xDEAD_BEEF);
+        assert!(r.is_ok());
+        // One CheckCRC frame sent.
+        assert_eq!(transport.io.sent.len(), 1);
+    }
+
+    #[test]
+    fn crc_check_mismatch() {
+        let mut mock = MockIo::new();
+        mock.add_response(crc_resp(0x1234_5678));
+        let mut transport = make_transport(mock);
+        let r = crc_check(&mut transport, 0x10000, 0x1000, 0xDEAD_BEEF);
+        assert!(matches!(
+            r,
+            Err(ProtocolError::CrcMismatch {
+                expected: 0xDEAD_BEEF,
+                got: 0x1234_5678
+            })
+        ));
+    }
+
+    #[test]
+    fn crc_check_timeout_errors() {
+        let mut mock = MockIo::new();
+        mock.add_silence(1);
+        let mut transport = make_transport(mock);
+        let r = crc_check(&mut transport, 0x10000, 0x1000, 0xDEAD_BEEF);
+        assert!(matches!(r, Err(ProtocolError::Timeout { .. })));
+    }
+
+    // ─────────────────────── get_flash_params ─────────────────────────
+
+    #[test]
+    fn get_flash_params_known_mid_bk7231n() {
+        // BK7231N uses extended frame for FlashGetMID.
+        let mut mock = MockIo::new();
+        mock.add_response(mid_ext_resp(0x1440c8)); // GD25Q80C
+        let mut transport = make_transport(mock);
+        let params = get_flash_params(&mut transport, &Bk7231nSpec).unwrap();
+        assert_eq!(params.name, "GD25Q80C");
+        assert_eq!(params.total_size, 1024 * 1024);
+    }
+
+    #[test]
+    fn get_flash_params_unknown_mid_falls_back() {
+        let mut mock = MockIo::new();
+        mock.add_response(mid_ext_resp(0xABCDEF));
+        let mut transport = make_transport(mock);
+        let params = get_flash_params(&mut transport, &T5Spec).unwrap();
+        assert_eq!(params.name, "Unknown");
+        assert_eq!(params.mid, 0xABCDEF);
+        assert_eq!(params.total_size, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn get_flash_params_timeout_errors() {
+        let mut mock = MockIo::new();
+        mock.add_silence(1);
+        let mut transport = make_transport(mock);
+        let r = get_flash_params(&mut transport, &Bk7231nSpec);
+        assert!(matches!(r, Err(ProtocolError::Timeout { .. })));
+    }
+
+    // ── A custom chip using *standard* frames for flash ops, single SR,
+    //    no per-sector CRC, no blank-skip — exercises the BK7231N
+    //    single-SR unprotect/protect path that the real specs don't reach.
+    struct StdSingleSrChip;
+    impl super::super::chip::ChipSpec for StdSingleSrChip {
+        fn name(&self) -> &'static str {
+            "TEST-STD-1SR"
+        }
+    }
+
+    // ── A custom chip using standard frames + dual SR (two write cmds). ──
+    struct StdDualSrChip;
+    impl super::super::chip::ChipSpec for StdDualSrChip {
+        fn name(&self) -> &'static str {
+            "TEST-STD-2SR"
+        }
+    }
+
+    fn params_with_wp(wp: super::super::flash_table::WriteProtectConfig) -> FlashParams {
+        FlashParams {
+            mid: 0x000000,
+            name: "TEST",
+            vendor: "TEST",
+            total_size: 2 * 1024 * 1024,
+            sector_size: 4096,
+            block_size: 65536,
+            wp: Some(wp),
+        }
+    }
+
+    fn params_no_wp() -> FlashParams {
+        FlashParams {
+            mid: 0x000000,
+            name: "TEST",
+            vendor: "TEST",
+            total_size: 2 * 1024 * 1024,
+            sector_size: 4096,
+            block_size: 65536,
+            wp: None,
+        }
+    }
+
+    // ──────────────────── unprotect / protect (no WP) ─────────────────
+
+    #[test]
+    fn unprotect_no_wp_is_noop() {
+        let mut transport = make_transport(MockIo::new());
+        let r = unprotect_flash(&mut transport, &params_no_wp(), &StdSingleSrChip);
+        assert!(r.is_ok());
+        assert!(transport.io.sent.is_empty());
+    }
+
+    #[test]
+    fn protect_no_wp_is_noop() {
+        let mut transport = make_transport(MockIo::new());
+        let r = protect_flash(&mut transport, &params_no_wp(), &StdSingleSrChip);
+        assert!(r.is_ok());
+        assert!(transport.io.sent.is_empty());
+    }
+
+    // ──────────────── unprotect / protect — standard single SR ─────────
+
+    static SR1_R: &[u8] = &[0x05];
+    static SR1_W: &[u8] = &[0x01];
+    static SR12_R: &[u8] = &[0x05, 0x35];
+    static SR12_W: &[u8] = &[0x01, 0x31];
+
+    fn wp_single() -> super::super::flash_table::WriteProtectConfig {
+        super::super::flash_table::WriteProtectConfig {
+            read_sr_cmds: SR1_R,
+            write_sr_cmds: SR1_W,
+            protect_mask: 0x000f,
+            unprotect_value: 0,
+            protect_value: 0x0007,
+            sr_bytes: 1,
+        }
+    }
+
+    fn wp_dual() -> super::super::flash_table::WriteProtectConfig {
+        super::super::flash_table::WriteProtectConfig {
+            read_sr_cmds: SR12_R,
+            write_sr_cmds: SR12_W,
+            protect_mask: 0x407c,
+            unprotect_value: 0,
+            protect_value: 0x0007,
+            sr_bytes: 2,
+        }
+    }
+
+    #[test]
+    fn unprotect_single_sr_standard() {
+        let mut mock = MockIo::new();
+        // read SR returns 0x3C, then write SR ack.
+        mock.add_response(std_resp(command::CMD_FLASH_READ_SR, 0x00, &[0x3C]));
+        mock.add_response(std_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        let mut transport = make_transport(mock);
+        let r = unprotect_flash(
+            &mut transport,
+            &params_with_wp(wp_single()),
+            &StdSingleSrChip,
+        );
+        assert!(r.is_ok());
+        // One read + one write = 2 frames sent.
+        assert_eq!(transport.io.sent.len(), 2);
+    }
+
+    #[test]
+    fn protect_single_sr_standard() {
+        let mut mock = MockIo::new();
+        mock.add_response(std_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        let mut transport = make_transport(mock);
+        let r = protect_flash(
+            &mut transport,
+            &params_with_wp(wp_single()),
+            &StdSingleSrChip,
+        );
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 1);
+    }
+
+    #[test]
+    fn unprotect_dual_sr_standard() {
+        let mut mock = MockIo::new();
+        // two reads, then two writes (write_sr_cmds.len() > 1)
+        mock.add_response(std_resp(command::CMD_FLASH_READ_SR, 0x00, &[0x7C]));
+        mock.add_response(std_resp(command::CMD_FLASH_READ_SR, 0x00, &[0x40]));
+        mock.add_response(std_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        mock.add_response(std_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        let mut transport = make_transport(mock);
+        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &StdDualSrChip);
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 4);
+    }
+
+    #[test]
+    fn protect_dual_sr_standard() {
+        let mut mock = MockIo::new();
+        mock.add_response(std_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        mock.add_response(std_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        let mut transport = make_transport(mock);
+        let r = protect_flash(&mut transport, &params_with_wp(wp_dual()), &StdDualSrChip);
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 2);
+    }
+
+    #[test]
+    fn unprotect_read_sr_timeout_errors() {
+        let mut mock = MockIo::new();
+        mock.add_silence(1);
+        let mut transport = make_transport(mock);
+        let r = unprotect_flash(
+            &mut transport,
+            &params_with_wp(wp_single()),
+            &StdSingleSrChip,
+        );
+        assert!(matches!(r, Err(ProtocolError::Timeout { .. })));
+    }
+
+    // ──────────── unprotect / protect — T5 extended frames ─────────────
+
+    #[test]
+    fn unprotect_extended_t5() {
+        // T5 dual-SR extended unprotect: read SR1, read SR2, write SR1,
+        // write SR2 (write_sr_cmds.len()>1), then verify with read SR1,
+        // read SR2 — total 6 frames.
+        let mut mock = MockIo::new();
+        // initial reads: SR already clear (0x00) so masked bits match
+        mock.add_response(sr_ext_resp(0x00));
+        mock.add_response(sr_ext_resp(0x00));
+        // write acks
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        // verify reads: still clear → verified
+        mock.add_response(sr_ext_resp(0x00));
+        mock.add_response(sr_ext_resp(0x00));
+        let mut transport = make_transport(mock);
+        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &T5Spec);
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 6);
+    }
+
+    #[test]
+    fn unprotect_extended_t5_verify_fails() {
+        // SR after write still has protect bits set → verification fails.
+        let mut mock = MockIo::new();
+        mock.add_response(sr_ext_resp(0x7C)); // SR1 with BP bits set
+        mock.add_response(sr_ext_resp(0x40)); // SR2
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_SR, 0x00, &[]));
+        // verify reads: still protected → fail
+        mock.add_response(sr_ext_resp(0x7C));
+        mock.add_response(sr_ext_resp(0x40));
+        let mut transport = make_transport(mock);
+        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &T5Spec);
+        assert!(matches!(r, Err(ProtocolError::Protocol(_))));
+    }
+
+    #[test]
+    fn protect_extended_t5_already_protected() {
+        // SR already has the protect value → early return, only 2 reads.
+        let mut mock = MockIo::new();
+        mock.add_response(sr_ext_resp(0x07)); // matches protect_value lo byte
+        mock.add_response(sr_ext_resp(0x00));
+        let mut transport = make_transport(mock);
+        let r = protect_flash(&mut transport, &params_with_wp(wp_dual()), &T5Spec);
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 2);
+    }
+
+    // ───────────────────────── erase ─────────────────────────────────
+
+    #[test]
+    fn erase_empty_range_is_noop() {
+        let mut transport = make_transport(MockIo::new());
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x1000,
+            0x1000,
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        assert!(transport.io.sent.is_empty());
+    }
+
+    #[test]
+    fn erase_single_4k_sector() {
+        // Unaligned-to-64K small range → 4K sector erase, one erase frame.
+        let mut mock = MockIo::new();
+        // erase ack (extended, status 0x00). BK7231N uses extended flash ops.
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[]));
+        let mut transport = make_transport(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x1000,
+            0x2000, // 4 KiB, not 64K aligned/sized → sector erase
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 1);
+    }
+
+    #[test]
+    fn erase_sector_device_error() {
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x05, &[])); // non-zero status
+        let mut transport = make_transport(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x1000,
+            0x2000,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::DeviceError(0x05))));
+    }
+
+    #[test]
+    fn erase_64k_block_with_crc_verify() {
+        // Aligned 64K range → block erase + CRC verify of first 4K.
+        let blank_crc = crc32_ver2(&[0xFFu8; 4096]);
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // erase ack
+        mock.add_response(crc_resp(blank_crc)); // CRC matches blank → success
+        let mut transport = make_transport(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x0,
+            64 * 1024,
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        // erase frame + crc frame
+        assert_eq!(transport.io.sent.len(), 2);
+    }
+
+    #[test]
+    fn erase_64k_block_crc_fail_falls_back_to_4k() {
+        // CRC verify fails → 16× 4K sector erase fallback.
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 64K erase ack
+        mock.add_response(crc_resp(0x1234_5678)); // wrong CRC → fallback
+        for _ in 0..16 {
+            mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 4K acks
+        }
+        let mut transport = make_transport(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x0,
+            64 * 1024,
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        // 1 block erase + 1 crc + 16 sector erases = 18 frames
+        assert_eq!(transport.io.sent.len(), 18);
+    }
+
+    #[test]
+    fn erase_progress_callback_invoked() {
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[]));
+        let mut transport = make_transport(mock);
+        let done_cell = std::cell::Cell::new(0u32);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x1000,
+            0x2000,
+            &|done, _total| done_cell.set(done),
+        );
+        assert!(r.is_ok());
+        assert_eq!(done_cell.get(), 0x1000);
+    }
+
+    // ───────────────────────── write ─────────────────────────────────
+
+    #[test]
+    fn write_skips_blank_sectors_t5() {
+        // T5 skips all-0xFF sectors entirely; no frames sent.
+        let firmware = vec![0xFFu8; 4096];
+        let mut transport = make_transport(MockIo::new());
+        let r = write(
+            &mut transport,
+            &params_no_wp(),
+            &T5Spec,
+            &firmware,
+            0x0,
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        assert!(transport.io.sent.is_empty());
+    }
+
+    #[test]
+    fn write_one_sector_bk7231n_no_crc() {
+        // BK7231N has no per-sector CRC: just write + status check.
+        let firmware = vec![0xAAu8; 4096];
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_4K, 0x00, &[0, 0, 0, 0]));
+        let mut transport = make_transport(mock);
+        let r = write(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            &firmware,
+            0x10000,
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        assert_eq!(transport.io.sent.len(), 1);
+    }
+
+    #[test]
+    fn write_one_sector_t5_with_crc() {
+        // T5: write a non-blank sector + per-sector CRC verify.
+        let mut firmware = vec![0xAAu8; 4096];
+        firmware[0] = 0x01; // make it non-blank already true; ensure CRC distinct
+        let local_crc = crc32_ver2(&{
+            let mut s = [0xFFu8; 4096];
+            s[..firmware.len()].copy_from_slice(&firmware);
+            s
+        });
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_4K, 0x00, &[0, 0, 0, 0]));
+        mock.add_response(crc_resp(local_crc));
+        let mut transport = make_transport(mock);
+        let r = write(
+            &mut transport,
+            &params_no_wp(),
+            &T5Spec,
+            &firmware,
+            0x10000,
+            &|_, _| {},
+        );
+        assert!(r.is_ok());
+        // write frame + crc frame
+        assert_eq!(transport.io.sent.len(), 2);
+    }
+
+    #[test]
+    fn write_t5_crc_mismatch_retries_then_fails() {
+        // T5 CRC always mismatches → 5 attempts, then Protocol error.
+        let firmware = vec![0xAAu8; 4096];
+        let mut mock = MockIo::new();
+        // 5 attempts, each: write ack + wrong CRC.
+        for _ in 0..5 {
+            mock.add_response(ext_resp(command::CMD_FLASH_WRITE_4K, 0x00, &[0, 0, 0, 0]));
+            mock.add_response(crc_resp(0xBAD0_BAD0));
+        }
+        let mut transport = make_transport(mock);
+        let r = write(
+            &mut transport,
+            &params_no_wp(),
+            &T5Spec,
+            &firmware,
+            0x10000,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::Protocol(_))));
+    }
+
+    #[test]
+    fn write_short_last_chunk_padded() {
+        // Firmware shorter than 4K → padded; one write frame for BK7231N.
+        let firmware = vec![0x11u8; 100];
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_FLASH_WRITE_4K, 0x00, &[0, 0, 0, 0]));
+        let mut transport = make_transport(mock);
+        let done_cell = std::cell::Cell::new(0u32);
+        let r = write(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            &firmware,
+            0x10000,
+            &|done, _| done_cell.set(done),
+        );
+        assert!(r.is_ok());
+        assert_eq!(done_cell.get(), 100);
+        assert_eq!(transport.io.sent.len(), 1);
+    }
+
+    // ───────────────────────── read ──────────────────────────────────
+
+    #[test]
+    fn read_zero_length_returns_empty() {
+        let mut transport = make_transport(MockIo::new());
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x0,
+            0,
+            &|_, _| {},
+        );
+        assert_eq!(r.unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn read_one_sector_bk7231n() {
+        let mut sector = vec![0u8; 4096];
+        for (i, b) in sector.iter_mut().enumerate() {
+            *b = (i & 0xff) as u8;
+        }
+        let mut mock = MockIo::new();
+        mock.add_response(read4k_resp(0x10000, &sector));
+        let mut transport = make_transport(mock);
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x10000,
+            4096,
+            &|_, _| {},
+        )
+        .unwrap();
+        assert_eq!(r.len(), 4096);
+        assert_eq!(r, sector);
+    }
+
+    #[test]
+    fn read_partial_range_trimmed() {
+        // Request 256 bytes at offset 0x10 inside a 4K-aligned sector.
+        let mut sector = vec![0u8; 4096];
+        for (i, b) in sector.iter_mut().enumerate() {
+            *b = (i & 0xff) as u8;
+        }
+        let mut mock = MockIo::new();
+        mock.add_response(read4k_resp(0x10000, &sector));
+        let mut transport = make_transport(mock);
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x10010,
+            256,
+            &|_, _| {},
+        )
+        .unwrap();
+        assert_eq!(r.len(), 256);
+        assert_eq!(r, &sector[0x10..0x10 + 256]);
+    }
+
+    #[test]
+    fn read_one_sector_t5_with_crc() {
+        let sector = vec![0x5Au8; 4096];
+        let local_crc = crc32_ver2(&sector);
+        let mut mock = MockIo::new();
+        mock.add_response(read4k_resp(0x10000, &sector));
+        mock.add_response(crc_resp(local_crc));
+        let mut transport = make_transport(mock);
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &T5Spec,
+            0x10000,
+            4096,
+            &|_, _| {},
+        )
+        .unwrap();
+        assert_eq!(r, sector);
+        // read frame + crc frame
+        assert_eq!(transport.io.sent.len(), 2);
+    }
+
+    #[test]
+    fn read_t5_crc_mismatch_fails_after_retries() {
+        let sector = vec![0x5Au8; 4096];
+        let mut mock = MockIo::new();
+        for _ in 0..5 {
+            mock.add_response(read4k_resp(0x10000, &sector));
+            mock.add_response(crc_resp(0xBAD0_BAD0)); // never matches
+        }
+        let mut transport = make_transport(mock);
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &T5Spec,
+            0x10000,
+            4096,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::Protocol(_))));
+    }
+
+    #[test]
+    fn read_bk7231n_consecutive_failures_error() {
+        // All reads time out → after MAX_CONSECUTIVE_FAILURES → Protocol err.
+        let mut mock = MockIo::new();
+        mock.add_silence(10);
+        let mut transport = make_transport(mock);
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x10000,
+            4096,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::Protocol(_))));
+    }
+
+    // ──────────────────── cancellation paths ──────────────────────────
+
+    #[test]
+    fn erase_respects_cancel() {
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[]));
+        let mut transport = make_transport_cancelled(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x1000,
+            0x2000,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::Cancelled)));
+    }
+
+    #[test]
+    fn write_respects_cancel() {
+        let firmware = vec![0xAAu8; 4096];
+        let mut transport = make_transport_cancelled(MockIo::new());
+        let r = write(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            &firmware,
+            0x10000,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::Cancelled)));
+    }
+
+    #[test]
+    fn read_respects_cancel() {
+        let mut transport = make_transport_cancelled(MockIo::new());
+        let r = read(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x10000,
+            4096,
+            &|_, _| {},
+        );
+        assert!(matches!(r, Err(ProtocolError::Cancelled)));
+    }
 
     #[test]
     fn crc32_matches_python() {
