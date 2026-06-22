@@ -792,6 +792,90 @@ async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, String> {
     Ok(body)
 }
 
+/// Hex-encoded SHA-256 of the given bytes (lowercase).
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
+}
+
+/// Derive a path-safe cache filename for an auth-firmware version.
+/// Any character outside [A-Za-z0-9._-] is replaced with '_' to prevent traversal.
+fn auth_firmware_filename(version: &str) -> String {
+    let safe: String = version
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("auth-fw-{}.bin", safe)
+}
+
+/// Download an authorization firmware binary to the app cache dir, verifying its
+/// SHA-256. Idempotent: if a cached file with the matching hash already exists,
+/// it is reused without re-downloading. Returns the absolute local path.
+#[tauri::command]
+async fn download_auth_firmware(
+    app: AppHandle,
+    url: String,
+    sha256: String,
+    version: String,
+) -> Result<String, String> {
+    log::info!(
+        "[AuthFw] download_auth_firmware: version={}, url={}",
+        version,
+        url
+    );
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("auth-firmware");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(auth_firmware_filename(&version));
+    let expected = sha256.to_lowercase();
+
+    // Idempotent cache hit: reuse existing file when its hash matches.
+    if dest.exists() {
+        if let Ok(existing) = std::fs::read(&dest) {
+            if sha256_hex(&existing) == expected {
+                log::info!("[AuthFw] cache hit: {}", dest.display());
+                return Ok(dest.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let actual = sha256_hex(&bytes);
+    if actual != expected {
+        return Err(format!(
+            "SHA-256 mismatch: expected {}, got {}",
+            expected, actual
+        ));
+    }
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    log::info!(
+        "[AuthFw] downloaded {} bytes -> {}",
+        bytes.len(),
+        dest.display()
+    );
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn get_install_type() -> String {
     detect_install_type()
@@ -1277,6 +1361,7 @@ pub fn run() {
             check_port_available_cmd,
             check_file_exists,
             fetch_url,
+            download_auth_firmware,
             get_install_type,
             set_log_level,
             reset_main_window_layout,
@@ -1660,5 +1745,34 @@ mod xdg_command_tests {
             .map(|(_, v)| v.as_str())
             .unwrap();
         assert_eq!(dirs, "/usr/local/share:/usr/share");
+    }
+}
+
+#[cfg(test)]
+mod auth_firmware_tests {
+    use super::{auth_firmware_filename, sha256_hex};
+
+    #[test]
+    fn sha256_hex_matches_known_vector() {
+        // SHA-256 of the empty input.
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        // SHA-256 of "abc".
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn auth_firmware_filename_sanitizes_path_separators() {
+        assert_eq!(auth_firmware_filename("1.2.3"), "auth-fw-1.2.3.bin");
+        assert_eq!(
+            auth_firmware_filename("../etc/passwd"),
+            "auth-fw-.._etc_passwd.bin"
+        );
+        assert_eq!(auth_firmware_filename("a/b\\c"), "auth-fw-a_b_c.bin");
     }
 }
