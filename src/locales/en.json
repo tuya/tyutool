@@ -530,7 +530,19 @@
       "excelTotal": "Total",
       "excelUsed": "Used",
       "excelRemaining": "Remaining",
-      "excelExhausted": "All auth codes used — please add more to the Excel"
+      "excelExhausted": "All auth codes used — please add more to the Excel",
+      "firmwareSource": "Firmware Source",
+      "sourceLocal": "Local File",
+      "sourceDefault": "Default Auth Firmware",
+      "firmwareVersion": "Version",
+      "selectVersion": "Select version",
+      "downloadFirmware": "Download",
+      "firmwareLoading": "Loading versions…",
+      "firmwareDownloading": "Downloading firmware…",
+      "firmwareReady": "Firmware ready",
+      "firmwareLoadFailed": "Failed to load versions",
+      "firmwareDownloadFailed": "Download failed",
+      "firmwareNoVersions": "No versions available"
     },
     "toolbar": {
       "autoAssign": "Auto Assign",
