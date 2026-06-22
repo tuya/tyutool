@@ -516,6 +516,7 @@
       "elapsed": "Elapsed"
     },
     "config": {
+      "sharedConfig": "Shared Config",
       "chip": "Chip",
       "baud": "Baud Rate",
       "firmware": "Firmware File",
