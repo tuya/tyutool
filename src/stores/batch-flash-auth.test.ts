@@ -267,3 +267,31 @@ describe("resetFlashStats", () => {
     });
   });
 });
+
+describe("useBatchFlashAuthStore firmware source", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it("defaults to local source with empty path", () => {
+    const store = useBatchFlashAuthStore();
+    expect(store.firmwareSource).toBe("local");
+    expect(store.selectedDefaultVersion).toBe("");
+  });
+
+  it("switching source clears a previously chosen firmware path", () => {
+    const store = useBatchFlashAuthStore();
+    store.firmwarePath = "/tmp/local.bin";
+    store.setFirmwareSource("default");
+    expect(store.firmwareSource).toBe("default");
+    expect(store.firmwarePath).toBe("");
+  });
+
+  it("switching back to local resets default-firmware status", () => {
+    const store = useBatchFlashAuthStore();
+    store.setFirmwareSource("default");
+    store.setFirmwareSource("local");
+    expect(store.firmwareSource).toBe("local");
+    expect(store.defaultFirmwareStatus).toBe("idle");
+  });
+});
