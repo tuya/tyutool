@@ -791,6 +791,8 @@ mod tests {
         buf: Vec<u8>,
         /// Every byte slice written (for assertion).
         sent: Vec<Vec<u8>>,
+        /// Control-line transitions in order: ('D', level) for DTR, ('R', level) for RTS.
+        control_lines: Vec<(char, bool)>,
     }
 
     impl MockAuthIo {
@@ -799,6 +801,7 @@ mod tests {
                 responses: VecDeque::new(),
                 buf: Vec::new(),
                 sent: Vec::new(),
+                control_lines: Vec::new(),
             }
         }
 
@@ -830,10 +833,12 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
-        fn set_dtr(&mut self, _level: bool) -> io::Result<()> {
+        fn set_dtr(&mut self, level: bool) -> io::Result<()> {
+            self.control_lines.push(('D', level));
             Ok(())
         }
-        fn set_rts(&mut self, _level: bool) -> io::Result<()> {
+        fn set_rts(&mut self, level: bool) -> io::Result<()> {
+            self.control_lines.push(('R', level));
             Ok(())
         }
         fn clear_input(&mut self) -> io::Result<()> {
@@ -1002,8 +1007,14 @@ mod tests {
     fn hardware_reset_pulses_control_lines() {
         let mock = MockAuthIo::new();
         let mut sess = session(mock);
-        // No control-line errors from the mock → Ok.
         assert!(sess.hardware_reset().is_ok());
+        // Verify the exact reset sequence: DTR low, then RTS high→low pulse.
+        // A regression that swapped DTR/RTS, dropped the falling RTS edge, or
+        // reordered the pulse would change this recorded sequence.
+        assert_eq!(
+            sess.port.control_lines,
+            vec![('D', false), ('R', true), ('R', false)]
+        );
     }
 
     #[test]

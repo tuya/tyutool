@@ -202,20 +202,21 @@ pub fn shake<T: IoTransport>(
 ///
 /// Falls back to conservative defaults if the MID is not in the table.
 ///
-/// For T5, the FlashGetMID uses extended frame format with register address
-/// `0x9f` (JEDEC Read-ID command) in the payload.
-/// For BK7231N, it uses standard frame with empty payload.
+/// The frame format is selected by `chip.use_extended_flash_mid()`. All
+/// currently registered Beken chips (BK7231N, T1/T2/T3, T5) use the extended
+/// frame with register address `0x9f` (JEDEC Read-ID) in the payload; the
+/// standard-frame branch is the fallback for any chip that reports `false`.
 pub fn get_flash_params<T: IoTransport>(
     transport: &mut Transport<'_, T>,
     chip: &dyn ChipSpec,
 ) -> Result<FlashParams, ProtocolError> {
     log::info!("Reading Flash MID...");
     let rx = if chip.use_extended_flash_mid() {
-        // T5: extended frame with 0x9f register address
+        // Extended frame with 0x9f register address (all current Beken chips).
         let payload = build::flash_get_mid_ext(0x9f);
         transport.send_recv_extended(command::CMD_FLASH_GET_MID, &payload, 3000)?
     } else {
-        // BK7231N: standard frame, empty payload
+        // Fallback: standard frame, empty payload.
         transport.send_recv_standard(command::CMD_FLASH_GET_MID, &build::flash_get_mid(), 3000)?
     };
 

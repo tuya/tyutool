@@ -101,6 +101,14 @@ describe("flash store", () => {
     vi.mocked(loadFlashWorkspaceFromStorage).mockClear();
   });
 
+  afterEach(() => {
+    // Kill any setInterval the runJob mock left running for an operation that
+    // a test started but did not drive to completion, so a leaked timer can't
+    // fire its captured onProgress into the next test's disposed store.
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   // validateOperation requires uuid length 20 and authkey length 32.
   const VALID_UUID = "u".repeat(20);
   const VALID_KEY = "k".repeat(32);
