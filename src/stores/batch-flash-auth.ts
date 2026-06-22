@@ -171,6 +171,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   async function downloadDefaultFirmware(version: string) {
+    if (!isTauriRuntime()) return;
     const entry = defaultFirmwareEntries.value.find(
       (e) => e.version === version,
     );
@@ -190,6 +191,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   async function loadDefaultFirmwareList() {
+    if (!isTauriRuntime()) return;
     defaultFirmwareStatus.value = "loading";
     defaultFirmwareError.value = "";
     try {
