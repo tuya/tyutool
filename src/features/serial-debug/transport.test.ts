@@ -50,9 +50,9 @@ import { wsTransport } from "@/transport/ws-transport";
 const cfg: DebugConfig = {
   port: "/dev/ttyUSB0",
   baudRate: 115200,
-  dataBits: 8,
+  dataBits: "eight",
   parity: "none",
-  stopBits: 1,
+  stopBits: "one",
 };
 
 describe("serialDebugTransport factory", () => {

@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 const { showConfirmDialog, save, invoke } = vi.hoisted(() => ({
   showConfirmDialog: vi.fn(async () => true),
   save: vi.fn(async () => "/home/u/logs.zip"),
-  invoke: vi.fn(async () => undefined),
+  invoke: vi.fn(
+    async (_cmd: string, _args?: Record<string, unknown>) => undefined,
+  ),
 }));
 
 vi.mock("@/runtime", async (importOriginal) => ({
@@ -112,7 +114,7 @@ describe("exportLogsAndReport", () => {
 
   it("Tauri mode: copies the issue URL to the clipboard and opens it externally", async () => {
     vi.mocked(isTauriRuntime).mockReturnValue(true);
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(async (_text: string) => undefined);
     vi.stubGlobal("navigator", {
       userAgent: "Mozilla/5.0 (X11; Linux x86_64)",
       clipboard: { writeText },
