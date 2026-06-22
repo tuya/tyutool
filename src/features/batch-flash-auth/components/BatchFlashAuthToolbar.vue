@@ -13,16 +13,27 @@ const filterOpen = ref(false);
 async function handleStart() {
   const idleCount = store.slots.filter((s) => s.status === "idle").length;
   if (idleCount > 8) {
-    const excelInfo = store.authConfig.excelPath
-      ? `\n授权表：${store.authConfig.excelPath}`
-      : "";
-    const firmwareInfo =
-      store.opMode === "flash-then-auth" && store.firmwarePath
-        ? `\n固件：${store.firmwarePath}`
-        : "";
+    const parts: string[] = [
+      t("batchFlashAuth.dialog.aboutToOperate", { count: idleCount }),
+    ];
+    if (store.opMode === "flash-then-auth" && store.firmwarePath) {
+      parts.push(
+        t("batchFlashAuth.dialog.firmwareLine", { path: store.firmwarePath }),
+      );
+    }
+    if (store.authConfig.excelPath) {
+      parts.push(
+        t("batchFlashAuth.dialog.excelLine", {
+          path: store.authConfig.excelPath,
+        }),
+      );
+    }
     const ok = await showConfirmDialog({
-      title: store.opMode === "auth-only" ? "确认批量授权" : "确认批量烧录",
-      message: `即将对 ${idleCount} 个端口并行操作${firmwareInfo}${excelInfo}`,
+      title:
+        store.opMode === "auth-only"
+          ? t("batchFlashAuth.dialog.confirmAuthOnly")
+          : t("batchFlashAuth.dialog.confirmFlashThenAuth"),
+      message: parts.join("\n"),
       kind: "warning",
     });
     if (!ok) return;
@@ -44,7 +55,9 @@ async function handleAutoAssign() {
         class="ty-btn-secondary flex items-center gap-1.5 text-sm"
         :disabled="store.isBusy"
         :title="
-          store.isBusy ? '任务进行中，不可自动分配' : '扫描并添加可用串口'
+          store.isBusy
+            ? t('batchFlashAuth.toolbar.autoAssignBusy')
+            : t('batchFlashAuth.toolbar.autoAssignHint')
         "
         @click="handleAutoAssign"
       >
@@ -85,7 +98,11 @@ async function handleAutoAssign() {
         type="button"
         class="ty-btn-secondary text-sm"
         :disabled="!store.canRetry"
-        :title="!store.canRetry ? '暂无失败端口' : undefined"
+        :title="
+          !store.canRetry
+            ? t('batchFlashAuth.toolbar.noFailedPorts')
+            : undefined
+        "
         @click="store.retryFailed()"
       >
         {{ t("batchFlashAuth.toolbar.retry") }}
@@ -97,9 +114,9 @@ async function handleAutoAssign() {
         :disabled="!store.canStart"
         :title="
           !store.authConfig.excelPath
-            ? '请先选择授权表'
+            ? t('batchFlashAuth.toolbar.selectExcelFirst')
             : !store.slots.some((s) => s.status === 'idle')
-              ? '暂无空闲串口'
+              ? t('batchFlashAuth.toolbar.noIdlePorts')
               : undefined
         "
         @click="handleStart"
