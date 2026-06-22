@@ -88,3 +88,22 @@ export interface CompletionBanner {
   kind: CompletionBannerKind;
   message: string;
 }
+
+/** Firmware source mode for the batch auth tool. */
+export type BatchFirmwareSource = "local" | "default";
+
+/** One downloadable authorization firmware version.
+ *  Mirrors an entry in the `auth-firmware.json` release manifest. */
+export interface AuthFirmwareEntry {
+  version: string;
+  chip: string;
+  url: string;
+  sha256: string;
+  size?: number;
+  notes?: string;
+}
+
+/** Top-level shape of `auth-firmware.json`. */
+export interface AuthFirmwareManifest {
+  firmwares: AuthFirmwareEntry[];
+}
