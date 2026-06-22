@@ -396,6 +396,97 @@ mod hw_reset_tests {
 }
 
 #[cfg(test)]
+mod phantom_port_tests {
+    use super::is_phantom_port;
+    use serialport::{SerialPortType, UsbPortInfo};
+
+    fn usb() -> SerialPortType {
+        SerialPortType::UsbPort(UsbPortInfo {
+            vid: 0x1a86,
+            pid: 0x55d2,
+            serial_number: None,
+            manufacturer: None,
+            product: None,
+            interface: None,
+        })
+    }
+
+    #[test]
+    fn legacy_ttys_with_unknown_type_is_phantom_only_on_linux() {
+        let phantom = is_phantom_port("/dev/ttyS0", &SerialPortType::Unknown);
+        // The classification is Linux-specific; on other targets it is never phantom.
+        assert_eq!(phantom, cfg!(target_os = "linux"));
+        assert_eq!(
+            is_phantom_port("/dev/ttyS31", &SerialPortType::Unknown),
+            cfg!(target_os = "linux")
+        );
+    }
+
+    #[test]
+    fn usb_and_acm_ports_are_never_phantom() {
+        // Real USB device with a known type — never phantom on any platform.
+        assert!(!is_phantom_port("/dev/ttyUSB0", &usb()));
+        // ACM / non-ttyS paths with Unknown type — not phantom.
+        assert!(!is_phantom_port("/dev/ttyACM0", &SerialPortType::Unknown));
+        // A ttyS path but with a known (non-Unknown) type — not phantom.
+        assert!(!is_phantom_port("/dev/ttyS0", &usb()));
+    }
+}
+
+#[cfg(test)]
+mod ioreg_extract_tests {
+    use super::{extract_ioreg_quoted_value, extract_ioreg_u8_value};
+
+    #[test]
+    fn quoted_value_extracts_callout_device_path() {
+        let line = r#"        "IOCalloutDevice" = "/dev/cu.usbmodem56D70351251""#;
+        assert_eq!(
+            extract_ioreg_quoted_value(line, "IOCalloutDevice").as_deref(),
+            Some("/dev/cu.usbmodem56D70351251")
+        );
+    }
+
+    #[test]
+    fn quoted_value_returns_none_for_absent_or_malformed_key() {
+        // Key not present.
+        assert_eq!(
+            extract_ioreg_quoted_value("nothing here", "IOCalloutDevice"),
+            None
+        );
+        // Opening quote present but no closing quote.
+        let line = r#"   "IOCalloutDevice" = "/dev/cu.unterminated"#;
+        assert_eq!(extract_ioreg_quoted_value(line, "IOCalloutDevice"), None);
+    }
+
+    #[test]
+    fn u8_value_parses_interface_fields() {
+        let line = r#"      "bInterfaceNumber" = 3"#;
+        assert_eq!(extract_ioreg_u8_value(line, "bInterfaceNumber"), Some(3));
+        let cls = r#"      "bInterfaceClass" = 10"#;
+        assert_eq!(extract_ioreg_u8_value(cls, "bInterfaceClass"), Some(10));
+    }
+
+    #[test]
+    fn u8_value_returns_none_when_missing_or_non_numeric() {
+        // Key absent.
+        assert_eq!(
+            extract_ioreg_u8_value("unrelated line", "bInterfaceNumber"),
+            None
+        );
+        // Value present but not a digit immediately after the marker.
+        let line = r#"      "bInterfaceNumber" = Yes"#;
+        assert_eq!(extract_ioreg_u8_value(line, "bInterfaceNumber"), None);
+    }
+
+    #[test]
+    fn u8_value_overflow_returns_none() {
+        // 256 does not fit in u8; parse must fail and return None.
+        let line = r#"      "bInterfaceNumber" = 256"#;
+        assert_eq!(extract_ioreg_u8_value(line, "bInterfaceNumber"), None);
+    }
+}
+
+#[cfg(test)]
 mod macos_ioreg_parse_tests {
     use super::parse_macos_ioreg_usb_interfaces;
 
@@ -448,6 +539,41 @@ mod macos_ioreg_parse_tests {
         let parsed = parse_macos_ioreg_usb_interfaces(ioreg);
 
         assert!(!parsed.contains_key("/dev/cu.should-not-map"));
+    }
+
+    #[test]
+    fn cdc_data_flag_resets_at_each_new_host_interface() {
+        // The first interface is CDC data (class 10); the second is a control
+        // interface (class 2). The new `+-o IOUSBHostInterface@` boundary must
+        // reset the cdc-data flag so the second callout device is NOT mapped.
+        let ioreg = r#"
++-o IOUSBHostInterface@1  <class IOUSBHostInterface>
+  | {
+  |   "bInterfaceClass" = 10
+  |   "bInterfaceNumber" = 1
+  | }
+  +-o IOSerialBSDClient  <class IOSerialBSDClient>
+      {
+        "IOCalloutDevice" = "/dev/cu.mapped"
+      }
++-o IOUSBHostInterface@0  <class IOUSBHostInterface>
+  | {
+  |   "bInterfaceClass" = 2
+  |   "bInterfaceNumber" = 0
+  | }
+  +-o IOSerialBSDClient  <class IOSerialBSDClient>
+      {
+        "IOCalloutDevice" = "/dev/cu.unmapped"
+      }
+"#;
+        let parsed = parse_macos_ioreg_usb_interfaces(ioreg);
+        assert_eq!(parsed.get("/dev/cu.mapped"), Some(&1));
+        assert!(!parsed.contains_key("/dev/cu.unmapped"));
+    }
+
+    #[test]
+    fn empty_input_yields_empty_map() {
+        assert!(parse_macos_ioreg_usb_interfaces("").is_empty());
     }
 }
 

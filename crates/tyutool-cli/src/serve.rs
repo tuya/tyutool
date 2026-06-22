@@ -554,4 +554,149 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         assert_eq!(read_back, original);
     }
+
+    #[test]
+    fn deserialize_serial_debug_open_with_config() {
+        let json = r#"{
+            "type": "serial_debug_open",
+            "cfg": {
+                "port": "/dev/ttyUSB0",
+                "baudRate": 115200,
+                "dataBits": "eight",
+                "parity": "none",
+                "stopBits": "one"
+            }
+        }"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ClientMessage::SerialDebugOpen { cfg } => {
+                assert_eq!(cfg.port, "/dev/ttyUSB0");
+                assert_eq!(cfg.baud_rate, 115200);
+            }
+            other => panic!("expected SerialDebugOpen, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserialize_serial_debug_close_and_state() {
+        let close: ClientMessage =
+            serde_json::from_str(r#"{"type":"serial_debug_close"}"#).unwrap();
+        assert!(matches!(close, ClientMessage::SerialDebugClose));
+        let state: ClientMessage =
+            serde_json::from_str(r#"{"type":"serial_debug_state"}"#).unwrap();
+        assert!(matches!(state, ClientMessage::SerialDebugState));
+    }
+
+    #[test]
+    fn deserialize_serial_debug_send_bytes() {
+        let msg: ClientMessage =
+            serde_json::from_str(r#"{"type":"serial_debug_send","bytes":[1,2,255]}"#).unwrap();
+        match msg {
+            ClientMessage::SerialDebugSend { bytes } => assert_eq!(bytes, vec![1, 2, 255]),
+            other => panic!("expected SerialDebugSend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserialize_run_job_with_multiple_segments_and_file_contents() {
+        let json = r#"{
+            "type": "run_job",
+            "job": {
+                "mode": "flash",
+                "chipId": "T5",
+                "port": "/dev/ttyUSB0",
+                "baudRate": 921600,
+                "segments": [
+                    {"firmwarePath": "", "startAddr": "0x00000000", "endAddr": "0x00100000"},
+                    {"firmwarePath": "", "startAddr": "0x00100000", "endAddr": "0x00200000"}
+                ]
+            },
+            "file_contents": ["YWFh", "YmJi"]
+        }"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ClientMessage::RunJob {
+                job,
+                file_content,
+                file_contents,
+            } => {
+                assert!(file_content.is_none());
+                let segments = job.segments.expect("segments present");
+                assert_eq!(segments.len(), 2);
+                assert_eq!(segments[1].start_addr, "0x00100000");
+                assert_eq!(file_contents.unwrap().len(), 2);
+            }
+            other => panic!("expected RunJob, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serialize_serial_debug_lifecycle_messages_use_snake_case() {
+        assert!(serde_json::to_string(&ServerMessage::SerialDebugOpened)
+            .unwrap()
+            .contains(r#""type":"serial_debug_opened""#));
+        assert!(serde_json::to_string(&ServerMessage::SerialDebugClosed)
+            .unwrap()
+            .contains(r#""type":"serial_debug_closed""#));
+        let disc = serde_json::to_string(&ServerMessage::SerialDebugDisconnected {
+            reason: "device removed".into(),
+        })
+        .unwrap();
+        assert!(disc.contains(r#""type":"serial_debug_disconnected""#));
+        assert!(disc.contains(r#""reason":"device removed""#));
+    }
+
+    #[test]
+    fn serialize_serial_debug_state_info_omits_cfg_when_closed() {
+        let closed = serde_json::to_string(&ServerMessage::SerialDebugStateInfo {
+            open: false,
+            cfg: None,
+        })
+        .unwrap();
+        assert!(closed.contains(r#""type":"serial_debug_state_info""#));
+        assert!(closed.contains(r#""open":false"#));
+        // skip_serializing_if = Option::is_none → cfg must be absent.
+        assert!(
+            !closed.contains("cfg"),
+            "cfg should be omitted when None: {closed}"
+        );
+
+        let open = serde_json::to_string(&ServerMessage::SerialDebugStateInfo {
+            open: true,
+            cfg: Some(DebugConfig {
+                port: "/dev/ttyUSB0".into(),
+                baud_rate: 115200,
+                data_bits: tyutool_core::DataBits::Eight,
+                parity: tyutool_core::Parity::None,
+                stop_bits: tyutool_core::StopBits::One,
+            }),
+        })
+        .unwrap();
+        assert!(open.contains(r#""open":true"#));
+        assert!(
+            open.contains(r#""baudRate":115200"#),
+            "cfg should be present: {open}"
+        );
+    }
+
+    #[test]
+    fn serialize_error_and_chunk_messages() {
+        let err = serde_json::to_string(&ServerMessage::Error {
+            message: "boom".into(),
+        })
+        .unwrap();
+        assert!(err.contains(r#""type":"error""#));
+        assert!(err.contains(r#""message":"boom""#));
+
+        let chunk = serde_json::to_string(&ServerMessage::SerialDebugChunk {
+            chunk: DebugChunk {
+                direction: tyutool_core::Direction::Tx,
+                ts_ms: 42,
+                bytes: vec![7, 8],
+            },
+        })
+        .unwrap();
+        assert!(chunk.contains(r#""type":"serial_debug_chunk""#));
+        assert!(chunk.contains(r#""direction":"tx""#));
+    }
 }

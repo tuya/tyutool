@@ -158,13 +158,67 @@ fn is_shell_prompt(s: &str) -> bool {
     t == "tuya>" || t.starts_with("tuya> ")
 }
 
-// ── Serial session ────────────────────────────────────────────────────────
+// ── Serial I/O abstraction ──────────────────────────────────────────────────
 
-struct AuthSession {
+/// Byte-level serial I/O the [`AuthSession`] needs. Mirrors the proven
+/// `IoTransport` pattern (see `plugins/beken/transport.rs`): a real adapter
+/// wraps `serialport::SerialPort`, a test mock pre-loads reads and records writes.
+trait AuthIo: Send {
+    /// Number of bytes available to read without blocking.
+    fn bytes_to_read(&self) -> io::Result<u32>;
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+    fn write_all(&mut self, data: &[u8]) -> io::Result<()>;
+    fn flush(&mut self) -> io::Result<()>;
+    fn set_dtr(&mut self, level: bool) -> io::Result<()>;
+    fn set_rts(&mut self, level: bool) -> io::Result<()>;
+    /// Clear the input (RX) buffer.
+    fn clear_input(&mut self) -> io::Result<()>;
+}
+
+/// Real serial adapter wrapping `serialport::SerialPort`.
+struct SerialAuthIo {
     port: Box<dyn serialport::SerialPort>,
 }
 
-impl AuthSession {
+impl AuthIo for SerialAuthIo {
+    fn bytes_to_read(&self) -> io::Result<u32> {
+        self.port
+            .bytes_to_read()
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        io::Read::read(&mut self.port, buf)
+    }
+    fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+        io::Write::write_all(&mut self.port, data)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(&mut self.port)
+    }
+    fn set_dtr(&mut self, level: bool) -> io::Result<()> {
+        self.port
+            .write_data_terminal_ready(level)
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
+    fn set_rts(&mut self, level: bool) -> io::Result<()> {
+        self.port
+            .write_request_to_send(level)
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
+    fn clear_input(&mut self) -> io::Result<()> {
+        self.port
+            .clear(serialport::ClearBuffer::Input)
+            .map_err(|e| io::Error::other(e.to_string()))
+    }
+}
+
+// ── Serial session ────────────────────────────────────────────────────────
+
+struct AuthSession<T: AuthIo> {
+    port: T,
+}
+
+impl AuthSession<SerialAuthIo> {
     fn open(port_name: &str) -> Result<Self, FlashError> {
         let mut port = serialport::new(port_name, BAUD)
             .timeout(Duration::from_millis(50))
@@ -173,9 +227,13 @@ impl AuthSession {
         // De-assert control lines — avoid triggering download mode on open.
         let _ = port.write_data_terminal_ready(false);
         let _ = port.write_request_to_send(false);
-        Ok(Self { port })
+        Ok(Self {
+            port: SerialAuthIo { port },
+        })
     }
+}
 
+impl<T: AuthIo> AuthSession<T> {
     /// Read and discard bytes until the line has been quiet for [`DRAIN_QUIET`]
     /// or [`DRAIN_MAX`] has elapsed. Returns total bytes consumed.
     fn drain_boot_output(&mut self) -> usize {
@@ -190,7 +248,7 @@ impl AuthSession {
             match self.port.bytes_to_read() {
                 Ok(n) if n > 0 => {
                     let to_read = (n as usize).min(buf.len());
-                    if let Ok(read) = io::Read::read(&mut self.port, &mut buf[..to_read]) {
+                    if let Ok(read) = self.port.read(&mut buf[..to_read]) {
                         total += read;
                         last_data = Instant::now();
                     }
@@ -209,14 +267,14 @@ impl AuthSession {
     /// Pulse RTS to reset the device (same as tos.py `_hardware_reset_via_rts`).
     fn hardware_reset(&mut self) -> Result<(), FlashError> {
         self.port
-            .write_data_terminal_ready(false)
+            .set_dtr(false)
             .map_err(|e| FlashError::Plugin(format!("DTR error: {}", e)))?;
         self.port
-            .write_request_to_send(true)
+            .set_rts(true)
             .map_err(|e| FlashError::Plugin(format!("RTS high error: {}", e)))?;
         std::thread::sleep(Duration::from_millis(100));
         self.port
-            .write_request_to_send(false)
+            .set_rts(false)
             .map_err(|e| FlashError::Plugin(format!("RTS low error: {}", e)))?;
         std::thread::sleep(Duration::from_millis(100));
         Ok(())
@@ -224,10 +282,12 @@ impl AuthSession {
 
     /// Clear RX buffer then write `cmd\r\n`.
     fn send_cmd(&mut self, cmd: &str) -> Result<(), FlashError> {
-        let _ = self.port.clear(serialport::ClearBuffer::Input);
+        let _ = self.port.clear_input();
         let data = format!("{}\r\n", cmd);
-        io::Write::write_all(&mut self.port, data.as_bytes()).map_err(FlashError::Io)?;
-        io::Write::flush(&mut self.port).map_err(FlashError::Io)?;
+        self.port
+            .write_all(data.as_bytes())
+            .map_err(FlashError::Io)?;
+        self.port.flush().map_err(FlashError::Io)?;
         Ok(())
     }
 
@@ -236,11 +296,11 @@ impl AuthSession {
     /// before issuing real commands when the device has just booted.
     fn wake_shell(&mut self) {
         for _ in 0..3 {
-            let _ = io::Write::write_all(&mut self.port, b"\r\n");
+            let _ = self.port.write_all(b"\r\n");
             std::thread::sleep(Duration::from_millis(300));
         }
         // Drain prompt echoes and any leftover boot output.
-        let _ = self.port.clear(serialport::ClearBuffer::Input);
+        let _ = self.port.clear_input();
     }
 
     /// Read response lines within [`CMD_TIMEOUT`], returning early after
@@ -259,7 +319,7 @@ impl AuthSession {
             match self.port.bytes_to_read() {
                 Ok(n) if n > 0 => {
                     let to_read = (n as usize).min(tmp.len());
-                    if let Ok(read) = io::Read::read(&mut self.port, &mut tmp[..to_read]) {
+                    if let Ok(read) = self.port.read(&mut tmp[..to_read]) {
                         raw_buf.extend_from_slice(&tmp[..read]);
                         last_data = Some(Instant::now());
                         // Extract complete `\n`-terminated lines
@@ -716,6 +776,256 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+
+    /// Mock serial I/O for `AuthSession` unit tests.
+    ///
+    /// Each command sent via `send_cmd` begins with a `clear_input()` call;
+    /// on that signal the mock loads the next queued response into its read
+    /// buffer. `bytes_to_read`/`read` then serve that buffer, so the
+    /// idle-timeout read loops terminate naturally once it drains.
+    struct MockAuthIo {
+        /// Response served for each subsequent command (in order).
+        responses: VecDeque<Vec<u8>>,
+        /// Bytes currently available to read.
+        buf: Vec<u8>,
+        /// Every byte slice written (for assertion).
+        sent: Vec<Vec<u8>>,
+        /// Control-line transitions in order: ('D', level) for DTR, ('R', level) for RTS.
+        control_lines: Vec<(char, bool)>,
+    }
+
+    impl MockAuthIo {
+        fn new() -> Self {
+            Self {
+                responses: VecDeque::new(),
+                buf: Vec::new(),
+                sent: Vec::new(),
+                control_lines: Vec::new(),
+            }
+        }
+
+        /// Queue the text returned after the next command's `clear_input`.
+        fn add_response(&mut self, text: &str) {
+            self.responses.push_back(text.as_bytes().to_vec());
+        }
+
+        /// Concatenation of all sent bytes as a UTF-8 string.
+        fn sent_str(&self) -> String {
+            String::from_utf8_lossy(&self.sent.concat()).to_string()
+        }
+    }
+
+    impl AuthIo for MockAuthIo {
+        fn bytes_to_read(&self) -> io::Result<u32> {
+            Ok(self.buf.len() as u32)
+        }
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = self.buf.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.buf[..n]);
+            self.buf.drain(..n);
+            Ok(n)
+        }
+        fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+            self.sent.push(data.to_vec());
+            Ok(())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_dtr(&mut self, level: bool) -> io::Result<()> {
+            self.control_lines.push(('D', level));
+            Ok(())
+        }
+        fn set_rts(&mut self, level: bool) -> io::Result<()> {
+            self.control_lines.push(('R', level));
+            Ok(())
+        }
+        fn clear_input(&mut self) -> io::Result<()> {
+            // A command is starting: load its response so the following read
+            // loop sees the device's reply.
+            self.buf = self.responses.pop_front().unwrap_or_default();
+            Ok(())
+        }
+    }
+
+    fn session(mock: MockAuthIo) -> AuthSession<MockAuthIo> {
+        AuthSession { port: mock }
+    }
+
+    // ── auth_read parsing ──────────────────────────────────────────────
+
+    #[test]
+    fn auth_read_extracts_uuid_and_authkey() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-read\r\nuuid12345678901234\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\ntuya> \r\n",
+        );
+        let mut sess = session(mock);
+        assert_eq!(
+            sess.auth_read(),
+            Some((
+                "uuid12345678901234".to_string(),
+                "keyabcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn auth_read_filters_device_log_lines() {
+        let mut mock = MockAuthIo::new();
+        // Device-log lines and the echoed command must be filtered; only the
+        // two credential lines should remain.
+        mock.add_response(
+            "auth-read\r\n[04-24 10:30:00] [INFO] booting\r\nuuid12345678901234\r\n[04-24 10:30:01] noise\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\ntuya>\r\n",
+        );
+        let mut sess = session(mock);
+        assert_eq!(
+            sess.auth_read(),
+            Some((
+                "uuid12345678901234".to_string(),
+                "keyabcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn auth_read_handles_ansi_escapes() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-read\r\n\x1b[32muuid12345678901234\x1b[0m\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\n");
+        let mut sess = session(mock);
+        assert_eq!(
+            sess.auth_read(),
+            Some((
+                "uuid12345678901234".to_string(),
+                "keyabcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn auth_read_returns_none_for_single_line() {
+        let mut mock = MockAuthIo::new();
+        // Only one relevant line after filtering — not enough for a pair.
+        mock.add_response("auth-read\r\nuuid12345678901234\r\ntuya>\r\n");
+        let mut sess = session(mock);
+        assert_eq!(sess.auth_read(), None);
+    }
+
+    #[test]
+    fn auth_read_returns_none_for_empty_response() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("");
+        let mut sess = session(mock);
+        assert_eq!(sess.auth_read(), None);
+    }
+
+    #[test]
+    fn auth_read_returns_none_when_only_logs_and_prompt() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-read\r\n[04-24 10:30:00] [INFO] only logs\r\ntuya>\r\n");
+        let mut sess = session(mock);
+        assert_eq!(sess.auth_read(), None);
+    }
+
+    #[test]
+    fn auth_read_detects_placeholder_uuid() {
+        // Placeholder is a valid 2-line pair at the parsing layer; the
+        // higher-level flows treat it as "no auth".
+        let mut mock = MockAuthIo::new();
+        mock.add_response(&format!(
+            "auth-read\r\n{}\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\n",
+            PLACEHOLDER_UUID
+        ));
+        let mut sess = session(mock);
+        assert_eq!(
+            sess.auth_read(),
+            Some((
+                PLACEHOLDER_UUID.to_string(),
+                "keyabcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
+    }
+
+    // ── read_mac parsing ──────────────────────────────────────────────
+
+    #[test]
+    fn read_mac_parses_from_response() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("read_mac\r\nWIFI MAC ADDR:11:22:33:AA:BB:CC\r\ntuya>\r\n");
+        let mut sess = session(mock);
+        assert_eq!(sess.read_mac(), Some("11:22:33:AA:BB:CC".to_string()));
+    }
+
+    #[test]
+    fn read_mac_returns_none_without_mac() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("read_mac\r\nno address here\r\ntuya>\r\n");
+        let mut sess = session(mock);
+        assert_eq!(sess.read_mac(), None);
+    }
+
+    // ── send_cmd records the right bytes ───────────────────────────────
+
+    #[test]
+    fn send_cmd_writes_command_with_crlf() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("");
+        let mut sess = session(mock);
+        sess.send_cmd("auth-read").unwrap();
+        assert_eq!(sess.port.sent_str(), "auth-read\r\n");
+    }
+
+    #[test]
+    fn auth_write_sends_auth_command() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth uuid key\r\nAuthorization write succeeds.\r\n");
+        let mut sess = session(mock);
+        let _ = sess.auth_write("myuuid", "mykey");
+        assert!(sess.port.sent_str().contains("auth myuuid mykey\r\n"));
+    }
+
+    // ── command sequencing: drain → reset → wake → read ────────────────
+
+    #[test]
+    fn wake_shell_sends_three_newlines() {
+        let mock = MockAuthIo::new();
+        let mut sess = session(mock);
+        sess.wake_shell();
+        // Three bare CRLFs written.
+        assert_eq!(
+            sess.port
+                .sent
+                .iter()
+                .filter(|b| b.as_slice() == b"\r\n")
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn hardware_reset_pulses_control_lines() {
+        let mock = MockAuthIo::new();
+        let mut sess = session(mock);
+        assert!(sess.hardware_reset().is_ok());
+        // Verify the exact reset sequence: DTR low, then RTS high→low pulse.
+        // A regression that swapped DTR/RTS, dropped the falling RTS edge, or
+        // reordered the pulse would change this recorded sequence.
+        assert_eq!(
+            sess.port.control_lines,
+            vec![('D', false), ('R', true), ('R', false)]
+        );
+    }
+
+    #[test]
+    fn drain_boot_output_consumes_buffered_bytes() {
+        // drain_boot_output does not issue a command (no clear_input), so
+        // preload the read buffer directly with stale boot bytes.
+        let mut sess = session(MockAuthIo::new());
+        sess.port.buf = b"stale boot banner\r\n".to_vec();
+        let n = sess.drain_boot_output();
+        assert_eq!(n, "stale boot banner\r\n".len());
+    }
 
     #[test]
     fn strip_ansi_removes_escape_sequences() {

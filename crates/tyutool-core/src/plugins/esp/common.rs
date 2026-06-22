@@ -555,3 +555,107 @@ fn read_flash_with_progress(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// Collects every `FlashEvent` the adapter emits and returns the percent
+    /// values seen (in order). Non-percent events are ignored for percent runs.
+    fn percents_from(events: &[FlashEvent]) -> Vec<u8> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                FlashEvent::Percent { value } => Some(*value),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn maps_full_range_linearly() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        let mut a = ProgressAdapter::new(&cb, 0, 100);
+        a.init(0, 100);
+        a.update(0);
+        a.update(50);
+        a.update(100);
+        assert_eq!(percents_from(&seen.borrow()), vec![0, 50, 100]);
+    }
+
+    #[test]
+    fn maps_into_subrange() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        // Range [40, 80): start at 40%, full progress lands at 80%.
+        let mut a = ProgressAdapter::new(&cb, 40, 80);
+        a.init(0, 10);
+        a.update(0);
+        a.update(5);
+        a.update(10);
+        assert_eq!(percents_from(&seen.borrow()), vec![40, 60, 80]);
+    }
+
+    #[test]
+    fn update_is_clamped_to_pct_end() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        let mut a = ProgressAdapter::new(&cb, 0, 50);
+        a.init(0, 10);
+        // current beyond total would overshoot; must clamp to pct_end.
+        a.update(20);
+        assert_eq!(percents_from(&seen.borrow()), vec![50]);
+    }
+
+    #[test]
+    fn init_zero_total_does_not_divide_by_zero() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        let mut a = ProgressAdapter::new(&cb, 0, 100);
+        a.init(0, 0); // clamped internally to 1
+        a.update(0);
+        a.update(1);
+        assert_eq!(percents_from(&seen.borrow()), vec![0, 100]);
+    }
+
+    #[test]
+    fn finish_emits_pct_end_when_not_skipped() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        let mut a = ProgressAdapter::new(&cb, 0, 90);
+        a.finish(false);
+        assert_eq!(percents_from(&seen.borrow()), vec![90]);
+    }
+
+    #[test]
+    fn finish_emits_nothing_when_skipped() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        let mut a = ProgressAdapter::new(&cb, 0, 90);
+        a.finish(true);
+        assert!(seen.borrow().is_empty());
+    }
+
+    #[test]
+    fn verifying_resets_to_full_range_and_emits_verify_phase() {
+        let seen: RefCell<Vec<FlashEvent>> = RefCell::new(Vec::new());
+        let cb = |e: FlashEvent| seen.borrow_mut().push(e);
+        // Start in a write subrange, then enter verify.
+        let mut a = ProgressAdapter::new(&cb, 40, 80);
+        a.init(0, 10);
+        a.verifying();
+        // First event is the Verify phase transition.
+        assert!(matches!(
+            seen.borrow()[0],
+            FlashEvent::Phase {
+                phase: FlashPhase::Verify
+            }
+        ));
+        // After verifying(), range is reset to [0, 100): update maps linearly.
+        a.update(0);
+        a.update(10);
+        assert_eq!(percents_from(&seen.borrow()), vec![0, 100]);
+    }
+}

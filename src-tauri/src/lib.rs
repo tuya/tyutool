@@ -366,15 +366,23 @@ fn batch_flash_cancel_all(state: State<'_, BatchFlashState>) -> Result<(), Strin
     Ok(())
 }
 
-#[tauri::command]
-fn validate_excel_cmd(path: String) -> Result<batch_auth::ExcelStats, String> {
-    let p = std::path::Path::new(&path);
+/// Validate that `path` exists and has an `.xlsx` extension, returning the
+/// borrowed path on success. Pure: the existence + extension branches are the
+/// testable part; the happy path delegates to the already-tested loader.
+fn validate_excel_file(path: &str) -> Result<&std::path::Path, String> {
+    let p = std::path::Path::new(path);
     if !p.exists() {
         return Err("文件不存在".into());
     }
     if p.extension().and_then(|e| e.to_str()) != Some("xlsx") {
         return Err("请选择 .xlsx 格式文件".into());
     }
+    Ok(p)
+}
+
+#[tauri::command]
+fn validate_excel_cmd(path: String) -> Result<batch_auth::ExcelStats, String> {
+    let p = validate_excel_file(&path)?;
     let alloc = batch_auth::ExcelRowAllocator::load(p)?;
     Ok(alloc.stats())
 }
@@ -973,11 +981,18 @@ fn tail_bytes(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String>
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// Select the active log in `dir` and return its last `max_bytes` bytes.
+/// Pure (no AppHandle): pick + tail folded into one testable unit.
+fn read_log_tail_impl(dir: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    let path = pick_active_log(dir)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no log file found"))?;
+    tail_bytes(&path, max_bytes)
+}
+
 #[tauri::command]
 fn read_log_tail(app: AppHandle, max_bytes: usize) -> Result<String, String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-    let path = pick_active_log(&dir).ok_or_else(|| "no log file found".to_string())?;
-    tail_bytes(&path, max_bytes as u64).map_err(|e| e.to_string())
+    read_log_tail_impl(&dir, max_bytes as u64).map_err(|e| e.to_string())
 }
 
 fn collect_log_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -1024,17 +1039,32 @@ fn write_logs_zip(
     Ok(())
 }
 
+/// Gather `*.log` files from `dir`, build the report header, and write the zip
+/// to `dest`. Pure (no AppHandle): collect + build + write folded into one unit.
+fn gather_and_write_logs_zip(
+    dir: &std::path::Path,
+    name: &str,
+    version: &str,
+    install: &str,
+    session_id: &str,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    let files = collect_log_files(dir);
+    let info = build_report_info(name, version, install, session_id);
+    write_logs_zip(&files, &info, dest)
+}
+
 #[tauri::command]
 fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-    let files = collect_log_files(&dir);
-    let info = build_report_info(
+    gather_and_write_logs_zip(
+        &dir,
         &app.package_info().name,
         &app.package_info().version.to_string(),
         &detect_install_type(),
         SESSION_ID.get().map(String::as_str).unwrap_or(""),
-    );
-    write_logs_zip(&files, &info, std::path::Path::new(&dest_path))
+        std::path::Path::new(&dest_path),
+    )
 }
 
 /// Open an external URL in the system browser.
@@ -1059,6 +1089,83 @@ fn open_external_url(url: String) -> Result<(), String> {
     }
 }
 
+/// AppImage-injected environment variables that point a spawned process at the
+/// bundled libraries/modules. Stripped before launching the system browser.
+#[cfg(target_os = "linux")]
+const APPIMAGE_INJECTED_VARS: &[&str] = &[
+    "LD_LIBRARY_PATH",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GTK_IM_MODULE_FILE",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GIO_EXTRA_MODULES",
+    "GSETTINGS_SCHEMA_DIR",
+    "GST_PLUGIN_SYSTEM_PATH",
+    "GST_PLUGIN_SYSTEM_PATH_1_0",
+    "QT_PLUGIN_PATH",
+    "PERLLIB",
+    "PYTHONPATH",
+    "PYTHONHOME",
+];
+
+/// The command + environment changes needed to launch `xdg-open` cleanly.
+/// Returned (rather than spawned) so the sanitization decisions are testable.
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq)]
+struct XdgCommandSpec {
+    program: String,
+    arg: String,
+    env_remove: Vec<&'static str>,
+    /// (key, value) pairs to set; empty when not inside an AppImage.
+    env_set: Vec<(&'static str, String)>,
+}
+
+/// Build the launch spec for opening `url` via `xdg`. When `appdir` is `Some`
+/// (running inside an AppImage), strip the injected vars, reset PATH, and drop
+/// `$APPDIR` entries from `xdg_data_dirs`. When `None`, no sanitization.
+#[cfg(target_os = "linux")]
+fn build_xdg_command_spec(
+    url: &str,
+    xdg: &str,
+    appdir: Option<&str>,
+    xdg_data_dirs: Option<&str>,
+) -> XdgCommandSpec {
+    let mut env_remove = Vec::new();
+    let mut env_set = Vec::new();
+
+    if let Some(appdir) = appdir {
+        env_remove.extend_from_slice(APPIMAGE_INJECTED_VARS);
+        // Reset PATH so the browser and its helpers resolve to system binaries.
+        env_set.push((
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+        ));
+        // Drop the $APPDIR entries from XDG_DATA_DIRS (handler/.desktop lookup).
+        if let Some(dirs) = xdg_data_dirs {
+            let cleaned: Vec<&str> = dirs
+                .split(':')
+                .filter(|d| !d.is_empty() && !d.starts_with(appdir))
+                .collect();
+            env_set.push((
+                "XDG_DATA_DIRS",
+                if cleaned.is_empty() {
+                    "/usr/local/share:/usr/share".to_string()
+                } else {
+                    cleaned.join(":")
+                },
+            ));
+        }
+    }
+
+    XdgCommandSpec {
+        program: xdg.to_string(),
+        arg: url.to_string(),
+        env_remove,
+        env_set,
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn open_external_url_linux(url: &str) -> Result<(), String> {
     use std::process::Command;
@@ -1069,58 +1176,24 @@ fn open_external_url_linux(url: &str) -> Result<(), String> {
         .find(|p| std::path::Path::new(p).exists())
         .unwrap_or("xdg-open");
 
-    let in_appimage = std::env::var_os("APPDIR").is_some();
+    let appdir = std::env::var("APPDIR").ok();
     log::info!(
         "[OpenUrl] linux: appimage={}, opener={}, url_len={}",
-        in_appimage,
+        appdir.is_some(),
         xdg,
         url.len()
     );
 
-    let mut cmd = Command::new(xdg);
-    cmd.arg(url);
+    let xdg_data_dirs = std::env::var("XDG_DATA_DIRS").ok();
+    let spec = build_xdg_command_spec(url, xdg, appdir.as_deref(), xdg_data_dirs.as_deref());
 
-    // Only sanitize when actually inside an AppImage (APPDIR is set by AppRun).
-    if let Some(appdir) = std::env::var_os("APPDIR") {
-        let appdir = appdir.to_string_lossy().into_owned();
-        for var in [
-            "LD_LIBRARY_PATH",
-            "GTK_PATH",
-            "GTK_EXE_PREFIX",
-            "GTK_DATA_PREFIX",
-            "GTK_IM_MODULE_FILE",
-            "GDK_PIXBUF_MODULE_FILE",
-            "GIO_EXTRA_MODULES",
-            "GSETTINGS_SCHEMA_DIR",
-            "GST_PLUGIN_SYSTEM_PATH",
-            "GST_PLUGIN_SYSTEM_PATH_1_0",
-            "QT_PLUGIN_PATH",
-            "PERLLIB",
-            "PYTHONPATH",
-            "PYTHONHOME",
-        ] {
-            cmd.env_remove(var);
-        }
-        // Reset PATH so the browser and its helpers resolve to system binaries.
-        cmd.env(
-            "PATH",
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        );
-        // Drop the $APPDIR entries from XDG_DATA_DIRS (handler/.desktop lookup).
-        if let Ok(dirs) = std::env::var("XDG_DATA_DIRS") {
-            let cleaned: Vec<&str> = dirs
-                .split(':')
-                .filter(|d| !d.is_empty() && !d.starts_with(&appdir))
-                .collect();
-            cmd.env(
-                "XDG_DATA_DIRS",
-                if cleaned.is_empty() {
-                    "/usr/local/share:/usr/share".to_string()
-                } else {
-                    cleaned.join(":")
-                },
-            );
-        }
+    let mut cmd = Command::new(&spec.program);
+    cmd.arg(&spec.arg);
+    for var in &spec.env_remove {
+        cmd.env_remove(var);
+    }
+    for (key, value) in &spec.env_set {
+        cmd.env(key, value);
     }
 
     // status() waits only for xdg-open (which returns once the browser is
@@ -1370,6 +1443,69 @@ mod log_tools_tests {
     }
 
     #[test]
+    fn pick_active_log_falls_back_to_a_log_when_no_exact_name() {
+        let dir = tempfile::tempdir().unwrap();
+        // No "tyutool.log" present, only timestamped rotations + a non-log file.
+        std::fs::write(dir.path().join("tyutool_old.log"), b"old").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
+
+        let picked = pick_active_log(dir.path()).unwrap();
+        assert_eq!(picked.extension().unwrap(), "log");
+    }
+
+    #[test]
+    fn pick_active_log_returns_none_for_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
+        assert!(pick_active_log(dir.path()).is_none());
+    }
+
+    #[test]
+    fn tail_bytes_returns_whole_file_when_max_exceeds_len() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.log");
+        std::fs::write(&p, b"abc").unwrap();
+        let tail = tail_bytes(&p, 1000).unwrap();
+        assert_eq!(tail, "abc");
+    }
+
+    #[test]
+    fn collect_log_files_filters_only_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.log"), b"x").unwrap();
+        std::fs::write(dir.path().join("b.log"), b"x").unwrap();
+        std::fs::write(dir.path().join("c.txt"), b"x").unwrap();
+        std::fs::write(dir.path().join("readme"), b"x").unwrap();
+
+        let files = collect_log_files(dir.path());
+
+        assert_eq!(files.len(), 2);
+        assert!(files
+            .iter()
+            .all(|p| p.extension().map(|x| x == "log").unwrap_or(false)));
+    }
+
+    #[test]
+    fn collect_log_files_returns_empty_for_missing_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        assert!(collect_log_files(&missing).is_empty());
+    }
+
+    #[test]
+    fn build_report_info_contains_expected_fields() {
+        let info = build_report_info("tyutool", "3.0.11", "AppImage", "abc-123");
+
+        assert!(info.contains("name: tyutool"));
+        assert!(info.contains("version: 3.0.11"));
+        assert!(info.contains("install: AppImage"));
+        assert!(info.contains("session: abc-123"));
+        assert!(info.contains(&format!("os: {}", std::env::consts::OS)));
+        assert!(info.contains(&format!("arch: {}", std::env::consts::ARCH)));
+        assert!(info.contains(&format!("family: {}", std::env::consts::FAMILY)));
+    }
+
+    #[test]
     fn write_logs_zip_includes_logs_and_report() {
         let dir = tempfile::tempdir().unwrap();
         let log_a = dir.path().join("tyutool.log");
@@ -1385,5 +1521,144 @@ mod log_tools_tests {
             .collect();
         assert!(names.contains(&"report-info.txt".to_string()));
         assert!(names.contains(&"tyutool.log".to_string()));
+    }
+
+    #[test]
+    fn read_log_tail_impl_reads_active_log_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool.log"), b"0123456789").unwrap();
+        let tail = read_log_tail_impl(dir.path(), 4).unwrap();
+        assert_eq!(tail, "6789");
+    }
+
+    #[test]
+    fn read_log_tail_impl_errors_when_no_log() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
+        let err = read_log_tail_impl(dir.path(), 100).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn gather_and_write_logs_zip_collects_logs_and_report() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool.log"), b"hello").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"skip").unwrap();
+        let dest = dir.path().join("out.zip");
+
+        gather_and_write_logs_zip(dir.path(), "tyutool", "3.0.11", "AppImage", "sid", &dest)
+            .unwrap();
+
+        let f = std::fs::File::open(&dest).unwrap();
+        let mut zip = zip::ZipArchive::new(f).unwrap();
+        let names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.contains(&"report-info.txt".to_string()));
+        assert!(names.contains(&"tyutool.log".to_string()));
+        assert!(!names.contains(&"notes.txt".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod validate_excel_tests {
+    use super::*;
+
+    #[test]
+    fn validate_excel_file_rejects_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope.xlsx");
+        let err = validate_excel_file(missing.to_str().unwrap()).unwrap_err();
+        assert_eq!(err, "文件不存在");
+    }
+
+    #[test]
+    fn validate_excel_file_rejects_wrong_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("data.csv");
+        std::fs::write(&p, b"x").unwrap();
+        let err = validate_excel_file(p.to_str().unwrap()).unwrap_err();
+        assert_eq!(err, "请选择 .xlsx 格式文件");
+    }
+
+    #[test]
+    fn validate_excel_file_accepts_existing_xlsx() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("book.xlsx");
+        std::fs::write(&p, b"x").unwrap();
+        let ok = validate_excel_file(p.to_str().unwrap()).unwrap();
+        assert_eq!(ok, p.as_path());
+    }
+}
+
+#[cfg(test)]
+#[cfg(target_os = "linux")]
+mod xdg_command_tests {
+    use super::*;
+
+    #[test]
+    fn no_appimage_leaves_env_untouched() {
+        let spec = build_xdg_command_spec("https://example.com", "/usr/bin/xdg-open", None, None);
+        assert_eq!(spec.program, "/usr/bin/xdg-open");
+        assert_eq!(spec.arg, "https://example.com");
+        assert!(spec.env_remove.is_empty());
+        assert!(spec.env_set.is_empty());
+    }
+
+    #[test]
+    fn appimage_strips_vars_and_resets_path() {
+        let spec = build_xdg_command_spec(
+            "https://example.com",
+            "/usr/bin/xdg-open",
+            Some("/tmp/.mount_app"),
+            None,
+        );
+        assert!(spec.env_remove.contains(&"LD_LIBRARY_PATH"));
+        assert!(spec.env_remove.contains(&"GTK_PATH"));
+        let path = spec
+            .env_set
+            .iter()
+            .find(|(k, _)| *k == "PATH")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            path,
+            Some("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+        );
+        // No XDG_DATA_DIRS provided -> not set.
+        assert!(spec.env_set.iter().all(|(k, _)| *k != "XDG_DATA_DIRS"));
+    }
+
+    #[test]
+    fn appimage_drops_appdir_entries_from_xdg_data_dirs() {
+        let spec = build_xdg_command_spec(
+            "https://example.com",
+            "/usr/bin/xdg-open",
+            Some("/tmp/.mount_app"),
+            Some("/tmp/.mount_app/usr/share:/usr/share:/usr/local/share"),
+        );
+        let dirs = spec
+            .env_set
+            .iter()
+            .find(|(k, _)| *k == "XDG_DATA_DIRS")
+            .map(|(_, v)| v.as_str())
+            .unwrap();
+        assert_eq!(dirs, "/usr/share:/usr/local/share");
+    }
+
+    #[test]
+    fn appimage_falls_back_when_all_xdg_data_dirs_stripped() {
+        let spec = build_xdg_command_spec(
+            "https://example.com",
+            "/usr/bin/xdg-open",
+            Some("/tmp/.mount_app"),
+            Some("/tmp/.mount_app/usr/share"),
+        );
+        let dirs = spec
+            .env_set
+            .iter()
+            .find(|(k, _)| *k == "XDG_DATA_DIRS")
+            .map(|(_, v)| v.as_str())
+            .unwrap();
+        assert_eq!(dirs, "/usr/local/share:/usr/share");
     }
 }

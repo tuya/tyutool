@@ -650,6 +650,37 @@ mod rotation_tests {
     use std::path::Path;
 
     #[test]
+    fn with_ext_num_appends_numeric_suffix() {
+        let base = Path::new("/var/log/tyutool.log");
+        assert_eq!(
+            with_ext_num(base, 1).display().to_string(),
+            "/var/log/tyutool.log.1"
+        );
+        assert_eq!(
+            with_ext_num(base, 3).display().to_string(),
+            "/var/log/tyutool.log.3"
+        );
+    }
+
+    #[test]
+    fn rotation_plan_keep_1_only_moves_base() {
+        let base = Path::new("/tmp/tyutool.log");
+        let moves: Vec<(String, String)> = rotation_plan(base, 1)
+            .iter()
+            .map(|(a, b): &(std::path::PathBuf, std::path::PathBuf)| {
+                (a.display().to_string(), b.display().to_string())
+            })
+            .collect();
+        assert_eq!(
+            moves,
+            vec![(
+                "/tmp/tyutool.log".to_string(),
+                "/tmp/tyutool.log.1".to_string()
+            )]
+        );
+    }
+
+    #[test]
     fn rotation_plan_keep_3_shifts_oldest_last() {
         let base = Path::new("/tmp/tyutool.log");
         let moves: Vec<(String, String)> = rotation_plan(base, 3)

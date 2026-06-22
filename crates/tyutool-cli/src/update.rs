@@ -300,4 +300,96 @@ mod tests {
         // Wrong data must not match.
         assert!(!verify_sha256(b"abcd", expected));
     }
+
+    #[test]
+    fn platform_key_matches_current_build_target() {
+        // platform_key() is cfg-conditional; assert it returns the key for the
+        // target this test is compiled for. Any build target the CLI ships for
+        // must yield Some(_); only exotic hosts return None.
+        let expected = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            Some("linux-x86_64")
+        } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+            Some("linux-aarch64")
+        } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            Some("darwin-x86_64")
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            Some("darwin-aarch64")
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            Some("windows-x86_64")
+        } else {
+            None
+        };
+        assert_eq!(platform_key(), expected);
+    }
+
+    // ─── Archive extraction fixtures (built in-test with existing deps) ─────────
+
+    fn build_tar_gz(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        let buf = Vec::new();
+        let enc = GzEncoder::new(buf, Compression::default());
+        let mut builder = tar::Builder::new(enc);
+        for (name, data) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, name, *data)
+                .expect("append tar entry");
+        }
+        let enc = builder.into_inner().expect("finish tar");
+        enc.finish().expect("finish gzip")
+    }
+
+    fn build_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Cursor;
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            let opts = SimpleFileOptions::default();
+            for (name, data) in entries {
+                writer.start_file(*name, opts).expect("start zip entry");
+                writer.write_all(data).expect("write zip entry");
+            }
+            writer.finish().expect("finish zip");
+        }
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn extract_binary_from_tar_gz_finds_cli_binary() {
+        let payload = b"\x7fELF fake binary bytes";
+        let archive = build_tar_gz(&[
+            ("README.txt", b"docs"),
+            ("tyutool_cli", payload),
+            ("extra", b"junk"),
+        ]);
+        let extracted = extract_binary_from_tar_gz(&archive).expect("extract tar.gz");
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn extract_binary_from_tar_gz_errors_when_binary_absent() {
+        let archive = build_tar_gz(&[("README.txt", b"docs"), ("notes.md", b"text")]);
+        assert!(extract_binary_from_tar_gz(&archive).is_err());
+    }
+
+    #[test]
+    fn extract_binary_from_zip_finds_cli_exe_by_suffix() {
+        let payload = b"MZ fake windows binary";
+        // The zip extractor matches by suffix, so a nested path must still resolve.
+        let archive = build_zip(&[("readme.txt", b"docs"), ("dist/tyutool_cli.exe", payload)]);
+        let extracted = extract_binary_from_zip(&archive).expect("extract zip");
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn extract_binary_from_zip_errors_when_binary_absent() {
+        let archive = build_zip(&[("readme.txt", b"docs")]);
+        assert!(extract_binary_from_zip(&archive).is_err());
+    }
 }

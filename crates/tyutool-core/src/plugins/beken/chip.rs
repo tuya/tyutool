@@ -408,3 +408,125 @@ pub fn t5_post_handshake<T: IoTransport>(
 ) -> Result<(), ProtocolError> {
     post_handshake_read_chip_id(transport, "T5")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bk7231n_spec_getters() {
+        let s = Bk7231nSpec;
+        assert_eq!(s.name(), "BK7231N");
+        // Defaults inherited from the trait.
+        assert_eq!(s.initial_baud(), 115200);
+        assert_eq!(s.handshake_retries(), 50);
+        assert_eq!(s.handshake_interval_ms(), 20);
+        assert!(!s.needs_post_handshake());
+        assert!(!s.uses_extended_reset_sequence());
+        assert!(!s.has_per_sector_crc());
+        assert!(!s.skip_blank_sectors());
+        assert!(!s.use_extended_erase());
+        // Overridden values.
+        assert_eq!(s.baud_switch_delay_ms(), 100);
+        assert!(s.use_extended_frame(0));
+        assert!(s.use_extended_frame(0x1234));
+        assert!(s.use_extended_flash_mid());
+        assert!(s.use_extended_flash_ops());
+        assert!(s.use_block_erase_64k());
+    }
+
+    #[test]
+    fn t5_spec_getters() {
+        let s = T5Spec;
+        assert_eq!(s.name(), "T5");
+        assert_eq!(s.initial_baud(), 115200);
+        assert_eq!(s.handshake_retries(), 50);
+        assert_eq!(s.handshake_interval_ms(), 1);
+        assert_eq!(s.baud_switch_delay_ms(), 20);
+        assert!(s.needs_post_handshake());
+        assert!(s.uses_extended_reset_sequence());
+        assert!(s.use_extended_frame(0));
+        assert!(s.use_extended_frame(0xffff_ffff));
+        assert!(s.has_per_sector_crc());
+        assert!(s.skip_blank_sectors());
+        assert!(!s.use_extended_erase());
+        assert!(s.use_block_erase_64k());
+        assert!(s.use_extended_flash_mid());
+        assert!(s.use_extended_flash_ops());
+    }
+
+    #[test]
+    fn t1_spec_getters() {
+        let s = T1Spec;
+        assert_eq!(s.name(), "T1");
+        assert_eq!(s.handshake_interval_ms(), 1);
+        assert_eq!(s.baud_switch_delay_ms(), 20);
+        assert!(s.needs_post_handshake());
+        assert!(s.uses_extended_reset_sequence());
+        assert!(s.use_extended_frame(0));
+        assert!(s.has_per_sector_crc());
+        assert!(s.skip_blank_sectors());
+        assert!(!s.use_extended_erase());
+        assert!(s.use_extended_flash_mid());
+        assert!(s.use_extended_flash_ops());
+        // Inherited default.
+        assert!(s.use_block_erase_64k());
+    }
+
+    #[test]
+    fn t2_spec_getters() {
+        let s = T2Spec;
+        assert_eq!(s.name(), "T2");
+        assert_eq!(s.baud_switch_delay_ms(), 100);
+        // Inherited defaults — T2 behaves like BK7231N.
+        assert_eq!(s.handshake_interval_ms(), 20);
+        assert!(!s.needs_post_handshake());
+        assert!(!s.uses_extended_reset_sequence());
+        assert!(!s.has_per_sector_crc());
+        assert!(!s.skip_blank_sectors());
+        // Overrides.
+        assert!(s.use_extended_frame(0));
+        assert!(s.use_extended_flash_mid());
+        assert!(s.use_extended_flash_ops());
+        assert!(s.use_block_erase_64k());
+    }
+
+    #[test]
+    fn t3_spec_getters() {
+        let s = T3Spec;
+        assert_eq!(s.name(), "T3");
+        assert_eq!(s.handshake_interval_ms(), 1);
+        assert_eq!(s.baud_switch_delay_ms(), 20);
+        assert!(s.needs_post_handshake());
+        assert!(s.uses_extended_reset_sequence());
+        assert!(s.use_extended_frame(0));
+        assert!(s.has_per_sector_crc());
+        assert!(s.skip_blank_sectors());
+        assert!(s.use_extended_flash_mid());
+        assert!(s.use_extended_flash_ops());
+        // Inherited defaults.
+        assert!(!s.use_extended_erase());
+        assert!(s.use_block_erase_64k());
+    }
+
+    #[test]
+    fn chip_id_reg_tables() {
+        let expected = &[0x4401_0004u32, 0x0080_0000, 0x3401_0004];
+        assert_eq!(T5_CHIP_ID_REGS, expected);
+        assert_eq!(T2_CHIP_ID_REGS, expected);
+    }
+
+    #[test]
+    fn spec_usable_as_trait_object() {
+        // Confirms every spec is dyn-compatible (used as &dyn ChipSpec in run_beken).
+        let specs: Vec<Box<dyn ChipSpec>> = vec![
+            Box::new(Bk7231nSpec),
+            Box::new(T5Spec),
+            Box::new(T1Spec),
+            Box::new(T2Spec),
+            Box::new(T3Spec),
+        ];
+        let names: Vec<&str> = specs.iter().map(|s| s.name()).collect();
+        assert_eq!(names, vec!["BK7231N", "T5", "T1", "T2", "T3"]);
+    }
+}
