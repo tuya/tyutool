@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 
@@ -54,16 +54,58 @@ vi.mock("@/transport/ws-transport", () => {
     cancelFn?.();
     cancelFn = null;
   });
-  return { wsTransport: { runJob, listPorts, cancelJob } };
+  const authorizeProbe = vi.fn(
+    async () => null as { uuid: string; authkey: string } | null,
+  );
+  const deviceReset = vi.fn(async () => {});
+  return {
+    wsTransport: { runJob, listPorts, cancelJob, authorizeProbe, deviceReset },
+  };
 });
+
+// Workspace persistence is exercised via spies; stub the storage layer so tests
+// don't touch real localStorage/disk.
+vi.mock("@/stores/flash-workspace", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/stores/flash-workspace")>();
+  return {
+    ...actual,
+    loadFlashWorkspaceFromStorage: vi.fn(async () => null),
+    saveFlashWorkspaceToStorage: vi.fn(async () => {}),
+  };
+});
+
+// Confirm dialog: default to confirmed; individual tests override per-call.
+vi.mock("@/composables/confirmDialog", () => ({
+  showConfirmDialog: vi.fn(async () => true),
+}));
 
 // Now import store (it will see the mocked isTauriRuntime)
 import { useFlashStore } from "./flash";
+import { wsTransport } from "@/transport/ws-transport";
+import { showConfirmDialog } from "@/composables/confirmDialog";
+import {
+  loadFlashWorkspaceFromStorage,
+  saveFlashWorkspaceToStorage,
+} from "@/stores/flash-workspace";
 
 describe("flash store", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    // Reset call history on the shared module-level mocks (keeps implementations).
+    vi.mocked(wsTransport.runJob).mockClear();
+    vi.mocked(wsTransport.cancelJob).mockClear();
+    vi.mocked(wsTransport.authorizeProbe).mockClear();
+    vi.mocked(showConfirmDialog).mockClear();
+    vi.mocked(saveFlashWorkspaceToStorage).mockClear();
+    vi.mocked(loadFlashWorkspaceFromStorage).mockClear();
   });
+
+  // validateOperation requires uuid length 20 and authkey length 32.
+  const VALID_UUID = "u".repeat(20);
+  const VALID_KEY = "k".repeat(32);
+  const OTHER_UUID = "z".repeat(20);
+  const OTHER_KEY = "y".repeat(32);
 
   // ── Initial state ───────────────────────────────────────────────
 
@@ -683,6 +725,428 @@ describe("flash store", () => {
       await store.startOperation("erase");
       expect(store.flashPhase).toBe("error");
       expect(store.flashMessage).not.toBe("");
+    });
+  });
+
+  // ── connect / disconnect lifecycle (web mode) ────────────────────
+
+  describe("connect (web mode)", () => {
+    it("connects and claims the port via the port manager", async () => {
+      const { usePortManagerStore } = await import("@/stores/port-manager");
+      const pm = usePortManagerStore();
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      await store.connect();
+      expect(store.connected).toBe(true);
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("flash");
+    });
+
+    it("does nothing without a selected port", async () => {
+      const store = useFlashStore();
+      store.selectedSerialPort = "";
+      await store.connect();
+      expect(store.connected).toBe(false);
+    });
+
+    it("fails to connect when the port is already owned and unyielding", async () => {
+      const { usePortManagerStore } = await import("@/stores/port-manager");
+      const pm = usePortManagerStore();
+      await pm.acquire({
+        id: "serial-debug",
+        port: "/dev/ttyUSB0",
+        onReleaseRequest: async () => false,
+        onReleased: () => {},
+      });
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      await store.connect();
+      expect(store.connected).toBe(false);
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
+    });
+
+    it("disconnect releases the claimed port", async () => {
+      const { usePortManagerStore } = await import("@/stores/port-manager");
+      const pm = usePortManagerStore();
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      await store.connect();
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("flash");
+      store.disconnect();
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBeNull();
+    });
+  });
+
+  // ── deviceReset (web mode) ──────────────────────────────────────
+
+  describe("deviceReset (web mode)", () => {
+    it("delegates to wsTransport.deviceReset and logs success", async () => {
+      const spy = vi
+        .spyOn(wsTransport, "deviceReset")
+        .mockResolvedValue(undefined);
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.selectedChipId = "t5";
+      const before = store.logLines.length;
+      await store.deviceReset();
+      expect(spy).toHaveBeenCalledWith("/dev/ttyUSB0", "T5");
+      expect(store.logLines.length).toBeGreaterThan(before);
+    });
+
+    it("does nothing without a port", async () => {
+      const spy = vi
+        .spyOn(wsTransport, "deviceReset")
+        .mockResolvedValue(undefined);
+      const store = useFlashStore();
+      store.selectedSerialPort = "";
+      await store.deviceReset();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("logs a failure line when the reset rejects", async () => {
+      vi.spyOn(wsTransport, "deviceReset").mockRejectedValue(new Error("boom"));
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      const before = store.logLines.length;
+      await store.deviceReset();
+      expect(store.logLines.length).toBeGreaterThan(before);
+    });
+  });
+
+  // ── startOperation happy path (web mode) ─────────────────────────
+
+  describe("startOperation success path (web mode)", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    function completeImmediately() {
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({ payload: { kind: "percent", value: 100 } });
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.5 } } },
+          } as never);
+        },
+      );
+    }
+
+    it("auto-connects, runs a flash job and logs the duration on done", async () => {
+      completeImmediately();
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.flashSegments[0].firmwarePath = "/fw.bin";
+      store.flashSegments[0].startAddr = "0x0";
+      store.flashSegments[0].endAddr = "0x1000";
+      expect(store.connected).toBe(false);
+      await store.startOperation("flash");
+      // connect() ran during the operation, runJob received the job
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+      const job = vi.mocked(wsTransport.runJob).mock.calls[0][0] as {
+        mode: string;
+        chipId: string;
+      };
+      expect(job.mode).toBe("flash");
+    });
+
+    it("runs a read job (web mode skips readDir, server uses temp path)", async () => {
+      completeImmediately();
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.readDir = "";
+      await store.startOperation("read");
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+      const job = vi.mocked(wsTransport.runJob).mock.calls[0][0] as {
+        mode: string;
+        readFilePath: string | null;
+      };
+      expect(job.mode).toBe("read");
+      expect(job.readFilePath).toBeNull();
+    });
+
+    it("sets error phase and logs when the ws job rejects", async () => {
+      vi.mocked(wsTransport.runJob).mockRejectedValueOnce(
+        new Error("ws kaboom"),
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.flashSegments[0].firmwarePath = "/fw.bin";
+      const before = store.logLines.length;
+      await store.startOperation("flash");
+      expect(store.flashPhase).toBe("error");
+      expect(store.flashMessage).toBe("ws kaboom");
+      expect(store.runningOp).toBeNull();
+      expect(store.logLines.length).toBeGreaterThan(before);
+    });
+
+    it("aborts when auto-connect fails because the port is busy", async () => {
+      const { usePortManagerStore } = await import("@/stores/port-manager");
+      const pm = usePortManagerStore();
+      await pm.acquire({
+        id: "serial-debug",
+        port: "/dev/ttyUSB0",
+        onReleaseRequest: async () => false,
+        onReleased: () => {},
+      });
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.flashSegments[0].firmwarePath = "/fw.bin";
+      await store.startOperation("flash");
+      expect(store.flashPhase).toBe("error");
+      expect(store.runningOp).toBeNull();
+      expect(wsTransport.runJob).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── startOperation erase confirm dialog ──────────────────────────
+
+  describe("startOperation erase confirmation", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("aborts (idle) when the user cancels the erase confirmation", async () => {
+      vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.connected = true; // skip auto-connect
+      store.eraseStartAddr = "0x0";
+      store.eraseEndAddr = "0x1000";
+      await store.startOperation("erase");
+      expect(showConfirmDialog).toHaveBeenCalled();
+      expect(store.flashPhase).not.toBe("running");
+      expect(wsTransport.runJob).not.toHaveBeenCalled();
+    });
+
+    it("proceeds to run the erase job when confirmed", async () => {
+      vi.mocked(showConfirmDialog).mockResolvedValueOnce(true);
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
+          } as never);
+        },
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.connected = true;
+      store.eraseStartAddr = "0x0";
+      store.eraseEndAddr = "0x1000";
+      await store.startOperation("erase");
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+      const job = vi.mocked(wsTransport.runJob).mock.calls[0][0] as {
+        mode: string;
+      };
+      expect(job.mode).toBe("erase");
+    });
+  });
+
+  // ── startOperation authorize probe (web mode) ────────────────────
+
+  describe("startOperation authorize probe (web mode)", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("aborts when the existing-credentials overwrite confirm is declined", async () => {
+      vi.mocked(wsTransport.authorizeProbe).mockResolvedValueOnce({
+        uuid: OTHER_UUID,
+        authkey: OTHER_KEY,
+      });
+      vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.connected = true;
+      store.authorizeUuid = VALID_UUID;
+      store.authorizeAuthKey = VALID_KEY;
+      await store.startOperation("authorize");
+      expect(wsTransport.authorizeProbe).toHaveBeenCalled();
+      expect(showConfirmDialog).toHaveBeenCalled();
+      expect(store.flashPhase).toBe("idle");
+      expect(wsTransport.runJob).not.toHaveBeenCalled();
+    });
+
+    it("runs the authorize job when no conflicting credentials exist", async () => {
+      vi.mocked(wsTransport.authorizeProbe).mockResolvedValueOnce(null);
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
+          } as never);
+        },
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.connected = true;
+      store.authorizeUuid = VALID_UUID;
+      store.authorizeAuthKey = VALID_KEY;
+      await store.startOperation("authorize");
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+    });
+
+    it("tolerates a probe failure and continues to run the job", async () => {
+      vi.mocked(wsTransport.authorizeProbe).mockRejectedValueOnce(
+        new Error("probe timeout"),
+      );
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
+          } as never);
+        },
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.connected = true;
+      store.authorizeUuid = VALID_UUID;
+      store.authorizeAuthKey = VALID_KEY;
+      await store.startOperation("authorize");
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── startAuthRead ────────────────────────────────────────────────
+
+  describe("startAuthRead", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("runs an authorize job in read mode and restores credentials afterward", async () => {
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
+          } as never);
+        },
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.connected = true;
+      store.authorizeUuid = VALID_UUID;
+      store.authorizeAuthKey = VALID_KEY;
+      await store.startAuthRead();
+      // authorizeProbe is skipped in read mode; job ran with no credentials
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+      const job = vi.mocked(wsTransport.runJob).mock.calls[0][0] as {
+        mode: string;
+        authorizeUuid: string | null;
+      };
+      expect(job.mode).toBe("authorize");
+      expect(job.authorizeUuid).toBeNull();
+      // original form values are restored
+      expect(store.authorizeUuid).toBe(VALID_UUID);
+      expect(store.authorizeAuthKey).toBe(VALID_KEY);
+    });
+  });
+
+  // ── stopFlash / cancelBackendFlash (web mode) ────────────────────
+
+  describe("stopFlash (web mode)", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("resetFlash on a non-running state cancels the backend job via wsTransport", () => {
+      const store = useFlashStore();
+      store.flashPhase = "error";
+      store.resetFlash();
+      expect(wsTransport.cancelJob).toHaveBeenCalled();
+    });
+  });
+
+  // ── cleanup ──────────────────────────────────────────────────────
+
+  describe("cleanup", () => {
+    it("can be called safely with no active listeners or timers", () => {
+      const store = useFlashStore();
+      expect(() => store.cleanup()).not.toThrow();
+    });
+  });
+
+  // ── onPickReadDir (web mode) ─────────────────────────────────────
+
+  describe("onPickReadDir (web mode)", () => {
+    it("logs the browser no-dir hint instead of opening a dialog", async () => {
+      const store = useFlashStore();
+      const before = store.logLines.length;
+      await store.onPickReadDir();
+      expect(store.logLines.length).toBe(before + 1);
+    });
+  });
+
+  // ── workspace persistence ────────────────────────────────────────
+
+  describe("workspace persistence", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("loadWorkspace is a no-op when storage has no data", async () => {
+      vi.mocked(loadFlashWorkspaceFromStorage).mockResolvedValueOnce(null);
+      const store = useFlashStore();
+      await store.loadWorkspace();
+      // defaults unchanged
+      expect(store.selectedChipId).toBe("t5");
+    });
+
+    it("loadWorkspace restores serialized fields without re-triggering chip side effects", async () => {
+      vi.mocked(loadFlashWorkspaceFromStorage).mockResolvedValueOnce({
+        v: 1,
+        activeTab: "erase",
+        selectedSerialPort: "/dev/ttyUSB9",
+        selectedBaudRate: 230400,
+        selectedChipId: "esp32",
+        flashSegments: [
+          {
+            id: "seg1",
+            firmwarePath: "/saved/fw.bin",
+            startAddr: "0x1000",
+            endAddr: "0x2000",
+          },
+        ],
+        activeSegmentIndex: 0,
+        eraseAdvancedOpen: true,
+        eraseStartAddr: "0x3000",
+        eraseEndAddr: "0x4000",
+        readStartAddr: "0x5000",
+        readEndAddr: "0x6000",
+        readDir: "/saved/dir",
+        readFileName: "saved.bin",
+        readFileNameModified: true,
+        authorizeUuid: "saved-uuid",
+        authorizeAuthKey: "saved-key",
+        authBaudRate: 460800,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+      const store = useFlashStore();
+      await store.loadWorkspace();
+      expect(store.selectedChipId).toBe("esp32");
+      expect(store.activeTab).toBe("erase");
+      expect(store.selectedSerialPort).toBe("/dev/ttyUSB9");
+      expect(store.flashSegments[0].firmwarePath).toBe("/saved/fw.bin");
+      expect(store.flashSegments[0].startAddr).toBe("0x1000");
+      expect(store.eraseStartAddr).toBe("0x3000");
+      expect(store.eraseEndAddr).toBe("0x4000");
+      expect(store.readStartAddr).toBe("0x5000");
+      expect(store.readDir).toBe("/saved/dir");
+      expect(store.eraseAdvancedOpen).toBe(true);
+      // readFileNameModified was restored as true, so the chip watch (which
+      // flushes after the muted restore) leaves the saved name untouched.
+      expect(store.readFileName).toBe("saved.bin");
+    });
+
+    it("startWorkspacePersistence saves a debounced snapshot when state changes", async () => {
+      vi.useFakeTimers();
+      const store = useFlashStore();
+      store.startWorkspacePersistence();
+      store.selectedBaudRate = 12345;
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(saveFlashWorkspaceToStorage).toHaveBeenCalled();
+      const snap = vi.mocked(saveFlashWorkspaceToStorage).mock.calls[0][0];
+      expect(snap.selectedBaudRate).toBe(12345);
+      vi.useRealTimers();
+    });
+
+    it("startWorkspacePersistence is idempotent (second call adds no watcher)", async () => {
+      vi.useFakeTimers();
+      const store = useFlashStore();
+      store.startWorkspacePersistence();
+      store.startWorkspacePersistence(); // guarded by workspacePersistStarted
+      store.eraseAdvancedOpen = true;
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(500);
+      // A single watcher → exactly one save for one change.
+      expect(saveFlashWorkspaceToStorage).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
     });
   });
 });
