@@ -2,8 +2,15 @@ import { isTauriRuntime } from "@/runtime";
 import type {
   CumulativeStats,
   PortFilterConfig,
+  BatchFirmwareSource,
 } from "@/features/batch-flash-auth/types";
 
+export interface BatchFirmwareConfig {
+  source: BatchFirmwareSource;
+  version: string;
+}
+
+const FIRMWARE_KEY = "batch-flash-auth-firmware";
 const CUMULATIVE_KEY = "batch-flash-auth-cumulative";
 const FILTER_KEY = "batch-flash-auth-port-filter";
 const LEGACY_CUMULATIVE_KEY = "batch-flash-cumulative";
@@ -13,9 +20,10 @@ const STORE_FILE = "settings.json";
 export async function loadBatchFlashAuthWorkspace(): Promise<{
   cumulative: CumulativeStats | null;
   filter: PortFilterConfig | null;
+  firmware: BatchFirmwareConfig | null;
 }> {
   if (!isTauriRuntime()) {
-    return { cumulative: null, filter: null };
+    return { cumulative: null, filter: null, firmware: null };
   }
   const { Store } = await import("@tauri-apps/plugin-store");
   const store = await Store.load(STORE_FILE);
@@ -39,7 +47,9 @@ export async function loadBatchFlashAuthWorkspace(): Promise<{
     }
   }
 
-  return { cumulative, filter };
+  const firmware = (await store.get<BatchFirmwareConfig>(FIRMWARE_KEY)) ?? null;
+
+  return { cumulative, filter, firmware };
 }
 
 export async function saveBatchFlashAuthCumulative(
@@ -59,5 +69,15 @@ export async function saveBatchFlashAuthFilterConfig(
   const { Store } = await import("@tauri-apps/plugin-store");
   const store = await Store.load(STORE_FILE);
   await store.set(FILTER_KEY, filter);
+  await store.save();
+}
+
+export async function saveBatchFlashAuthFirmwareConfig(
+  cfg: BatchFirmwareConfig,
+): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const { Store } = await import("@tauri-apps/plugin-store");
+  const store = await Store.load(STORE_FILE);
+  await store.set(FIRMWARE_KEY, cfg);
   await store.save();
 }
