@@ -26,3 +26,13 @@ impl FlashPlugin for Esp32s3Plugin {
         run_esp(job, cancel, progress, &ESP32S3_DEF)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_id_is_uppercase() {
+        assert_eq!(Esp32s3Plugin.id(), "ESP32S3");
+    }
+}

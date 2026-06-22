@@ -31,3 +31,13 @@ impl FlashPlugin for T1Plugin {
         super::bk7231n::run_beken(job, cancel, progress, &chip, true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_id_is_uppercase() {
+        assert_eq!(T1Plugin.id(), "T1");
+    }
+}

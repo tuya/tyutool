@@ -35,3 +35,13 @@ impl FlashPlugin for T3Plugin {
         super::bk7231n::run_beken(job, cancel, progress, &chip, true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_id_is_uppercase() {
+        assert_eq!(T3Plugin.id(), "T3");
+    }
+}

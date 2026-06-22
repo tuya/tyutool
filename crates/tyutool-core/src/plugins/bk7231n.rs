@@ -346,3 +346,13 @@ fn to_flash_err(e: super::beken::frame::ProtocolError) -> FlashError {
         other => FlashError::Plugin(other.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_id_is_uppercase() {
+        assert_eq!(Bk7231nPlugin.id(), "BK7231N");
+    }
+}

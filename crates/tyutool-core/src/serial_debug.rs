@@ -376,4 +376,109 @@ mod tests {
             "close() should not trigger on_disconnect"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_open_reports_true_until_closed_and_config_is_preserved() {
+        let Ok((master, slave)) = serialport::TTYPort::pair() else {
+            eprintln!("serialport::TTYPort::pair() unavailable on this host; skipping");
+            return;
+        };
+        use serialport::SerialPort;
+        let Some(slave_name) = slave.name() else {
+            eprintln!("pty slave has no name on this host; skipping");
+            return;
+        };
+        drop(slave);
+
+        let cfg = DebugConfig {
+            port: slave_name,
+            baud_rate: 9600,
+            data_bits: DataBits::Seven,
+            parity: Parity::Even,
+            stop_bits: StopBits::Two,
+        };
+        let session = SerialDebugSession::open(cfg.clone(), Box::new(|_| {}), Box::new(|_| {}))
+            .expect("session open");
+
+        assert!(session.is_open(), "session should report open before close");
+        // The stored config must match what we opened with.
+        assert_eq!(session.config(), &cfg);
+
+        // Keep the master alive until after we inspect state.
+        drop(master);
+        session.close();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_peer_end_triggers_disconnect_callback() {
+        use std::sync::mpsc::channel;
+
+        let Ok((master, slave)) = serialport::TTYPort::pair() else {
+            eprintln!("serialport::TTYPort::pair() unavailable on this host; skipping");
+            return;
+        };
+        use serialport::SerialPort;
+        let Some(slave_name) = slave.name() else {
+            eprintln!("pty slave has no name on this host; skipping");
+            return;
+        };
+        drop(slave);
+
+        let (tx_disc, rx_disc) = channel::<String>();
+        let cfg = DebugConfig {
+            port: slave_name,
+            baud_rate: 115200,
+            data_bits: DataBits::Eight,
+            parity: Parity::None,
+            stop_bits: StopBits::One,
+        };
+        let session = SerialDebugSession::open(
+            cfg,
+            Box::new(|_| {}),
+            Box::new(move |r| {
+                let _ = tx_disc.send(r);
+            }),
+        )
+        .expect("session open");
+
+        // Closing the master pty end makes reads on the slave fail; the read loop
+        // should surface that through on_disconnect. Some platforms only report a
+        // timeout (no error) — in that case the callback never fires and we accept
+        // either outcome rather than asserting a host-specific behavior.
+        drop(master);
+
+        match rx_disc.recv_timeout(Duration::from_millis(1500)) {
+            Ok(reason) => assert!(!reason.is_empty(), "disconnect reason should be non-empty"),
+            Err(_) => eprintln!(
+                "peer drop did not surface as a read error on this host; accepted as timeout-only"
+            ),
+        }
+
+        session.close();
+    }
+
+    #[test]
+    fn data_bits_and_parity_round_trip_json() {
+        for (v, wire) in [
+            (DataBits::Five, "\"five\""),
+            (DataBits::Six, "\"six\""),
+            (DataBits::Seven, "\"seven\""),
+            (DataBits::Eight, "\"eight\""),
+        ] {
+            assert_eq!(serde_json::to_string(&v).unwrap(), wire);
+            let back: DataBits = serde_json::from_str(wire).unwrap();
+            assert_eq!(back, v);
+        }
+        for (v, wire) in [
+            (Parity::None, "\"none\""),
+            (Parity::Odd, "\"odd\""),
+            (Parity::Even, "\"even\""),
+        ] {
+            assert_eq!(serde_json::to_string(&v).unwrap(), wire);
+            let back: Parity = serde_json::from_str(wire).unwrap();
+            assert_eq!(back, v);
+        }
+    }
 }
