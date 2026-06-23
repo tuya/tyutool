@@ -5,6 +5,7 @@ import { useFirmwareFlashContext } from "../context";
 import { chipManifest } from "../chip-manifests";
 import type { ErasePresetKind } from "../types";
 import FlashSegmentTable from "./FlashSegmentTable.vue";
+import TySecretInput from "@/components/TySecretInput.vue";
 
 const { t, locale } = useI18n();
 const ctx = useFirmwareFlashContext();
@@ -354,14 +355,10 @@ const currentErasePresets = computed(() => {
               <label for="auth-uuid" class="ops-field-label mb-1.5 block">{{
                 t("flash.uuid")
               }}</label>
-              <input
+              <TySecretInput
                 id="auth-uuid"
                 v-model="ctx.authorizeUuid"
-                type="text"
-                class="ops-text-input w-full font-mono py-1.5"
                 :placeholder="t('flash.uuidPh')"
-                spellcheck="false"
-                autocomplete="off"
                 :disabled="ctx.busy"
               />
             </div>
@@ -369,14 +366,10 @@ const currentErasePresets = computed(() => {
               <label for="auth-key" class="ops-field-label mb-1.5 block">{{
                 t("flash.authKey")
               }}</label>
-              <input
+              <TySecretInput
                 id="auth-key"
                 v-model="ctx.authorizeAuthKey"
-                type="text"
-                class="ops-text-input w-full font-mono py-1.5"
                 :placeholder="t('flash.authKeyPh')"
-                spellcheck="false"
-                autocomplete="off"
                 :disabled="ctx.busy"
               />
             </div>
