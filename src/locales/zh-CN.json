@@ -513,7 +513,9 @@
       "success": "成功",
       "fail": "失败",
       "reset": "重置",
-      "elapsed": "已用时"
+      "elapsed": "已用时",
+      "total": "总计",
+      "successRate": "成功率"
     },
     "config": {
       "sharedConfig": "共享配置",
@@ -547,7 +549,12 @@
       "filter": "串口过滤",
       "start": "全部开始",
       "cancel": "取消",
-      "retry": "重试失败"
+      "retry": "重试失败",
+      "autoAssignBusy": "任务进行中，不可自动分配",
+      "autoAssignHint": "扫描并添加可用串口",
+      "noFailedPorts": "暂无失败端口",
+      "selectExcelFirst": "请先选择授权表",
+      "noIdlePorts": "暂无空闲串口"
     },
     "slot": {
       "port": "串口",
@@ -570,6 +577,27 @@
       "done": "成功",
       "failed": "失败",
       "skipped": "已跳过"
+    },
+    "filter": {
+      "title": "串口过滤",
+      "hint": "添加要屏蔽的串口名称（精确匹配，Windows 不区分大小写）。规则生效后，自动分配时将跳过这些串口。",
+      "placeholder": "如 COM1 或 /dev/ttyS0",
+      "add": "添加",
+      "empty": "暂无过滤规则",
+      "remove": "移除"
+    },
+    "dialog": {
+      "confirmAuthOnly": "确认批量授权",
+      "confirmFlashThenAuth": "确认批量烧录",
+      "aboutToOperate": "即将对 {count} 个端口并行操作",
+      "firmwareLine": "固件：{path}",
+      "excelLine": "授权表：{path}"
+    },
+    "completion": {
+      "allSkipped": "本次批次完成：{count} 台已跳过（设备已授权）",
+      "allSuccess": "本次批次完成：{count} 台全部成功",
+      "allFailed": "本次批次全部失败，请检查连接后重试",
+      "partial": "本次批次完成：{done} 成功，{failed} 失败，可点击「重试失败」"
     }
   },
   "toolbox": {

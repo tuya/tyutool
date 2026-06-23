@@ -513,7 +513,9 @@
       "success": "Success",
       "fail": "Failed",
       "reset": "Reset",
-      "elapsed": "Elapsed"
+      "elapsed": "Elapsed",
+      "total": "Total",
+      "successRate": "Success rate"
     },
     "config": {
       "sharedConfig": "Shared Config",
@@ -547,7 +549,12 @@
       "filter": "Port Filter",
       "start": "Start All",
       "cancel": "Cancel",
-      "retry": "Retry Failed"
+      "retry": "Retry Failed",
+      "autoAssignBusy": "Busy — auto-assign unavailable",
+      "autoAssignHint": "Scan and add available ports",
+      "noFailedPorts": "No failed ports",
+      "selectExcelFirst": "Select an auth table first",
+      "noIdlePorts": "No idle ports"
     },
     "slot": {
       "port": "Port",
@@ -570,6 +577,27 @@
       "done": "Done",
       "failed": "Failed",
       "skipped": "Skipped"
+    },
+    "filter": {
+      "title": "Port Filter",
+      "hint": "Add port names to block (exact match, case-insensitive on Windows). Auto-assign will skip these ports.",
+      "placeholder": "e.g. COM1 or /dev/ttyS0",
+      "add": "Add",
+      "empty": "No filter rules",
+      "remove": "Remove"
+    },
+    "dialog": {
+      "confirmAuthOnly": "Confirm Batch Authorization",
+      "confirmFlashThenAuth": "Confirm Batch Flash",
+      "aboutToOperate": "About to operate on {count} ports in parallel",
+      "firmwareLine": "Firmware: {path}",
+      "excelLine": "Auth table: {path}"
+    },
+    "completion": {
+      "allSkipped": "Batch complete: {count} skipped (already authorized)",
+      "allSuccess": "Batch complete: all {count} succeeded",
+      "allFailed": "Batch failed entirely — check connections and retry",
+      "partial": "Batch complete: {done} succeeded, {failed} failed — click Retry Failed"
     }
   },
   "toolbox": {

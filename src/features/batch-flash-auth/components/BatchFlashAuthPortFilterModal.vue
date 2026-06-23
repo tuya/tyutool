@@ -1,7 +1,10 @@
 <!-- src/features/batch-flash/components/BatchPortFilterModal.vue -->
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
+
+const { t } = useI18n();
 
 defineProps<{ open: boolean }>();
 defineEmits<{ close: [] }>();
@@ -29,12 +32,12 @@ function addPort() {
       >
         <div class="mb-4 flex items-center justify-between">
           <h2 class="text-base font-semibold text-[var(--ty-text)]">
-            串口过滤
+            {{ t("batchFlashAuth.filter.title") }}
           </h2>
           <button
             type="button"
             class="cursor-pointer text-xl text-[var(--ty-text-muted)] hover:text-[var(--ty-text)]"
-            aria-label="关闭"
+            :aria-label="t('common.closeDialog')"
             @click="$emit('close')"
           >
             ×
@@ -42,8 +45,7 @@ function addPort() {
         </div>
 
         <p class="mb-3 text-xs text-[var(--ty-text-muted)]">
-          添加要屏蔽的串口名称（精确匹配，Windows 不区分大小写）。
-          规则生效后，自动分配时将跳过这些串口。
+          {{ t("batchFlashAuth.filter.hint") }}
         </p>
 
         <!-- Add port input -->
@@ -51,7 +53,7 @@ function addPort() {
           <input
             v-model="newPort"
             type="text"
-            placeholder="如 COM1 或 /dev/ttyS0"
+            :placeholder="t('batchFlashAuth.filter.placeholder')"
             class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 py-1.5 text-sm text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
             @keydown.enter="addPort"
           />
@@ -60,7 +62,7 @@ function addPort() {
             class="ty-btn-secondary px-3 text-sm"
             @click="addPort"
           >
-            添加
+            {{ t("batchFlashAuth.filter.add") }}
           </button>
         </div>
 
@@ -80,14 +82,16 @@ function addPort() {
             <button
               type="button"
               class="cursor-pointer text-sm text-[var(--ty-text-muted)] hover:text-[var(--ty-danger)]"
-              aria-label="移除"
+              :aria-label="t('batchFlashAuth.filter.remove')"
               @click="store.removeBlockedPort(port)"
             >
               ×
             </button>
           </div>
         </div>
-        <p v-else class="text-xs text-[var(--ty-text-muted)]">暂无过滤规则</p>
+        <p v-else class="text-xs text-[var(--ty-text-muted)]">
+          {{ t("batchFlashAuth.filter.empty") }}
+        </p>
       </div>
     </div>
   </Teleport>

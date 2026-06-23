@@ -82,12 +82,13 @@ export interface ExcelStats {
   remaining: number;
 }
 
-export type CompletionBannerKind = "success" | "partial" | "all-failed";
-
-export interface CompletionBanner {
-  kind: CompletionBannerKind;
-  message: string;
-}
+/** Discriminated by `kind`; carries the counts the UI needs to render a
+ *  localized message (no preformatted string — translation happens in the view). */
+export type CompletionBanner =
+  | { kind: "all-skipped"; count: number }
+  | { kind: "all-success"; count: number }
+  | { kind: "all-failed" }
+  | { kind: "partial"; done: number; failed: number };
 
 /** Firmware source mode for the batch auth tool. */
 export type BatchFirmwareSource = "local" | "default";

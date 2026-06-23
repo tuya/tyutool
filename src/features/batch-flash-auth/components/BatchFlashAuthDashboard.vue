@@ -31,7 +31,7 @@ onUnmounted(() => clearInterval(ticker));
 
 const bannerBg = computed(() => {
   const k = store.completionBanner?.kind;
-  if (k === "success")
+  if (k === "all-success")
     return "color-mix(in srgb, var(--ty-success) 10%, transparent)";
   if (k === "all-failed")
     return "color-mix(in srgb, var(--ty-danger) 10%, transparent)";
@@ -40,9 +40,27 @@ const bannerBg = computed(() => {
 
 const bannerTextColor = computed(() => {
   const k = store.completionBanner?.kind;
-  if (k === "success") return "var(--ty-success)";
+  if (k === "all-success") return "var(--ty-success)";
   if (k === "all-failed") return "var(--ty-danger)";
   return "var(--ty-accent)";
+});
+
+const bannerText = computed(() => {
+  const b = store.completionBanner;
+  if (!b) return "";
+  switch (b.kind) {
+    case "all-skipped":
+      return t("batchFlashAuth.completion.allSkipped", { count: b.count });
+    case "all-success":
+      return t("batchFlashAuth.completion.allSuccess", { count: b.count });
+    case "all-failed":
+      return t("batchFlashAuth.completion.allFailed");
+    case "partial":
+      return t("batchFlashAuth.completion.partial", {
+        done: b.done,
+        failed: b.failed,
+      });
+  }
 });
 </script>
 
@@ -54,7 +72,7 @@ const bannerTextColor = computed(() => {
       class="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium"
       :style="{ backgroundColor: bannerBg, color: bannerTextColor }"
     >
-      <span>{{ store.completionBanner.message }}</span>
+      <span>{{ bannerText }}</span>
       <button
         type="button"
         class="ml-3 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded opacity-60 transition-opacity hover:opacity-100"
@@ -95,7 +113,7 @@ const bannerTextColor = computed(() => {
           </div>
           <div class="flex gap-4 text-xs text-[var(--ty-text-muted)]">
             <span
-              >总计
+              >{{ t("batchFlashAuth.dashboard.total") }}
               <strong class="text-[var(--ty-text)]">{{
                 store.cumulativeStats.flash.total
               }}</strong></span
@@ -140,7 +158,7 @@ const bannerTextColor = computed(() => {
           </div>
           <div class="flex gap-4 text-xs text-[var(--ty-text-muted)]">
             <span
-              >总计
+              >{{ t("batchFlashAuth.dashboard.total") }}
               <strong class="text-[var(--ty-text)]">{{
                 store.cumulativeStats.auth.total
               }}</strong></span
