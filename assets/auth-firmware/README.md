@@ -1,19 +1,20 @@
-# 默认授权固件（auth-firmware）
+# Default Authorization Firmware (auth-firmware)
 
-批量烧录授权（batch-flash-auth）「默认授权固件」列表的源固件目录。维护者在此放置
-固件 bin，手动触发 `.github/workflows/release-auth-firmware.yml` 即可自动生成
-`auth-firmware.json` 并发布到 GitHub + Gitee 的 `auth-firmware` release。
+Source firmware directory for the batch-flash-auth tool's "default authorization
+firmware" list. Maintainers drop firmware bins here, then manually trigger
+`.github/workflows/release-auth-firmware.yml` to generate `auth-firmware.json`
+and publish both to the `auth-firmware` release on GitHub and Gitee.
 
-## 目录结构与命名规则
+## Directory layout and naming rules
 
 ```
 assets/auth-firmware/
   <chip>/
-    auth-firmware-<chip>-<version>.bin     # 固件
-    auth-firmware-<chip>-<version>.txt      # 可选：版本说明（notes，纯文本）
+    auth-firmware-<chip>-<version>.bin     # firmware
+    auth-firmware-<chip>-<version>.txt     # optional: release notes (plain text)
 ```
 
-示例：
+Example:
 
 ```
 assets/auth-firmware/
@@ -25,20 +26,35 @@ assets/auth-firmware/
     auth-firmware-bk7231n-v1.0.0.bin
 ```
 
-规则（违反会导致发布 workflow 报错退出）：
+Rules (violations fail the release workflow):
 
-1. 一级目录名 = `chip`（小写，权威来源）。
-2. bin 文件名必须为 `auth-firmware-<chip>-<version>.bin`，其中 `<chip>` 必须等于所在目录名。
-3. `version` = 剥掉 `auth-firmware-<chip>-` 前缀与 `.bin` 后缀后的剩余部分（如 `v1.1.0`）。
-4. 同名 `auth-firmware-<chip>-<version>.txt` 存在则其 trim 后内容作为该版本的 notes；不存在则省略。
-5. **不要**建 `other/` 目录——`other` 是 auth-only 芯片，走 `FlashMode::Authorize`，不需要默认固件。
+1. The first-level directory name is the `chip` id — lowercase, alphanumeric
+   (plus `_`), and must match a `ChipId` key in
+   `src/features/firmware-flash/chip-manifests.ts`. This is the authoritative
+   source of truth.
+2. Each bin filename must be `auth-firmware-<chip>-<version>.bin`, where
+   `<chip>` matches the parent directory name exactly.
+3. `<version>` is whatever remains after stripping the `auth-firmware-<chip>-`
+   prefix and the `.bin` suffix (e.g. `v1.1.0`).
+4. If a sibling `auth-firmware-<chip>-<version>.txt` exists, its trimmed
+   contents are used as `notes` for that version; otherwise `notes` is
+   omitted.
+5. **Do not create an `other/` directory.** `other` is the auth-only chip
+   that runs through `FlashMode::Authorize` and has no default firmware.
+6. Bins must live exactly two levels deep (`<source>/<chip>/<file>.bin`);
+   nested subdirectories under a chip dir are ignored by both the manifest
+   generator and the release uploader.
 
-## 发布
+## Publishing
 
-在 GitHub Actions 页面手动运行 **Release auth-firmware**（`workflow_dispatch`）。流程：
+Manually dispatch **Release auth-firmware** (`workflow_dispatch`) from the
+GitHub Actions page. The workflow:
 
-- 用 `scripts/generate-auth-firmware-manifest.ts` 扫描本目录，算 sha256/size、拼 url、生成 manifest。
-- 上传到 GitHub + Gitee 的 `auth-firmware` release：**已存在的 bin 跳过（固件按版本不可变），
-  `auth-firmware.json` 始终覆盖**。
+- Runs `scripts/generate-auth-firmware-manifest.ts` to scan this directory,
+  compute sha256/size, build the download URL, and write the manifest.
+- Uploads to the `auth-firmware` release on GitHub and Gitee. **Existing bins
+  are skipped (firmware is immutable per version); `auth-firmware.json` is
+  always overwritten.**
 
-固件一经发布即视为不可变；要发新版本就放新 `version` 的 bin，不要改已发布的 bin。
+Once published, a firmware version is immutable. To ship a new version, drop
+a bin with a new `<version>` — never modify a published bin.
