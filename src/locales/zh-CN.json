@@ -518,6 +518,7 @@
       "successRate": "成功率"
     },
     "config": {
+      "sharedConfig": "共享配置",
       "chip": "芯片型号",
       "baud": "波特率",
       "firmware": "固件文件",
@@ -532,7 +533,16 @@
       "excelTotal": "总计",
       "excelUsed": "已用",
       "excelRemaining": "剩余",
-      "excelExhausted": "授权码已全部使用，请补充 Excel"
+      "excelExhausted": "授权码已全部使用，请补充 Excel",
+      "sourceLocal": "本地文件",
+      "sourceDefault": "默认授权固件",
+      "selectVersion": "选择版本",
+      "firmwareLoading": "正在获取版本列表…",
+      "firmwareDownloading": "正在下载固件…",
+      "firmwareReady": "固件已就绪",
+      "firmwareLoadFailed": "获取版本列表失败",
+      "firmwareDownloadFailed": "下载失败",
+      "firmwareNoVersions": "暂无可用版本"
     },
     "toolbar": {
       "autoAssign": "自动分配",

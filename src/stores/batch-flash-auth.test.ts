@@ -317,3 +317,50 @@ describe("checkBatchCompletion banner", () => {
     });
   });
 });
+
+describe("web-mode no-op for default firmware", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("loadDefaultFirmwareList is a silent no-op: leaves status idle, entries empty", async () => {
+    const store = useBatchFlashAuthStore();
+    await store.loadDefaultFirmwareList();
+    expect(store.defaultFirmwareStatus).toBe("idle");
+    expect(store.defaultFirmwareEntries).toHaveLength(0);
+  });
+
+  it("downloadDefaultFirmware is a silent no-op: leaves firmwarePath empty, status idle", async () => {
+    const store = useBatchFlashAuthStore();
+    await store.downloadDefaultFirmware("1.0.0");
+    expect(store.defaultFirmwareStatus).toBe("idle");
+    expect(store.defaultFirmwareEntries).toHaveLength(0);
+    expect(store.firmwarePath).toBe("");
+  });
+});
+
+describe("useBatchFlashAuthStore firmware source", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it("defaults to local source with empty path", () => {
+    const store = useBatchFlashAuthStore();
+    expect(store.firmwareSource).toBe("local");
+    expect(store.selectedDefaultVersion).toBe("");
+  });
+
+  it("switching source clears a previously chosen firmware path", () => {
+    const store = useBatchFlashAuthStore();
+    store.firmwarePath = "/tmp/local.bin";
+    store.setFirmwareSource("default");
+    expect(store.firmwareSource).toBe("default");
+    expect(store.firmwarePath).toBe("");
+  });
+
+  it("switching back to local resets default-firmware status", () => {
+    const store = useBatchFlashAuthStore();
+    store.setFirmwareSource("default");
+    store.setFirmwareSource("local");
+    expect(store.firmwareSource).toBe("local");
+    expect(store.defaultFirmwareStatus).toBe("idle");
+  });
+});

@@ -518,6 +518,7 @@
       "successRate": "Success rate"
     },
     "config": {
+      "sharedConfig": "Shared Config",
       "chip": "Chip",
       "baud": "Baud Rate",
       "firmware": "Firmware File",
@@ -532,7 +533,16 @@
       "excelTotal": "Total",
       "excelUsed": "Used",
       "excelRemaining": "Remaining",
-      "excelExhausted": "All auth codes used — please add more to the Excel"
+      "excelExhausted": "All auth codes used — please add more to the Excel",
+      "sourceLocal": "Local File",
+      "sourceDefault": "Default Auth Firmware",
+      "selectVersion": "Select version",
+      "firmwareLoading": "Loading versions…",
+      "firmwareDownloading": "Downloading firmware…",
+      "firmwareReady": "Firmware ready",
+      "firmwareLoadFailed": "Failed to load versions",
+      "firmwareDownloadFailed": "Download failed",
+      "firmwareNoVersions": "No versions available"
     },
     "toolbar": {
       "autoAssign": "Auto Assign",

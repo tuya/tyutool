@@ -14,7 +14,14 @@ import {
   type CompletionBanner,
   type BatchAuthProgressEvent,
   type BatchAuthStartConfig,
+  type AuthFirmwareEntry,
+  type BatchFirmwareSource,
 } from "@/features/batch-flash-auth/types";
+import {
+  fetchAuthFirmwareManifest,
+  filterByChip,
+  downloadAuthFirmware,
+} from "@/features/batch-flash-auth/auth-firmware";
 import {
   applyPortFilter,
   normalizePortName,
@@ -23,6 +30,7 @@ import {
   loadBatchFlashAuthWorkspace,
   saveBatchFlashAuthCumulative,
   saveBatchFlashAuthFilterConfig,
+  saveBatchFlashAuthFirmwareConfig,
 } from "@/stores/batch-flash-auth-workspace";
 
 const ACTIVE_STATUSES: BatchSlotStatus[] = [
@@ -44,6 +52,13 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const chipId = ref<string>("esp32");
   const baudRate = ref<number>(115200);
   const firmwarePath = ref<string>("");
+  const firmwareSource = ref<BatchFirmwareSource>("local");
+  const selectedDefaultVersion = ref<string>("");
+  const defaultFirmwareEntries = ref<AuthFirmwareEntry[]>([]);
+  const defaultFirmwareStatus = ref<
+    "idle" | "loading" | "downloading" | "ready" | "error"
+  >("idle");
+  const defaultFirmwareError = ref<string>("");
   const authConfig = ref<BatchAuthConfigData>({
     excelPath: "",
     conflictPolicy: "skip",
@@ -133,6 +148,73 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       filterConfig.value.blockedPorts,
     );
     addPorts(filtered);
+  }
+
+  // ── Default-firmware download ─────────────────────────────────────────────
+  async function saveFirmwareConfig() {
+    await saveBatchFlashAuthFirmwareConfig({
+      source: firmwareSource.value,
+      version: selectedDefaultVersion.value,
+    });
+  }
+
+  function setFirmwareSource(source: BatchFirmwareSource) {
+    if (firmwareSource.value === source) return;
+    firmwareSource.value = source;
+    // Switching source invalidates the previously chosen firmware path.
+    firmwarePath.value = "";
+    if (source === "local") {
+      defaultFirmwareStatus.value = "idle";
+      defaultFirmwareError.value = "";
+    }
+    void saveFirmwareConfig();
+  }
+
+  async function downloadDefaultFirmware(version: string) {
+    if (!isTauriRuntime()) return;
+    const entry = defaultFirmwareEntries.value.find(
+      (e) => e.version === version,
+    );
+    if (!entry) return;
+    selectedDefaultVersion.value = version;
+    void saveFirmwareConfig();
+    defaultFirmwareStatus.value = "downloading";
+    defaultFirmwareError.value = "";
+    try {
+      firmwarePath.value = await downloadAuthFirmware(entry);
+      defaultFirmwareStatus.value = "ready";
+    } catch (e) {
+      firmwarePath.value = "";
+      defaultFirmwareStatus.value = "error";
+      defaultFirmwareError.value = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function loadDefaultFirmwareList() {
+    if (!isTauriRuntime()) return;
+    defaultFirmwareStatus.value = "loading";
+    defaultFirmwareError.value = "";
+    try {
+      const { manifest } = await fetchAuthFirmwareManifest();
+      defaultFirmwareEntries.value = filterByChip(
+        manifest.firmwares,
+        chipId.value,
+      );
+      defaultFirmwareStatus.value = "idle";
+      // Restore the previously selected version's path if still available.
+      if (
+        selectedDefaultVersion.value &&
+        defaultFirmwareEntries.value.some(
+          (e) => e.version === selectedDefaultVersion.value,
+        )
+      ) {
+        await downloadDefaultFirmware(selectedDefaultVersion.value);
+      }
+    } catch (e) {
+      defaultFirmwareStatus.value = "error";
+      defaultFirmwareError.value = e instanceof Error ? e.message : String(e);
+      defaultFirmwareEntries.value = [];
+    }
   }
 
   // ── Flash actions ─────────────────────────────────────────────────────────
@@ -346,9 +428,17 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   // ── Persistence ───────────────────────────────────────────────────────────
   async function loadPersistedData() {
-    const { cumulative, filter } = await loadBatchFlashAuthWorkspace();
+    const { cumulative, filter, firmware } =
+      await loadBatchFlashAuthWorkspace();
     if (cumulative) cumulativeStats.value = cumulative;
     if (filter) filterConfig.value = filter;
+    if (firmware) {
+      firmwareSource.value = firmware.source;
+      selectedDefaultVersion.value = firmware.version;
+      if (firmware.source === "default") {
+        await loadDefaultFirmwareList();
+      }
+    }
   }
 
   async function saveCumulativeStats() {
@@ -398,6 +488,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     filterConfig,
     cumulativeStats,
     completionBanner,
+    firmwareSource,
+    selectedDefaultVersion,
+    defaultFirmwareEntries,
+    defaultFirmwareStatus,
+    defaultFirmwareError,
     // Computed
     canFlash,
     opMode,
@@ -413,6 +508,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     addPorts,
     removeSlot,
     autoAssign,
+    setFirmwareSource,
+    loadDefaultFirmwareList,
+    downloadDefaultFirmware,
     startAuth,
     startBatch,
     retryFailed,
