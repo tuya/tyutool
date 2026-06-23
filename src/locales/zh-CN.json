@@ -124,8 +124,6 @@
       "esp32c6": "复位序列与烧录结束后的硬复位一致；接口类型由系统自动识别。请先释放串口占用。",
       "esp32s3": "部分开发板为 USB-JTAG/串口复合，复位时序与烧录结束后一致。请先释放串口占用。"
     },
-    "connect": "连接",
-    "disconnect": "断开",
     "deviceOps": "设备与操作",
     "deviceOpsHint": "芯片平台在上方连接区已选；此处仅填各子任务参数",
     "tabsAria": "固件烧录子项目",
@@ -353,7 +351,6 @@
       "portBusyKillHint": "释放命令：{cmd}（请确认不会影响其他正在运行的任务）",
       "portCheckFailed": "串口可用性检查失败：{msg}",
       "autoConnecting": "自动连接 {port}…",
-      "autoDisconnected": "已自动断开连接。",
       "eraseCancelled": "用户取消了擦除操作。",
       "readOverwriting": "覆盖已有文件：{path}",
       "readTimestamped": "保存至带时间戳的文件：{path}",

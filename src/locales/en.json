@@ -124,8 +124,6 @@
       "esp32c6": "Hard reset matches post-flash reset; interface type is auto-detected. Free the serial port first.",
       "esp32s3": "Some boards use a USB-JTAG/serial bridge; reset timing matches post-flash reset. Free the serial port first."
     },
-    "connect": "Connect",
-    "disconnect": "Disconnect",
     "deviceOps": "Device & operation",
     "deviceOpsHint": "Chip platform is selected above; fill only task-specific options here.",
     "tabsAria": "Firmware flash tasks",
@@ -353,7 +351,6 @@
       "portBusyKillHint": "Release command: {cmd} (verify this won't affect other running tasks)",
       "portCheckFailed": "Port check failed: {msg}",
       "autoConnecting": "Auto-connecting to {port}…",
-      "autoDisconnected": "Auto-disconnected.",
       "eraseCancelled": "Erase cancelled by user.",
       "readOverwriting": "Overwriting existing file: {path}",
       "readTimestamped": "Saving to timestamped file: {path}",

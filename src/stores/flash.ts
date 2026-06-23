@@ -566,6 +566,24 @@ export const useFlashStore = defineStore("flash", () => {
     );
   }
 
+  /**
+   * Release the serial port when an operation auto-connected (acquired the
+   * port) but then bailed out before the backend emitted a terminal event —
+   * e.g. the auth-overwrite confirm was cancelled, or `flash_run` threw before
+   * `Done`. On those paths `onOperationSettled` never runs. Idempotent (a
+   * mismatched/absent owner is a PortManager no-op); a no-op for a non-auto
+   * connection. There is no manual disconnect control, so this is what frees
+   * the port and re-enables the form selects on these exits.
+   */
+  function releaseIfAutoConnected(): void {
+    if (!autoConnected.value) {
+      return;
+    }
+    connected.value = false;
+    autoConnected.value = false;
+    usePortManagerStore().release(selectedSerialPort.value, "flash");
+  }
+
   async function startOperation(kind: OpKind): Promise<void> {
     if (flashPhase.value === "running") {
       return;
@@ -767,6 +785,7 @@ export const useFlashStore = defineStore("flash", () => {
             });
             if (!confirmed) {
               appendLog(t("flash.log.authOverwriteCancelled"));
+              releaseIfAutoConnected();
               flashPhase.value = "idle";
               runningOp.value = null;
               return;
@@ -837,6 +856,7 @@ export const useFlashStore = defineStore("flash", () => {
         flashMessage.value = msg;
         appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
+        releaseIfAutoConnected();
       }
     } else {
       try {
@@ -851,6 +871,7 @@ export const useFlashStore = defineStore("flash", () => {
         flashMessage.value = msg;
         appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
+        releaseIfAutoConnected();
       }
     }
   }
