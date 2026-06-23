@@ -71,6 +71,7 @@ async function copyValue() {
       autocorrect="off"
       data-1p-ignore
       data-lpignore="true"
+      data-bwignore="true"
       @input="onInput"
     />
     <div
