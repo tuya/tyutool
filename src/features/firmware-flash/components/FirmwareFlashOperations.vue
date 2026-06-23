@@ -692,7 +692,7 @@ onUnmounted(() => {
         <button
           v-else-if="ctx.activeTab === 'erase'"
           type="button"
-          class="ops-btn-erase inline-flex min-h-[2.75rem] w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200"
+          class="ty-btn-danger-solid inline-flex min-h-[2.75rem] w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200"
           :disabled="!ctx.canErase"
           @click="startOperation('erase')"
         >

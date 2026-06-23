@@ -161,7 +161,10 @@
 }
 
 @theme {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, -apple-system,
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
+    "Microsoft YaHei", "Source Han Sans CN", sans-serif;
 }
 
 @layer base {
@@ -180,13 +183,53 @@
       "Inter Variable",
       ui-sans-serif,
       system-ui,
+      -apple-system,
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Noto Sans CJK SC",
+      "Microsoft YaHei",
+      "Source Han Sans CN",
       sans-serif;
     font-feature-settings: "tnum" 1;
     background-color: var(--ty-canvas);
     color: var(--ty-text);
     line-height: 1.5;
     overflow-x: clip;
+    /* Default: text is selectable. Only chrome (nav/buttons/labels) opts out
+       via the rule below — this preserves copy/paste in logs, errors, lists. */
+    user-select: text;
+  }
+
+  /* Non-selectable chrome: navigation, controls, label-style headers.
+     Form inputs (input/textarea/[contenteditable]) and content blocks
+     (code/pre/.font-mono/log lines) remain selectable. */
+  nav,
+  button,
+  [role="button"],
+  [role="tab"],
+  label,
+  .ty-section-title,
+  .ty-block-label,
+  .ty-page-title,
+  .ty-page-title-accent,
+  .conn-section-label,
+  .conn-field-label,
+  .conn-status-text,
+  .ops-field-label,
+  .ops-tab,
+  .page-header-section,
+  .page-header-title,
+  .page-header-desc {
     user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  code,
+  pre,
+  .font-mono {
+    user-select: text;
   }
 
   #app {
@@ -731,23 +774,23 @@
     border-top: 1px solid var(--ty-border);
   }
 
-  /* 擦除按钮 */
-  .ops-btn-erase {
+  /* 破坏性操作按钮（擦除等） — danger 语义，与 ty-btn-primary-solid 对应 */
+  .ty-btn-danger-solid {
     border: 2px solid color-mix(in srgb, var(--ty-danger) 40%, transparent);
     background: color-mix(in srgb, var(--ty-danger) 9%, transparent);
     color: var(--ty-danger);
   }
 
-  .ops-btn-erase:hover:not(:disabled) {
+  .ty-btn-danger-solid:hover:not(:disabled) {
     background: color-mix(in srgb, var(--ty-danger) 15%, transparent);
     border-color: color-mix(in srgb, var(--ty-danger) 55%, transparent);
   }
 
-  .ops-btn-erase:active:not(:disabled) {
+  .ty-btn-danger-solid:active:not(:disabled) {
     transform: scale(0.99);
   }
 
-  .ops-btn-erase:disabled {
+  .ty-btn-danger-solid:disabled {
     cursor: not-allowed;
     opacity: 0.4;
   }
