@@ -512,6 +512,10 @@
   "batchFlashAuth": {
     "title": "批量烧录授权",
     "subtitle": "同时向多个串口并行烧录固件并写入授权码，最多 32 个",
+    "configurationSection": "配置",
+    "configurationHint": "运行批量任务前，先配置芯片、固件与授权来源",
+    "expand": "展开",
+    "collapse": "折叠",
     "dashboard": {
       "flashStats": "烧录累计",
       "authStats": "授权累计",

@@ -134,65 +134,77 @@ async function openOpensourceLicenses(): Promise<void> {
         <h2 id="appearance-heading" class="ty-section-title">
           {{ t("settings.appearance") }}
         </h2>
-        <div class="mt-4 space-y-2">
-          <label
-            for="settings-theme-style"
-            class="block text-sm font-medium text-[var(--ty-text)]"
-          >
+        <!-- Theme style: visual swatch cards -->
+        <fieldset class="mt-4 space-y-2">
+          <legend class="text-sm font-medium text-[var(--ty-text)]">
             {{ t("settings.themeStyle") }}
-          </label>
-          <TySelect
-            id="settings-theme-style"
-            v-model="themeStyleValue"
-            :options="themeStyleOptions"
-            class="w-full max-w-md"
-            style="height: 2.5rem"
-          />
-        </div>
-        <fieldset class="mt-4 space-y-3">
-          <legend class="sr-only">{{ t("settings.themeLegend") }}</legend>
-          <div class="space-y-2">
-            <div class="text-sm font-medium text-[var(--ty-text)]">
-              {{ t("settings.theme") }}
-            </div>
-            <div class="flex flex-wrap gap-x-5 gap-y-3">
-              <label
-                class="flex cursor-pointer items-center gap-2.5 text-sm text-[var(--ty-text)]"
-              >
-                <input
-                  v-model="settings.theme"
-                  type="radio"
-                  name="theme"
-                  value="light"
-                  class="size-4 shrink-0"
-                />
-                {{ t("settings.themeLight") }}
-              </label>
-              <label
-                class="flex cursor-pointer items-center gap-2.5 text-sm text-[var(--ty-text)]"
-              >
-                <input
-                  v-model="settings.theme"
-                  type="radio"
-                  name="theme"
-                  value="dark"
-                  class="size-4 shrink-0"
-                />
-                {{ t("settings.themeDark") }}
-              </label>
-              <label
-                class="flex cursor-pointer items-center gap-2.5 text-sm text-[var(--ty-text)]"
-              >
-                <input
-                  v-model="settings.theme"
-                  type="radio"
-                  name="theme"
-                  value="system"
-                  class="size-4 shrink-0"
-                />
-                {{ t("settings.themeSystem") }}
-              </label>
-            </div>
+          </legend>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button
+              v-for="opt in themeStyleOptions"
+              :key="opt.value"
+              type="button"
+              class="theme-style-card flex items-center gap-3 rounded-xl border p-3 text-left transition-colors"
+              :class="
+                themeStyleValue === opt.value
+                  ? 'border-[var(--ty-primary)] bg-[color-mix(in_srgb,var(--ty-primary)_8%,transparent)]'
+                  : 'border-[var(--ty-border)] hover:border-[var(--ty-border-strong)]'
+              "
+              :aria-pressed="themeStyleValue === opt.value"
+              @click="themeStyleValue = opt.value as ThemeStyle"
+            >
+              <span
+                class="size-7 shrink-0 rounded-lg ring-1 ring-[var(--ty-border)]"
+                :class="
+                  opt.value === 'tuyaopen-ide'
+                    ? 'bg-[linear-gradient(135deg,#cc3800,#e05500)]'
+                    : 'bg-[linear-gradient(135deg,#2563eb,#7c3aed)]'
+                "
+                aria-hidden="true"
+              />
+              <span class="text-sm font-medium">{{ opt.label }}</span>
+            </button>
+          </div>
+        </fieldset>
+        <!-- Theme mode: segmented icons -->
+        <fieldset class="mt-4 space-y-2">
+          <legend class="text-sm font-medium text-[var(--ty-text)]">
+            {{ t("settings.theme") }}
+          </legend>
+          <div
+            class="inline-flex w-full max-w-md rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] p-1"
+            role="radiogroup"
+            :aria-label="t('settings.themeLegend')"
+          >
+            <button
+              v-for="opt in [
+                { v: 'light', icon: 'sun', label: t('settings.themeLight') },
+                { v: 'dark', icon: 'moon', label: t('settings.themeDark') },
+                {
+                  v: 'system',
+                  icon: 'circle-half-stroke',
+                  label: t('settings.themeSystem'),
+                },
+              ]"
+              :key="opt.v"
+              type="button"
+              role="radio"
+              :aria-checked="settings.theme === opt.v"
+              class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+              :class="
+                settings.theme === opt.v
+                  ? 'bg-[var(--ty-surface)] text-[var(--ty-primary)] shadow-sm ring-1 ring-[color-mix(in_srgb,var(--ty-primary)_32%,transparent)]'
+                  : 'text-[var(--ty-text-muted)] hover:text-[var(--ty-text)]'
+              "
+              @click="settings.setTheme(opt.v as 'light' | 'dark' | 'system')"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', opt.icon]"
+                class="size-3.5"
+                aria-hidden="true"
+              />
+              <span>{{ opt.label }}</span>
+            </button>
           </div>
         </fieldset>
         <div class="mt-6 space-y-2">
