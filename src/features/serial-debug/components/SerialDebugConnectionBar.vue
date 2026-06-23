@@ -13,6 +13,7 @@ import { wsTransport } from "@/transport/ws-transport";
 import { useFlashStore } from "@/stores/flash";
 import { rustPluginIdForChip } from "@/features/firmware-flash/chip-manifests";
 import TySelect from "@/components/TySelect.vue";
+import TyConnectionBar from "@/components/TyConnectionBar.vue";
 import SerialDebugSettingsModal from "./SerialDebugSettingsModal.vue";
 
 const s = useSerialDebugStore();
@@ -116,46 +117,35 @@ onDeactivated(() => {
 </script>
 
 <template>
-  <section
-    class="conn-bar relative flex min-w-0 flex-wrap items-center gap-3 overflow-hidden rounded-2xl p-2 sm:gap-4 sm:p-2.5"
-    :aria-label="t('serialDebug.pageTitle')"
-  >
-    <div
-      class="conn-bar-bg pointer-events-none absolute inset-0"
-      aria-hidden="true"
-    />
-
-    <!-- 状态指示器 -->
-    <div class="relative flex shrink-0 items-center gap-2.5">
-      <div class="shrink-0 flex flex-col justify-center">
-        <p class="conn-section-label">{{ t("serialDebug.conn.port") }}</p>
-        <div class="mt-0.5 flex items-center gap-1.5">
-          <span
-            class="conn-status-dot inline-block size-2 shrink-0 rounded-full"
-            :class="s.open ? 'conn-status-on' : 'conn-status-off'"
-            aria-hidden="true"
-          />
-          <span class="conn-status-text text-xs font-semibold">
-            {{
-              s.opening
-                ? t("serialDebug.conn.connecting")
-                : s.open
-                  ? t("serialDebug.conn.statusConnected")
-                  : t("serialDebug.conn.statusDisconnected")
-            }}
-          </span>
-        </div>
-      </div>
+  <TyConnectionBar :aria-label="t('serialDebug.pageTitle')">
+    <template #icon>
       <div
-        class="conn-divider hidden h-8 w-px shrink-0 sm:block"
+        class="conn-icon-wrap flex size-10 shrink-0 items-center justify-center rounded-xl"
         aria-hidden="true"
-      />
-    </div>
-
-    <!-- 端口 + 波特率 -->
-    <div
-      class="relative flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2"
-    >
+      >
+        <FontAwesomeIcon :icon="['fas', 'plug']" class="size-[1.1rem]" />
+      </div>
+    </template>
+    <template #status>
+      <p class="conn-section-label">{{ t("serialDebug.conn.port") }}</p>
+      <div class="mt-0.5 flex items-center gap-1.5">
+        <span
+          class="conn-status-dot inline-block size-2 shrink-0 rounded-full"
+          :class="s.open ? 'conn-status-on' : 'conn-status-off'"
+          aria-hidden="true"
+        />
+        <span class="conn-status-text text-xs font-semibold">
+          {{
+            s.opening
+              ? t("serialDebug.conn.connecting")
+              : s.open
+                ? t("serialDebug.conn.statusConnected")
+                : t("serialDebug.conn.statusDisconnected")
+          }}
+        </span>
+      </div>
+    </template>
+    <template #fields>
       <div class="flex min-w-0 items-center gap-1.5">
         <label
           for="sd-port"
@@ -203,10 +193,8 @@ onDeactivated(() => {
           "
         />
       </div>
-    </div>
-
-    <!-- 操作按钮 -->
-    <div class="relative flex shrink-0 items-center gap-2">
+    </template>
+    <template #actions>
       <button
         type="button"
         class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
@@ -280,15 +268,15 @@ onDeactivated(() => {
         />
         {{ t("serialDebug.conn.close") }}
       </button>
-    </div>
+    </template>
+  </TyConnectionBar>
 
-    <Teleport to="body">
-      <SerialDebugSettingsModal
-        v-if="showSettings"
-        @close="showSettings = false"
-      />
-    </Teleport>
-  </section>
+  <Teleport to="body">
+    <SerialDebugSettingsModal
+      v-if="showSettings"
+      @close="showSettings = false"
+    />
+  </Teleport>
 </template>
 
 <style scoped>
