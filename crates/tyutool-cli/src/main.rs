@@ -162,12 +162,20 @@ fn chip_value_parser() -> impl TypedValueParser<Value = String> {
     // value with `.map(...)`. Downstream code sees only canonical ids.
     PossibleValuesParser::new(SUPPORTED_DEVICES.iter().map(|s| {
         if *s == "t5ai" {
-            PossibleValue::new(*s).alias("t5")
+            // clap aliases are case-sensitive — list both spellings explicitly
+            // so scripts saying `--device T5` keep working alongside `t5`.
+            PossibleValue::new(*s).aliases(["t5", "T5"])
         } else {
             PossibleValue::new(*s)
         }
     }))
-    .map(|s| if s == "t5" { "t5ai".to_string() } else { s })
+    .map(|s| {
+        if s.eq_ignore_ascii_case("t5") {
+            "t5ai".to_string()
+        } else {
+            s
+        }
+    })
 }
 
 // Must stay in sync with `defaultBaudRate` in src/features/firmware-flash/chip-manifests.ts.
@@ -634,41 +642,25 @@ mod tests {
 
     #[test]
     fn cli_accepts_legacy_t5_device_and_resolves_to_t5ai() {
-        // `--device t5` is a hidden alias for `t5ai`; clap should accept it and
-        // store the primary value.
-        let cli = Cli::try_parse_from([
-            "tyutool",
-            "write",
-            "--device",
-            "t5",
-            "--port",
-            "/dev/null",
-            "--file",
-            "x.bin",
-        ])
-        .expect("clap should accept the legacy t5 alias");
-        match cli.command {
-            Commands::Write { device, .. } => assert_eq!(device, "t5ai"),
-            _ => panic!("expected Commands::Write"),
-        }
-
-        // Uppercase still works because clap matches aliases case-insensitively
-        // via PossibleValue; whether or not it does, the canonical t5ai must
-        // always be accepted.
-        let cli = Cli::try_parse_from([
-            "tyutool",
-            "write",
-            "--device",
-            "t5ai",
-            "--port",
-            "/dev/null",
-            "--file",
-            "x.bin",
-        ])
-        .expect("canonical t5ai must keep working");
-        match cli.command {
-            Commands::Write { device, .. } => assert_eq!(device, "t5ai"),
-            _ => panic!("expected Commands::Write"),
+        // Both `--device t5` and `--device T5` are hidden aliases for `t5ai`;
+        // clap accepts them, and the parser rewrites the matched value to the
+        // canonical primary so downstream code never sees the legacy spelling.
+        for variant in ["t5", "T5", "t5ai"] {
+            let cli = Cli::try_parse_from([
+                "tyutool",
+                "write",
+                "--device",
+                variant,
+                "--port",
+                "/dev/null",
+                "--file",
+                "x.bin",
+            ])
+            .unwrap_or_else(|e| panic!("clap rejected --device {variant}: {e}"));
+            match cli.command {
+                Commands::Write { device, .. } => assert_eq!(device, "t5ai"),
+                _ => panic!("expected Commands::Write"),
+            }
         }
     }
 
