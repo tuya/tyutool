@@ -46,7 +46,12 @@ const tools = computed(() =>
       </div>
     </header>
 
-    <div class="grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-4">
+    <div
+      class="grid min-w-0 gap-3 sm:gap-4"
+      :class="
+        tools.length >= 2 ? 'sm:grid-cols-2 xl:grid-cols-3' : 'sm:grid-cols-1'
+      "
+    >
       <RouterLink
         v-for="tool in tools"
         :key="tool.to"
