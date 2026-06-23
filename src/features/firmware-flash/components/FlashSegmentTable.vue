@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
+import { validateAddrRange } from "../hex";
 
 /**
  * Editor for the flash address segments.
@@ -18,6 +20,23 @@ const ctx = useFirmwareFlashContext();
 const { onPickFile, addSegment, removeSegment } = ctx;
 
 const MAX_SEGMENTS = 10;
+
+/** Per-segment inline range error (empty while either field is blank). */
+const segmentErrors = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {};
+  for (const seg of ctx.flashSegments) {
+    if (!seg.startAddr.trim() || !seg.endAddr.trim()) {
+      out[seg.id] = "";
+      continue;
+    }
+    const err = validateAddrRange(seg.startAddr, seg.endAddr);
+    if (err === "invalid") out[seg.id] = t("flash.err.addrInvalid");
+    else if (err === "startAfterEnd")
+      out[seg.id] = t("flash.err.startAfterEnd");
+    else out[seg.id] = "";
+  }
+  return out;
+});
 </script>
 
 <template>
@@ -53,88 +72,105 @@ const MAX_SEGMENTS = 10;
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="(seg, index) in ctx.flashSegments"
-            :key="seg.id"
-            class="border-b border-[var(--ty-border)] last:border-0"
-          >
-            <td
-              class="py-2.5 pr-1 text-center align-middle text-xs font-semibold text-[var(--ty-text-muted)]"
+          <template v-for="(seg, index) in ctx.flashSegments" :key="seg.id">
+            <tr
+              class="border-b border-[var(--ty-border)] last:border-0"
+              :class="{
+                '!border-b-0': !!segmentErrors[seg.id],
+              }"
             >
-              {{ index + 1 }}
-            </td>
-            <td class="py-2.5 pr-2 align-middle">
-              <label :for="`flash-${seg.id}-start`" class="sr-only">{{
-                t("flash.addrStart")
-              }}</label>
-              <input
-                :id="`flash-${seg.id}-start`"
-                v-model="seg.startAddr"
-                type="text"
-                class="ops-text-input w-full min-w-[7rem] font-mono py-1.5 text-xs"
-                placeholder="0x00000000"
-                spellcheck="false"
-                autocomplete="off"
-                :disabled="ctx.busy"
-              />
-            </td>
-            <td class="py-2.5 pr-2 align-middle">
-              <label :for="`flash-${seg.id}-end`" class="sr-only">{{
-                t("flash.addrEnd")
-              }}</label>
-              <input
-                :id="`flash-${seg.id}-end`"
-                v-model="seg.endAddr"
-                type="text"
-                class="ops-text-input w-full min-w-[7rem] font-mono py-1.5 text-xs"
-                placeholder="0x00000000"
-                spellcheck="false"
-                autocomplete="off"
-                :disabled="ctx.busy"
-              />
-            </td>
-            <td class="min-w-0 py-2.5 align-middle">
-              <div class="flex min-w-0 items-center gap-1.5">
-                <label :for="`flash-${seg.id}-file`" class="sr-only">{{
-                  t("flash.firmwareFile")
+              <td
+                class="py-2.5 pr-1 text-center align-middle text-xs font-semibold text-[var(--ty-text-muted)]"
+              >
+                {{ index + 1 }}
+              </td>
+              <td class="py-2.5 pr-2 align-middle">
+                <label :for="`flash-${seg.id}-start`" class="sr-only">{{
+                  t("flash.addrStart")
                 }}</label>
                 <input
-                  :id="`flash-${seg.id}-file`"
-                  v-model="seg.firmwarePath"
+                  :id="`flash-${seg.id}-start`"
+                  v-model="seg.startAddr"
                   type="text"
-                  readonly
-                  :placeholder="t('flash.noFile')"
-                  class="ops-text-input min-w-0 flex-1 cursor-default truncate bg-[var(--ty-surface-muted)] py-1.5 text-xs"
+                  class="ops-text-input w-full min-w-[7rem] font-mono py-1.5 text-xs"
+                  placeholder="0x00000000"
+                  spellcheck="false"
+                  autocomplete="off"
+                  :disabled="ctx.busy"
                 />
-                <button
-                  type="button"
-                  class="ops-browse-btn flex h-9 min-w-[4.75rem] shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3.5 text-sm font-semibold"
+              </td>
+              <td class="py-2.5 pr-2 align-middle">
+                <label :for="`flash-${seg.id}-end`" class="sr-only">{{
+                  t("flash.addrEnd")
+                }}</label>
+                <input
+                  :id="`flash-${seg.id}-end`"
+                  v-model="seg.endAddr"
+                  type="text"
+                  class="ops-text-input w-full min-w-[7rem] font-mono py-1.5 text-xs"
+                  placeholder="0x00000000"
+                  spellcheck="false"
+                  autocomplete="off"
                   :disabled="ctx.busy"
-                  @click="onPickFile(index)"
-                >
-                  {{ t("flash.browse") }}
-                </button>
-              </div>
-            </td>
-            <td class="py-2.5 align-middle">
-              <div class="flex size-7 shrink-0 items-center justify-center">
-                <button
-                  v-if="index > 0"
-                  type="button"
-                  class="flex size-7 items-center justify-center rounded-md text-[var(--ty-danger)] transition-colors hover:bg-[color-mix(in_srgb,var(--ty-danger)_12%,transparent)]"
-                  :disabled="ctx.busy"
-                  :aria-label="t('flash.removeSegment')"
-                  @click="removeSegment(index)"
-                >
-                  <FontAwesomeIcon
-                    :icon="['fas', 'trash']"
-                    class="size-3.5"
-                    aria-hidden="true"
+                />
+              </td>
+              <td class="min-w-0 py-2.5 align-middle">
+                <div class="flex min-w-0 items-center gap-1.5">
+                  <label :for="`flash-${seg.id}-file`" class="sr-only">{{
+                    t("flash.firmwareFile")
+                  }}</label>
+                  <input
+                    :id="`flash-${seg.id}-file`"
+                    v-model="seg.firmwarePath"
+                    type="text"
+                    readonly
+                    :placeholder="t('flash.noFile')"
+                    class="ops-text-input min-w-0 flex-1 cursor-default truncate bg-[var(--ty-surface-muted)] py-1.5 text-xs"
                   />
-                </button>
-              </div>
-            </td>
-          </tr>
+                  <button
+                    type="button"
+                    class="ops-browse-btn flex h-9 min-w-[4.75rem] shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3.5 text-sm font-semibold"
+                    :disabled="ctx.busy"
+                    @click="onPickFile(index)"
+                  >
+                    {{ t("flash.browse") }}
+                  </button>
+                </div>
+              </td>
+              <td class="py-2.5 align-middle">
+                <div class="flex size-7 shrink-0 items-center justify-center">
+                  <button
+                    v-if="index > 0"
+                    type="button"
+                    class="flex size-7 items-center justify-center rounded-md text-[var(--ty-danger)] transition-colors hover:bg-[color-mix(in_srgb,var(--ty-danger)_12%,transparent)]"
+                    :disabled="ctx.busy"
+                    :aria-label="t('flash.removeSegment')"
+                    @click="removeSegment(index)"
+                  >
+                    <FontAwesomeIcon
+                      :icon="['fas', 'trash']"
+                      class="size-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr
+              v-if="segmentErrors[seg.id]"
+              class="border-b border-[var(--ty-border)] last:border-0"
+            >
+              <td />
+              <td colspan="4" class="pb-2 pr-2">
+                <p
+                  class="text-xs leading-snug text-[var(--ty-danger)]"
+                  role="alert"
+                >
+                  {{ segmentErrors[seg.id] }}
+                </p>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -181,10 +217,18 @@ const MAX_SEGMENTS = 10;
               placeholder="0x00000000"
               spellcheck="false"
               autocomplete="off"
+              :aria-invalid="!!segmentErrors[seg.id]"
               :disabled="ctx.busy"
             />
           </div>
         </div>
+        <p
+          v-if="segmentErrors[seg.id]"
+          class="mt-2 text-xs leading-snug text-[var(--ty-danger)]"
+          role="alert"
+        >
+          {{ segmentErrors[seg.id] }}
+        </p>
         <div class="mt-3">
           <label
             :for="`flash-m-${seg.id}-file`"

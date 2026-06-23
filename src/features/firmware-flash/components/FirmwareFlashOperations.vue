@@ -4,8 +4,10 @@ import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
 import { chipManifest } from "../chip-manifests";
 import type { ErasePresetKind } from "../types";
+import { toRef } from "vue";
 import FlashSegmentTable from "./FlashSegmentTable.vue";
 import TySecretInput from "@/components/TySecretInput.vue";
+import { useAddrRangeError } from "../useAddrRangeError";
 
 const { t, locale } = useI18n();
 const ctx = useFirmwareFlashContext();
@@ -46,6 +48,15 @@ const currentErasePresets = computed(() => {
     label: t(ERASE_PRESET_LABEL_KEYS[kind]),
   }));
 });
+
+const { message: eraseAddrError } = useAddrRangeError(
+  toRef(ctx, "eraseStartAddr"),
+  toRef(ctx, "eraseEndAddr"),
+);
+const { message: readAddrError } = useAddrRangeError(
+  toRef(ctx, "readStartAddr"),
+  toRef(ctx, "readEndAddr"),
+);
 </script>
 
 <template>
@@ -159,11 +170,20 @@ const currentErasePresets = computed(() => {
                     placeholder="0x00100000"
                     spellcheck="false"
                     autocomplete="off"
+                    :aria-invalid="!!eraseAddrError"
                     :disabled="ctx.busy"
                   />
                 </div>
               </div>
               <p
+                v-if="eraseAddrError"
+                class="mt-1.5 text-xs leading-snug text-[var(--ty-danger)]"
+                role="alert"
+              >
+                {{ eraseAddrError }}
+              </p>
+              <p
+                v-else
                 class="mt-1.5 text-xs leading-snug text-[var(--ty-text-muted)]"
               >
                 {{ t("flash.hexHint") }}
@@ -315,11 +335,20 @@ const currentErasePresets = computed(() => {
                     placeholder="0x00200000"
                     spellcheck="false"
                     autocomplete="off"
+                    :aria-invalid="!!readAddrError"
                     :disabled="ctx.busy"
                   />
                 </div>
               </div>
               <p
+                v-if="readAddrError"
+                class="mt-1.5 text-xs leading-snug text-[var(--ty-danger)]"
+                role="alert"
+              >
+                {{ readAddrError }}
+              </p>
+              <p
+                v-else
                 class="mt-1.5 text-xs leading-snug text-[var(--ty-text-muted)]"
               >
                 {{ t("flash.hexHint") }}
