@@ -32,6 +32,33 @@ describe("filterByChip", () => {
     );
     expect(out.map((e) => e.version)).toEqual(["v1.1.0", "v1.0.0"]);
   });
+
+  it("orders versions with more than three segments by numeric value", () => {
+    const out = filterByChip(
+      [mk("1.2.3.4", "esp32"), mk("1.2.3.10", "esp32"), mk("1.2.3.5", "esp32")],
+      "esp32",
+    );
+    expect(out.map((e) => e.version)).toEqual([
+      "1.2.3.10",
+      "1.2.3.5",
+      "1.2.3.4",
+    ]);
+  });
+
+  it("produces a stable order for pre-release suffixes (no NaN comparator)", () => {
+    // The old Number()-based impl returned NaN for 'rc1'; Array.sort with a
+    // NaN comparator left order undefined. Only require determinism here.
+    const out = filterByChip(
+      [
+        mk("v1.0.0-rc1", "esp32"),
+        mk("v1.0.0-rc2", "esp32"),
+        mk("v1.1.0", "esp32"),
+      ],
+      "esp32",
+    );
+    expect(out[0].version).toBe("v1.1.0");
+    expect(out.map((e) => e.version)).toHaveLength(3);
+  });
 });
 
 describe("AUTH_FIRMWARE_SOURCES", () => {

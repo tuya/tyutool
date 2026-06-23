@@ -21,18 +21,13 @@ export const AUTH_FIRMWARE_SOURCES: UpdateSource[] = [
   },
 ];
 
-/** Descending numeric semver-ish comparison (tolerates a leading 'v'). */
+/** Descending numeric-aware version comparison (tolerates a leading 'v').
+ *  Uses Intl numeric collation so all segments and non-numeric suffixes
+ *  (e.g. `v1.0.0-rc1`) get a deterministic order. Mirrors the script-side
+ *  helper in scripts/generate-auth-firmware-manifest.ts. */
 function compareVersionDesc(a: string, b: string): number {
-  const parse = (v: string): number[] =>
-    v.replace(/^v/, "").split(".").map(Number);
-  const pa = parse(a);
-  const pb = parse(b);
-  for (let i = 0; i < 3; i++) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
-    if (x !== y) return y - x;
-  }
-  return 0;
+  const strip = (v: string): string => v.replace(/^v/, "");
+  return strip(b).localeCompare(strip(a), "en", { numeric: true });
 }
 
 /** Keep only entries for the given chip, sorted newest-first. */
