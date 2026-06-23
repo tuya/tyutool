@@ -512,6 +512,10 @@
   "batchFlashAuth": {
     "title": "Batch Flash & Auth",
     "subtitle": "Flash firmware and write auth codes to up to 32 ports in parallel",
+    "configurationSection": "Configuration",
+    "configurationHint": "Set up chip, firmware and auth source before running a batch",
+    "expand": "Expand",
+    "collapse": "Collapse",
     "dashboard": {
       "flashStats": "Flash Stats",
       "authStats": "Auth Stats",
