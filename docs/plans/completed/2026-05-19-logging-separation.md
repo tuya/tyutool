@@ -23,7 +23,7 @@
 | Modify | `crates/tyutool-core/src/plugins/bk7231n.rs` | Migrate `LogKey`/`LogLine` → `FlashEvent` |
 | Modify | `crates/tyutool-core/src/plugins/t1.rs` | Callback type only |
 | Modify | `crates/tyutool-core/src/plugins/t3.rs` | Callback type only |
-| Modify | `crates/tyutool-core/src/plugins/t5ai.rs` | Callback type only |
+| Modify | `crates/tyutool-core/src/plugins/t5.rs` | Callback type only |
 | Modify | `crates/tyutool-core/src/plugins/esp/common.rs` | Migrate `LogKey` → `FlashEvent` |
 | Modify | `crates/tyutool-core/src/plugins/ln882h/mod.rs` | Migrate `LogLine` → `FlashEvent`/`Warning` |
 | Modify | `crates/tyutool-core/src/authorize.rs` | Migrate `LogKey` → `AuthReadComplete` milestone |
@@ -323,7 +323,7 @@ This is a coordinated change across plugin.rs, registry.rs, and all plugin imple
 - Modify: `crates/tyutool-core/src/plugins/bk7231n.rs`
 - Modify: `crates/tyutool-core/src/plugins/t1.rs`
 - Modify: `crates/tyutool-core/src/plugins/t3.rs`
-- Modify: `crates/tyutool-core/src/plugins/t5ai.rs`
+- Modify: `crates/tyutool-core/src/plugins/t5.rs`
 - Modify: `crates/tyutool-core/src/plugins/esp/common.rs`
 - Modify: `crates/tyutool-core/src/plugins/ln882h/mod.rs`
 - Modify: `crates/tyutool-core/src/authorize.rs`
@@ -495,7 +495,7 @@ log::info!("Reading 0x{:010x}..0x{:010x} ({} KiB)", start, end, kib);
 log::info!("Saving {} bytes to {}", size, path);
 ```
 
-- [ ] **Step 2.4: Update `plugins/t1.rs`, `t3.rs`, `t5ai.rs` — change signature only**
+- [ ] **Step 2.4: Update `plugins/t1.rs`, `t3.rs`, `t5.rs` — change signature only**
 
 In each file, replace the import and the `run` method signature:
 
@@ -669,7 +669,7 @@ git commit -m "feat(core): switch FlashPlugin and run_job to FlashEvent
 - plugin.rs: FlashPlugin::run callback changes from FlashProgress to FlashEvent
 - registry.rs: run_job emits JobSummary first, wraps with timer, maps Cancelled
 - bk7231n: migrate LogKey/LogLine to typed FlashEvent variants
-- t1/t3/t5ai: update callback type (delegation unchanged)
+- t1/t3/t5: update callback type (delegation unchanged)
 - esp: migrate LogKey to Connected milestone and WriteSegment phase
 - ln882h: migrate LogLine to Warning/EraseComplete/SegmentWritten
 - authorize: migrate AuthReadComplete LogKey to typed milestone"
@@ -1641,7 +1641,7 @@ Outputs JSON with raw USB metadata for all ports. Used for cross-OS debugging.
 | `t2` | T2 | 921600 |
 | `t3` | T3 | 921600 |
 | `t1` | T1 | 921600 |
-| `t5ai` | T5AI | 921600 |
+| `t5` | T5 | 921600 |
 | `ln882h` | LN882H | 115200 |
 | `esp32` | ESP32 | 460800 |
 | `esp32c3` | ESP32-C3 | 460800 |

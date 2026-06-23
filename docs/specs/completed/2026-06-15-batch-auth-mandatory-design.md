@@ -72,7 +72,7 @@ export type BatchOpMode = "auth-only" | "flash-then-auth";
 **默认 chipId**（`chipId` 当前不持久化，改默认值即可，无需迁移代码）：
 ```ts
 // 之前
-const chipId = ref<string>(DEFAULT_CHIP_ID);  // "t5ai"，不在新芯片列表中
+const chipId = ref<string>(DEFAULT_CHIP_ID);  // "t5"，不在新芯片列表中
 
 // 之后
 const chipId = ref<string>("esp32");
