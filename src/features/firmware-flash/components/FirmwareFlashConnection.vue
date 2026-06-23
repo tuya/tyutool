@@ -3,6 +3,7 @@ import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
 import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
+import TyConnectionBar from "@/components/TyConnectionBar.vue";
 
 const { t } = useI18n();
 const ctx = useFirmwareFlashContext();
@@ -92,48 +93,29 @@ const chipValue = computed({
 </script>
 
 <template>
-  <section
-    class="conn-bar relative flex min-w-0 shrink-0 flex-col gap-3 overflow-hidden rounded-2xl p-3 sm:flex-row sm:items-center sm:gap-4 sm:p-3.5"
-    :aria-label="t('flash.connectionAria')"
-  >
-    <!-- 背景装饰 -->
-    <div
-      class="conn-bar-bg pointer-events-none absolute inset-0"
-      aria-hidden="true"
-    />
-
-    <!-- 状态指示器 -->
-    <div class="relative flex shrink-0 items-center gap-3">
+  <TyConnectionBar :aria-label="t('flash.connectionAria')">
+    <template #icon>
       <div
         class="conn-icon-wrap flex size-10 shrink-0 items-center justify-center rounded-xl"
         aria-hidden="true"
       >
         <FontAwesomeIcon :icon="['fas', 'plug']" class="size-[1.1rem]" />
       </div>
-      <div class="shrink-0">
-        <p class="conn-section-label">{{ t("flash.serialSection") }}</p>
-        <div class="mt-0.5 flex items-center gap-2">
-          <span
-            class="conn-status-dot inline-block size-2 shrink-0 rounded-full"
-            :class="ctx.connected ? 'conn-status-on' : 'conn-status-off'"
-            aria-hidden="true"
-          />
-          <span class="conn-status-text text-xs font-semibold">{{
-            ctx.statusText
-          }}</span>
-        </div>
+    </template>
+    <template #status>
+      <p class="conn-section-label">{{ t("flash.serialSection") }}</p>
+      <div class="mt-0.5 flex items-center gap-2">
+        <span
+          class="conn-status-dot inline-block size-2 shrink-0 rounded-full"
+          :class="ctx.connected ? 'conn-status-on' : 'conn-status-off'"
+          aria-hidden="true"
+        />
+        <span class="conn-status-text text-xs font-semibold">{{
+          ctx.statusText
+        }}</span>
       </div>
-      <!-- 竖分隔线 -->
-      <div
-        class="conn-divider ml-1 hidden h-8 w-px shrink-0 sm:block"
-        aria-hidden="true"
-      />
-    </div>
-
-    <!-- 参数选择区 -->
-    <div
-      class="relative flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2"
-    >
+    </template>
+    <template #fields>
       <!-- 串口 -->
       <div class="flex min-w-0 items-center gap-1.5">
         <label
@@ -196,6 +178,6 @@ const chipValue = computed({
           class="min-w-0 w-[9rem] max-w-[13rem]"
         />
       </div>
-    </div>
-  </section>
+    </template>
+  </TyConnectionBar>
 </template>
