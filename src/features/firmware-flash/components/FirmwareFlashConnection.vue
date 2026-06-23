@@ -9,7 +9,7 @@ const ctx = useFirmwareFlashContext();
 
 // Only destructure actions (functions) — ref state must be accessed via ctx.xxx
 // to preserve Pinia reactive() wrapper (destructuring unwraps refs into snapshots).
-const { refreshDevice, connect, disconnect } = ctx;
+const { refreshDevice } = ctx;
 
 /** True when the authorize tab is active — baud rate then controls auth baud. */
 const isAuthTab = computed(() => ctx.activeTab === "authorize");
@@ -146,7 +146,7 @@ const chipValue = computed({
           id="serial-port"
           v-model="serialPortValue"
           :options="serialPortOptions"
-          :disabled="ctx.busy || ctx.connected"
+          :disabled="ctx.busy"
           class="w-auto min-w-[8.5rem] max-w-[16rem]"
           @open="refreshDevice"
         />
@@ -164,7 +164,7 @@ const chipValue = computed({
           id="baud-rate"
           v-model="baudSelectVal"
           :options="isAuthTab ? baudOptionsNoCustom : baudOptions"
-          :disabled="ctx.busy || ctx.connected"
+          :disabled="ctx.busy"
           class="w-[8rem] min-w-0"
         />
         <input
@@ -176,7 +176,7 @@ const chipValue = computed({
           max="4000000"
           step="1"
           class="conn-select w-[6.5rem] min-w-0 text-sm"
-          :disabled="ctx.busy || ctx.connected"
+          :disabled="ctx.busy"
         />
       </div>
 
@@ -192,41 +192,10 @@ const chipValue = computed({
           id="chip-select"
           v-model="chipValue"
           :options="chipOptions"
-          :disabled="ctx.busy || ctx.connected"
+          :disabled="ctx.busy"
           class="min-w-0 w-[9rem] max-w-[13rem]"
         />
       </div>
-    </div>
-
-    <!-- 操作按钮 -->
-    <div class="relative flex shrink-0 items-center gap-2">
-      <button
-        v-if="!ctx.connected"
-        type="button"
-        class="conn-btn-action flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
-        :disabled="!ctx.selectedSerialPort || ctx.busy"
-        @click="connect"
-      >
-        <FontAwesomeIcon
-          :icon="['fas', 'plug']"
-          class="size-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        {{ t("flash.connect") }}
-      </button>
-      <button
-        v-else
-        type="button"
-        class="conn-btn-disconnect flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-150"
-        @click="disconnect"
-      >
-        <FontAwesomeIcon
-          :icon="['fas', 'plug-circle-xmark']"
-          class="size-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        {{ t("flash.disconnect") }}
-      </button>
     </div>
   </section>
 </template>
