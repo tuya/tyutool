@@ -2,10 +2,14 @@ use std::io::{IsTerminal as _, Write as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use clap::{builder::PossibleValuesParser, CommandFactory, Parser, Subcommand};
+use clap::{
+    builder::{PossibleValue, PossibleValuesParser, TypedValueParser},
+    CommandFactory, Parser, Subcommand,
+};
 use clap_complete::{generate, Shell};
 use tyutool_core::{
-    device_reset_dtr_rts, list_serial_ports, run_job, usb_port_survey, FlashJob, FlashMode,
+    device_reset_dtr_rts, list_serial_ports, normalize_chip_id, run_job, usb_port_survey, FlashJob,
+    FlashMode,
 };
 
 mod reporter;
@@ -150,8 +154,20 @@ const SUPPORTED_DEVICES: &[&str] = &[
     "bk7231n", "t2", "t3", "t1", "t5ai", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3",
 ];
 
-fn chip_value_parser() -> PossibleValuesParser {
-    PossibleValuesParser::new(SUPPORTED_DEVICES)
+fn chip_value_parser() -> impl TypedValueParser<Value = String> {
+    // Legacy `t5` is accepted as a hidden alias for `t5ai` so users / scripts
+    // written before the rename keep working. clap's `PossibleValue::alias`
+    // only widens what is *accepted* — the matched string is still whatever
+    // the user typed, so we explicitly rewrite the alias back to the primary
+    // value with `.map(...)`. Downstream code sees only canonical ids.
+    PossibleValuesParser::new(SUPPORTED_DEVICES.iter().map(|s| {
+        if *s == "t5ai" {
+            PossibleValue::new(*s).alias("t5")
+        } else {
+            PossibleValue::new(*s)
+        }
+    }))
+    .map(|s| if s == "t5" { "t5ai".to_string() } else { s })
 }
 
 // Must stay in sync with `defaultBaudRate` in src/features/firmware-flash/chip-manifests.ts.
@@ -396,7 +412,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(p) => p,
                 None => choose_port()?,
             };
-            let chip_id = device.to_ascii_uppercase();
+            let chip_id = normalize_chip_id(&device);
             device_reset_dtr_rts(&port, &chip_id)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
             log::info!("Device reset (DTR/RTS) completed on {}", port);
@@ -470,7 +486,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(e) => e,
                 None => compute_end_from_file(&start, &file)?,
             };
-            let chip_id = device.to_ascii_uppercase();
+            let chip_id = normalize_chip_id(&device);
 
             let reporter = CliReporter::new(force_plain);
 
@@ -511,7 +527,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start_val = parse_hex_addr(&start)?;
             let length_val = parse_hex_addr(&length)?;
             let end = format!("0x{:08X}", start_val + length_val);
-            let chip_id = device.to_ascii_uppercase();
+            let chip_id = normalize_chip_id(&device);
 
             let reporter = CliReporter::new(force_plain);
 
@@ -551,7 +567,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start_val = parse_hex_addr(&start)?;
             let length_val = parse_hex_addr(&length)?;
             let end = format!("0x{:08X}", start_val + length_val);
-            let chip_id = device.to_ascii_uppercase();
+            let chip_id = normalize_chip_id(&device);
 
             let reporter = CliReporter::new(force_plain);
 
@@ -614,6 +630,46 @@ mod tests {
         assert!(parse_hex_addr("0xZZ").is_err());
         assert!(parse_hex_addr("not_hex").is_err());
         assert!(parse_hex_addr("").is_err());
+    }
+
+    #[test]
+    fn cli_accepts_legacy_t5_device_and_resolves_to_t5ai() {
+        // `--device t5` is a hidden alias for `t5ai`; clap should accept it and
+        // store the primary value.
+        let cli = Cli::try_parse_from([
+            "tyutool",
+            "write",
+            "--device",
+            "t5",
+            "--port",
+            "/dev/null",
+            "--file",
+            "x.bin",
+        ])
+        .expect("clap should accept the legacy t5 alias");
+        match cli.command {
+            Commands::Write { device, .. } => assert_eq!(device, "t5ai"),
+            _ => panic!("expected Commands::Write"),
+        }
+
+        // Uppercase still works because clap matches aliases case-insensitively
+        // via PossibleValue; whether or not it does, the canonical t5ai must
+        // always be accepted.
+        let cli = Cli::try_parse_from([
+            "tyutool",
+            "write",
+            "--device",
+            "t5ai",
+            "--port",
+            "/dev/null",
+            "--file",
+            "x.bin",
+        ])
+        .expect("canonical t5ai must keep working");
+        match cli.command {
+            Commands::Write { device, .. } => assert_eq!(device, "t5ai"),
+            _ => panic!("expected Commands::Write"),
+        }
     }
 
     #[test]

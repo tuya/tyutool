@@ -81,10 +81,14 @@ describe("normalizeChipId", () => {
     expect(normalizeChipId("  T5  ")).toBe("t5ai");
   });
 
-  it("passes through ids that need no remap (lower-cased)", () => {
+  it("passes through ids that need no remap, preserving case", () => {
     expect(normalizeChipId("t5ai")).toBe("t5ai");
-    expect(normalizeChipId("ESP32")).toBe("esp32");
     expect(normalizeChipId("bk7231n")).toBe("bk7231n");
+  });
+
+  it("does NOT lower-case other inputs (chipManifest stays case-sensitive)", () => {
+    expect(normalizeChipId("ESP32")).toBe("ESP32");
+    expect(normalizeChipId("OTHER")).toBe("OTHER");
   });
 
   it("leaves the auth-only id and unknown ids alone", () => {

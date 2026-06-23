@@ -17,11 +17,16 @@ export type ChipId = (typeof CHIP_IDS)[number];
 /** Map legacy chip ids (kept in saved workspaces, scripts, deep links) to their
  *  current canonical id. Mirrors `tyutool_core::normalize_chip_id` on the Rust
  *  side — apply to any chip id that crossed a persistence or user-input
- *  boundary before using it as a `ChipId`. */
+ *  boundary before using it as a `ChipId`.
+ *
+ *  Deliberately surgical: only the known legacy spellings (`t5` / `T5`) are
+ *  rewritten. Other inputs pass through unchanged so case-sensitive callers
+ *  (e.g. `chipManifest("OTHER")` correctly throwing "Unknown chip") keep the
+ *  same contract they had before the alias was introduced. */
 export function normalizeChipId(raw: string): string {
-  const lower = raw.trim().toLowerCase();
-  if (lower === "t5") return "t5ai";
-  return lower;
+  const trimmed = raw.trim();
+  if (trimmed === "t5" || trimmed === "T5") return "t5ai";
+  return trimmed;
 }
 
 /**
