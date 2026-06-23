@@ -2,8 +2,10 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRoute } from "vue-router";
+import { storeToRefs } from "pinia";
 import { APP_NAV_ITEMS, isNavItemActive } from "@/config/app-nav";
 import TySerialPortIcon from "@/components/icons/TySerialPortIcon.vue";
+import { useSettingsStore } from "@/stores/settings";
 import appLogo from "@/assets/logo.png";
 
 const route = useRoute();
@@ -18,6 +20,39 @@ const nav = computed(() =>
     label: t(item.labelKey),
   })),
 );
+
+const settings = useSettingsStore();
+const { theme, locale } = storeToRefs(settings);
+
+const themeIcon = computed(() => {
+  if (theme.value === "light") return "sun";
+  if (theme.value === "dark") return "moon";
+  return "circle-half-stroke";
+});
+const themeTitle = computed(() => {
+  if (theme.value === "light") return t("app.quickThemeOnLight");
+  if (theme.value === "dark") return t("app.quickThemeOnDark");
+  return t("app.quickThemeOnSystem");
+});
+
+function cycleTheme() {
+  if (theme.value === "light") settings.setTheme("dark");
+  else if (theme.value === "dark") settings.setTheme("system");
+  else settings.setTheme("light");
+}
+
+const langBadge = computed(() => {
+  // The settings store resolves "auto" to a concrete locale before storing;
+  // showing the active i18n locale is more honest than the preference.
+  return locale.value === "en" ? "EN" : "中";
+});
+const langTitle = computed(() =>
+  locale.value === "en" ? t("app.quickLangOnEn") : t("app.quickLangOnZh"),
+);
+
+function toggleLang() {
+  settings.setLocale(locale.value === "en" ? "zh-CN" : "en");
+}
 </script>
 
 <template>
@@ -71,6 +106,34 @@ const nav = computed(() =>
           <span class="min-w-0 truncate">{{ item.label }}</span>
         </RouterLink>
       </nav>
+
+      <!-- Quick theme + language toggles (md+ only; mobile users go to /settings) -->
+      <div
+        class="hidden border-t border-[var(--ty-border)] p-2 md:flex md:items-center md:justify-center md:gap-1.5"
+      >
+        <button
+          type="button"
+          class="flex size-9 items-center justify-center rounded-lg text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
+          :title="themeTitle"
+          :aria-label="themeTitle"
+          @click="cycleTheme"
+        >
+          <FontAwesomeIcon
+            :icon="['fas', themeIcon]"
+            class="size-4"
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          type="button"
+          class="flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-xs font-bold text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
+          :title="langTitle"
+          :aria-label="langTitle"
+          @click="toggleLang"
+        >
+          {{ langBadge }}
+        </button>
+      </div>
     </aside>
     <main
       class="main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden"

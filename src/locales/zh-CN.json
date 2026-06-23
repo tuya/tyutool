@@ -2,6 +2,9 @@
   "common": {
     "closeDialog": "关闭",
     "copy": "复制",
+    "copied": "已复制",
+    "secretShow": "显示内容",
+    "secretHide": "隐藏内容",
     "ok": "确定",
     "dialogIconPurposeInfo": "对话框类型图标：信息提示",
     "dialogIconPurposeWarning": "对话框类型图标：警告，请留意风险",
@@ -19,7 +22,14 @@
       "settings": "设置"
     },
     "mainNav": "主导航",
-    "resetWindowSize": "恢复默认窗口"
+    "resetWindowSize": "恢复默认窗口",
+    "quickTheme": "切换主题",
+    "quickThemeOnLight": "切换到暗色主题",
+    "quickThemeOnDark": "切换到跟随系统",
+    "quickThemeOnSystem": "切换到亮色主题",
+    "quickLang": "切换语言",
+    "quickLangOnZh": "切换到 English",
+    "quickLangOnEn": "切换到简体中文"
   },
   "settings": {
     "section": "偏好",

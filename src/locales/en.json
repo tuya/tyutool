@@ -2,6 +2,9 @@
   "common": {
     "closeDialog": "Close",
     "copy": "Copy",
+    "copied": "Copied",
+    "secretShow": "Show value",
+    "secretHide": "Hide value",
     "ok": "OK",
     "dialogIconPurposeInfo": "Dialog type: information",
     "dialogIconPurposeWarning": "Dialog type: warning — please review the risk",
@@ -19,7 +22,14 @@
       "settings": "Settings"
     },
     "mainNav": "Main navigation",
-    "resetWindowSize": "Reset window size"
+    "resetWindowSize": "Reset window size",
+    "quickTheme": "Cycle theme",
+    "quickThemeOnLight": "Switch to dark theme",
+    "quickThemeOnDark": "Switch to system theme",
+    "quickThemeOnSystem": "Switch to light theme",
+    "quickLang": "Switch language",
+    "quickLangOnZh": "Switch to English",
+    "quickLangOnEn": "Switch to 简体中文"
   },
   "settings": {
     "section": "Preferences",
