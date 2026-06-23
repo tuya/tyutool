@@ -1,7 +1,7 @@
 //! High-level flash operations: shake, erase, write, CRC check, reboot.
 //!
 //! These functions compose the frame/command/transport primitives into
-//! the complete firmware-flashing workflow shared by BK7231N and T5.
+//! the complete firmware-flashing workflow shared by BK7231N and T5AI.
 
 use super::chip::ChipSpec;
 use super::command::{self, build, parse};
@@ -20,27 +20,27 @@ pub const SECTOR_SIZE_PUB: u32 = SECTOR_SIZE;
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Perform the full handshake sequence:
-/// 1. Hardware reset (DTR/RTS) + LinkCheck loop (T5: retry reset on failure)
+/// 1. Hardware reset (DTR/RTS) + LinkCheck loop (T5AI: retry reset on failure)
 /// 2. Switch to target baud rate
-/// 3. Chip-specific post-handshake (e.g. T5 reads ChipID)
+/// 3. Chip-specific post-handshake (e.g. T5AI reads ChipID)
 pub fn shake<T: IoTransport>(
     transport: &mut Transport<'_, T>,
     target_baud: u32,
     chip: &dyn ChipSpec,
-    _is_t5: bool,
+    _is_t5ai: bool,
 ) -> Result<(), ProtocolError> {
     log::info!("Starting handshake sequence (target baud: {})", target_baud);
     transport.log(&format!("{}: starting handshake...", chip.name()));
 
     if chip.uses_extended_reset_sequence() {
-        // T5: loop reset + link_check, matching Python get_bus() pattern
+        // T5AI: loop reset + link_check, matching Python get_bus() pattern
         let max_reset_retries: u32 = 10;
         let mut connected = false;
         for attempt in 0..max_reset_retries {
             transport.check_cancel()?;
 
             // Hardware reset
-            transport.reset_into_download_mode_t5()?;
+            transport.reset_into_download_mode_t5ai()?;
             std::thread::sleep(std::time::Duration::from_millis(4));
             transport.clear_rx();
 
@@ -58,7 +58,7 @@ pub fn shake<T: IoTransport>(
                 }
                 Err(ProtocolError::Cancelled) => return Err(ProtocolError::Cancelled),
                 Err(_) => {
-                    // Reset and retry — this is normal for T5
+                    // Reset and retry — this is normal for T5AI
                     continue;
                 }
             }
@@ -76,7 +76,7 @@ pub fn shake<T: IoTransport>(
         //         Every 100 failed attempts → reboot_cmd_tx() again + baud toggle + "reboot\r\n"
         //         Up to 15 outer resets before giving up.
         //
-        // KEY: The inner LinkCheck uses 1ms timeout (same as T5), and runs
+        // KEY: The inner LinkCheck uses 1ms timeout (same as T5AI), and runs
         // continuously WITHOUT resetting the port between each attempt.
         // This is why 50 retries at 20ms each (~1s total) always fails —
         // the chip needs ~35–100 continuous 1ms link-checks after the reset pulse.
@@ -203,7 +203,7 @@ pub fn shake<T: IoTransport>(
 /// Falls back to conservative defaults if the MID is not in the table.
 ///
 /// The frame format is selected by `chip.use_extended_flash_mid()`. All
-/// currently registered Beken chips (BK7231N, T1/T2/T3, T5) use the extended
+/// currently registered Beken chips (BK7231N, T1/T2/T3, T5AI) use the extended
 /// frame with register address `0x9f` (JEDEC Read-ID) in the payload; the
 /// standard-frame branch is the fallback for any chip that reports `false`.
 pub fn get_flash_params<T: IoTransport>(
@@ -221,7 +221,7 @@ pub fn get_flash_params<T: IoTransport>(
     };
 
     let mid = if chip.use_extended_flash_mid() {
-        // T5 extended response: payload has 4 bytes of MID data
+        // T5AI extended response: payload has 4 bytes of MID data
         // The extended response format: cmd=0x0e, status=0x00, data=[mid0, mid1, mid2, mid3]
         // MID is in data bytes, skip first byte (status already checked)
         parse::flash_mid_from_extended(&rx.data)?
@@ -285,7 +285,7 @@ pub fn unprotect_flash<T: IoTransport>(
     transport.log("disabling flash write protection...");
 
     if chip.use_extended_flash_ops() {
-        // T5: uses extended frames for FlashReadSR / FlashWriteSR
+        // T5AI: uses extended frames for FlashReadSR / FlashWriteSR
         unprotect_flash_extended(transport, wp)?;
     } else if wp.sr_bytes == 1 {
         // BK7231N single SR
@@ -346,7 +346,7 @@ pub fn unprotect_flash<T: IoTransport>(
     Ok(())
 }
 
-/// T5 unprotect using extended frames (matches Python _read_flash_status_reg_val / _write_flash_status_reg_val).
+/// T5AI unprotect using extended frames (matches Python _read_flash_status_reg_val / _write_flash_status_reg_val).
 fn unprotect_flash_extended<T: IoTransport>(
     transport: &mut Transport<'_, T>,
     wp: &super::flash_table::WriteProtectConfig,
@@ -473,7 +473,7 @@ pub fn protect_flash<T: IoTransport>(
     transport.log("re-enabling flash write protection...");
 
     if chip.use_extended_flash_ops() {
-        // T5: use extended frames for protect
+        // T5AI: use extended frames for protect
         protect_flash_extended(transport, wp)?;
     } else if wp.sr_bytes == 1 {
         let val = (wp.protect_value & 0xff) as u8;
@@ -509,7 +509,7 @@ pub fn protect_flash<T: IoTransport>(
     Ok(())
 }
 
-/// T5 protect using extended frames (matches Python pattern).
+/// T5AI protect using extended frames (matches Python pattern).
 fn protect_flash_extended<T: IoTransport>(
     transport: &mut Transport<'_, T>,
     wp: &super::flash_table::WriteProtectConfig,
@@ -632,7 +632,7 @@ pub fn erase<T: IoTransport>(
 
         // Use 64K block erase when the chip supports it, the address is aligned,
         // and there's enough remaining data to fill a full block.
-        // All current chips (BK7231N, T5, T2) support 64K block erase.
+        // All current chips (BK7231N, T5AI, T2) support 64K block erase.
         // CRC verification after erase catches any failure, with 4K fallback.
         let use_block_erase = chip.use_block_erase_64k()
             && addr.is_multiple_of(block_size)
@@ -737,7 +737,7 @@ pub fn erase<T: IoTransport>(
 
 /// Write `firmware` bytes to flash starting at `base_addr`.
 ///
-/// Writes in 4 KiB chunks. If the chip supports per-sector CRC (`T5Spec`),
+/// Writes in 4 KiB chunks. If the chip supports per-sector CRC (`T5AISpec`),
 /// each sector is verified immediately after write.
 ///
 /// `progress_cb(written_bytes, total_bytes)` is called after each chunk.
@@ -774,7 +774,7 @@ pub fn write<T: IoTransport>(
         let mut sector = [0xFFu8; SECTOR_SIZE as usize];
         sector[..chunk.len()].copy_from_slice(chunk);
 
-        // Skip blank sectors (T5 optimisation)
+        // Skip blank sectors (T5AI optimisation)
         if chip.skip_blank_sectors() && is_blank(&sector) {
             written += chunk.len() as u32;
             progress_cb(written, total);
@@ -837,7 +837,7 @@ pub fn write<T: IoTransport>(
                 continue; // retry
             }
 
-            // Per-sector CRC verification (T5)
+            // Per-sector CRC verification (T5AI)
             if chip.has_per_sector_crc() {
                 // Clear RX buffer to avoid stale data from write response
                 transport.clear_rx();
@@ -868,7 +868,7 @@ pub fn write<T: IoTransport>(
                         continue;
                     }
                 };
-                // T5 bootrom uses crc32_ver2 (no final XOR)
+                // T5AI bootrom uses crc32_ver2 (no final XOR)
                 let local_crc = crc32_ver2(&sector);
                 if device_crc != local_crc {
                     transport.log(&format!(
@@ -949,7 +949,7 @@ pub fn crc_check<T: IoTransport>(
 /// Read `length` bytes from flash starting at `start_addr`.
 ///
 /// Reads in 4 KiB sectors using `FlashRead4K` (always extended frame).
-/// For T5, each sector is additionally verified via per-sector CRC.
+/// For T5AI, each sector is additionally verified via per-sector CRC.
 ///
 /// Returns the read data trimmed to exactly `length` bytes.
 ///
@@ -977,7 +977,7 @@ pub fn read<T: IoTransport>(
 
     /// Maximum consecutive read failures before giving up.
     const MAX_CONSECUTIVE_FAILURES: u32 = 10;
-    /// Maximum retries per sector for T5 CRC verification.
+    /// Maximum retries per sector for T5AI CRC verification.
     const MAX_SECTOR_RETRIES: u32 = 5;
 
     transport.log(&format!(
@@ -992,7 +992,7 @@ pub fn read<T: IoTransport>(
         let addr = read_addr + read_so_far;
 
         if chip.has_per_sector_crc() {
-            // T5: read + CRC verify (matching Python read_and_check_sector)
+            // T5AI: read + CRC verify (matching Python read_and_check_sector)
             let mut sector_ok = false;
             for attempt in 0..MAX_SECTOR_RETRIES {
                 transport.check_cancel()?;
@@ -1035,7 +1035,7 @@ pub fn read<T: IoTransport>(
                     continue;
                 }
 
-                // CRC verification (T5 uses crc32_ver2)
+                // CRC verification (T5AI uses crc32_ver2)
                 let local_crc = crc32_ver2(&sector_data[..SECTOR_SIZE as usize]);
                 let end_addr_inclusive = addr + SECTOR_SIZE - 1;
                 let crc_payload = build::check_crc(addr, end_addr_inclusive);
@@ -1087,7 +1087,7 @@ pub fn read<T: IoTransport>(
                 transport.check_cancel()?;
 
                 let payload = build::flash_read_4k(addr);
-                // FlashRead4K always uses extended frame for both BK7231N and T5
+                // FlashRead4K always uses extended frame for both BK7231N and T5AI
                 let rx_result =
                     transport.send_recv_extended(command::CMD_FLASH_READ_4K, &payload, 5_000);
 
@@ -1195,7 +1195,7 @@ pub fn crc32_buf(data: &[u8]) -> u32 {
 /// Compute CRC-32 matching Python `crc32_ver2(0xFFFFFFFF, data)`.
 ///
 /// This is the same algorithm as IEEE CRC-32 but **without** the final XOR
-/// with `0xFFFFFFFF`. The T5 bootrom uses this variant for per-sector CRC
+/// with `0xFFFFFFFF`. The T5AI bootrom uses this variant for per-sector CRC
 /// verification during writes.
 pub fn crc32_ver2(data: &[u8]) -> u32 {
     // crc32fast computes: init=0xFFFFFFFF, then final XOR 0xFFFFFFFF
@@ -1223,7 +1223,7 @@ pub fn parse_hex_addr(s: Option<&str>) -> Result<u32, ProtocolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::chip::{Bk7231nSpec, T5Spec};
+    use super::super::chip::{Bk7231nSpec, T5AISpec};
     use super::super::transport::mock::MockIo;
     use super::super::transport::Transport;
     use super::*;
@@ -1266,7 +1266,7 @@ mod tests {
         v
     }
 
-    /// A FlashGetMID extended-frame response (T5). `flash_mid_from_extended`
+    /// A FlashGetMID extended-frame response (T5AI). `flash_mid_from_extended`
     /// reads data[0..4] as LE u32 then `>> 8`, so to produce `mid` we place
     /// `[0x00, mid_b0, mid_b1, mid_b2]` in data.
     fn mid_ext_resp(mid: u32) -> Vec<u8> {
@@ -1283,7 +1283,7 @@ mod tests {
         std_resp(command::CMD_CHECK_CRC, b[0], &[b[1], b[2], b[3]])
     }
 
-    /// A FlashReadSR extended-frame response (T5). data = [reg_echo, sr_value].
+    /// A FlashReadSR extended-frame response (T5AI). data = [reg_echo, sr_value].
     fn sr_ext_resp(sr: u8) -> Vec<u8> {
         ext_resp(command::CMD_FLASH_READ_SR, 0x00, &[0x00, sr])
     }
@@ -1367,7 +1367,7 @@ mod tests {
         let mut mock = MockIo::new();
         mock.add_response(mid_ext_resp(0xABCDEF));
         let mut transport = make_transport(mock);
-        let params = get_flash_params(&mut transport, &T5Spec).unwrap();
+        let params = get_flash_params(&mut transport, &T5AISpec).unwrap();
         assert_eq!(params.name, "Unknown");
         assert_eq!(params.mid, 0xABCDEF);
         assert_eq!(params.total_size, 2 * 1024 * 1024);
@@ -1540,11 +1540,11 @@ mod tests {
         assert!(matches!(r, Err(ProtocolError::Timeout { .. })));
     }
 
-    // ──────────── unprotect / protect — T5 extended frames ─────────────
+    // ──────────── unprotect / protect — T5AI extended frames ─────────────
 
     #[test]
-    fn unprotect_extended_t5() {
-        // T5 dual-SR extended unprotect: read SR1, read SR2, write SR1,
+    fn unprotect_extended_t5ai() {
+        // T5AI dual-SR extended unprotect: read SR1, read SR2, write SR1,
         // write SR2 (write_sr_cmds.len()>1), then verify with read SR1,
         // read SR2 — total 6 frames.
         let mut mock = MockIo::new();
@@ -1558,13 +1558,13 @@ mod tests {
         mock.add_response(sr_ext_resp(0x00));
         mock.add_response(sr_ext_resp(0x00));
         let mut transport = make_transport(mock);
-        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &T5Spec);
+        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &T5AISpec);
         assert!(r.is_ok());
         assert_eq!(transport.io.sent.len(), 6);
     }
 
     #[test]
-    fn unprotect_extended_t5_verify_fails() {
+    fn unprotect_extended_t5ai_verify_fails() {
         // SR after write still has protect bits set → verification fails.
         let mut mock = MockIo::new();
         mock.add_response(sr_ext_resp(0x7C)); // SR1 with BP bits set
@@ -1575,18 +1575,18 @@ mod tests {
         mock.add_response(sr_ext_resp(0x7C));
         mock.add_response(sr_ext_resp(0x40));
         let mut transport = make_transport(mock);
-        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &T5Spec);
+        let r = unprotect_flash(&mut transport, &params_with_wp(wp_dual()), &T5AISpec);
         assert!(matches!(r, Err(ProtocolError::Protocol(_))));
     }
 
     #[test]
-    fn protect_extended_t5_already_protected() {
+    fn protect_extended_t5ai_already_protected() {
         // SR already has the protect value → early return, only 2 reads.
         let mut mock = MockIo::new();
         mock.add_response(sr_ext_resp(0x07)); // matches protect_value lo byte
         mock.add_response(sr_ext_resp(0x00));
         let mut transport = make_transport(mock);
-        let r = protect_flash(&mut transport, &params_with_wp(wp_dual()), &T5Spec);
+        let r = protect_flash(&mut transport, &params_with_wp(wp_dual()), &T5AISpec);
         assert!(r.is_ok());
         assert_eq!(transport.io.sent.len(), 2);
     }
@@ -1708,14 +1708,14 @@ mod tests {
     // ───────────────────────── write ─────────────────────────────────
 
     #[test]
-    fn write_skips_blank_sectors_t5() {
-        // T5 skips all-0xFF sectors entirely; no frames sent.
+    fn write_skips_blank_sectors_t5ai() {
+        // T5AI skips all-0xFF sectors entirely; no frames sent.
         let firmware = vec![0xFFu8; 4096];
         let mut transport = make_transport(MockIo::new());
         let r = write(
             &mut transport,
             &params_no_wp(),
-            &T5Spec,
+            &T5AISpec,
             &firmware,
             0x0,
             &|_, _| {},
@@ -1744,8 +1744,8 @@ mod tests {
     }
 
     #[test]
-    fn write_one_sector_t5_with_crc() {
-        // T5: write a non-blank sector + per-sector CRC verify.
+    fn write_one_sector_t5ai_with_crc() {
+        // T5AI: write a non-blank sector + per-sector CRC verify.
         let mut firmware = vec![0xAAu8; 4096];
         firmware[0] = 0x01; // make it non-blank already true; ensure CRC distinct
         let local_crc = crc32_ver2(&{
@@ -1760,7 +1760,7 @@ mod tests {
         let r = write(
             &mut transport,
             &params_no_wp(),
-            &T5Spec,
+            &T5AISpec,
             &firmware,
             0x10000,
             &|_, _| {},
@@ -1771,8 +1771,8 @@ mod tests {
     }
 
     #[test]
-    fn write_t5_crc_mismatch_retries_then_fails() {
-        // T5 CRC always mismatches → 5 attempts, then Protocol error.
+    fn write_t5ai_crc_mismatch_retries_then_fails() {
+        // T5AI CRC always mismatches → 5 attempts, then Protocol error.
         let firmware = vec![0xAAu8; 4096];
         let mut mock = MockIo::new();
         // 5 attempts, each: write ack + wrong CRC.
@@ -1784,7 +1784,7 @@ mod tests {
         let r = write(
             &mut transport,
             &params_no_wp(),
-            &T5Spec,
+            &T5AISpec,
             &firmware,
             0x10000,
             &|_, _| {},
@@ -1875,7 +1875,7 @@ mod tests {
     }
 
     #[test]
-    fn read_one_sector_t5_with_crc() {
+    fn read_one_sector_t5ai_with_crc() {
         let sector = vec![0x5Au8; 4096];
         let local_crc = crc32_ver2(&sector);
         let mut mock = MockIo::new();
@@ -1885,7 +1885,7 @@ mod tests {
         let r = read(
             &mut transport,
             &params_no_wp(),
-            &T5Spec,
+            &T5AISpec,
             0x10000,
             4096,
             &|_, _| {},
@@ -1897,7 +1897,7 @@ mod tests {
     }
 
     #[test]
-    fn read_t5_crc_mismatch_fails_after_retries() {
+    fn read_t5ai_crc_mismatch_fails_after_retries() {
         let sector = vec![0x5Au8; 4096];
         let mut mock = MockIo::new();
         for _ in 0..5 {
@@ -1908,7 +1908,7 @@ mod tests {
         let r = read(
             &mut transport,
             &params_no_wp(),
-            &T5Spec,
+            &T5AISpec,
             0x10000,
             4096,
             &|_, _| {},

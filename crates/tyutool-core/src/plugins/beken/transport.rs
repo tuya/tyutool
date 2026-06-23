@@ -331,11 +331,11 @@ impl<'a, T: IoTransport> Transport<'a, T> {
         Ok(())
     }
 
-    /// T5 reset sequence:
+    /// T5AI reset sequence:
     /// 1. DTR=0, RTS=1
     /// 2. Wait 300ms
     /// 3. RTS=0
-    pub fn reset_into_download_mode_t5(&mut self) -> Result<(), ProtocolError> {
+    pub fn reset_into_download_mode_t5ai(&mut self) -> Result<(), ProtocolError> {
         self.io.set_dtr(false)?;
         self.io.set_rts(true)?;
         std::thread::sleep(Duration::from_millis(300));

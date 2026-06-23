@@ -10,7 +10,7 @@ Command-line interface for **tyutool** — firmware flashing, reading, and devic
 
 - **BK7231N** — Beken BK7231N
 - **T2** — BK7231N-compatible
-- **T5** — Beken T5 (extended frame protocol)
+- **T5AI** — Beken T5AI (extended frame protocol)
 
 ## Commands
 
@@ -31,14 +31,14 @@ tyutool write -d bk7231n -f firmware.bin
 
 # Examples
 tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
-tyutool write -d t5 -p /dev/ttyUSB0 -b 921600 -s 0x00000000 -f firmware.bin
+tyutool write -d t5ai -p /dev/ttyUSB0 -b 921600 -s 0x00000000 -f firmware.bin
 ```
 
 ### Read Flash
 
 ```bash
 # Default: read 2MB from address 0x0
-tyutool read -d t5 -p /dev/ttyUSB0 -f dump.bin
+tyutool read -d t5ai -p /dev/ttyUSB0 -f dump.bin
 
 # Custom range
 tyutool read -d bk7231n -p /dev/ttyUSB0 -s 0x00000000 -l 0x100000 -f dump.bin

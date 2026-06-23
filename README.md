@@ -10,7 +10,7 @@ Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform de
 
 | Family | Chips |
 |--------|-------|
-| Tuya   | T1, T2, T3, T5 |
+| Tuya   | T1, T2, T3, T5AI |
 | Beken  | BK7231N |
 | Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-S3 |
 
@@ -80,7 +80,7 @@ tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
 tyutool write -d <DEVICE> -p <PORT> -b <BAUD> -s <START_ADDR> --end <END_ADDR> -f <FILE>
 ```
 
-Supported `-d` values: `bk7231n`, `t2`, `t5`
+Supported `-d` values: `bk7231n`, `t2`, `t5ai`
 
 ### Read flash
 
@@ -89,7 +89,7 @@ Supported `-d` values: `bk7231n`, `t2`, `t5`
 tyutool read -d bk7231n -p /dev/ttyUSB0 -f dump.bin
 
 # Custom range
-tyutool read -d t5 -p /dev/ttyUSB0 -s 0x0 -l 0x100000 -f dump.bin
+tyutool read -d t5ai -p /dev/ttyUSB0 -s 0x0 -l 0x100000 -f dump.bin
 ```
 
 ### List serial ports

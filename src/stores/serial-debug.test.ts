@@ -388,9 +388,9 @@ describe("useSerialDebugStore.deviceReset", () => {
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
 
-    await s.deviceReset("T5", "/dev/ttyACM0");
+    await s.deviceReset("T5AI", "/dev/ttyACM0");
 
-    expect(spy).toHaveBeenCalledWith("/dev/ttyACM0", "T5");
+    expect(spy).toHaveBeenCalledWith("/dev/ttyACM0", "T5AI");
   });
 
   it("falls back to port.value when resetPort is not provided", async () => {
@@ -400,9 +400,9 @@ describe("useSerialDebugStore.deviceReset", () => {
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
 
-    await s.deviceReset("T5");
+    await s.deviceReset("T5AI");
 
-    expect(spy).toHaveBeenCalledWith("/dev/ttyACM1", "T5");
+    expect(spy).toHaveBeenCalledWith("/dev/ttyACM1", "T5AI");
   });
 
   it("falls back to port.value when resetPort is empty string", async () => {
@@ -412,9 +412,9 @@ describe("useSerialDebugStore.deviceReset", () => {
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
 
-    await s.deviceReset("T5", "");
+    await s.deviceReset("T5AI", "");
 
-    expect(spy).toHaveBeenCalledWith("/dev/ttyACM1", "T5");
+    expect(spy).toHaveBeenCalledWith("/dev/ttyACM1", "T5AI");
   });
 
   it("does nothing when no effective port is available", async () => {
@@ -423,7 +423,7 @@ describe("useSerialDebugStore.deviceReset", () => {
       .mockResolvedValue(undefined);
     const s = useSerialDebugStore();
     s.port = "";
-    await s.deviceReset("T5", "");
+    await s.deviceReset("T5AI", "");
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -432,7 +432,7 @@ describe("useSerialDebugStore.deviceReset", () => {
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
     const before = s.lines.length;
-    await s.deviceReset("T5");
+    await s.deviceReset("T5AI");
     expect(s.lines.length).toBe(before + 1);
     expect(s.lines[s.lines.length - 1].direction).toBe("sys");
   });
@@ -444,7 +444,7 @@ describe("useSerialDebugStore.deviceReset", () => {
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
     const before = s.lines.length;
-    await s.deviceReset("T5");
+    await s.deviceReset("T5AI");
     expect(s.lines.length).toBe(before + 1);
     expect(s.lines[s.lines.length - 1].direction).toBe("sys");
   });
@@ -456,7 +456,7 @@ describe("useSerialDebugStore.deviceReset", () => {
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
     const before = s.lines.length;
-    await s.deviceReset("T5");
+    await s.deviceReset("T5AI");
     expect(s.lines.length).toBe(before + 1);
   });
 });

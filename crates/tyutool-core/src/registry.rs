@@ -7,8 +7,20 @@ use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
 use crate::plugins::{
     Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32s3Plugin, Ln882hPlugin,
-    T1Plugin, T2Plugin, T3Plugin, T5Plugin,
+    T1Plugin, T2Plugin, T3Plugin, T5AIPlugin,
 };
+
+/// Canonicalize a user-supplied chip id: trim, upper-case, and rewrite legacy
+/// names to their current registry key. Used at every chip-id boundary
+/// (registry lookup, [`FlashJob::normalized_chip_id`], serial reset routing)
+/// so callers passing the legacy `T5` keep working after the T5→T5AI rename.
+pub fn normalize_chip_id(raw: &str) -> String {
+    let key = raw.trim().to_ascii_uppercase();
+    match key.as_str() {
+        "T5" => "T5AI".to_string(),
+        _ => key,
+    }
+}
 
 /// Global registry of chip plugins (Python `FlashInterface.SocList` equivalent).
 pub struct FlashPluginRegistry {
@@ -25,8 +37,8 @@ impl FlashPluginRegistry {
         log::debug!("Registered flash plugin: T2");
         plugins.insert("T3".to_string(), Arc::new(T3Plugin));
         log::debug!("Registered flash plugin: T3");
-        plugins.insert("T5".to_string(), Arc::new(T5Plugin));
-        log::debug!("Registered flash plugin: T5");
+        plugins.insert("T5AI".to_string(), Arc::new(T5AIPlugin));
+        log::debug!("Registered flash plugin: T5AI");
         plugins.insert("T1".to_string(), Arc::new(T1Plugin));
         log::debug!("Registered flash plugin: T1");
         plugins.insert("ESP32".to_string(), Arc::new(Esp32Plugin));
@@ -44,7 +56,7 @@ impl FlashPluginRegistry {
     }
 
     pub fn get(&self, chip_id: &str) -> Result<&Arc<dyn FlashPlugin>, FlashError> {
-        let key = chip_id.trim().to_ascii_uppercase();
+        let key = normalize_chip_id(chip_id);
         self.plugins.get(&key).ok_or(FlashError::UnknownChip(key))
     }
 
@@ -133,6 +145,32 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
+    fn normalize_chip_id_maps_legacy_t5_to_t5ai() {
+        assert_eq!(normalize_chip_id("T5"), "T5AI");
+        assert_eq!(normalize_chip_id("t5"), "T5AI");
+        assert_eq!(normalize_chip_id("  T5  "), "T5AI");
+    }
+
+    #[test]
+    fn normalize_chip_id_leaves_other_ids_alone() {
+        assert_eq!(normalize_chip_id("T5AI"), "T5AI");
+        assert_eq!(normalize_chip_id("esp32"), "ESP32");
+        assert_eq!(normalize_chip_id("BK7231N"), "BK7231N");
+    }
+
+    #[test]
+    fn registry_get_accepts_legacy_t5_id() {
+        let r = FlashPluginRegistry::new();
+        let via_legacy = r.get("T5").expect("legacy T5 should resolve");
+        let via_canonical = r.get("T5AI").expect("canonical T5AI should resolve");
+        assert!(
+            Arc::ptr_eq(via_legacy, via_canonical),
+            "T5 must alias to the same plugin as T5AI",
+        );
+        assert!(r.get("t5").is_ok(), "lowercase t5 alias should also work");
+    }
+
+    #[test]
     fn registry_has_all_chips() {
         let r = FlashPluginRegistry::new();
         assert!(r.get("bk7231n").is_ok());
@@ -141,8 +179,8 @@ mod tests {
         assert!(r.get("T2").is_ok());
         assert!(r.get("t3").is_ok());
         assert!(r.get("T3").is_ok());
-        assert!(r.get("t5").is_ok());
-        assert!(r.get("T5").is_ok());
+        assert!(r.get("t5ai").is_ok());
+        assert!(r.get("T5AI").is_ok());
         assert!(r.get("t1").is_ok());
         assert!(r.get("T1").is_ok());
         assert!(r.get("esp32").is_ok());
@@ -166,7 +204,7 @@ mod tests {
         assert!(ids.contains(&"BK7231N".to_string()));
         assert!(ids.contains(&"T2".to_string()));
         assert!(ids.contains(&"T3".to_string()));
-        assert!(ids.contains(&"T5".to_string()));
+        assert!(ids.contains(&"T5AI".to_string()));
         assert!(ids.contains(&"T1".to_string()));
         assert!(ids.contains(&"ESP32".to_string()));
         assert!(ids.contains(&"ESP32C3".to_string()));

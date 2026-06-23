@@ -352,16 +352,16 @@ fn protocol_err_to_flash(e: ProtocolError) -> FlashError {
 }
 
 /// Same Beken DTR/RTS pulse as [`crate::plugins::beken::ops::shake`] uses to enter download mode:
-/// `Transport::reset_into_download_mode_bk` (BK7231N, T2) vs `reset_into_download_mode_t5` (T5, T3, T1).
+/// `Transport::reset_into_download_mode_bk` (BK7231N, T2) vs `reset_into_download_mode_t5ai` (T5AI, T3, T1).
 fn device_reset_beken_match_flash_shake(port: &str, chip_upper: &str) -> Result<(), FlashError> {
     let io = SerialIo::open(port, 115_200).map_err(protocol_err_to_flash)?;
     let cancel = AtomicBool::new(false);
     let noop: &dyn Fn(&str) = &|_| {};
     let mut transport = Transport::new(io, port, 115_200, &cancel, noop);
 
-    let t5_style = matches!(chip_upper, "T5" | "T3" | "T1");
-    let r = if t5_style {
-        transport.reset_into_download_mode_t5()
+    let t5ai_style = matches!(chip_upper, "T5AI" | "T3" | "T1");
+    let r = if t5ai_style {
+        transport.reset_into_download_mode_t5ai()
     } else {
         transport.reset_into_download_mode_bk()
     };
@@ -370,12 +370,12 @@ fn device_reset_beken_match_flash_shake(port: &str, chip_upper: &str) -> Result<
 
 /// Pulse UART control lines to reset the device — **same strategies as automatic reset during flash**:
 ///
-/// - **Beken (BK7231N, T2, T3, T5, T1)**: `Transport::reset_into_download_mode_bk` (BK/T2) or
-///   `reset_into_download_mode_t5` (T5/T3/T1), matching `plugins::beken::ops::shake`.
+/// - **Beken (BK7231N, T2, T3, T5AI, T1)**: `Transport::reset_into_download_mode_bk` (BK/T2) or
+///   `reset_into_download_mode_t5ai` (T5AI/T3/T1), matching `plugins::beken::ops::shake`.
 /// - **ESP32 (all variants)**: espflash `hard_reset` / `reset_after_flash` (USB PID–aware), matching
 ///   post-flash reset in `plugins::esp::common::run_esp`.
 pub fn device_reset_dtr_rts(port: &str, chip_id: &str) -> Result<(), FlashError> {
-    let key = chip_id.trim().to_ascii_uppercase();
+    let key = crate::registry::normalize_chip_id(chip_id);
     if key.starts_with("ESP32") {
         return crate::plugins::esp::common::esp_uart_hard_reset(port);
     }
@@ -386,12 +386,12 @@ pub fn device_reset_dtr_rts(port: &str, chip_id: &str) -> Result<(), FlashError>
 mod hw_reset_tests {
     #[test]
     fn beken_pulse_variant_matches_shake_routing() {
-        let t5_style = |chip: &str| matches!(chip, "T5" | "T3" | "T1");
-        assert!(t5_style("T5"));
-        assert!(t5_style("T3"));
-        assert!(t5_style("T1"));
-        assert!(!t5_style("T2"));
-        assert!(!t5_style("BK7231N"));
+        let t5ai_style = |chip: &str| matches!(chip, "T5AI" | "T3" | "T1");
+        assert!(t5ai_style("T5AI"));
+        assert!(t5ai_style("T3"));
+        assert!(t5ai_style("T1"));
+        assert!(!t5ai_style("T2"));
+        assert!(!t5ai_style("BK7231N"));
     }
 }
 

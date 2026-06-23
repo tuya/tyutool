@@ -30,16 +30,16 @@ impl FlashPlugin for Bk7231nPlugin {
     }
 }
 
-/// Shared implementation for BK7231N and T5.
+/// Shared implementation for BK7231N and T5AI.
 ///
 /// The `chip` trait object controls the behavioural differences;
-/// `is_t5` selects the appropriate reset sequence.
+/// `is_t5ai` selects the appropriate reset sequence.
 pub(crate) fn run_beken(
     job: &FlashJob,
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashEvent),
     chip: &dyn super::beken::chip::ChipSpec,
-    is_t5: bool,
+    is_t5ai: bool,
 ) -> Result<(), FlashError> {
     log::info!("Plugin starting: port={}, mode={:?}", job.port, job.mode);
 
@@ -55,7 +55,7 @@ pub(crate) fn run_beken(
 
     // ── Phase: Handshake ────────────────────────────────────────────
     phase(FlashPhase::Handshake);
-    ops::shake(&mut transport, job.baud_rate, chip, is_t5).map_err(to_flash_err)?;
+    ops::shake(&mut transport, job.baud_rate, chip, is_t5ai).map_err(to_flash_err)?;
 
     // ── Phase: Read flash parameters ────────────────────────────────
     phase(FlashPhase::ReadFlashId);
@@ -316,7 +316,7 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
     )
     .map_err(to_flash_err)?;
 
-    // CRC check (BK7231N only — T5 already verified per-sector CRC during read)
+    // CRC check (BK7231N only — T5AI already verified per-sector CRC during read)
     // BK7231N bootrom uses crc32_ver2 (no final XOR).
     // For read, we use the raw data length (already aligned from sector reads).
     if !chip.has_per_sector_crc() {

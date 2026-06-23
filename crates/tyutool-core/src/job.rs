@@ -45,6 +45,6 @@ pub struct FlashJob {
 
 impl FlashJob {
     pub fn normalized_chip_id(&self) -> String {
-        self.chip_id.trim().to_ascii_uppercase()
+        crate::registry::normalize_chip_id(&self.chip_id)
     }
 }

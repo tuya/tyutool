@@ -5,6 +5,7 @@ import {
   BAUD_RATE_OPTIONS,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
+  normalizeChipId,
   SERIAL_PORT_OPTIONS,
 } from "./constants";
 
@@ -19,8 +20,8 @@ describe("CHIP_IDS", () => {
     expect([...CHIP_IDS]).toEqual(copy);
   });
 
-  it("uses t5 as default chip for first launch (not necessarily first in list)", () => {
-    expect(DEFAULT_CHIP_ID).toBe("t5");
+  it("uses t5ai as default chip for first launch (not necessarily first in list)", () => {
+    expect(DEFAULT_CHIP_ID).toBe("t5ai");
   });
 
   it("contains all expected chip IDs", () => {
@@ -28,7 +29,7 @@ describe("CHIP_IDS", () => {
     expect(CHIP_IDS).toContain("esp32c3");
     expect(CHIP_IDS).toContain("esp32c6");
     expect(CHIP_IDS).toContain("esp32s3");
-    expect(CHIP_IDS).toContain("t5");
+    expect(CHIP_IDS).toContain("t5ai");
     expect(CHIP_IDS).toContain("t2");
     expect(CHIP_IDS).toContain("bk7231n");
   });
@@ -70,5 +71,24 @@ describe("BAUD_RATE_OPTIONS", () => {
 describe("SERIAL_PORT_OPTIONS", () => {
   it("starts as an empty array (populated at runtime)", () => {
     expect(SERIAL_PORT_OPTIONS).toEqual([]);
+  });
+});
+
+describe("normalizeChipId", () => {
+  it("maps the legacy t5 / T5 ids to t5ai", () => {
+    expect(normalizeChipId("t5")).toBe("t5ai");
+    expect(normalizeChipId("T5")).toBe("t5ai");
+    expect(normalizeChipId("  T5  ")).toBe("t5ai");
+  });
+
+  it("passes through ids that need no remap (lower-cased)", () => {
+    expect(normalizeChipId("t5ai")).toBe("t5ai");
+    expect(normalizeChipId("ESP32")).toBe("esp32");
+    expect(normalizeChipId("bk7231n")).toBe("bk7231n");
+  });
+
+  it("leaves the auth-only id and unknown ids alone", () => {
+    expect(normalizeChipId(AUTH_ONLY_CHIP_ID)).toBe(AUTH_ONLY_CHIP_ID);
+    expect(normalizeChipId("nonexistent")).toBe("nonexistent");
   });
 });

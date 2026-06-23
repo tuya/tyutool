@@ -197,7 +197,7 @@ describe("deviceReset", () => {
 
   it("rejects when result.ok is false", async () => {
     const t = new WsTransport();
-    const p = t.deviceReset("/dev/ttyUSB0", "T5");
+    const p = t.deviceReset("/dev/ttyUSB0", "T5AI");
     await flush();
     const ws = latest();
     ws.open();
@@ -208,7 +208,7 @@ describe("deviceReset", () => {
 
   it("rejects on an error frame", async () => {
     const t = new WsTransport();
-    const p = t.deviceReset("/dev/ttyUSB0", "T5");
+    const p = t.deviceReset("/dev/ttyUSB0", "T5AI");
     await flush();
     const ws = latest();
     ws.open();
@@ -219,7 +219,7 @@ describe("deviceReset", () => {
 
   it("ignores non-JSON frames and resolves on the later valid result", async () => {
     const t = new WsTransport();
-    const p = t.deviceReset("/dev/ttyUSB0", "T5");
+    const p = t.deviceReset("/dev/ttyUSB0", "T5AI");
     await flush();
     const ws = latest();
     ws.open();
@@ -232,7 +232,7 @@ describe("deviceReset", () => {
   it("rejects after the 15s timeout when no response arrives", async () => {
     vi.useFakeTimers();
     const t = new WsTransport();
-    const p = t.deviceReset("/dev/ttyUSB0", "T5");
+    const p = t.deviceReset("/dev/ttyUSB0", "T5AI");
     // connect() resolves via microtasks; advance them.
     await vi.advanceTimersByTimeAsync(0);
     latest().open();

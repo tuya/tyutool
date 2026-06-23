@@ -8,6 +8,7 @@ import {
   BAUD_RATE_OPTIONS,
   CHIP_IDS,
   DEFAULT_CHIP_ID,
+  normalizeChipId,
 } from "@/features/firmware-flash/constants";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
 import { isTauriRuntime } from "@/runtime";
@@ -118,7 +119,9 @@ export function parseFlashWorkspaceJson(
     }
     const activeTab: OpKind = isOpKind(rec.activeTab) ? rec.activeTab : "flash";
     const chipId =
-      typeof rec.selectedChipId === "string" ? rec.selectedChipId : "";
+      typeof rec.selectedChipId === "string"
+        ? normalizeChipId(rec.selectedChipId)
+        : "";
     if (!isValidWorkspaceChipId(chipId, activeTab)) {
       return null;
     }

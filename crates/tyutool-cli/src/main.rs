@@ -103,7 +103,7 @@ enum Commands {
         /// Serial port (default: first available)
         #[arg(short = 'p', long = "port")]
         port: Option<String>,
-        /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5/t3/t1); ESP32* uses espflash hard_reset
+        /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5ai/t3/t1); ESP32* uses espflash hard_reset
         #[arg(short = 'd', long = "device", default_value = "bk7231n")]
         device: String,
     },
@@ -147,7 +147,7 @@ enum Commands {
 // runtime — instead `device_list_matches_registry` asserts the two agree, so a
 // chip added to the registry can't silently drift out of the CLI.
 const SUPPORTED_DEVICES: &[&str] = &[
-    "bk7231n", "t2", "t3", "t1", "t5", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3",
+    "bk7231n", "t2", "t3", "t1", "t5ai", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3",
 ];
 
 fn chip_value_parser() -> PossibleValuesParser {
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(default_baud("esp32c6"), 460800);
         assert_eq!(default_baud("esp32s3"), 460800);
         assert_eq!(default_baud("bk7231n"), 921600);
-        assert_eq!(default_baud("t5"), 921600);
+        assert_eq!(default_baud("t5ai"), 921600);
     }
 
     #[test]

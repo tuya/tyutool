@@ -1,7 +1,7 @@
 //! T1 flash plugin — real hardware implementation.
 //!
 //! Reuses the shared Beken protocol layer via [`super::bk7231n::run_beken`],
-//! with `T1Spec` matching the T5 extended-frame / per-sector CRC behaviour.
+//! with `T1Spec` matching the T5AI extended-frame / per-sector CRC behaviour.
 
 use std::sync::atomic::AtomicBool;
 
@@ -12,7 +12,7 @@ use crate::plugin::FlashPlugin;
 
 use super::beken::chip::T1Spec;
 
-/// T1 flash plugin using the real Beken UART protocol (T5-equivalent stack).
+/// T1 flash plugin using the real Beken UART protocol (T5AI-equivalent stack).
 pub struct T1Plugin;
 
 impl FlashPlugin for T1Plugin {
@@ -26,7 +26,7 @@ impl FlashPlugin for T1Plugin {
         cancel: &AtomicBool,
         progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
-        log::info!("T1 plugin delegating to run_beken (is_t5=true)");
+        log::info!("T1 plugin delegating to run_beken (is_t5ai=true)");
         let chip = T1Spec;
         super::bk7231n::run_beken(job, cancel, progress, &chip, true)
     }

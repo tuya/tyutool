@@ -3,7 +3,7 @@
 //! T2 uses the standard Beken UART protocol (same frame format as BK7231N),
 //! backed by [`T2Spec`] which provides T2-specific chip parameters.
 //! The Python reference (`FlashInterface.SocList`) confirms T2 maps to
-//! `BK7231NFlashHandler` (standard frames), not `T5FlashHandler`.
+//! `BK7231NFlashHandler` (standard frames), not `T5AIFlashHandler`.
 
 use std::sync::atomic::AtomicBool;
 

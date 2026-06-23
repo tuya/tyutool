@@ -11,7 +11,7 @@
 //!      LEN = 3 + 1 + 1 + data.len()   (counts echo header + CMD + STATUS + data)
 //! ```
 //!
-//! **Extended (long) frame** — used for 4 KiB flash read/write and some T5 ops:
+//! **Extended (long) frame** — used for 4 KiB flash read/write and some T5AI ops:
 //! ```text
 //! TX: [01] [e0] [fc] [ff] [f4] [LEN_L] [LEN_H] [CMD] [PAYLOAD…]
 //!      LEN = 1 + payload.len()   (LE u16, counts CMD byte + payload)
