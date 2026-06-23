@@ -37,7 +37,7 @@ body:
     attributes:
       label: 芯片型号 / Chip
       description: 如适用 / If applicable
-      placeholder: "e.g. BK7231N, T5"
+      placeholder: "e.g. BK7231N, T5AI"
   - type: textarea
     id: steps
     attributes:

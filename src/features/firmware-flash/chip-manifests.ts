@@ -1,4 +1,4 @@
-import { AUTH_ONLY_CHIP_ID, type ChipId } from "./constants";
+import { AUTH_ONLY_CHIP_ID, normalizeChipId, type ChipId } from "./constants";
 import type { ErasePresetKind } from "./types";
 
 export interface ChipManifest {
@@ -69,8 +69,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
       fullChip: { start: "0x00000000", end: "0x00FFFFFF" },
     },
   },
-  t5: {
-    rustPluginId: "T5",
+  t5ai: {
+    rustPluginId: "T5AI",
     defaultBaudRate: 921600,
     defaultAuthBaudRate: 115200,
     defaultLogBaudRate: 460800,
@@ -86,7 +86,7 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
     defaultBaudRate: 921600,
     defaultAuthBaudRate: 115200,
     defaultLogBaudRate: 115200,
-    flashSize: "0x00800000", // 8 MiB — same layout as T5
+    flashSize: "0x00800000", // 8 MiB — same layout as T5AI
     eraseRequires4KAlignment: true,
     erasePresets: {
       authInfo: { start: "0x001EE000", end: "0x001FFFFF" },
@@ -153,23 +153,27 @@ const AUTH_ONLY_CHIP_MANIFEST: ChipManifest = {
   erasePresets: {},
 };
 
-/** Get manifest for a chip id; throws if unknown. */
+/** Get manifest for a chip id; throws if unknown. Accepts legacy ids via
+ *  {@link normalizeChipId} (e.g. `t5` → `t5ai`). */
 export function chipManifest(chipId: string): ChipManifest {
-  if (chipId === AUTH_ONLY_CHIP_ID) {
+  const id = normalizeChipId(chipId);
+  if (id === AUTH_ONLY_CHIP_ID) {
     return AUTH_ONLY_CHIP_MANIFEST;
   }
-  const m = CHIP_MANIFEST[chipId as ChipId];
+  const m = CHIP_MANIFEST[id as ChipId];
   if (!m) throw new Error(`Unknown chip: ${chipId}`);
   return m;
 }
 
-/** Maps UI chip id to Rust registry id. */
+/** Maps UI chip id to Rust registry id. Accepts legacy ids via
+ *  {@link normalizeChipId} (e.g. `t5` → `t5ai`). */
 export function rustPluginIdForChip(uiId: string): string {
-  if (uiId === AUTH_ONLY_CHIP_ID) {
+  const id = normalizeChipId(uiId);
+  if (id === AUTH_ONLY_CHIP_ID) {
     return chipManifest(AUTH_ONLY_CHIP_ID).rustPluginId;
   }
   return (
-    CHIP_MANIFEST[uiId as ChipId]?.rustPluginId ??
-    uiId.toUpperCase().replace(/-/g, "")
+    CHIP_MANIFEST[id as ChipId]?.rustPluginId ??
+    id.toUpperCase().replace(/-/g, "")
   );
 }

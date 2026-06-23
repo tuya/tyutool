@@ -20,14 +20,14 @@ tyutool-core/
 └── plugins/
     ├── mod.rs        # Plugin module exports
     ├── bk7231n.rs    # BK7231N FlashPlugin implementation
-    ├── t5.rs         # T5 FlashPlugin implementation
+    ├── t5ai.rs         # T5AI FlashPlugin implementation
     ├── t2.rs         # T2 FlashPlugin implementation (BK7231N-compatible)
     └── beken/        # Shared Beken UART protocol layer
         ├── frame.rs       # TX/RX frame encoding/decoding
         ├── command.rs     # Command opcodes + payload builders/parsers
         ├── transport.rs   # IoTransport trait, Transport (send/recv/retry)
         ├── flash_table.rs # Flash MID → params lookup (44 chips)
-        ├── chip.rs        # ChipSpec trait (BK7231N vs T5 differences)
+        ├── chip.rs        # ChipSpec trait (BK7231N vs T5AI differences)
         └── ops.rs         # High-level ops: shake, erase, write, crc_check, reboot
 ```
 
@@ -98,4 +98,4 @@ Unit tests use `MockIo` for transport-level testing. Protocol changes **must als
 3. Register in `FlashPluginRegistry::new()` (`registry.rs`)
 4. Export from `plugins/mod.rs`
 
-See `bk7231n.rs` and `t5.rs` as reference implementations.
+See `bk7231n.rs` and `t5ai.rs` as reference implementations.

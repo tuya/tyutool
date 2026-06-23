@@ -478,9 +478,10 @@ mod tests {
 
     #[test]
     fn deserialize_device_reset() {
-        let msg: ClientMessage =
-            serde_json::from_str(r#"{"type":"device_reset","port":"/dev/ttyUSB0","chip_id":"T5"}"#)
-                .unwrap();
+        let msg: ClientMessage = serde_json::from_str(
+            r#"{"type":"device_reset","port":"/dev/ttyUSB0","chip_id":"T5AI"}"#,
+        )
+        .unwrap();
         assert!(matches!(msg, ClientMessage::DeviceReset { .. }));
     }
 
@@ -534,7 +535,7 @@ mod tests {
             "type": "run_job",
             "job": {
                 "mode": "erase",
-                "chipId": "T5",
+                "chipId": "T5AI",
                 "port": "/dev/ttyUSB0",
                 "baudRate": 921600,
                 "eraseStartHex": "0x00000000",
@@ -603,7 +604,7 @@ mod tests {
             "type": "run_job",
             "job": {
                 "mode": "flash",
-                "chipId": "T5",
+                "chipId": "T5AI",
                 "port": "/dev/ttyUSB0",
                 "baudRate": 921600,
                 "segments": [

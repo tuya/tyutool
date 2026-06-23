@@ -28,7 +28,7 @@ import type { FlashConnectionDeps } from "./useFlashConnection";
 
 function makeDeps(overrides: Partial<FlashConnectionDeps> = {}) {
   const selectedSerialPort = ref("");
-  const selectedChipId = ref("t5");
+  const selectedChipId = ref("t5ai");
   const connected = ref(false);
   const autoConnected = ref(false);
   const busyRef = ref(false);

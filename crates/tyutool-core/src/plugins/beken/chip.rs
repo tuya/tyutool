@@ -1,11 +1,11 @@
 //! Chip-specific behaviour abstraction.
 //!
-//! BK7231N and T5 share the same UART protocol but differ in:
+//! BK7231N and T5AI share the same UART protocol but differ in:
 //! - reset sequence timing
-//! - post-handshake steps (T5 reads ChipID)
+//! - post-handshake steps (T5AI reads ChipID)
 //! - use of extended frames for large flash
-//! - per-sector CRC after write (T5) vs. whole-image CRC after write (BK7231N)
-//! - skipping blank (0xFF) sectors (T5 optimisation)
+//! - per-sector CRC after write (T5AI) vs. whole-image CRC after write (BK7231N)
+//! - skipping blank (0xFF) sectors (T5AI optimisation)
 //! - default baud-rate delay parameter
 
 use super::frame::ProtocolError;
@@ -14,7 +14,7 @@ use super::transport::{IoTransport, Transport};
 /// Trait capturing the behavioural differences between Beken chip families.
 ///
 /// All methods are dyn-compatible (no generics). The `post_handshake`
-/// step is handled separately via [`t5_post_handshake`] since it needs
+/// step is handled separately via [`t5ai_post_handshake`] since it needs
 /// a generic `Transport<T>`.
 pub trait ChipSpec: Send + Sync {
     /// Human-readable chip name (for log messages).
@@ -31,7 +31,7 @@ pub trait ChipSpec: Send + Sync {
     }
 
     /// Timeout in ms for each handshake `LinkCheck` attempt response.
-    /// Python T5 uses 1ms; BK7231N uses 20ms.
+    /// Python T5AI uses 1ms; BK7231N uses 20ms.
     fn handshake_interval_ms(&self) -> u64 {
         20
     }
@@ -41,12 +41,12 @@ pub trait ChipSpec: Send + Sync {
         100
     }
 
-    /// Whether this chip needs a post-handshake step (e.g. T5/T2 GetChipID).
+    /// Whether this chip needs a post-handshake step (e.g. T5AI/T2 GetChipID).
     fn needs_post_handshake(&self) -> bool {
         false
     }
 
-    /// Whether this chip uses the T5-style reset-retry handshake sequence
+    /// Whether this chip uses the T5AI-style reset-retry handshake sequence
     /// (reset loop + extended link-check), as opposed to BK7231N-style
     /// (3× BKRegDoReboot + single DTR/RTS reset).
     fn uses_extended_reset_sequence(&self) -> bool {
@@ -81,8 +81,8 @@ pub trait ChipSpec: Send + Sync {
 
     /// Whether this chip can safely use 64K block erase (`0xd8`/`0xdc`).
     ///
-    /// All current Beken chips (BK7231N, T5, T2) support 64K block erase.
-    /// The Python reference and vendor tool confirm T5 uses 64K erase
+    /// All current Beken chips (BK7231N, T5AI, T2) support 64K block erase.
+    /// The Python reference and vendor tool confirm T5AI uses 64K erase
     /// (command `0xd8` for flash <256 MiB, `0xdc` for flash ≥256 MiB).
     /// The erase path includes CRC verification with automatic 4K fallback
     /// for safety.
@@ -90,13 +90,13 @@ pub trait ChipSpec: Send + Sync {
         true
     }
 
-    /// Whether FlashGetMID uses extended frame format (T5).
+    /// Whether FlashGetMID uses extended frame format (T5AI).
     fn use_extended_flash_mid(&self) -> bool {
         false
     }
 
     /// Whether flash operations (FlashReadSR, FlashWriteSR, FlashErase, etc.)
-    /// use extended frame format. T5 uses extended frames for all flash
+    /// use extended frame format. T5AI uses extended frames for all flash
     /// operations; BK7231N uses standard frames.
     fn use_extended_flash_ops(&self) -> bool {
         false
@@ -142,13 +142,13 @@ impl ChipSpec for Bk7231nSpec {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// T5
+// T5AI
 // ─────────────────────────────────────────────────────────────────────────
 
-/// T5 chip registers for reading ChipID (tried in order).
-pub const T5_CHIP_ID_REGS: &[u32] = &[0x4401_0004, 0x0080_0000, 0x3401_0004];
+/// T5AI chip registers for reading ChipID (tried in order).
+pub const T5AI_CHIP_ID_REGS: &[u32] = &[0x4401_0004, 0x0080_0000, 0x3401_0004];
 
-/// T5 chip specification.
+/// T5AI chip specification.
 ///
 /// Differences from BK7231N:
 /// - Post-handshake reads ChipID via `ReadReg`.
@@ -156,15 +156,15 @@ pub const T5_CHIP_ID_REGS: &[u32] = &[0x4401_0004, 0x0080_0000, 0x3401_0004];
 /// - Per-sector CRC verification (no separate whole-image CRC step).
 /// - Uses extended erase commands for flash >2 MiB.
 /// - Lower baud-switch delay (20ms vs 100ms).
-pub struct T5Spec;
+pub struct T5AISpec;
 
-impl ChipSpec for T5Spec {
+impl ChipSpec for T5AISpec {
     fn name(&self) -> &'static str {
-        "T5"
+        "T5AI"
     }
 
     fn handshake_interval_ms(&self) -> u64 {
-        // Python T5 uses 1ms timeout per LinkCheck attempt
+        // Python T5AI uses 1ms timeout per LinkCheck attempt
         1
     }
 
@@ -181,7 +181,7 @@ impl ChipSpec for T5Spec {
     }
 
     fn use_extended_frame(&self, _addr: u32) -> bool {
-        // T5 ALWAYS uses extended frames for FlashWrite4K,
+        // T5AI ALWAYS uses extended frames for FlashWrite4K,
         // regardless of address. Extended-address commands (0xe7 etc.)
         // are only for flash >= 256 MiB.
         true
@@ -196,7 +196,7 @@ impl ChipSpec for T5Spec {
     }
 
     fn use_extended_erase(&self) -> bool {
-        // T5 uses standard erase commands (0x20/0xd8) for flash <256 MiB.
+        // T5AI uses standard erase commands (0x20/0xd8) for flash <256 MiB.
         // Extended commands (0x21/0xdc) are only for flash ≥256 MiB.
         // Confirmed by vendor tool pcapng: all erases use 0xd8 and 0x20.
         // Python reference: flash_size >= 256*1024*1024 → extended, else standard.
@@ -216,7 +216,7 @@ impl ChipSpec for T5Spec {
 // T1
 // ─────────────────────────────────────────────────────────────────────────
 
-/// T1 chip specification — same protocol behaviour as [`T5Spec`].
+/// T1 chip specification — same protocol behaviour as [`T5AISpec`].
 pub struct T1Spec;
 
 impl ChipSpec for T1Spec {
@@ -276,7 +276,7 @@ pub const T2_CHIP_ID_REGS: &[u32] = &[0x4401_0004, 0x0080_0000, 0x3401_0004];
 ///
 /// T2 uses the same Beken UART protocol as BK7231N (extended frames for flash ops,
 /// standard frames for control commands, whole-image CRC after write).
-/// The Python reference confirms T2 maps to `BK7231NFlashHandler`, not `T5FlashHandler`.
+/// The Python reference confirms T2 maps to `BK7231NFlashHandler`, not `T5AIFlashHandler`.
 pub struct T2Spec;
 
 impl ChipSpec for T2Spec {
@@ -311,9 +311,9 @@ impl ChipSpec for T2Spec {
 
 /// T3 chip specification.
 ///
-/// T3 uses the T5 protocol variant (extended reset sequence, per-sector CRC,
+/// T3 uses the T5AI protocol variant (extended reset sequence, per-sector CRC,
 /// skip blank sectors, post-handshake ChipID read, 20ms baud-switch delay).
-/// The Python reference confirms T3 maps to `T5FlashHandler`, not `BK7231NFlashHandler`.
+/// The Python reference confirms T3 maps to `T5AIFlashHandler`, not `BK7231NFlashHandler`.
 pub struct T3Spec;
 
 impl ChipSpec for T3Spec {
@@ -358,7 +358,7 @@ impl ChipSpec for T3Spec {
     }
 }
 
-/// Post-handshake: read ChipID for chips that need it (T5, T2, etc.).
+/// Post-handshake: read ChipID for chips that need it (T5AI, T2, etc.).
 ///
 /// Tries each register address in `CHIP_ID_REGS` in order; logs the result.
 /// This is a free function (not a trait method) because it needs the generic
@@ -401,12 +401,12 @@ fn read_chip_id<T: IoTransport>(
     parse::chip_id_from_read_reg(&rx.data)
 }
 
-/// T5 post-handshake: kept for backwards compatibility — delegates to the shared function.
+/// T5AI post-handshake: kept for backwards compatibility — delegates to the shared function.
 #[deprecated(note = "use post_handshake_read_chip_id instead")]
-pub fn t5_post_handshake<T: IoTransport>(
+pub fn t5ai_post_handshake<T: IoTransport>(
     transport: &mut Transport<T>,
 ) -> Result<(), ProtocolError> {
-    post_handshake_read_chip_id(transport, "T5")
+    post_handshake_read_chip_id(transport, "T5AI")
 }
 
 #[cfg(test)]
@@ -436,9 +436,9 @@ mod tests {
     }
 
     #[test]
-    fn t5_spec_getters() {
-        let s = T5Spec;
-        assert_eq!(s.name(), "T5");
+    fn t5ai_spec_getters() {
+        let s = T5AISpec;
+        assert_eq!(s.name(), "T5AI");
         assert_eq!(s.initial_baud(), 115200);
         assert_eq!(s.handshake_retries(), 50);
         assert_eq!(s.handshake_interval_ms(), 1);
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn chip_id_reg_tables() {
         let expected = &[0x4401_0004u32, 0x0080_0000, 0x3401_0004];
-        assert_eq!(T5_CHIP_ID_REGS, expected);
+        assert_eq!(T5AI_CHIP_ID_REGS, expected);
         assert_eq!(T2_CHIP_ID_REGS, expected);
     }
 
@@ -521,12 +521,12 @@ mod tests {
         // Confirms every spec is dyn-compatible (used as &dyn ChipSpec in run_beken).
         let specs: Vec<Box<dyn ChipSpec>> = vec![
             Box::new(Bk7231nSpec),
-            Box::new(T5Spec),
+            Box::new(T5AISpec),
             Box::new(T1Spec),
             Box::new(T2Spec),
             Box::new(T3Spec),
         ];
         let names: Vec<&str> = specs.iter().map(|s| s.name()).collect();
-        assert_eq!(names, vec!["BK7231N", "T5", "T1", "T2", "T3"]);
+        assert_eq!(names, vec!["BK7231N", "T5AI", "T1", "T2", "T3"]);
     }
 }

@@ -37,7 +37,7 @@ describe("CHIP_MANIFEST", () => {
   });
 
   it("Beken chips have authInfo and fullChipNoRf presets", () => {
-    const bekenIds = (["bk7231n", "t1", "t2", "t3", "t5"] as const).filter(
+    const bekenIds = (["bk7231n", "t1", "t2", "t3", "t5ai"] as const).filter(
       (id) => CHIP_IDS.includes(id),
     );
     for (const id of bekenIds) {
@@ -61,8 +61,8 @@ describe("CHIP_MANIFEST", () => {
 
 describe("chipManifest", () => {
   it("returns manifest for known chip IDs", () => {
-    const m = chipManifest("t5");
-    expect(m.rustPluginId).toBe("T5");
+    const m = chipManifest("t5ai");
+    expect(m.rustPluginId).toBe("T5AI");
     expect(m.defaultBaudRate).toBe(921600);
   });
 
@@ -100,7 +100,7 @@ describe("chipManifest", () => {
 
 describe("rustPluginIdForChip", () => {
   it("maps known UI IDs to Rust plugin IDs", () => {
-    expect(rustPluginIdForChip("t5")).toBe("T5");
+    expect(rustPluginIdForChip("t5ai")).toBe("T5AI");
     expect(rustPluginIdForChip("t1")).toBe("T1");
     expect(rustPluginIdForChip("t2")).toBe("T2");
     expect(rustPluginIdForChip("bk7231n")).toBe("BK7231N");
@@ -116,5 +116,17 @@ describe("rustPluginIdForChip", () => {
   it("falls back to uppercase for unknown IDs", () => {
     expect(rustPluginIdForChip("new-chip")).toBe("NEWCHIP");
     expect(rustPluginIdForChip("abc")).toBe("ABC");
+  });
+
+  it("accepts the legacy t5 / T5 id and routes it to T5AI", () => {
+    expect(rustPluginIdForChip("t5")).toBe("T5AI");
+    expect(rustPluginIdForChip("T5")).toBe("T5AI");
+  });
+});
+
+describe("chipManifest legacy alias", () => {
+  it("returns the t5ai manifest when called with the legacy t5 id", () => {
+    expect(chipManifest("t5")).toBe(chipManifest("t5ai"));
+    expect(chipManifest("T5")).toBe(chipManifest("t5ai"));
   });
 });

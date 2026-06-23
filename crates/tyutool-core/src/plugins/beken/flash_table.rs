@@ -4,7 +4,7 @@
 //! capacity, sector/block size, and write-protection register layout.
 //!
 //! Source: Python `tyutool/flash/bk7231n/protocol.py` `FLASH.TABLE`
-//! and `tyutool/flash/t5/flash_info.py`.
+//! and `tyutool/flash/t5ai/flash_info.py`.
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types
@@ -94,7 +94,7 @@ const fn wp2(
 // Flash parameter table
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Combined flash table covering BK7231N and T5 supported chips.
+/// Combined flash table covering BK7231N and T5AI supported chips.
 ///
 /// MIDs are 3-byte JEDEC IDs; the table is sorted by MID for binary search.
 /// Sizes are in bytes (e.g. `2 * MB` = 2 MiB).

@@ -122,7 +122,7 @@ describe("flash store", () => {
       const store = useFlashStore();
       expect(store.connected).toBe(false);
       expect(store.selectedSerialPort).toBe("");
-      expect(store.selectedChipId).toBe("t5");
+      expect(store.selectedChipId).toBe("t5ai");
       expect(store.flashSegments.length).toBe(1);
       expect(store.flashSegments[0].firmwarePath).toBe("");
       expect(store.flashPhase).toBe("idle");
@@ -139,7 +139,7 @@ describe("flash store", () => {
       expect(store.eraseStartAddr).toBe("0x00000000");
       expect(store.eraseEndAddr).toBe("0x00000000");
       expect(store.readStartAddr).toBe("0x00000000");
-      // readEndAddr comes from chipManifest('t5').flashSize (8 MiB)
+      // readEndAddr comes from chipManifest('t5ai').flashSize (8 MiB)
       expect(store.readEndAddr).toBe("0x00800000");
     });
 
@@ -358,7 +358,7 @@ describe("flash store", () => {
 
     it("has 4 tabs for Beken chips (includes authorize)", () => {
       const store = useFlashStore();
-      store.selectedChipId = "t5";
+      store.selectedChipId = "t5ai";
       expect(store.tabList.length).toBe(4);
       expect(store.tabList.map((t) => t.id)).toEqual([
         "flash",
@@ -438,7 +438,7 @@ describe("flash store", () => {
   describe("applyErasePreset", () => {
     it("sets erase address range from authInfo preset (Beken chip)", () => {
       const store = useFlashStore();
-      store.selectedChipId = "t5"; // switch to a Beken chip that has authInfo
+      store.selectedChipId = "t5ai"; // switch to a Beken chip that has authInfo
       store.applyErasePreset("authInfo");
       expect(store.eraseStartAddr).toBe("0x001EE000");
       expect(store.eraseEndAddr).toBe("0x001FFFFF");
@@ -446,7 +446,7 @@ describe("flash store", () => {
 
     it("sets erase address range from fullChipNoRf preset (Beken chip)", () => {
       const store = useFlashStore();
-      store.selectedChipId = "t5";
+      store.selectedChipId = "t5ai";
       store.applyErasePreset("fullChipNoRf");
       expect(store.eraseStartAddr).toBe("0x00000000");
       expect(store.eraseEndAddr).toBe("0x001EDFFF");
@@ -627,9 +627,9 @@ describe("flash store", () => {
   describe("selectedChipId watch (chip-change side effects)", () => {
     it("updates readFileName, readEndAddr and selectedBaudRate per the new chip manifest", async () => {
       const store = useFlashStore();
-      // Default is t5 (baud 921600, flashSize 8 MiB)
-      expect(store.selectedChipId).toBe("t5");
-      expect(store.readFileName).toBe("tyutool_read_t5.bin");
+      // Default is t5ai (baud 921600, flashSize 8 MiB)
+      expect(store.selectedChipId).toBe("t5ai");
+      expect(store.readFileName).toBe("tyutool_read_t5ai.bin");
 
       // Switch to ln882h: baud 115200, flashSize 2 MiB
       store.selectedChipId = "ln882h";
@@ -793,10 +793,10 @@ describe("flash store", () => {
         .mockResolvedValue(undefined);
       const store = useFlashStore();
       store.selectedSerialPort = "/dev/ttyUSB0";
-      store.selectedChipId = "t5";
+      store.selectedChipId = "t5ai";
       const before = store.logLines.length;
       await store.deviceReset();
-      expect(spy).toHaveBeenCalledWith("/dev/ttyUSB0", "T5");
+      expect(spy).toHaveBeenCalledWith("/dev/ttyUSB0", "T5AI");
       expect(store.logLines.length).toBeGreaterThan(before);
     });
 
@@ -1082,7 +1082,7 @@ describe("flash store", () => {
       const store = useFlashStore();
       await store.loadWorkspace();
       // defaults unchanged
-      expect(store.selectedChipId).toBe("t5");
+      expect(store.selectedChipId).toBe("t5ai");
     });
 
     it("loadWorkspace restores serialized fields without re-triggering chip side effects", async () => {

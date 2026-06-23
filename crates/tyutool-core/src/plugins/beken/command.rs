@@ -16,7 +16,7 @@ pub const CMD_LINK_CHECK: u8 = 0x00;
 /// Write 32-bit register.
 pub const CMD_WRITE_REG: u8 = 0x01;
 
-/// Read 32-bit register (also used for T5 `GetChipID`).
+/// Read 32-bit register (also used for T5AI `GetChipID`).
 pub const CMD_READ_REG: u8 = 0x03;
 
 /// Write up to 256 bytes to flash (legacy, not used in 4K path).
@@ -76,7 +76,7 @@ pub const ERASE_CMD_32K: u8 = 0x52;
 /// Erase 64 KiB block.
 pub const ERASE_CMD_64K: u8 = 0xd8;
 
-// T5 extended erase commands (for >16 MiB flash)
+// T5AI extended erase commands (for >16 MiB flash)
 /// Extended erase 4 KiB sector.
 pub const ERASE_CMD_4K_EXT: u8 = 0x21;
 /// Extended erase 64 KiB block.
@@ -114,7 +114,7 @@ pub mod build {
         Vec::new()
     }
 
-    /// FlashGetMID (extended, T5) — `[reg_addr, 0, 0, 0]`.
+    /// FlashGetMID (extended, T5AI) — `[reg_addr, 0, 0, 0]`.
     /// `reg_addr` is typically `0x9f` (JEDEC Read-ID SPI command).
     pub fn flash_get_mid_ext(reg_addr: u8) -> Vec<u8> {
         vec![reg_addr, 0x00, 0x00, 0x00]
@@ -175,12 +175,12 @@ pub mod build {
     /// BKRegDoReboot (software reset via CMD 0xfe).
     ///
     /// Payload is `[0x95, 0x27, 0x95, 0x27]` — the magic reboot key
-    /// expected by the BK7231N/T5 bootrom.
+    /// expected by the BK7231N/T5AI bootrom.
     pub fn bk_reg_do_reboot() -> Vec<u8> {
         vec![0x95, 0x27, 0x95, 0x27]
     }
 
-    /// ReadReg — `[addr_le(4)]` (used for T5 GetChipID).
+    /// ReadReg — `[addr_le(4)]` (used for T5AI GetChipID).
     pub fn read_reg(addr: u32) -> Vec<u8> {
         addr.to_le_bytes().to_vec()
     }
@@ -194,7 +194,7 @@ pub mod build {
 pub mod parse {
     use super::super::frame::ProtocolError;
 
-    /// Parse a FlashGetMID response (extended frame, T5).
+    /// Parse a FlashGetMID response (extended frame, T5AI).
     ///
     /// Extended frame: `[04 0e ff 01 e0 fc f4 LEN_L LEN_H CMD STATUS DATA…]`
     /// In our `RxFrame`: cmd=0x0e, status=0x00, data=[mid0, mid1, mid2, mid3].
@@ -247,7 +247,7 @@ pub mod parse {
         Ok(data[0])
     }
 
-    /// Parse a FlashReadSR response (extended frame, T5).
+    /// Parse a FlashReadSR response (extended frame, T5AI).
     ///
     /// Extended frame response: `[04 0e ff 01 e0 fc f4 LEN_L LEN_H CMD STATUS DATA…]`
     /// In our `RxFrame`: cmd=0x0c, status=0x00, data=[reg_cmd_echo, sr_value].
@@ -280,7 +280,7 @@ pub mod parse {
         Ok(crc)
     }
 
-    /// Parse a ReadReg (T5 GetChipID) response.
+    /// Parse a ReadReg (T5AI GetChipID) response.
     ///
     /// Standard frame: `[04 0e LEN 01 e0 fc 03 regB0..B3(4) chipB0..B3(4)]`
     /// In our `RxFrame`: cmd=0x03, status=regB0, data=[regB1..B3, chipB0..B3].

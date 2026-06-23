@@ -23,7 +23,7 @@ pub use flash_event::{
 };
 pub use job::{FlashJob, FlashMode};
 pub use plugin::FlashPlugin;
-pub use registry::{default_registry, run_job, FlashPluginRegistry};
+pub use registry::{default_registry, normalize_chip_id, run_job, FlashPluginRegistry};
 pub use serial::{
     check_port_available, device_reset_dtr_rts, list_serial_ports, PortCheckResult, SerialPortEntry,
 };

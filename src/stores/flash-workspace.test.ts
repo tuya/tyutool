@@ -15,7 +15,7 @@ describe("parseFlashWorkspaceJson", () => {
       activeTab: "flash",
       selectedSerialPort: "/dev/ttyUSB0",
       selectedBaudRate: 921600,
-      selectedChipId: "t5",
+      selectedChipId: "t5ai",
       flashSegments: [
         {
           id: "seg1",
@@ -39,7 +39,7 @@ describe("parseFlashWorkspaceJson", () => {
     });
     const w = parseFlashWorkspaceJson(raw);
     expect(w).not.toBeNull();
-    expect(w!.selectedChipId).toBe("t5");
+    expect(w!.selectedChipId).toBe("t5ai");
     expect(w!.flashSegments).toHaveLength(1);
     expect(w!.flashSegments[0].firmwarePath).toBe("/tmp/a.bin");
     expect(w!.readFileNameModified).toBe(true);
@@ -109,5 +109,38 @@ describe("parseFlashWorkspaceJson", () => {
 
     const flashRaw = authorizeRaw.replace('"authorize"', '"flash"');
     expect(parseFlashWorkspaceJson(flashRaw)).toBeNull();
+  });
+
+  it("upgrades a saved legacy 't5' chipId to 't5ai'", () => {
+    const raw = JSON.stringify({
+      v: WORKSPACE_VERSION,
+      activeTab: "flash",
+      selectedSerialPort: "/dev/ttyUSB0",
+      selectedBaudRate: 921600,
+      selectedChipId: "t5",
+      flashSegments: [
+        {
+          id: "seg1",
+          firmwarePath: "/tmp/a.bin",
+          startAddr: "0x00000000",
+          endAddr: "0x00001000",
+        },
+      ],
+      activeSegmentIndex: 0,
+      eraseAdvancedOpen: false,
+      eraseStartAddr: "0x00000000",
+      eraseEndAddr: "0x00100000",
+      readStartAddr: "0x00000000",
+      readEndAddr: "0x00800000",
+      readDir: "",
+      readFileName: "dump.bin",
+      readFileNameModified: false,
+      authorizeUuid: "",
+      authorizeAuthKey: "",
+      authBaudRate: 115200,
+    });
+    const w = parseFlashWorkspaceJson(raw);
+    expect(w).not.toBeNull();
+    expect(w!.selectedChipId).toBe("t5ai");
   });
 });

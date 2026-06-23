@@ -1,7 +1,7 @@
-//! T5 flash plugin — real hardware implementation.
+//! T5AI flash plugin — real hardware implementation.
 //!
 //! Reuses the shared Beken protocol layer via [`super::bk7231n::run_beken`],
-//! with `T5Spec` providing the T5-specific behaviour differences.
+//! with `T5AISpec` providing the T5AI-specific behaviour differences.
 
 use std::sync::atomic::AtomicBool;
 
@@ -10,14 +10,14 @@ use crate::flash_event::FlashEvent;
 use crate::job::FlashJob;
 use crate::plugin::FlashPlugin;
 
-use super::beken::chip::T5Spec;
+use super::beken::chip::T5AISpec;
 
-/// T5 flash plugin using the real Beken UART protocol.
-pub struct T5Plugin;
+/// T5AI flash plugin using the real Beken UART protocol.
+pub struct T5AIPlugin;
 
-impl FlashPlugin for T5Plugin {
+impl FlashPlugin for T5AIPlugin {
     fn id(&self) -> &'static str {
-        "T5"
+        "T5AI"
     }
 
     fn run(
@@ -26,8 +26,8 @@ impl FlashPlugin for T5Plugin {
         cancel: &AtomicBool,
         progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
-        log::info!("T5 plugin delegating to run_beken (is_t5=true)");
-        let chip = T5Spec;
+        log::info!("T5AI plugin delegating to run_beken (is_t5ai=true)");
+        let chip = T5AISpec;
         super::bk7231n::run_beken(job, cancel, progress, &chip, true)
     }
 }
@@ -38,6 +38,6 @@ mod tests {
 
     #[test]
     fn plugin_id_is_uppercase() {
-        assert_eq!(T5Plugin.id(), "T5");
+        assert_eq!(T5AIPlugin.id(), "T5AI");
     }
 }

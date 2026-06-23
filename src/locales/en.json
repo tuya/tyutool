@@ -114,8 +114,8 @@
     "refresh": "Refresh devices",
     "deviceReset": "Reset device",
     "deviceResetHints": {
-      "t5": "DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
-      "t1": "Same as T5: DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
+      "t5ai": "DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
+      "t1": "Same as T5AI: DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
       "t3": "DTR/RTS pulse with longer hold—same handshake family when connecting. Free the serial port first.",
       "t2": "DTR/RTS shorter pulse—same as the handshake when connecting. Free the serial port first.",
       "bk7231n": "DTR/RTS shorter pulse matching the connect handshake. Free the serial port first.",
@@ -142,7 +142,7 @@
       "ln882h": "LN882H",
       "t2": "T2",
       "t3": "T3",
-      "t5": "T5",
+      "t5ai": "T5AI",
       "t1": "T1",
       "other": "Other"
     },
