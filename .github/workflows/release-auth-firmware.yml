@@ -1,0 +1,108 @@
+name: Release auth-firmware
+
+# Manually-triggered publish of the batch-flash-auth "default authorization
+# firmware" set. Reads firmware bins from assets/auth-firmware/, generates
+# auth-firmware.json, and publishes both to the fixed `auth-firmware` release
+# tag on GitHub and Gitee. Idempotent: existing bins are skipped (firmware is
+# immutable per version), auth-firmware.json is always overwritten.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize runs so two concurrent dispatches can't interleave release uploads.
+# Don't cancel an in-flight publish mid-upload — let it finish.
+concurrency:
+  group: release-auth-firmware
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate GitHub manifest
+        env:
+          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/auth-firmware
+          SOURCE_DIR: assets/auth-firmware
+          OUTPUT: auth-firmware.json
+        run: pnpm exec tsx scripts/generate-auth-firmware-manifest.ts
+
+      - name: Publish to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=auth-firmware
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "creating release $TAG"
+            gh release create "$TAG" \
+              --title "默认授权固件 (auth-firmware)" \
+              --notes "batch-flash-auth 默认授权固件。资产由 release-auth-firmware workflow 自动维护。"
+          fi
+          mapfile -t existing < <(gh release view "$TAG" --json assets -q '.assets[].name')
+          is_existing() { printf '%s\n' "${existing[@]}" | grep -qxF "$1"; }
+          while IFS= read -r bin; do
+            name="$(basename "$bin")"
+            if is_existing "$name"; then
+              echo "skip existing bin: $name"
+            else
+              echo "upload bin: $name"
+              gh release upload "$TAG" "$bin"
+            fi
+          done < <(find assets/auth-firmware -mindepth 2 -maxdepth 2 -type f -name '*.bin' | sort)
+          echo "upload manifest (clobber): auth-firmware.json"
+          gh release upload "$TAG" auth-firmware.json --clobber
+
+      - name: Generate Gitee manifest
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GITEE_TOKEN}" ]]; then
+            echo "::notice::GITEE_TOKEN not set — skipping Gitee manifest."
+            exit 0
+          fi
+          if [[ -z "${GITEE_REPO}" ]]; then
+            echo "::error::GITEE_REPO must be set when GITEE_TOKEN is set."
+            exit 1
+          fi
+          if [[ "${GITEE_REPO}" != */* && -z "${GITEE_USER}" ]]; then
+            echo "::error::GITEE_USER is required when GITEE_REPO has no '/'."
+            exit 1
+          fi
+          if [[ "${GITEE_REPO}" == */* ]]; then
+            GPATH="${GITEE_REPO}"
+          else
+            GPATH="${GITEE_USER}/${GITEE_REPO}"
+          fi
+          BASE_URL="https://gitee.com/${GPATH}/releases/download/auth-firmware" \
+          SOURCE_DIR=assets/auth-firmware \
+          OUTPUT=auth-firmware.json \
+            pnpm exec tsx scripts/generate-auth-firmware-manifest.ts
+
+      - name: Publish to Gitee release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          GITEE_TARGET_COMMITISH: ${{ vars.GITEE_TARGET_COMMITISH }}
+          TAG: auth-firmware
+          AUTH_FIRMWARE_DIR: assets/auth-firmware
+          MANIFEST_FILE: auth-firmware.json
+        run: bash scripts/publish-auth-firmware-gitee.sh
