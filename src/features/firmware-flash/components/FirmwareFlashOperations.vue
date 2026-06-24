@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
 import { chipManifest } from "../chip-manifests";
@@ -32,6 +32,25 @@ const {
   startOperation,
   startAuthRead,
 } = ctx;
+
+const credentialsCopied = ref(false);
+let credentialsCopiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function copyCredentials() {
+  const uuid = ctx.authorizeUuid.trim();
+  const key = ctx.authorizeAuthKey.trim();
+  if (!uuid && !key) return;
+  try {
+    await navigator.clipboard.writeText(`${uuid}\n${key}`);
+    credentialsCopied.value = true;
+    clearTimeout(credentialsCopiedTimer);
+    credentialsCopiedTimer = setTimeout(() => {
+      credentialsCopied.value = false;
+    }, 1400);
+  } catch {
+    // Clipboard API unavailable — silent.
+  }
+}
 
 /** i18n key for each erase preset kind. */
 const ERASE_PRESET_LABEL_KEYS: Record<ErasePresetKind, string> = {
@@ -389,6 +408,7 @@ const { message: readAddrError } = useAddrRangeError(
                 v-model="ctx.authorizeUuid"
                 :placeholder="t('flash.uuidPh')"
                 :disabled="ctx.busy"
+                no-copy
               />
             </div>
             <div>
@@ -400,8 +420,34 @@ const { message: readAddrError } = useAddrRangeError(
                 v-model="ctx.authorizeAuthKey"
                 :placeholder="t('flash.authKeyPh')"
                 :disabled="ctx.busy"
+                no-copy
               />
             </div>
+            <button
+              type="button"
+              class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1.5 text-sm transition-colors hover:bg-[var(--ty-surface-muted)] disabled:opacity-40"
+              :class="
+                credentialsCopied
+                  ? 'text-[var(--ty-success)]'
+                  : 'text-[var(--ty-text-muted)]'
+              "
+              :disabled="
+                ctx.busy || (!ctx.authorizeUuid && !ctx.authorizeAuthKey)
+              "
+              :title="t('flash.copyCredentials')"
+              @click="copyCredentials"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', credentialsCopied ? 'check' : 'copy']"
+                class="size-3.5"
+                aria-hidden="true"
+              />
+              {{
+                credentialsCopied
+                  ? t("common.copied")
+                  : t("flash.copyCredentials")
+              }}
+            </button>
             <p class="text-xs leading-snug text-[var(--ty-text-muted)]">
               <a
                 :href="tuyaopenAuthDocUrl"

@@ -3,11 +3,11 @@ import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-t
 
 /** Chips available in the batch auth tool (all support the auth serial protocol). */
 // When GD32 support is added to the Rust plugin registry, append "gd32" here.
-export const BATCH_AUTH_TOOL_CHIP_OPTIONS = ["esp32", "other"] as const;
+export const BATCH_AUTH_TOOL_CHIP_OPTIONS = ["esp32", "t5ai", "other"] as const;
 
 /** Subset of BATCH_AUTH_TOOL_CHIP_OPTIONS that also have a registered flash plugin. */
 // When GD32 support is added to the Rust plugin registry, append "gd32" here.
-export const BATCH_FLASH_CAPABLE_CHIPS = ["esp32"] as const;
+export const BATCH_FLASH_CAPABLE_CHIPS = ["esp32", "t5ai"] as const;
 
 export type BatchOpMode = "auth-only" | "flash-then-auth";
 
