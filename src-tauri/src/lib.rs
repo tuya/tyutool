@@ -602,9 +602,16 @@ fn batch_auth_cancel_all(state: State<'_, BatchAuthState>) -> Result<(), String>
 
 /// Read current UART authorization (for GUI overwrite prompt). Does not emit `flash-progress`.
 #[tauri::command]
-fn authorize_probe_cmd(port: String) -> Result<Option<tyutool_core::DeviceAuthorization>, String> {
-    let cancel = AtomicBool::new(false);
-    tyutool_core::probe_device_authorization(&port, &cancel).map_err(|e| e.to_string())
+async fn authorize_probe_cmd(
+    port: String,
+) -> Result<Option<tyutool_core::DeviceAuthorization>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cancel = AtomicBool::new(false);
+        tyutool_core::probe_device_authorization(&port, &cancel)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -745,14 +752,24 @@ fn device_reset_cmd(args: DeviceResetArgs) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn check_port_available_cmd(port: String) -> tyutool_core::PortCheckResult {
-    let result = tyutool_core::check_port_available(&port);
-    log::debug!(
-        "[Serial] check_port_available: port={}, available={}",
-        port,
-        result.available
-    );
-    result
+async fn check_port_available_cmd(port: String) -> tyutool_core::PortCheckResult {
+    match tauri::async_runtime::spawn_blocking(move || tyutool_core::check_port_available(&port))
+        .await
+    {
+        Ok(result) => {
+            log::debug!(
+                "[Serial] check_port_available: available={}",
+                result.available
+            );
+            result
+        }
+        Err(_) => tyutool_core::PortCheckResult {
+            available: false,
+            error_message: Some("Port check task panicked".to_string()),
+            process_info: None,
+            kill_hint: None,
+        },
+    }
 }
 
 #[tauri::command]
