@@ -207,12 +207,14 @@ Outputs JSON with raw USB metadata for all ports. Used for cross-OS debugging.
 | `t2` | T2 | 921600 |
 | `t3` | T3 | 921600 |
 | `t1` | T1 | 921600 |
-| `t5ai` | T5AI | 921600 |
+| `t5ai` (alias: `t5`) | T5AI | 921600 |
 | `ln882h` | LN882H | 115200 |
 | `esp32` | ESP32 | 460800 |
 | `esp32c3` | ESP32-C3 | 460800 |
 | `esp32c6` | ESP32-C6 | 460800 |
 | `esp32s3` | ESP32-S3 | 460800 |
+
+Device names are case-insensitive (`--device T5AI`, `--device t5AI`, and `--device t5ai` are all equivalent).
 
 ---
 
