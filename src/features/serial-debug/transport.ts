@@ -19,6 +19,11 @@ class TauriTransport implements SerialDebugTransport {
   private disconnectListeners = new Set<DisconnectListener>();
   private unlistenChunk?: () => void;
   private unlistenDisconnect?: () => void;
+  private listenersReady: Promise<void>;
+
+  constructor() {
+    this.listenersReady = this.ensureListeners();
+  }
 
   private async ensureListeners(): Promise<void> {
     if (this.unlistenChunk && this.unlistenDisconnect) return;
@@ -38,7 +43,7 @@ class TauriTransport implements SerialDebugTransport {
   }
 
   async open(cfg: DebugConfig): Promise<void> {
-    await this.ensureListeners();
+    await this.listenersReady;
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("serial_debug_open", { cfg });
   }
