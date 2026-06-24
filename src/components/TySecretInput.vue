@@ -17,6 +17,7 @@ const props = defineProps<{
   placeholder?: string;
   disabled?: boolean;
   ariaDescribedby?: string;
+  noCopy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -57,7 +58,8 @@ async function copyValue() {
       :placeholder="placeholder"
       :disabled="disabled"
       :aria-describedby="ariaDescribedby"
-      class="ops-text-input min-w-0 flex-1 pr-9 font-mono py-1.5"
+      :class="noCopy ? 'pr-2' : 'pr-9'"
+      class="ops-text-input min-w-0 flex-1 font-mono py-1.5"
       spellcheck="false"
       autocomplete="off"
       autocapitalize="off"
@@ -68,6 +70,7 @@ async function copyValue() {
       @input="onInput"
     />
     <div
+      v-if="!noCopy"
       class="pointer-events-none absolute inset-y-0 right-1.5 flex items-center"
     >
       <button

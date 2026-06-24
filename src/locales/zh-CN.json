@@ -196,6 +196,7 @@
     "uuidPh": "20 位设备 UUID",
     "authKey": "AuthKey",
     "authKeyPh": "32 位 AuthKey",
+    "copyCredentials": "复制 UUID & AuthKey",
     "authOfficialIntro": "",
     "authOfficialDocLink": "TuyaOpen 官方文档：设备授权",
     "authTuyaOpenOnly": "仅支持 TuyaOpen 授权：请使用 {link} ，勿与 tuyaos 产品密钥混用。",
