@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use clap::{
-    builder::{PossibleValue, PossibleValuesParser, TypedValueParser},
+    builder::{StringValueParser, TypedValueParser},
     CommandFactory, Parser, Subcommand,
 };
 use clap_complete::{generate, Shell};
@@ -155,25 +155,23 @@ const SUPPORTED_DEVICES: &[&str] = &[
 ];
 
 fn chip_value_parser() -> impl TypedValueParser<Value = String> {
-    // Legacy `t5` is accepted as a hidden alias for `t5ai` so users / scripts
-    // written before the rename keep working. clap's `PossibleValue::alias`
-    // only widens what is *accepted* — the matched string is still whatever
-    // the user typed, so we explicitly rewrite the alias back to the primary
-    // value with `.map(...)`. Downstream code sees only canonical ids.
-    PossibleValuesParser::new(SUPPORTED_DEVICES.iter().map(|s| {
-        if *s == "t5ai" {
-            // clap aliases are case-sensitive — list both spellings explicitly
-            // so scripts saying `--device T5` keep working alongside `t5`.
-            PossibleValue::new(*s).aliases(["t5", "T5"])
-        } else {
-            PossibleValue::new(*s)
-        }
-    }))
-    .map(|s| {
-        if s.eq_ignore_ascii_case("t5") {
+    // Lowercase first so --device T5AI / T5 / t5AI etc. all work.
+    // Legacy `t5` (any case) maps to `t5ai` for backwards compatibility.
+    StringValueParser::new().try_map(|s| {
+        let lower = s.to_ascii_lowercase();
+        let canonical = if lower == "t5" {
             "t5ai".to_string()
         } else {
-            s
+            lower
+        };
+        if SUPPORTED_DEVICES.contains(&canonical.as_str()) {
+            Ok(canonical)
+        } else {
+            Err(format!(
+                "invalid device '{}', valid values: {}",
+                s,
+                SUPPORTED_DEVICES.join(", ")
+            ))
         }
     })
 }
@@ -642,10 +640,9 @@ mod tests {
 
     #[test]
     fn cli_accepts_legacy_t5_device_and_resolves_to_t5ai() {
-        // Both `--device t5` and `--device T5` are hidden aliases for `t5ai`;
-        // clap accepts them, and the parser rewrites the matched value to the
-        // canonical primary so downstream code never sees the legacy spelling.
-        for variant in ["t5", "T5", "t5ai"] {
+        // Input is lowercased before matching, so all case variants are accepted.
+        // Legacy `t5` (any case) resolves to the canonical `t5ai`.
+        for variant in ["t5", "T5", "t5ai", "T5AI", "T5aI"] {
             let cli = Cli::try_parse_from([
                 "tyutool",
                 "write",
@@ -659,6 +656,41 @@ mod tests {
             .unwrap_or_else(|e| panic!("clap rejected --device {variant}: {e}"));
             match cli.command {
                 Commands::Write { device, .. } => assert_eq!(device, "t5ai"),
+                _ => panic!("expected Commands::Write"),
+            }
+        }
+    }
+
+    #[test]
+    fn cli_device_arg_is_case_insensitive() {
+        // chip_value_parser lowercases input before matching, so mixed-case
+        // spellings must be accepted and resolved to the canonical lowercase id.
+        let cases: &[(&str, &str)] = &[
+            ("BK7231N", "bk7231n"),
+            ("Bk7231N", "bk7231n"),
+            ("T2", "t2"),
+            ("T3", "t3"),
+            ("T1", "t1"),
+            ("LN882H", "ln882h"),
+            ("ESP32", "esp32"),
+            ("ESP32C3", "esp32c3"),
+            ("ESP32C6", "esp32c6"),
+            ("ESP32S3", "esp32s3"),
+        ];
+        for (input, canonical) in cases {
+            let cli = Cli::try_parse_from([
+                "tyutool",
+                "write",
+                "--device",
+                input,
+                "--port",
+                "/dev/null",
+                "--file",
+                "x.bin",
+            ])
+            .unwrap_or_else(|e| panic!("clap rejected --device {input}: {e}"));
+            match cli.command {
+                Commands::Write { device, .. } => assert_eq!(device, *canonical),
                 _ => panic!("expected Commands::Write"),
             }
         }
