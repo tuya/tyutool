@@ -16,7 +16,7 @@
   "app": {
     "tagline": "Embedded utilities",
     "nav": {
-      "flash": "Firmware flash",
+      "flash": "Firmware tools",
       "serialDebug": "Serial debug",
       "toolbox": "Toolbox",
       "settings": "Settings"
@@ -112,7 +112,7 @@
   },
   "flash": {
     "tool": "Tools",
-    "pageTitle": "Firmware flash",
+    "pageTitle": "Firmware tools",
     "introLead": "Connect the serial port and choose the chip platform",
     "introRest": ", then pick Flash / Erase / Authorize; authorization needs UUID and AuthKey.",
     "connectionAria": "Connection",
@@ -136,7 +136,7 @@
     },
     "deviceOps": "Device & operation",
     "deviceOpsHint": "Chip platform is selected above; fill only task-specific options here.",
-    "tabsAria": "Firmware flash tasks",
+    "tabsAria": "Firmware tools tasks",
     "tabs": {
       "flash": "Flash",
       "erase": "Erase",
@@ -434,7 +434,7 @@
       "statusConnected": "Connected",
       "statusDisconnected": "Disconnected",
       "deviceReset": "Reset device",
-      "deviceResetHint": "Sends DTR/RTS reset. Sequence depends on chip — select the correct chip platform in Firmware Flash first."
+      "deviceResetHint": "Sends DTR/RTS reset. Sequence depends on chip — select the correct chip platform in Firmware Tools first."
     },
     "send": {
       "placeholder": "Type to send…",

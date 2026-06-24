@@ -8,16 +8,16 @@ import {
   loadStoredLogEnabled,
   loadStoredLogLevel,
   loadStoredTheme,
-  loadStoredThemeStyle,
+  // loadStoredThemeStyle,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
   LOCALE_KEY,
   THEME_KEY,
-  THEME_STYLE_KEY,
+  // THEME_STYLE_KEY,
 } from "./settings-utils";
 
 export type ThemePreference = "light" | "dark" | "system";
-export type ThemeStyle = "default" | "tuyaopen-ide";
+// export type ThemeStyle = "default" | "tuyaopen-ide";
 export type LocaleId = "zh-CN" | "en";
 export type LocalePreference = LocaleId | "auto";
 export type LogLevelId = "error" | "warn" | "info" | "debug" | "trace";
@@ -46,7 +46,7 @@ async function persistSetting(key: string, value: string): Promise<void> {
 
 export const useSettingsStore = defineStore("settings", () => {
   const theme = ref<ThemePreference>(loadStoredTheme());
-  const themeStyle = ref<ThemeStyle>(loadStoredThemeStyle());
+  // const themeStyle = ref<ThemeStyle>(loadStoredThemeStyle());
   const locale = ref<LocalePreference>(loadStoredLocale());
   const logEnabled = ref<boolean>(loadStoredLogEnabled());
   const logLevel = ref<LogLevelId>(loadStoredLogLevel());
@@ -55,9 +55,9 @@ export const useSettingsStore = defineStore("settings", () => {
     theme.value = value;
   }
 
-  function setThemeStyle(value: ThemeStyle): void {
-    themeStyle.value = value;
-  }
+  // function setThemeStyle(value: ThemeStyle): void {
+  //   themeStyle.value = value;
+  // }
 
   function setLocale(value: LocalePreference): void {
     locale.value = value;
@@ -86,7 +86,7 @@ export const useSettingsStore = defineStore("settings", () => {
     const { Store } = await import("@tauri-apps/plugin-store");
     const store = await Store.load(STORE_FILE);
     const storedTheme = await store.get<ThemePreference>(THEME_KEY);
-    const storedThemeStyle = await store.get<string>(THEME_STYLE_KEY);
+    // const storedThemeStyle = await store.get<string>(THEME_STYLE_KEY);
     const storedLocale = await store.get<LocalePreference>(LOCALE_KEY);
     if (
       storedTheme === "light" ||
@@ -95,9 +95,9 @@ export const useSettingsStore = defineStore("settings", () => {
     ) {
       theme.value = storedTheme;
     }
-    if (storedThemeStyle === "default" || storedThemeStyle === "tuyaopen-ide") {
-      themeStyle.value = storedThemeStyle;
-    }
+    // if (storedThemeStyle === "default" || storedThemeStyle === "tuyaopen-ide") {
+    //   themeStyle.value = storedThemeStyle;
+    // }
     if (
       storedLocale === "zh-CN" ||
       storedLocale === "en" ||
@@ -123,28 +123,28 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function init(): void {
     // Apply theme to DOM on startup
-    applyThemeToDom(theme.value, themeStyle.value);
+    applyThemeToDom(theme.value);
 
     // Load persisted settings from Tauri store (async, may update theme/locale after init)
     if (isTauriRuntime()) {
       _ready = loadFromTauriStore().then(() => {
-        applyThemeToDom(theme.value, themeStyle.value);
+        applyThemeToDom(theme.value);
       });
     }
 
     // Persist theme and re-apply on change
     watch(theme, (v) => {
       void persistSetting(THEME_KEY, v);
-      applyThemeToDom(v, themeStyle.value);
+      applyThemeToDom(v);
       rLog.debug(`[Settings] Theme changed to: ${v}`);
     });
 
     // Persist themeStyle and re-apply on change
-    watch(themeStyle, (v) => {
-      void persistSetting(THEME_STYLE_KEY, v);
-      applyThemeToDom(theme.value, v);
-      rLog.debug(`[Settings] Theme style changed to: ${v}`);
-    });
+    // watch(themeStyle, (v) => {
+    //   void persistSetting(THEME_STYLE_KEY, v);
+    //   applyThemeToDom(theme.value, v);
+    //   rLog.debug(`[Settings] Theme style changed to: ${v}`);
+    // });
 
     // Persist locale on change
     watch(locale, (v) => {
@@ -177,19 +177,19 @@ export const useSettingsStore = defineStore("settings", () => {
       .matchMedia("(prefers-color-scheme: dark)")
       .addEventListener("change", () => {
         if (theme.value === "system") {
-          applyThemeToDom(theme.value, themeStyle.value);
+          applyThemeToDom(theme.value);
         }
       });
   }
 
   return {
     theme,
-    themeStyle,
+    // themeStyle,
     locale,
     logEnabled,
     logLevel,
     setTheme,
-    setThemeStyle,
+    // setThemeStyle,
     setLocale,
     setLogEnabled,
     setLogLevel,

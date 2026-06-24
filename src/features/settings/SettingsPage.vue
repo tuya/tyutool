@@ -7,7 +7,7 @@ import { useSerialDebugStore } from "@/stores/serial-debug";
 import type {
   LogLevelId,
   LocalePreference,
-  ThemeStyle,
+  // ThemeStyle,
 } from "@/stores/settings";
 import { isTauriRuntime } from "@/runtime";
 import { openLogsFolder as openLogsFolderAction } from "./open-logs-folder";
@@ -50,15 +50,14 @@ const localeValue = computed({
   },
 });
 
-const themeStyleOptions = computed<TySelectOption[]>(() => [
-  { value: "default", label: t("settings.themeStyleDefault") },
-  { value: "tuyaopen-ide", label: t("settings.themeStyleTuyaopenIde") },
-]);
-
-const themeStyleValue = computed({
-  get: () => settings.themeStyle,
-  set: (val: string) => settings.setThemeStyle(val as ThemeStyle),
-});
+// const themeStyleOptions = computed<TySelectOption[]>(() => [
+//   { value: "default", label: t("settings.themeStyleDefault") },
+// ]);
+//
+// const themeStyleValue = computed({
+//   get: () => settings.themeStyle,
+//   set: (val: string) => settings.setThemeStyle(val as ThemeStyle),
+// });
 
 // Sync vue-i18n locale when settings locale changes (e.g. from Tauri store load)
 watch(
@@ -134,38 +133,8 @@ async function openOpensourceLicenses(): Promise<void> {
         <h2 id="appearance-heading" class="ty-section-title">
           {{ t("settings.appearance") }}
         </h2>
-        <!-- Theme style: visual swatch cards -->
-        <fieldset class="mt-4 space-y-2">
-          <legend class="text-sm font-medium text-[var(--ty-text)]">
-            {{ t("settings.themeStyle") }}
-          </legend>
-          <div class="grid grid-cols-2 gap-2.5">
-            <button
-              v-for="opt in themeStyleOptions"
-              :key="opt.value"
-              type="button"
-              class="theme-style-card flex items-center gap-3 rounded-xl border p-3 text-left transition-colors"
-              :class="
-                themeStyleValue === opt.value
-                  ? 'border-[var(--ty-primary)] bg-[color-mix(in_srgb,var(--ty-primary)_8%,transparent)]'
-                  : 'border-[var(--ty-border)] hover:border-[var(--ty-border-strong)]'
-              "
-              :aria-pressed="themeStyleValue === opt.value"
-              @click="themeStyleValue = opt.value as ThemeStyle"
-            >
-              <span
-                class="size-7 shrink-0 rounded-lg ring-1 ring-[var(--ty-border)]"
-                :class="
-                  opt.value === 'tuyaopen-ide'
-                    ? 'bg-[linear-gradient(135deg,#cc3800,#e05500)]'
-                    : 'bg-[linear-gradient(135deg,#2563eb,#7c3aed)]'
-                "
-                aria-hidden="true"
-              />
-              <span class="text-sm font-medium">{{ opt.label }}</span>
-            </button>
-          </div>
-        </fieldset>
+        <!-- Theme style: temporarily hidden -->
+        <!-- <fieldset class="mt-4 space-y-2"> ... </fieldset> -->
         <!-- Theme mode: segmented icons -->
         <fieldset class="mt-4 space-y-2">
           <legend class="text-sm font-medium text-[var(--ty-text)]">

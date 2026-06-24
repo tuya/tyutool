@@ -16,7 +16,7 @@
   "app": {
     "tagline": "嵌入式工具",
     "nav": {
-      "flash": "固件烧录",
+      "flash": "固件工具",
       "serialDebug": "串口调试",
       "toolbox": "工具箱",
       "settings": "设置"
@@ -112,7 +112,7 @@
   },
   "flash": {
     "tool": "工具",
-    "pageTitle": "固件烧录",
+    "pageTitle": "固件工具",
     "introLead": "先连串口并选定芯片平台",
     "introRest": "，再选烧录 / 擦除 / 授权；授权需 UUID 与 AuthKey。",
     "connectionAria": "连接状态",
@@ -136,7 +136,7 @@
     },
     "deviceOps": "设备与操作",
     "deviceOpsHint": "芯片平台在上方连接区已选；此处仅填各子任务参数",
-    "tabsAria": "固件烧录子项目",
+    "tabsAria": "固件工具子项目",
     "tabs": {
       "flash": "烧录",
       "erase": "擦除",
@@ -434,7 +434,7 @@
       "statusConnected": "已连接",
       "statusDisconnected": "已断开",
       "deviceReset": "设备复位",
-      "deviceResetHint": "通过 DTR/RTS 对设备复位。复位时序取决于芯片平台，请先在「固件烧录」中选择正确的芯片。"
+      "deviceResetHint": "通过 DTR/RTS 对设备复位。复位时序取决于芯片平台，请先在「固件工具」中选择正确的芯片。"
     },
     "send": {
       "placeholder": "输入内容…",

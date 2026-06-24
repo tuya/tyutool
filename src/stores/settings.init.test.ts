@@ -19,7 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeSpy }));
 import { useSettingsStore } from "./settings";
 import {
   THEME_KEY,
-  THEME_STYLE_KEY,
+  // THEME_STYLE_KEY,
   LOCALE_KEY,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
@@ -65,24 +65,24 @@ describe("useSettingsStore init() + web persistence", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
-  it("changing themeStyle persists and toggles the tuyaopen-ide class", async () => {
-    const s = useSettingsStore();
-    s.init();
-
-    s.setThemeStyle("tuyaopen-ide");
-    await nextTick();
-    expect(localStorage.getItem(THEME_STYLE_KEY)).toBe("tuyaopen-ide");
-    expect(document.documentElement.classList.contains("tuyaopen-ide")).toBe(
-      true,
-    );
-
-    s.setThemeStyle("default");
-    await nextTick();
-    expect(localStorage.getItem(THEME_STYLE_KEY)).toBe("default");
-    expect(document.documentElement.classList.contains("tuyaopen-ide")).toBe(
-      false,
-    );
-  });
+  // it("changing themeStyle persists and toggles the tuyaopen-ide class", async () => {
+  //   const s = useSettingsStore();
+  //   s.init();
+  //
+  //   s.setThemeStyle("tuyaopen-ide");
+  //   await nextTick();
+  //   expect(localStorage.getItem(THEME_STYLE_KEY)).toBe("tuyaopen-ide");
+  //   expect(document.documentElement.classList.contains("tuyaopen-ide")).toBe(
+  //     true,
+  //   );
+  //
+  //   s.setThemeStyle("default");
+  //   await nextTick();
+  //   expect(localStorage.getItem(THEME_STYLE_KEY)).toBe("default");
+  //   expect(document.documentElement.classList.contains("tuyaopen-ide")).toBe(
+  //     false,
+  //   );
+  // });
 
   it("changing locale persists and updates document lang", async () => {
     const s = useSettingsStore();

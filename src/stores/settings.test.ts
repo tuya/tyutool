@@ -80,13 +80,13 @@ describe("useSettingsStore setters", () => {
     expect(s.theme).toBe("light");
   });
 
-  it("setThemeStyle mutates the themeStyle ref", () => {
-    const s = useSettingsStore();
-    s.setThemeStyle("tuyaopen-ide");
-    expect(s.themeStyle).toBe("tuyaopen-ide");
-    s.setThemeStyle("default");
-    expect(s.themeStyle).toBe("default");
-  });
+  // it("setThemeStyle mutates the themeStyle ref", () => {
+  //   const s = useSettingsStore();
+  //   s.setThemeStyle("tuyaopen-ide");
+  //   expect(s.themeStyle).toBe("tuyaopen-ide");
+  //   s.setThemeStyle("default");
+  //   expect(s.themeStyle).toBe("default");
+  // });
 
   it("setLocale mutates the locale ref", () => {
     const s = useSettingsStore();
