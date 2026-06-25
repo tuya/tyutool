@@ -384,8 +384,9 @@ impl<T: AuthIo> AuthSession<T> {
     fn detect_firmware(&mut self, cancel: &AtomicBool) -> Result<FirmwareKind, FlashError> {
         self.hardware_reset()?;
 
-        // Give device 500ms to initialize serial before sending commands.
-        let sleep_end = Instant::now() + Duration::from_millis(500);
+        // Give device 1000ms to initialize serial before sending commands.
+        // 500ms was too short for some new-firmware boards (shell not yet ready).
+        let sleep_end = Instant::now() + Duration::from_millis(1000);
         while Instant::now() < sleep_end {
             if cancel.load(Ordering::Relaxed) {
                 return Err(FlashError::Cancelled);
@@ -427,8 +428,8 @@ impl<T: AuthIo> AuthSession<T> {
             Ok(kind)
         } else {
             // Old firmware: wait out the remainder of the 3s post-reset window.
-            // 500ms init + up to 300ms detection = up to 800ms elapsed; need ~2200ms more.
-            let wait_end = Instant::now() + Duration::from_millis(2200);
+            // 1000ms init + up to 300ms detection = up to 1300ms elapsed; need ~1700ms more.
+            let wait_end = Instant::now() + Duration::from_millis(1700);
             while Instant::now() < wait_end {
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
