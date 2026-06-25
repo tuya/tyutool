@@ -6,11 +6,14 @@
 //! # Boot sequence (common to all entry points)
 //!
 //! `detect_firmware` opens the serial port, drains stale output, hardware-resets
-//! the device, and probes for new-firmware support by sending `sys_log_enable off`:
-//! - If the device responds `OK: log disable` within 300 ms → new firmware
-//!   (logging now disabled; queries `version` for capability gating)
-//! - Otherwise → old firmware (waits the remaining ~2.2 s to total a 3 s
-//!   post-reset settle, then proceeds with logging still active)
+//! the device, and polls for firmware kind by repeatedly sending `sys_log_enable off`:
+//! - Response `OK: log disable` → new firmware (shell ready; logging disabled)
+//! - Response contains "No command" or a `tuya>` prompt → old firmware (shell ready)
+//! - No recognizable response within `boot_max_wait` → old firmware (timeout fallback)
+//!
+//! Polling starts at `boot_probe_start` after reset and repeats every
+//! `boot_probe_interval`. Both values come from `AuthTiming::for_chip`, which
+//! holds chip-measured values (T5AI: 600 ms start / 50 ms interval / 2 100 ms max).
 //!
 //! # Write flow
 //!
@@ -39,21 +42,72 @@ use crate::error::FlashError;
 use crate::flash_event::{FlashEvent, FlashMilestone};
 use crate::job::FlashJob;
 
-// ── Timing (aligned with auth_handler.py) ────────────────────────────────
+// ── Timing ────────────────────────────────────────────────────────────────
 
 const BAUD: u32 = 115_200;
-/// Per-command read window.
+/// Per-command absolute read deadline (hard ceiling regardless of idle).
 const CMD_TIMEOUT: Duration = Duration::from_secs(3);
-/// Stop reading after this long with no new data.
-const IDLE_TIMEOUT: Duration = Duration::from_millis(300);
 /// Drain: stop when silent for this long.
 const DRAIN_QUIET: Duration = Duration::from_millis(800);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
-/// Wait after hardware reset before sending the first command.
-const POST_RESET_WAIT: Duration = Duration::from_secs(3);
 /// Devices shipped un-authorized carry this placeholder UUID.
 const PLACEHOLDER_UUID: &str = "uuidxxxxxxxxxxxxxxxx";
+
+// ── Per-chip timing ───────────────────────────────────────────────────────
+
+/// Chip-specific timing parameters for the TuyaOpen UART auth protocol.
+///
+/// Defaults are conservative. Measured values (T5AI: first-byte RTT ~11 ms,
+/// shell ready ~703 ms after reset) allow tighter per-chip configs.
+#[derive(Debug, Clone)]
+struct AuthTiming {
+    /// Do not start probing before this many ms after reset.
+    boot_probe_start: Duration,
+    /// Interval between boot-ready probes (also used as wake_shell spacing).
+    boot_probe_interval: Duration,
+    /// Hard ceiling: treat as old firmware if shell is still unresponsive by
+    /// this point (should be ≥ 3× the chip's measured boot-ready time).
+    boot_max_wait: Duration,
+    /// Idle timeout for regular command responses (3× measured first-byte RTT).
+    /// Replaces the old fixed 300 ms IDLE_TIMEOUT.
+    cmd_idle_timeout: Duration,
+}
+
+impl AuthTiming {
+    /// Select timing by chip ID (case-insensitive). Empty → default.
+    fn for_chip(chip_id: &str) -> Self {
+        match chip_id.to_ascii_uppercase().as_str() {
+            // T5AI: measured boot-ready 703 ms, first-byte RTT ~11 ms.
+            // boot_max_wait = 3× 703 ms ≈ 2 100 ms; cmd_idle = 3× 11 ms → 50 ms min.
+            "T5AI" | "T5" => Self {
+                boot_probe_start: Duration::from_millis(600),
+                boot_probe_interval: Duration::from_millis(50),
+                boot_max_wait: Duration::from_millis(2100),
+                cmd_idle_timeout: Duration::from_millis(50),
+            },
+            // ESP32 family: timing not yet measured; use conservative defaults.
+            "ESP32" | "ESP32C3" | "ESP32C6" | "ESP32S3" => Self {
+                boot_probe_start: Duration::from_millis(500),
+                boot_probe_interval: Duration::from_millis(50),
+                boot_max_wait: Duration::from_millis(3000),
+                cmd_idle_timeout: Duration::from_millis(100),
+            },
+            _ => Self::default(),
+        }
+    }
+}
+
+impl Default for AuthTiming {
+    fn default() -> Self {
+        Self {
+            boot_probe_start: Duration::from_millis(700),
+            boot_probe_interval: Duration::from_millis(50),
+            boot_max_wait: Duration::from_millis(3000),
+            cmd_idle_timeout: Duration::from_millis(100),
+        }
+    }
+}
 
 // ── Firmware version detection ────────────────────────────────────────────
 
@@ -173,10 +227,11 @@ impl AuthIo for SerialAuthIo {
 
 struct AuthSession<T: AuthIo> {
     port: T,
+    timing: AuthTiming,
 }
 
 impl AuthSession<SerialAuthIo> {
-    fn open(port_name: &str) -> Result<Self, FlashError> {
+    fn open(port_name: &str, timing: AuthTiming) -> Result<Self, FlashError> {
         let mut port = serialport::new(port_name, BAUD)
             .timeout(Duration::from_millis(50))
             .open()
@@ -186,6 +241,7 @@ impl AuthSession<SerialAuthIo> {
         let _ = port.write_request_to_send(false);
         Ok(Self {
             port: SerialAuthIo { port },
+            timing,
         })
     }
 }
@@ -251,10 +307,14 @@ impl<T: AuthIo> AuthSession<T> {
     /// Send a few bare `\r\n` to flush any partial input and wait until the
     /// TuyaOpen shell is ready.  Call this after the post-boot drain and
     /// before issuing real commands when the device has just booted.
+    ///
+    /// Spacing between CRLFs uses `timing.boot_probe_interval` (e.g. 50 ms for
+    /// T5AI) rather than a fixed 300 ms, since the shell responds within ~11 ms.
     fn wake_shell(&mut self) {
+        let interval = self.timing.boot_probe_interval;
         for _ in 0..3 {
             let _ = self.port.write_all(b"\r\n");
-            std::thread::sleep(Duration::from_millis(300));
+            std::thread::sleep(interval);
         }
         // Drain prompt echoes and any leftover boot output.
         let _ = self.port.clear_input();
@@ -319,7 +379,8 @@ impl<T: AuthIo> AuthSession<T> {
     }
 
     fn read_response(&mut self) -> Vec<String> {
-        self.read_response_timed(CMD_TIMEOUT, IDLE_TIMEOUT)
+        let idle = self.timing.cmd_idle_timeout;
+        self.read_response_timed(CMD_TIMEOUT, idle)
     }
 
     /// Send `auth-read` and return `(uuid, authkey)` or `None`.
@@ -374,74 +435,101 @@ impl<T: AuthIo> AuthSession<T> {
         None
     }
 
-    /// Hardware-reset the device, detect firmware version via `sys_log_enable off`,
-    /// and leave the shell ready for commands.
+    /// Hardware-reset the device, detect firmware kind, and leave the shell ready.
     ///
-    /// Replaces the old `hardware_reset → POST_RESET_WAIT(3s) → drain → wake_shell` sequence.
-    /// On return:
-    /// - `FirmwareKind::New(v)` — `sys_log_enable off` succeeded; logging is disabled; shell ready.
-    /// - `FirmwareKind::Old` — command absent; logging unchanged; shell ready (3s elapsed).
+    /// Polls by repeatedly sending `sys_log_enable off` starting at
+    /// `timing.boot_probe_start` after reset, every `timing.boot_probe_interval`:
+    /// - `OK: log disable` in response → new firmware; returns immediately.
+    /// - "No command" or `tuya>` in response → old firmware; returns immediately.
+    /// - No recognizable response by `timing.boot_max_wait` → old firmware fallback.
     fn detect_firmware(&mut self, cancel: &AtomicBool) -> Result<FirmwareKind, FlashError> {
+        let boot_probe_start = self.timing.boot_probe_start;
+        let boot_probe_interval = self.timing.boot_probe_interval;
+        let boot_max_wait = self.timing.boot_max_wait;
+
         self.hardware_reset()?;
+        let reset_time = Instant::now();
 
-        // Give device 1000ms to initialize serial before sending commands.
-        // 500ms was too short for some new-firmware boards (shell not yet ready).
-        let sleep_end = Instant::now() + Duration::from_millis(1000);
-        while Instant::now() < sleep_end {
+        // Wait until probe_start — shell cannot possibly be ready before this.
+        let first_probe_at = reset_time + boot_probe_start;
+        while Instant::now() < first_probe_at {
             if cancel.load(Ordering::Relaxed) {
                 return Err(FlashError::Cancelled);
             }
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(20));
         }
 
-        if cancel.load(Ordering::Relaxed) {
-            return Err(FlashError::Cancelled);
-        }
+        let max_deadline = reset_time + boot_max_wait;
 
-        // Attempt sys_log_enable off — 300ms window covers new-firmware shell response.
-        let _ = self.send_cmd("sys_log_enable off");
-        let lines =
-            self.read_response_timed(Duration::from_millis(300), Duration::from_millis(300));
-        let got_ok = lines
-            .iter()
-            .any(|l| l.to_lowercase().contains("ok: log disable"));
-
-        if got_ok {
-            // New firmware: logging disabled, shell is up.
-            self.drain_boot_output();
+        loop {
             if cancel.load(Ordering::Relaxed) {
                 return Err(FlashError::Cancelled);
             }
-            self.wake_shell();
-            if cancel.load(Ordering::Relaxed) {
-                return Err(FlashError::Cancelled);
-            }
-            // Identify exact version for future branching.
-            let _ = self.send_cmd("version");
-            let vlines = self.read_response();
-            let version = vlines.iter().find_map(|l| parse_cli_version(l));
-            let kind = match version {
-                Some(v) if v >= NEW_FIRMWARE_MIN => FirmwareKind::New(v),
-                // Responded to sys_log_enable but version unparseable — treat as minimum.
-                _ => FirmwareKind::New(NEW_FIRMWARE_MIN),
-            };
-            Ok(kind)
-        } else {
-            // Old firmware: wait out the remainder of the 3s post-reset window.
-            // 1000ms init + up to 300ms detection = up to 1300ms elapsed; need ~1700ms more.
-            let wait_end = Instant::now() + Duration::from_millis(1700);
-            while Instant::now() < wait_end {
+
+            let _ = self.send_cmd("sys_log_enable off");
+            // Each probe reads for at most one probe_interval.
+            let lines = self.read_response_timed(boot_probe_interval, boot_probe_interval);
+
+            let is_new = lines
+                .iter()
+                .any(|l| l.to_lowercase().contains("ok: log disable"));
+            let is_old = !is_new
+                && lines.iter().any(|l| {
+                    let lower = l.to_lowercase();
+                    lower.contains("no command") || is_shell_prompt(l)
+                });
+
+            if is_new || is_old {
+                let elapsed_ms = reset_time.elapsed().as_millis();
+                log::info!(
+                    "flash.log.auth.shellReady: new_firmware={}, elapsed={}ms",
+                    is_new,
+                    elapsed_ms
+                );
+                self.drain_boot_output();
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                self.wake_shell();
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(FlashError::Cancelled);
+                }
+                if is_new {
+                    let _ = self.send_cmd("version");
+                    let vlines = self.read_response();
+                    let version = vlines.iter().find_map(|l| parse_cli_version(l));
+                    let kind = match version {
+                        Some(v) if v >= NEW_FIRMWARE_MIN => FirmwareKind::New(v),
+                        _ => FirmwareKind::New(NEW_FIRMWARE_MIN),
+                    };
+                    return Ok(kind);
+                }
+                return Ok(FirmwareKind::Old);
             }
-            self.drain_boot_output();
-            if cancel.load(Ordering::Relaxed) {
-                return Err(FlashError::Cancelled);
+
+            // No recognizable response yet.
+            if Instant::now() >= max_deadline {
+                let elapsed_ms = reset_time.elapsed().as_millis();
+                log::info!(
+                    "flash.log.auth.shellReady: timed_out elapsed={}ms, fallback=Old",
+                    elapsed_ms
+                );
+                self.drain_boot_output();
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(FlashError::Cancelled);
+                }
+                self.wake_shell();
+                return Ok(FirmwareKind::Old);
             }
-            self.wake_shell();
-            Ok(FirmwareKind::Old)
+
+            // Wait the remaining probe interval before retrying.
+            let next_probe_at = Instant::now() + boot_probe_interval;
+            while Instant::now() < next_probe_at {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(FlashError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 
@@ -548,7 +636,8 @@ where
 
     // ── Step 1: Open serial ───────────────────────────────────────────
     log::info!("flash.log.auth.openingPort: port={}", job.port);
-    let mut sess = AuthSession::open(&job.port)?;
+    let timing = AuthTiming::for_chip(&job.chip_id);
+    let mut sess = AuthSession::open(&job.port, timing)?;
 
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
@@ -749,11 +838,9 @@ where
                 }
 
                 // Wait for device to settle after possible reboot (old firmware may reboot)
-                log::info!(
-                    "flash.log.auth.waitSettle: seconds={}",
-                    POST_RESET_WAIT.as_secs()
-                );
-                let wait_end = Instant::now() + POST_RESET_WAIT;
+                let settle_wait = sess.timing.boot_max_wait;
+                log::info!("flash.log.auth.waitSettle: ms={}", settle_wait.as_millis());
+                let wait_end = Instant::now() + settle_wait;
                 while Instant::now() < wait_end {
                     if cancel.load(Ordering::Relaxed) {
                         return Err(FlashError::Cancelled);
@@ -832,6 +919,7 @@ where
 /// - `Skipped`/`Err`/`Cancelled` → caller should release the Excel row.
 pub fn run_batch_auth_slot<F>(
     port: &str,
+    chip_id: &str,
     uuid: &str,
     authkey: &str,
     conflict_policy: ConflictPolicy,
@@ -849,7 +937,8 @@ where
         };
     }
 
-    let mut sess = AuthSession::open(port)?;
+    let timing = AuthTiming::for_chip(chip_id);
+    let mut sess = AuthSession::open(port, timing)?;
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -983,7 +1072,8 @@ where
             let _lines = sess.auth_write(uuid, authkey);
             check_cancel!();
 
-            let wait_end = Instant::now() + POST_RESET_WAIT;
+            let settle_wait = sess.timing.boot_max_wait;
+            let wait_end = Instant::now() + settle_wait;
             while Instant::now() < wait_end {
                 check_cancel!();
                 std::thread::sleep(Duration::from_millis(200));
@@ -1087,7 +1177,10 @@ mod tests {
     }
 
     fn session(mock: MockAuthIo) -> AuthSession<MockAuthIo> {
-        AuthSession { port: mock }
+        AuthSession {
+            port: mock,
+            timing: AuthTiming::default(),
+        }
     }
 
     // ── auth_read parsing ──────────────────────────────────────────────
@@ -1228,8 +1321,8 @@ mod tests {
     fn wake_shell_sends_three_newlines() {
         let mock = MockAuthIo::new();
         let mut sess = session(mock);
-        sess.wake_shell();
-        // Three bare CRLFs written.
+        sess.wake_shell(); // uses self.timing.boot_probe_interval
+                           // Three bare CRLFs written.
         assert_eq!(
             sess.port
                 .sent
@@ -1332,7 +1425,10 @@ mod tests {
         io.add_response("");
         // Response 2: version command
         io.add_response("CLI version: 1.0.0\r\n");
-        let mut sess = AuthSession { port: io };
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+        };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::New(CliVersion(1, 0, 0)));
@@ -1347,7 +1443,10 @@ mod tests {
         io.add_response("No command or file name\r\n");
         // Response 1: wake_shell clear_input → empty
         io.add_response("");
-        let mut sess = AuthSession { port: io };
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+        };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::Old);
@@ -1362,7 +1461,10 @@ mod tests {
         io.add_response("");
         // Response 1: wake_shell clear_input
         io.add_response("");
-        let mut sess = AuthSession { port: io };
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+        };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::Old);
@@ -1400,7 +1502,10 @@ mod tests {
         io.add_response("testuuid12345678901\r\ntestkey1234567890123456789012\r\n");
         // hardware_reset at end: no response needed
 
-        let mut sess = AuthSession { port: io };
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+        };
         let cancel = AtomicBool::new(false);
         let job = FlashJob {
             mode: FlashMode::Authorize,
@@ -1433,8 +1538,8 @@ mod tests {
         // auth_write
         let _lines = sess.auth_write("testuuid12345678901", "testkey1234567890123456789012");
         sess.drain_boot_output();
-        sess.wake_shell();
-        // verify
+        sess.wake_shell(); // no timing arg — uses self.timing
+                           // verify
         let verified = sess.auth_read();
         assert_eq!(
             verified,
@@ -1461,7 +1566,10 @@ mod tests {
         // auth_read → existing different credentials
         io.add_response("existinguuid1234567\r\nexistingkey12345678901234567890\r\n");
 
-        let mut sess = AuthSession { port: io };
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+        };
         let cancel = AtomicBool::new(false);
         let firmware = sess.detect_firmware(&cancel).unwrap();
         assert!(matches!(firmware, FirmwareKind::New(_)));
