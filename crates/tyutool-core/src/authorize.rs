@@ -82,8 +82,11 @@ struct AuthTiming {
 // To add a chip: append one row; record the measurement date in the comment.
 //
 // columns:  chips                              start  int   max   idle settle drain_q
+// columns: chips, start, interval, max_wait, idle, settle, drain_quiet (all ms)
+type ChipTimingRow = (&'static [&'static str], u64, u64, u64, u64, u64, u64);
+
 #[rustfmt::skip]
-const CHIP_TIMING: &[(&[&str], u64, u64, u64, u64, u64, u64)] = &[
+const CHIP_TIMING: &[ChipTimingRow] = &[
     (&["T5AI", "T5"],                              600,  50,  2100,  50,  3000,   800), // ready ~703ms,  RTT ~11ms
     (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400), // ready ~1108ms, RTT 20–40ms (2026-06-25)
 ];
@@ -93,7 +96,7 @@ impl AuthTiming {
     fn for_chip(chip_id: &str) -> Self {
         let id = chip_id.to_ascii_uppercase();
         for &(chips, start, interval, max_wait, idle, settle, drain_q) in CHIP_TIMING {
-            if chips.iter().any(|&c| c == id.as_str()) {
+            if chips.contains(&id.as_str()) {
                 return Self {
                     boot_probe_start: Duration::from_millis(start),
                     boot_probe_interval: Duration::from_millis(interval),
