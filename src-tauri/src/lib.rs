@@ -46,6 +46,13 @@ struct BatchAuthState {
     allocator: StdMutex<Option<std::sync::Arc<batch_auth::ExcelRowAllocator>>>,
 }
 
+/// Bridges an in-progress `run_authorize` blocking thread with the frontend's
+/// overwrite-confirmation dialog. The sender is set by `flash_run` before
+/// blocking; `authorize_confirm_cmd` resolves it with the user's choice.
+struct ConfirmState {
+    sender: Arc<StdMutex<Option<std::sync::mpsc::Sender<bool>>>>,
+}
+
 #[derive(Clone, serde::Serialize)]
 struct DisconnectPayload {
     reason: String,
@@ -186,7 +193,8 @@ fn list_serial_ports_cmd() -> Result<Vec<tyutool_core::SerialPortEntry>, String>
 fn flash_run(
     app: AppHandle,
     state: State<'_, FlashState>,
-    job: tyutool_core::FlashJob,
+    confirm_state: State<'_, ConfirmState>,
+    mut job: tyutool_core::FlashJob,
 ) -> Result<(), String> {
     log::info!(
         "[Flash] Starting operation: mode={:?}, chip={}, port={}, baud={}",
@@ -228,6 +236,30 @@ fn flash_run(
     }
 
     let cancel = new_cancel;
+
+    // Inject confirm callback: emits AuthConflict milestone, then blocks until
+    // the frontend calls authorize_confirm_cmd.
+    let app_emit = app.clone();
+    let confirm_sender = Arc::clone(&confirm_state.inner().sender);
+    job.confirm_overwrite = Some(Box::new(move |existing_uuid, existing_authkey| {
+        use tyutool_core::{FlashEvent, FlashMilestone};
+        let _ = app_emit.emit(
+            "flash-progress",
+            FlashEvent::Milestone {
+                milestone: FlashMilestone::AuthConflict {
+                    existing_uuid,
+                    existing_authkey,
+                },
+            },
+        );
+        let (tx, rx) = std::sync::mpsc::channel::<bool>();
+        {
+            let mut guard = confirm_sender.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = Some(tx);
+        }
+        rx.recv().unwrap_or(false)
+    }));
+
     let app = app.clone();
     let handle = std::thread::spawn(move || {
         let _ = tyutool_core::run_job(&job, &cancel, |p| {
@@ -322,6 +354,7 @@ fn batch_flash_start(
                 read_file_path: None,
                 authorize_uuid: None,
                 authorize_key: None,
+                confirm_overwrite: None,
             };
 
             let _ = tyutool_core::run_job(&job, &cancel_clone, |p| {
@@ -478,6 +511,7 @@ fn batch_auth_start(
                         read_file_path: None,
                         authorize_uuid: None,
                         authorize_key: None,
+                        confirm_overwrite: None,
                     };
                     let app2 = app_clone.clone();
                     let port2 = port_clone.clone();
@@ -600,25 +634,24 @@ fn batch_auth_cancel_all(state: State<'_, BatchAuthState>) -> Result<(), String>
     Ok(())
 }
 
-/// Read current UART authorization (for GUI overwrite prompt). Does not emit `flash-progress`.
-#[tauri::command]
-async fn authorize_probe_cmd(
-    port: String,
-) -> Result<Option<tyutool_core::DeviceAuthorization>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cancel = AtomicBool::new(false);
-        tyutool_core::probe_device_authorization(&port, &cancel)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
-}
-
 #[tauri::command]
 fn flash_cancel(state: State<'_, FlashState>) {
     log::info!("[Flash] User cancelled operation");
     if let Ok(guard) = state.cancel.lock() {
         guard.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Resolve a pending overwrite-confirmation from `run_authorize`.
+/// Called by the frontend after the user responds to the AuthConflict dialog.
+#[tauri::command]
+fn authorize_confirm_cmd(state: State<'_, ConfirmState>, confirmed: bool) -> Result<(), String> {
+    let mut guard = state.sender.lock().map_err(|e| e.to_string())?;
+    if let Some(tx) = guard.take() {
+        let _ = tx.send(confirmed);
+        Ok(())
+    } else {
+        Err("no pending authorization confirmation".into())
     }
 }
 
@@ -1349,6 +1382,9 @@ pub fn run() {
             slots: StdMutex::new(HashMap::new()),
             allocator: StdMutex::new(None),
         })
+        .manage(ConfirmState {
+            sender: Arc::new(StdMutex::new(None)),
+        })
         .setup(|app| {
             let version = app.package_info().version.to_string();
             let install_type = detect_install_type();
@@ -1364,7 +1400,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_serial_ports_cmd,
             flash_run,
-            authorize_probe_cmd,
+            authorize_confirm_cmd,
             flash_cancel,
             batch_flash_start,
             batch_flash_cancel_port,
