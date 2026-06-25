@@ -203,10 +203,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
             ClientMessage::Cancel => {
                 cancel.store(true, Ordering::Relaxed);
                 // Wake any thread blocked in confirm_overwrite so it can return Cancelled.
-                if let Ok(mut sender_guard) = pending_confirm.lock() {
-                    if let Some(tx) = sender_guard.take() {
-                        let _ = tx.send(false);
-                    }
+                let mut g = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(tx) = g.take() {
+                    let _ = tx.send(false);
                 }
             }
             ClientMessage::RunJob {
@@ -304,6 +303,17 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                     let _ = tx.send(confirmed);
                 }
             }
+        }
+    }
+
+    // Best-effort: wake any auth thread blocked on confirm_overwrite, and signal cancel.
+    // Without this, a WS disconnect during an AuthConflict prompt would park the
+    // blocking thread forever (holding the serial port open).
+    cancel.store(true, Ordering::Relaxed);
+    {
+        let mut g = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = g.take() {
+            let _ = tx.send(false);
         }
     }
 

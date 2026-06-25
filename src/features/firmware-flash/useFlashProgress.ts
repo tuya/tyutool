@@ -132,24 +132,34 @@ export function useFlashProgress(deps: FlashProgressDeps) {
         const nu = deps.getAuthorizeUuid();
         const nk = deps.getAuthorizeAuthKey();
         void (async () => {
-          const confirmed = await showConfirmDialog({
-            title: t("flash.confirm.authOverwriteTitle"),
-            message: t("flash.confirm.authOverwriteBody", {
-              existingUuid,
-              existingAuthkey,
-              newUuid: nu,
-              newAuthkey: nk,
-            }),
-            kind: "warning",
-            okLabel: t("flash.confirm.authOverwriteOk"),
-            cancelLabel: t("flash.confirm.authOverwriteCancel"),
-          });
-          deps.appendLog(
-            confirmed
-              ? t("flash.log.authOverwritePrompt")
-              : t("flash.log.authOverwriteCancelled"),
-          );
-          await deps.sendAuthorizeConfirm(confirmed);
+          try {
+            const confirmed = await showConfirmDialog({
+              title: t("flash.confirm.authOverwriteTitle"),
+              message: t("flash.confirm.authOverwriteBody", {
+                existingUuid,
+                existingAuthkey,
+                newUuid: nu,
+                newAuthkey: nk,
+              }),
+              kind: "warning",
+              okLabel: t("flash.confirm.authOverwriteOk"),
+              cancelLabel: t("flash.confirm.authOverwriteCancel"),
+            });
+            deps.appendLog(
+              confirmed
+                ? t("flash.log.authOverwritePrompt")
+                : t("flash.log.authOverwriteCancelled"),
+            );
+            await deps.sendAuthorizeConfirm(confirmed);
+          } catch (e) {
+            // If the dialog or invoke fails, try to unblock the auth thread with `false`.
+            deps.appendLog(`auth conflict handler failed: ${String(e)}`);
+            try {
+              await deps.sendAuthorizeConfirm(false);
+            } catch {
+              // best-effort
+            }
+          }
         })();
         return;
       }

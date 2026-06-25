@@ -572,9 +572,22 @@ where
     if write_mode {
         match firmware {
             FirmwareKind::New(_) => {
-                // ── New firmware: single auth-read, no 3s settle ──────────────
+                // ── New firmware: 2 retries / 200ms to absorb single-frame noise ──
                 log::info!("flash.log.auth.readDeviceAuth");
-                let existing_auth = sess.auth_read();
+                let existing_auth = {
+                    let mut auth = None;
+                    for _ in 0..2u32 {
+                        if cancel.load(Ordering::Relaxed) {
+                            return Err(FlashError::Cancelled);
+                        }
+                        auth = sess.auth_read();
+                        if auth.is_some() {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                    auth
+                };
 
                 // Conflict check: existing, non-placeholder, differs from requested
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
@@ -596,7 +609,12 @@ where
                             .map(|f| f(ex_u.clone(), ex_k.clone()))
                             .unwrap_or(true);
                         if !confirmed {
-                            return Err(FlashError::Cancelled);
+                            if cancel.load(Ordering::Relaxed) {
+                                return Err(FlashError::Cancelled);
+                            }
+                            return Err(FlashError::Plugin(
+                                "authorization cancelled by user (overwrite declined)".into(),
+                            ));
                         }
                     }
                 }
@@ -626,7 +644,21 @@ where
 
                 // ── Verify ────────────────────────────────────────────────────
                 log::info!("flash.log.auth.verify");
-                match sess.auth_read() {
+                let verify_result = {
+                    let mut result = None;
+                    for _ in 0..2u32 {
+                        if cancel.load(Ordering::Relaxed) {
+                            return Err(FlashError::Cancelled);
+                        }
+                        result = sess.auth_read();
+                        if result.is_some() {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                    result
+                };
+                match verify_result {
                     Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                         log::info!("flash.log.auth.verifyOk");
                         sess.hardware_reset()?;
@@ -692,7 +724,12 @@ where
                             .map(|f| f(ex_u.clone(), ex_k.clone()))
                             .unwrap_or(true);
                         if !confirmed {
-                            return Err(FlashError::Cancelled);
+                            if cancel.load(Ordering::Relaxed) {
+                                return Err(FlashError::Cancelled);
+                            }
+                            return Err(FlashError::Plugin(
+                                "authorization cancelled by user (overwrite declined)".into(),
+                            ));
                         }
                     }
                 }
@@ -831,7 +868,18 @@ where
 
             // Read existing auth
             progress(BatchAuthStep::ReadingAuth);
-            let existing_auth = sess.auth_read();
+            let existing_auth = {
+                let mut auth = None;
+                for _ in 0..2u32 {
+                    check_cancel!();
+                    auth = sess.auth_read();
+                    if auth.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                auth
+            };
 
             // Conflict check
             if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
@@ -857,7 +905,19 @@ where
 
             // Verify
             progress(BatchAuthStep::Verifying);
-            match sess.auth_read() {
+            let verify_result = {
+                let mut result = None;
+                for _ in 0..2u32 {
+                    check_cancel!();
+                    result = sess.auth_read();
+                    if result.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                result
+            };
+            match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                     sess.hardware_reset()?;
                     Ok(BatchAuthSlotResult::Done { mac })
