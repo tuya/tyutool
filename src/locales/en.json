@@ -402,6 +402,9 @@
         "readRange": "Read range: {start}–{end} ({kib} KiB)",
         "savingBytes": "Saving {size} bytes to {path}",
         "authorizeNotSupported": "Authorize mode not supported for this chip."
+      },
+      "milestone": {
+        "auth_write_skipped": "Device already has matching credentials — write skipped."
       }
     }
   },

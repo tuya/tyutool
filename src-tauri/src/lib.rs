@@ -242,21 +242,10 @@ fn flash_run(
 
     let cancel = new_cancel;
 
-    // Inject confirm callback: emits AuthConflict milestone, then blocks until
-    // the frontend calls authorize_confirm_cmd.
-    let app_emit = app.clone();
+    // Inject confirm callback: blocks until the frontend calls authorize_confirm_cmd.
+    // AuthConflict is already emitted by core's progress callback; no need to re-emit here.
     let confirm_sender = Arc::clone(&confirm_state.inner().sender);
-    job.confirm_overwrite = Some(Box::new(move |existing_uuid, existing_authkey| {
-        use tyutool_core::{FlashEvent, FlashMilestone};
-        let _ = app_emit.emit(
-            "flash-progress",
-            FlashEvent::Milestone {
-                milestone: FlashMilestone::AuthConflict {
-                    existing_uuid,
-                    existing_authkey,
-                },
-            },
-        );
+    job.confirm_overwrite = Some(Box::new(move |_existing_uuid, _existing_authkey| {
         let (tx, rx) = std::sync::mpsc::channel::<bool>();
         {
             let mut guard = confirm_sender.lock().unwrap_or_else(|e| e.into_inner());
@@ -548,7 +537,7 @@ fn batch_auth_start(
 
             let result = tyutool_core::run_batch_auth_slot(
                 &port_clone,
-                "",
+                &config_clone.chip_id,
                 &uuid,
                 &authkey,
                 conflict_policy,
