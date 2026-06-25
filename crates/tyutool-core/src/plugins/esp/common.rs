@@ -188,25 +188,18 @@ pub(crate) fn run_esp(
     }
 
     let mut flasher = Flasher::connect(
-        conn, true,  // use_stub — loads RAM stub for faster flash ops
-        false, // verify — we do our own progress reporting
-        false, // skip
-        None,  // auto-detect chip; firmware image header enforces compatibility
-        None,  // baud — will change after stub loads if needed
+        conn,
+        true,           // use_stub — loads RAM stub for faster flash ops
+        false,          // verify — we do our own progress reporting
+        false,          // skip
+        Some(def.chip), // expected chip; mismatch → error
+        None,           // baud — will change after stub loads if needed
     )
     .map_err(esp_err)?;
 
-    // Log device information and warn if detected chip differs from requested
+    // Log device information
     match flasher.device_info() {
         Ok(info) => {
-            if info.chip != def.chip {
-                progress(FlashEvent::Warning {
-                    message: format!(
-                        "Requested chip ({}) differs from detected chip ({}); proceeding with detected chip",
-                        def.id, info.chip
-                    ),
-                });
-            }
             progress(FlashEvent::Milestone {
                 milestone: FlashMilestone::Connected {
                     chip_info: Some(format!("{} (revision {:?})", info.chip, info.revision)),
