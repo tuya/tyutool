@@ -3,20 +3,33 @@
 //! Entirely independent of BootROM/flash protocols. All commands are plain
 //! ASCII terminated with `\r\n`, processed by the TuyaOpen CLI shell.
 //!
-//! # Write flow (uuid + authkey provided)
-//! 1. Open serial at 115 200 baud
-//! 2. Drain stale boot output
-//! 3. Hardware reset via DTR/RTS pulse (same as tos.py)
-//! 4. Wait 3 s for device to boot, drain again
-//! 5. Optional `auth-read`: if already matches requested credentials, skip write
-//! 6. `auth <uuid> <authkey>` → write authorization
-//! 7. `auth-read` → verify written values
+//! # Boot sequence (common to all entry points)
 //!
-//! Overwrite confirmation when device auth differs is implemented in the GUI (probe + dialog);
-//! the core always performs the UART write when credentials are supplied.
+//! `detect_firmware` opens the serial port, drains stale output, hardware-resets
+//! the device, and probes for new-firmware support by sending `sys_log_enable off`:
+//! - If the device responds `OK: log disable` within 300 ms → new firmware
+//!   (logging now disabled; queries `version` for capability gating)
+//! - Otherwise → old firmware (waits the remaining ~2.2 s to total a 3 s
+//!   post-reset settle, then proceeds with logging still active)
+//!
+//! # Write flow
+//!
+//! Boot sequence → `auth-read` to check existing credentials:
+//! - Already matches → skip the write (and `hardware_reset` on new firmware)
+//! - Conflict (existing differs and non-placeholder) → emit
+//!   `FlashMilestone::AuthConflict` and invoke `FlashJob.confirm_overwrite`
+//!   - `None` (CLI default) ⇒ proceed with overwrite
+//!   - `Some(fn)` returning `true` ⇒ proceed with overwrite
+//!   - `Some(fn)` returning `false` ⇒ return `Err(FlashError::Cancelled)`
+//! - No existing credentials → proceed
+//!
+//! Then `auth <uuid> <authkey>` and verify via `auth-read`. New firmware
+//! ends with `hardware_reset` to restart the device; old firmware does not.
 //!
 //! # Read-only flow (uuid + authkey absent)
-//! Steps 1–4, then `auth-read` to display current auth state.
+//!
+//! Boot sequence → `auth-read` to display current auth state. New firmware
+//! re-enables device logging via `sys_log_enable on` before returning.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};

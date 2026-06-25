@@ -202,6 +202,12 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
             }
             ClientMessage::Cancel => {
                 cancel.store(true, Ordering::Relaxed);
+                // Wake any thread blocked in confirm_overwrite so it can return Cancelled.
+                if let Ok(mut sender_guard) = pending_confirm.lock() {
+                    if let Some(tx) = sender_guard.take() {
+                        let _ = tx.send(false);
+                    }
+                }
             }
             ClientMessage::RunJob {
                 mut job,
