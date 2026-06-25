@@ -22,8 +22,6 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::FlashError;
 use crate::flash_event::{FlashEvent, FlashMilestone};
 use crate::job::FlashJob;
@@ -59,77 +57,6 @@ enum FirmwareKind {
     Old,
     /// `sys_log_enable` present, version >= 1.0.0 — logging disabled, new flow.
     New(CliVersion),
-}
-
-/// Parsed device authorization (used by GUI / [`probe_device_authorization`]).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceAuthorization {
-    pub uuid: String,
-    pub authkey: String,
-}
-
-/// Open UART, boot shell, and read current `auth-read` pair. Returns `None` if unparseable,
-/// empty, or factory placeholder — caller may treat as “no conflicting auth”.
-pub fn probe_device_authorization(
-    port: &str,
-    cancel: &AtomicBool,
-) -> Result<Option<DeviceAuthorization>, FlashError> {
-    let mut sess = AuthSession::open(port)?;
-
-    if cancel.load(Ordering::Relaxed) {
-        return Err(FlashError::Cancelled);
-    }
-    sess.drain_boot_output();
-
-    if cancel.load(Ordering::Relaxed) {
-        return Err(FlashError::Cancelled);
-    }
-    sess.hardware_reset()?;
-
-    if cancel.load(Ordering::Relaxed) {
-        return Err(FlashError::Cancelled);
-    }
-
-    let wait_end = Instant::now() + POST_RESET_WAIT;
-    while Instant::now() < wait_end {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(FlashError::Cancelled);
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    sess.drain_boot_output();
-
-    if cancel.load(Ordering::Relaxed) {
-        return Err(FlashError::Cancelled);
-    }
-    sess.wake_shell();
-
-    if cancel.load(Ordering::Relaxed) {
-        return Err(FlashError::Cancelled);
-    }
-
-    let mut pair: Option<(String, String)> = None;
-    for _ in 1..=5u32 {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(FlashError::Cancelled);
-        }
-        pair = sess.auth_read();
-        if pair.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(800));
-    }
-
-    Ok(match pair {
-        Some((u, k)) if !u.is_empty() && !k.is_empty() && u != PLACEHOLDER_UUID => {
-            Some(DeviceAuthorization {
-                uuid: u,
-                authkey: k,
-            })
-        }
-        _ => None,
-    })
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -867,94 +794,137 @@ where
 
     let mut sess = AuthSession::open(port)?;
     check_cancel!();
-
     sess.drain_boot_output();
     check_cancel!();
-    sess.hardware_reset()?;
+    let firmware = sess.detect_firmware(cancel)?;
     check_cancel!();
 
-    let wait_end = Instant::now() + POST_RESET_WAIT;
-    while Instant::now() < wait_end {
-        check_cancel!();
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    sess.drain_boot_output();
-    check_cancel!();
-    sess.wake_shell();
-    check_cancel!();
+    match firmware {
+        FirmwareKind::New(_) => {
+            // Read MAC
+            progress(BatchAuthStep::ReadingMac);
+            let mac = {
+                let mut mac_opt = None;
+                for _ in 0..3u8 {
+                    check_cancel!();
+                    mac_opt = sess.read_mac();
+                    if mac_opt.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
+            };
 
-    // Read MAC
-    progress(BatchAuthStep::ReadingMac);
-    let mac = {
-        let mut mac_opt = None;
-        for _ in 0..3u8 {
+            // Read existing auth
+            progress(BatchAuthStep::ReadingAuth);
+            let existing_auth = sess.auth_read();
+
+            // Conflict check
+            if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
+                if ex_uuid != PLACEHOLDER_UUID {
+                    if ex_uuid == uuid && ex_key == authkey {
+                        return Ok(BatchAuthSlotResult::AlreadyDone { mac });
+                    }
+                    if conflict_policy == ConflictPolicy::Skip {
+                        return Ok(BatchAuthSlotResult::Skipped { mac });
+                    }
+                }
+            }
+
+            // Write
+            progress(BatchAuthStep::WritingAuth);
+            let _lines = sess.auth_write(uuid, authkey);
             check_cancel!();
-            mac_opt = sess.read_mac();
-            if mac_opt.is_some() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
-        mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
-    };
 
-    // Read existing auth
-    progress(BatchAuthStep::ReadingAuth);
-    let existing_auth = {
-        let mut auth = None;
-        for _ in 0..3u8 {
+            // No 3s settle for new firmware
+            sess.drain_boot_output();
+            sess.wake_shell();
             check_cancel!();
-            auth = sess.auth_read();
-            if auth.is_some() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(800));
-        }
-        auth
-    };
 
-    // Check if device already has the credentials we want to write
-    if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
-        // Factory-fresh devices carry this placeholder — treat as uninitialized
-        if ex_uuid != PLACEHOLDER_UUID {
-            if ex_uuid == uuid && ex_key == authkey {
-                return Ok(BatchAuthSlotResult::AlreadyDone { mac });
-            }
-            if conflict_policy == ConflictPolicy::Skip {
-                return Ok(BatchAuthSlotResult::Skipped { mac });
+            // Verify
+            progress(BatchAuthStep::Verifying);
+            match sess.auth_read() {
+                Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
+                    sess.hardware_reset()?;
+                    Ok(BatchAuthSlotResult::Done { mac })
+                }
+                Some((rb_uuid, rb_key)) => Err(FlashError::Plugin(format!(
+                    "Verification failed: wrote ({uuid}, {authkey}), read back ({rb_uuid}, {rb_key})"
+                ))),
+                None => Err(FlashError::Plugin(
+                    "Verification failed: no response from auth-read".into(),
+                )),
             }
         }
-        // Overwrite (or placeholder device): fall through to write
-    }
 
-    // Write auth
-    progress(BatchAuthStep::WritingAuth);
-    let _lines = sess.auth_write(uuid, authkey);
-    check_cancel!();
+        FirmwareKind::Old => {
+            // Original old firmware flow (unchanged)
+            progress(BatchAuthStep::ReadingMac);
+            let mac = {
+                let mut mac_opt = None;
+                for _ in 0..3u8 {
+                    check_cancel!();
+                    mac_opt = sess.read_mac();
+                    if mac_opt.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
+            };
 
-    // Wait for device to settle after possible reboot
-    let wait_end = Instant::now() + POST_RESET_WAIT;
-    while Instant::now() < wait_end {
-        check_cancel!();
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    sess.drain_boot_output();
-    sess.wake_shell();
-    check_cancel!();
+            progress(BatchAuthStep::ReadingAuth);
+            let existing_auth = {
+                let mut auth = None;
+                for _ in 0..3u8 {
+                    check_cancel!();
+                    auth = sess.auth_read();
+                    if auth.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(800));
+                }
+                auth
+            };
 
-    // Verify
-    progress(BatchAuthStep::Verifying);
-    match sess.auth_read() {
-        Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
-            Ok(BatchAuthSlotResult::Done { mac })
+            if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
+                if ex_uuid != PLACEHOLDER_UUID {
+                    if ex_uuid == uuid && ex_key == authkey {
+                        return Ok(BatchAuthSlotResult::AlreadyDone { mac });
+                    }
+                    if conflict_policy == ConflictPolicy::Skip {
+                        return Ok(BatchAuthSlotResult::Skipped { mac });
+                    }
+                }
+            }
+
+            progress(BatchAuthStep::WritingAuth);
+            let _lines = sess.auth_write(uuid, authkey);
+            check_cancel!();
+
+            let wait_end = Instant::now() + POST_RESET_WAIT;
+            while Instant::now() < wait_end {
+                check_cancel!();
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            sess.drain_boot_output();
+            sess.wake_shell();
+            check_cancel!();
+
+            progress(BatchAuthStep::Verifying);
+            match sess.auth_read() {
+                Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
+                    Ok(BatchAuthSlotResult::Done { mac })
+                }
+                Some((rb_uuid, rb_key)) => Err(FlashError::Plugin(format!(
+                    "Verification failed: wrote ({uuid}, {authkey}), read back ({rb_uuid}, {rb_key})"
+                ))),
+                None => Err(FlashError::Plugin(
+                    "Verification failed: no response from auth-read".into(),
+                )),
+            }
         }
-        Some((rb_uuid, rb_key)) => Err(FlashError::Plugin(format!(
-            "Verification failed: wrote ({}, {}), read back ({}, {})",
-            uuid, authkey, rb_uuid, rb_key
-        ))),
-        None => Err(FlashError::Plugin(
-            "Verification failed: no response from auth-read".into(),
-        )),
     }
 }
 
