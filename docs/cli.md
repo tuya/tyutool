@@ -121,12 +121,13 @@ tyutool reset [-p <PORT>] [-d <DEVICE>]
 ### `authorize` — TuyaOpen device authorization
 
 ```
-tyutool authorize [-p <PORT>] [--uuid <UUID>] [--authkey <AUTHKEY>]
+tyutool authorize [-p <PORT>] [-d <DEVICE>] [--uuid <UUID>] [--authkey <AUTHKEY>]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--port` | Serial port (default: auto-detect) |
+| `-p` / `--port` | Serial port (default: auto-detect) |
+| `-d` / `--device` | Chip type — selects per-chip auth timing (e.g. `esp32`, `t5ai`). Optional; omit to use generic timing. |
 | `--uuid` | UUID to write (omit to read current authorization state only) |
 | `--authkey` | AuthKey to write (omit to read only) |
 
@@ -135,11 +136,12 @@ To write authorization you must pass **both** `--uuid` and `--authkey`. Passing 
 **Read current auth state:**
 ```bash
 tyutool authorize -p /dev/ttyUSB0
+tyutool authorize -p /dev/ttyUSB0 -d esp32
 ```
 
 **Write new authorization:**
 ```bash
-tyutool authorize -p /dev/ttyUSB0 --uuid abc123 --authkey def456
+tyutool authorize -p /dev/ttyUSB0 -d esp32 --uuid abc123 --authkey def456
 ```
 
 ---

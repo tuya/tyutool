@@ -131,6 +131,9 @@ enum Commands {
         /// Serial port (default: first available)
         #[arg(short = 'p', long = "port")]
         port: Option<String>,
+        /// Chip type — selects per-chip auth timing (default: generic)
+        #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
+        device: Option<String>,
         /// UUID to write (omit to only read current auth state)
         #[arg(long)]
         uuid: Option<String>,
@@ -433,6 +436,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Authorize {
             port,
+            device,
             uuid,
             authkey,
         } => {
@@ -448,9 +452,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(p) => p,
                 None => choose_port()?,
             };
+            let chip_id = device.as_deref().map(normalize_chip_id).unwrap_or_default();
             let job = FlashJob {
                 mode: FlashMode::Authorize,
-                chip_id: String::new(),
+                chip_id,
                 port,
                 baud_rate: 115_200,
                 segments: None,
