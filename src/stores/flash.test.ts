@@ -54,12 +54,16 @@ vi.mock("@/transport/ws-transport", () => {
     cancelFn?.();
     cancelFn = null;
   });
-  const authorizeProbe = vi.fn(
-    async () => null as { uuid: string; authkey: string } | null,
-  );
+  const authorizeConfirm = vi.fn((_confirmed: boolean) => {});
   const deviceReset = vi.fn(async () => {});
   return {
-    wsTransport: { runJob, listPorts, cancelJob, authorizeProbe, deviceReset },
+    wsTransport: {
+      runJob,
+      listPorts,
+      cancelJob,
+      authorizeConfirm,
+      deviceReset,
+    },
   };
 });
 
@@ -95,7 +99,7 @@ describe("flash store", () => {
     // Reset call history on the shared module-level mocks (keeps implementations).
     vi.mocked(wsTransport.runJob).mockClear();
     vi.mocked(wsTransport.cancelJob).mockClear();
-    vi.mocked(wsTransport.authorizeProbe).mockClear();
+    vi.mocked(wsTransport.authorizeConfirm).mockClear();
     vi.mocked(showConfirmDialog).mockClear();
     vi.mocked(saveFlashWorkspaceToStorage).mockClear();
     vi.mocked(loadFlashWorkspaceFromStorage).mockClear();
@@ -946,31 +950,55 @@ describe("flash store", () => {
 
   // ── startOperation authorize probe (web mode) ────────────────────
 
-  describe("startOperation authorize probe (web mode)", () => {
+  describe("auth_conflict milestone handling (web mode)", () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it("aborts when the existing-credentials overwrite confirm is declined", async () => {
-      vi.mocked(wsTransport.authorizeProbe).mockResolvedValueOnce({
-        uuid: OTHER_UUID,
-        authkey: OTHER_KEY,
-      });
-      vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+    it("sends authorizeConfirm(true) when user confirms overwrite", async () => {
+      vi.mocked(showConfirmDialog).mockResolvedValueOnce(true);
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({
+            payload: {
+              kind: "milestone",
+              milestone: {
+                auth_conflict: {
+                  existing_uuid: OTHER_UUID,
+                  existing_authkey: OTHER_KEY,
+                },
+              },
+            },
+          } as never);
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
+          } as never);
+        },
+      );
       const store = useFlashStore();
       store.selectedSerialPort = "/dev/ttyUSB0";
       store.connected = true;
       store.authorizeUuid = VALID_UUID;
       store.authorizeAuthKey = VALID_KEY;
       await store.startOperation("authorize");
-      expect(wsTransport.authorizeProbe).toHaveBeenCalled();
+      await nextTick();
       expect(showConfirmDialog).toHaveBeenCalled();
-      expect(store.flashPhase).toBe("idle");
-      expect(wsTransport.runJob).not.toHaveBeenCalled();
+      expect(wsTransport.authorizeConfirm).toHaveBeenCalledWith(true);
     });
 
-    it("runs the authorize job when no conflicting credentials exist", async () => {
-      vi.mocked(wsTransport.authorizeProbe).mockResolvedValueOnce(null);
+    it("sends authorizeConfirm(false) when user declines overwrite", async () => {
+      vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
       vi.mocked(wsTransport.runJob).mockImplementationOnce(
         async (_job, _files, onProgress) => {
+          onProgress({
+            payload: {
+              kind: "milestone",
+              milestone: {
+                auth_conflict: {
+                  existing_uuid: OTHER_UUID,
+                  existing_authkey: OTHER_KEY,
+                },
+              },
+            },
+          } as never);
           onProgress({
             payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
           } as never);
@@ -982,27 +1010,9 @@ describe("flash store", () => {
       store.authorizeUuid = VALID_UUID;
       store.authorizeAuthKey = VALID_KEY;
       await store.startOperation("authorize");
-      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
-    });
-
-    it("tolerates a probe failure and continues to run the job", async () => {
-      vi.mocked(wsTransport.authorizeProbe).mockRejectedValueOnce(
-        new Error("probe timeout"),
-      );
-      vi.mocked(wsTransport.runJob).mockImplementationOnce(
-        async (_job, _files, onProgress) => {
-          onProgress({
-            payload: { kind: "done", result: { ok: { elapsed_secs: 1.0 } } },
-          } as never);
-        },
-      );
-      const store = useFlashStore();
-      store.selectedSerialPort = "/dev/ttyUSB0";
-      store.connected = true;
-      store.authorizeUuid = VALID_UUID;
-      store.authorizeAuthKey = VALID_KEY;
-      await store.startOperation("authorize");
-      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+      await nextTick();
+      expect(showConfirmDialog).toHaveBeenCalled();
+      expect(wsTransport.authorizeConfirm).toHaveBeenCalledWith(false);
     });
   });
 
@@ -1025,7 +1035,7 @@ describe("flash store", () => {
       store.authorizeUuid = VALID_UUID;
       store.authorizeAuthKey = VALID_KEY;
       await store.startAuthRead();
-      // authorizeProbe is skipped in read mode; job ran with no credentials
+      // read mode never triggers auth_conflict; job ran with no credentials
       expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
       const job = vi.mocked(wsTransport.runJob).mock.calls[0][0] as {
         mode: string;

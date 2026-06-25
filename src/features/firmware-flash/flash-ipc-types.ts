@@ -57,7 +57,8 @@ export type FlashMilestone =
   | { flash_id_read: { mid: number | null } }
   | { segment_written: { current: number; total: number } }
   | { auth_read_complete: { uuid: string; authkey: string } }
-  | "auth_read_empty";
+  | "auth_read_empty"
+  | { auth_conflict: { existing_uuid: string; existing_authkey: string } };
 
 export type FlashResultPayload =
   | { ok: { elapsed_secs: number } }

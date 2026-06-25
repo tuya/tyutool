@@ -488,47 +488,35 @@ describe("runJob", () => {
   });
 });
 
-describe("authorizeProbe", () => {
-  it("returns trimmed uuid/authkey from an auth_read_complete milestone", async () => {
+describe("authorizeConfirm", () => {
+  it("sends authorize_confirm frame when socket is open", async () => {
     const t = new WsTransport();
-    const p = t.authorizeProbe("/dev/ttyUSB0", "other", 115200);
+    const a = t.isAvailable();
     await flush();
     const ws = latest();
     ws.open();
-    await flush();
-    // It's a runJob under the hood: mode authorize.
-    const sent = ws.lastSent as { type: string; job: { mode: string } };
-    expect(sent.type).toBe("run_job");
-    expect(sent.job.mode).toBe("authorize");
-
-    ws.recv({
-      type: "progress",
-      payload: {
-        kind: "milestone",
-        milestone: {
-          auth_read_complete: { uuid: " u123 ", authkey: " k456 " },
-        },
-      },
-    });
-    ws.recv({
-      type: "progress",
-      payload: { kind: "done", result: { ok: { elapsed_secs: 1 } } },
-    });
-    await expect(p).resolves.toEqual({ uuid: "u123", authkey: "k456" });
+    await a;
+    t.authorizeConfirm(true);
+    expect(ws.lastSent).toEqual({ type: "authorize_confirm", confirmed: true });
   });
 
-  it("returns null when no auth milestone is emitted", async () => {
+  it("sends authorize_confirm false when user declines", async () => {
     const t = new WsTransport();
-    const p = t.authorizeProbe("/dev/ttyUSB0", "other", 115200);
+    const a = t.isAvailable();
     await flush();
     const ws = latest();
     ws.open();
-    await flush();
-    ws.recv({
-      type: "progress",
-      payload: { kind: "done", result: { ok: { elapsed_secs: 1 } } },
+    await a;
+    t.authorizeConfirm(false);
+    expect(ws.lastSent).toEqual({
+      type: "authorize_confirm",
+      confirmed: false,
     });
-    await expect(p).resolves.toBeNull();
+  });
+
+  it("is a no-op when there is no open socket", () => {
+    const t = new WsTransport();
+    expect(() => t.authorizeConfirm(true)).not.toThrow();
   });
 });
 

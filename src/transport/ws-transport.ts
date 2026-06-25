@@ -164,42 +164,10 @@ export class WsTransport {
     });
   }
 
-  async authorizeProbe(
-    port: string,
-    chipId: string,
-    baudRate: number,
-  ): Promise<{ uuid: string; authkey: string } | null> {
-    const job: FlashJobPayload = {
-      mode: "authorize",
-      chipId,
-      port,
-      baudRate,
-      segments: null,
-      flashStartHex: null,
-      flashEndHex: null,
-      eraseStartHex: null,
-      eraseEndHex: null,
-      readStartHex: null,
-      readEndHex: null,
-      readFilePath: null,
-      firmwarePath: null,
-      authorizeUuid: null,
-      authorizeKey: null,
-    };
-    let found: { uuid: string; authkey: string } | null = null;
-    await this.runJob(job, [], (ev) => {
-      if (
-        ev.payload.kind === "milestone" &&
-        typeof ev.payload.milestone === "object" &&
-        "auth_read_complete" in ev.payload.milestone
-      ) {
-        const { uuid, authkey } = ev.payload.milestone.auth_read_complete;
-        if (uuid && authkey) {
-          found = { uuid: uuid.trim(), authkey: authkey.trim() };
-        }
-      }
-    });
-    return found;
+  authorizeConfirm(confirmed: boolean): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "authorize_confirm", confirmed }));
+    }
   }
 
   async runJob(

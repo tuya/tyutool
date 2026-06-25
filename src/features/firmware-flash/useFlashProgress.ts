@@ -19,6 +19,12 @@ export interface FlashProgressDeps {
   /** Teardown after an operation settles (success/error/cancel): release the
    *  serial port and sync connection state. Lives in the store. */
   onOperationSettled: () => void;
+  /** Returns current authorize UUID input value (for conflict dialog). */
+  getAuthorizeUuid: () => string;
+  /** Returns current authorize AuthKey input value (for conflict dialog). */
+  getAuthorizeAuthKey: () => string;
+  /** Send user's overwrite confirmation response to backend. */
+  sendAuthorizeConfirm: (confirmed: boolean) => Promise<void>;
 }
 
 /** Flash progress/phase state + the backend progress-event reducer. Owns its
@@ -116,6 +122,35 @@ export function useFlashProgress(deps: FlashProgressDeps) {
           showCancel: false,
         });
         deps.appendLog(t("flash.log.authReadEmpty"));
+        return;
+      }
+      if (typeof m === "object" && "auth_conflict" in m) {
+        const {
+          existing_uuid: existingUuid,
+          existing_authkey: existingAuthkey,
+        } = m.auth_conflict;
+        const nu = deps.getAuthorizeUuid();
+        const nk = deps.getAuthorizeAuthKey();
+        void (async () => {
+          const confirmed = await showConfirmDialog({
+            title: t("flash.confirm.authOverwriteTitle"),
+            message: t("flash.confirm.authOverwriteBody", {
+              existingUuid,
+              existingAuthkey,
+              newUuid: nu,
+              newAuthkey: nk,
+            }),
+            kind: "warning",
+            okLabel: t("flash.confirm.authOverwriteOk"),
+            cancelLabel: t("flash.confirm.authOverwriteCancel"),
+          });
+          deps.appendLog(
+            confirmed
+              ? t("flash.log.authOverwritePrompt")
+              : t("flash.log.authOverwriteCancelled"),
+          );
+          await deps.sendAuthorizeConfirm(confirmed);
+        })();
         return;
       }
       const milestoneKey = typeof m === "string" ? m : Object.keys(m)[0];

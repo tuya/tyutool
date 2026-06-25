@@ -51,9 +51,6 @@ import {
   type FlashWorkspaceSerialized,
 } from "@/stores/flash-workspace";
 
-/** Factory-unauthorized placeholder from TuyaOpen firmware (matches `authorize.rs`). */
-const AUTHORIZE_PLACEHOLDER_UUID = "uuidxxxxxxxxxxxxxxxx";
-
 function createDebounced(fn: () => void, ms: number): () => void {
   let t: ReturnType<typeof setTimeout> | null = null;
   return () => {
@@ -190,6 +187,16 @@ export const useFlashStore = defineStore("flash", () => {
       autoConnected.value = false;
       appendLog(t("flash.log.disconnected"));
       usePortManagerStore().release(selectedSerialPort.value, "flash");
+    },
+    getAuthorizeUuid: () => authorizeUuid.value.trim(),
+    getAuthorizeAuthKey: () => authorizeAuthKey.value.trim(),
+    sendAuthorizeConfirm: async (confirmed: boolean) => {
+      if (isTauriRuntime()) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("authorize_confirm_cmd", { confirmed });
+      } else {
+        wsTransport.authorizeConfirm(confirmed);
+      }
     },
   });
 
@@ -734,68 +741,6 @@ export const useFlashStore = defineStore("flash", () => {
         return;
       }
       autoConnected.value = true;
-    }
-
-    // ── 4b. Authorize write: probe device auth in UI, confirm overwrite if different ──
-    if (
-      kind === "authorize" &&
-      authorizeUuid.value.trim() &&
-      authorizeAuthKey.value.trim() &&
-      !authOpIsRead.value
-    ) {
-      const nu = authorizeUuid.value.trim();
-      const nk = authorizeAuthKey.value.trim();
-      try {
-        let existing: { uuid: string; authkey: string } | null = null;
-        if (isTauriRuntime()) {
-          const { invoke } = await import("@tauri-apps/api/core");
-          existing = await invoke<{ uuid: string; authkey: string } | null>(
-            "authorize_probe_cmd",
-            {
-              port: selectedSerialPort.value,
-            },
-          );
-        } else {
-          existing = await wsTransport.authorizeProbe(
-            selectedSerialPort.value,
-            rustPluginIdForChip(selectedChipId.value),
-            selectedAuthBaudRate.value,
-          );
-        }
-        if (existing) {
-          const eu = existing.uuid.trim();
-          const ek = existing.authkey.trim();
-          if (
-            eu &&
-            ek &&
-            eu !== AUTHORIZE_PLACEHOLDER_UUID &&
-            (eu !== nu || ek !== nk)
-          ) {
-            const confirmed = await showConfirmDialog({
-              title: t("flash.confirm.authOverwriteTitle"),
-              message: t("flash.confirm.authOverwriteBody", {
-                existingUuid: eu,
-                existingAuthkey: ek,
-                newUuid: nu,
-                newAuthkey: nk,
-              }),
-              kind: "warning",
-              okLabel: t("flash.confirm.authOverwriteOk"),
-              cancelLabel: t("flash.confirm.authOverwriteCancel"),
-            });
-            if (!confirmed) {
-              appendLog(t("flash.log.authOverwriteCancelled"));
-              releaseIfAutoConnected();
-              flashPhase.value = "idle";
-              runningOp.value = null;
-              return;
-            }
-          }
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        appendLog(t("flash.log.authProbeSkipped", { msg }));
-      }
     }
 
     // ── 5. Start operation ─────────────────────────────────────────
