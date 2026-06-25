@@ -55,61 +55,56 @@ const PLACEHOLDER_UUID: &str = "uuidxxxxxxxxxxxxxxxx";
 // ── Per-chip timing ───────────────────────────────────────────────────────
 
 /// Chip-specific timing parameters for the TuyaOpen UART auth protocol.
-///
-/// Defaults are conservative. Measured values (T5AI: first-byte RTT ~11 ms,
-/// shell ready ~703 ms after reset) allow tighter per-chip configs.
 #[derive(Debug, Clone)]
 struct AuthTiming {
-    /// Do not start probing before this many ms after reset.
+    /// Do not probe before this many ms after reset.
     boot_probe_start: Duration,
-    /// Interval between boot-ready probes (also used as wake_shell spacing).
+    /// Interval between boot-ready probes (also used as `wake_shell` spacing).
     boot_probe_interval: Duration,
-    /// Hard ceiling: treat as old firmware if shell is still unresponsive by
-    /// this point (should be ≥ 3× the chip's measured boot-ready time).
+    /// Hard ceiling before falling back to old-firmware path (≥ 3× boot-ready).
     boot_max_wait: Duration,
-    /// Idle timeout for regular command responses (3× measured first-byte RTT).
-    /// Replaces the old fixed 300 ms IDLE_TIMEOUT.
+    /// Idle timeout for regular command responses (≈ 3× max first-byte RTT).
     cmd_idle_timeout: Duration,
-    /// How long to wait after `auth_write` on old firmware before verifying.
-    /// Old firmware may reboot after writing auth; this gives the device time
-    /// to restart before the verify `auth-read` is issued.
+    /// Settle wait after `auth_write` on old firmware (device may reboot).
     write_settle_wait: Duration,
-    /// Stop draining when the line has been silent for this long.
-    /// New firmware silences quickly after `sys_log_enable off`; old firmware
-    /// and unknown chips keep the conservative 800 ms default.
+    /// Stop draining when silent for this long (per-chip; see table below).
     drain_quiet: Duration,
 }
 
+// Per-chip timing table — all values in milliseconds.
+//
+// Derivation:
+//   probe_start  ≈ measured_boot_ready − 100 ms
+//   max_wait     ≥ 3 × measured_boot_ready
+//   cmd_idle     ≈ 3 × max_observed_first_byte_rtt
+//   drain_quiet  ≥ 2 × observed post-log-off settle time
+//
+// To add a chip: append one row; record the measurement date in the comment.
+//
+// columns:  chips                              start  int   max   idle settle drain_q
+#[rustfmt::skip]
+const CHIP_TIMING: &[(&[&str], u64, u64, u64, u64, u64, u64)] = &[
+    (&["T5AI", "T5"],                              600,  50,  2100,  50,  3000,   800), // ready ~703ms,  RTT ~11ms
+    (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400), // ready ~1108ms, RTT 20–40ms (2026-06-25)
+];
+
 impl AuthTiming {
-    /// Select timing by chip ID (case-insensitive). Empty → default.
+    /// Select timing by chip ID (case-insensitive). Unrecognised chip → default.
     fn for_chip(chip_id: &str) -> Self {
-        match chip_id.to_ascii_uppercase().as_str() {
-            // T5AI: measured boot-ready 703 ms, first-byte RTT ~11 ms.
-            // boot_max_wait = 3× 703 ms ≈ 2 100 ms; cmd_idle = 3× 11 ms → 50 ms min.
-            "T5AI" | "T5" => Self {
-                boot_probe_start: Duration::from_millis(600),
-                boot_probe_interval: Duration::from_millis(50),
-                boot_max_wait: Duration::from_millis(2100),
-                cmd_idle_timeout: Duration::from_millis(50),
-                write_settle_wait: Duration::from_secs(3),
-                drain_quiet: Duration::from_millis(800),
-            },
-            // ESP32 family: measured boot-ready ~1108ms, first-byte RTT 20–40ms
-            // (ESP32, 2026-06-25). boot_max_wait = 3× 1108ms → 3500ms.
-            // cmd_idle_timeout = 3× max-observed RTT (40ms) → 120ms. 80ms was
-            //   too tight: post-write auth-read needs extra margin between lines.
-            // drain_quiet: new firmware silences within ~200ms after sys_log_enable
-            //   off; 400ms gives a 2× margin.
-            "ESP32" | "ESP32C3" | "ESP32C6" | "ESP32S3" => Self {
-                boot_probe_start: Duration::from_millis(1000),
-                boot_probe_interval: Duration::from_millis(50),
-                boot_max_wait: Duration::from_millis(3500),
-                cmd_idle_timeout: Duration::from_millis(120),
-                write_settle_wait: Duration::from_secs(3),
-                drain_quiet: Duration::from_millis(400),
-            },
-            _ => Self::default(),
+        let id = chip_id.to_ascii_uppercase();
+        for &(chips, start, interval, max_wait, idle, settle, drain_q) in CHIP_TIMING {
+            if chips.iter().any(|&c| c == id.as_str()) {
+                return Self {
+                    boot_probe_start: Duration::from_millis(start),
+                    boot_probe_interval: Duration::from_millis(interval),
+                    boot_max_wait: Duration::from_millis(max_wait),
+                    cmd_idle_timeout: Duration::from_millis(idle),
+                    write_settle_wait: Duration::from_millis(settle),
+                    drain_quiet: Duration::from_millis(drain_q),
+                };
+            }
         }
+        Self::default()
     }
 }
 
