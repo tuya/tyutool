@@ -402,6 +402,9 @@
         "readRange": "读取范围：{start}–{end}（{kib} KiB）",
         "savingBytes": "保存 {size} 字节至 {path}",
         "authorizeNotSupported": "该芯片不支持授权操作。"
+      },
+      "milestone": {
+        "auth_write_skipped": "设备授权信息与待写入内容一致，无需重复写入。"
       }
     }
   },

@@ -72,6 +72,10 @@ struct AuthTiming {
     /// Idle timeout for regular command responses (3× measured first-byte RTT).
     /// Replaces the old fixed 300 ms IDLE_TIMEOUT.
     cmd_idle_timeout: Duration,
+    /// How long to wait after `auth_write` on old firmware before verifying.
+    /// Old firmware may reboot after writing auth; this gives the device time
+    /// to restart before the verify `auth-read` is issued.
+    write_settle_wait: Duration,
 }
 
 impl AuthTiming {
@@ -85,13 +89,15 @@ impl AuthTiming {
                 boot_probe_interval: Duration::from_millis(50),
                 boot_max_wait: Duration::from_millis(2100),
                 cmd_idle_timeout: Duration::from_millis(50),
+                write_settle_wait: Duration::from_secs(3),
             },
             // ESP32 family: timing not yet measured; use conservative defaults.
             "ESP32" | "ESP32C3" | "ESP32C6" | "ESP32S3" => Self {
                 boot_probe_start: Duration::from_millis(500),
                 boot_probe_interval: Duration::from_millis(50),
                 boot_max_wait: Duration::from_millis(3000),
-                cmd_idle_timeout: Duration::from_millis(100),
+                cmd_idle_timeout: Duration::from_millis(200),
+                write_settle_wait: Duration::from_secs(3),
             },
             _ => Self::default(),
         }
@@ -104,7 +110,8 @@ impl Default for AuthTiming {
             boot_probe_start: Duration::from_millis(700),
             boot_probe_interval: Duration::from_millis(50),
             boot_max_wait: Duration::from_millis(3000),
-            cmd_idle_timeout: Duration::from_millis(100),
+            cmd_idle_timeout: Duration::from_millis(200),
+            write_settle_wait: Duration::from_secs(3),
         }
     }
 }
@@ -467,8 +474,11 @@ impl<T: AuthIo> AuthSession<T> {
             }
 
             let _ = self.send_cmd("sys_log_enable off");
-            // Each probe reads for at most one probe_interval.
-            let lines = self.read_response_timed(boot_probe_interval, boot_probe_interval);
+            // Each probe reads for at most 2× probe_interval (wider window to avoid
+            // false-positive old-firmware detection while boot banner is still printing),
+            // but stops as soon as the line has been idle for one probe_interval.
+            let lines = self
+                .read_response_timed(boot_probe_interval.saturating_mul(2), boot_probe_interval);
 
             let is_new = lines
                 .iter()
@@ -486,11 +496,7 @@ impl<T: AuthIo> AuthSession<T> {
                     is_new,
                     elapsed_ms
                 );
-                self.drain_boot_output();
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(FlashError::Cancelled);
-                }
-                self.wake_shell();
+                self.drain_and_wake(cancel)?;
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
                 }
@@ -514,11 +520,7 @@ impl<T: AuthIo> AuthSession<T> {
                     "flash.log.auth.shellReady: timed_out elapsed={}ms, fallback=Old",
                     elapsed_ms
                 );
-                self.drain_boot_output();
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(FlashError::Cancelled);
-                }
-                self.wake_shell();
+                self.drain_and_wake(cancel)?;
                 return Ok(FirmwareKind::Old);
             }
 
@@ -531,6 +533,19 @@ impl<T: AuthIo> AuthSession<T> {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
+    }
+
+    /// Drain stale boot output, check for cancellation, then wake the shell.
+    ///
+    /// Called after firmware detection in all three paths (new, old, timeout fallback)
+    /// to avoid duplicating the drain → cancel-check → wake sequence.
+    fn drain_and_wake(&mut self, cancel: &AtomicBool) -> Result<(), FlashError> {
+        self.drain_boot_output();
+        if cancel.load(Ordering::Relaxed) {
+            return Err(FlashError::Cancelled);
+        }
+        self.wake_shell();
+        Ok(())
     }
 
     /// Send `sys_log_enable on` and drain the response (used at read-only flow end).
@@ -679,6 +694,18 @@ where
                     auth
                 };
 
+                // Skip write if already identical (checked before conflict to avoid
+                // prompting the user when the credentials are already correct)
+                if let Some((ref ex_u, ref ex_k)) = existing_auth {
+                    if !ex_u.is_empty() && !ex_k.is_empty() && ex_u == &uuid && ex_k == &authkey {
+                        log::info!("flash.log.auth.alreadySame");
+                        progress(FlashEvent::Milestone {
+                            milestone: FlashMilestone::AuthWriteSkipped,
+                        });
+                        sess.hardware_reset()?;
+                        return Ok(());
+                    }
+                }
                 // Conflict check: existing, non-placeholder, differs from requested
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if !ex_u.is_empty()
@@ -706,17 +733,6 @@ where
                                 "authorization cancelled by user (overwrite declined)".into(),
                             ));
                         }
-                    }
-                }
-                // Skip write if already identical
-                if let Some((ref ex_u, ref ex_k)) = existing_auth {
-                    if ex_u == &uuid && ex_k == &authkey {
-                        log::info!("flash.log.auth.alreadySame");
-                        progress(FlashEvent::Milestone {
-                            milestone: FlashMilestone::AuthWriteSkipped,
-                        });
-                        sess.hardware_reset()?;
-                        return Ok(());
                     }
                 }
 
@@ -801,6 +817,7 @@ where
                         progress(FlashEvent::Milestone {
                             milestone: FlashMilestone::AuthWriteSkipped,
                         });
+                        sess.hardware_reset()?;
                         return Ok(());
                     }
                     // Conflict check (non-placeholder, differs)
@@ -838,7 +855,7 @@ where
                 }
 
                 // Wait for device to settle after possible reboot (old firmware may reboot)
-                let settle_wait = sess.timing.boot_max_wait;
+                let settle_wait = sess.timing.write_settle_wait;
                 log::info!("flash.log.auth.waitSettle: ms={}", settle_wait.as_millis());
                 let wait_end = Instant::now() + settle_wait;
                 while Instant::now() < wait_end {
@@ -1072,7 +1089,7 @@ where
             let _lines = sess.auth_write(uuid, authkey);
             check_cancel!();
 
-            let settle_wait = sess.timing.boot_max_wait;
+            let settle_wait = sess.timing.write_settle_wait;
             let wait_end = Instant::now() + settle_wait;
             while Instant::now() < wait_end {
                 check_cancel!();

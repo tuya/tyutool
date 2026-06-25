@@ -163,10 +163,6 @@ export function useFlashProgress(deps: FlashProgressDeps) {
         })();
         return;
       }
-      if (m === "auth_write_skipped") {
-        deps.appendLog(t("flash.log.auth.alreadySame"));
-        return;
-      }
       const milestoneKey = typeof m === "string" ? m : Object.keys(m)[0];
       const i18nKey = `flash.log.milestone.${milestoneKey}`;
       deps.appendLog(
