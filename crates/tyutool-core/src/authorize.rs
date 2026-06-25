@@ -47,8 +47,6 @@ use crate::job::FlashJob;
 const BAUD: u32 = 115_200;
 /// Per-command absolute read deadline (hard ceiling regardless of idle).
 const CMD_TIMEOUT: Duration = Duration::from_secs(3);
-/// Drain: stop when silent for this long.
-const DRAIN_QUIET: Duration = Duration::from_millis(800);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Devices shipped un-authorized carry this placeholder UUID.
@@ -76,6 +74,10 @@ struct AuthTiming {
     /// Old firmware may reboot after writing auth; this gives the device time
     /// to restart before the verify `auth-read` is issued.
     write_settle_wait: Duration,
+    /// Stop draining when the line has been silent for this long.
+    /// New firmware silences quickly after `sys_log_enable off`; old firmware
+    /// and unknown chips keep the conservative 800 ms default.
+    drain_quiet: Duration,
 }
 
 impl AuthTiming {
@@ -90,16 +92,21 @@ impl AuthTiming {
                 boot_max_wait: Duration::from_millis(2100),
                 cmd_idle_timeout: Duration::from_millis(50),
                 write_settle_wait: Duration::from_secs(3),
+                drain_quiet: Duration::from_millis(800),
             },
-            // ESP32 family: measured boot-ready ~1112ms (ESP32, 2026-06-25).
-            // boot_max_wait = 3× 1112ms ≈ 3336ms → 3500ms.
-            // cmd_idle_timeout: first-byte RTT not yet measured; keep conservative.
+            // ESP32 family: measured boot-ready ~1108ms, first-byte RTT 20–40ms
+            // (ESP32, 2026-06-25). boot_max_wait = 3× 1108ms → 3500ms.
+            // cmd_idle_timeout = 3× max-observed RTT (40ms) → 120ms. 80ms was
+            //   too tight: post-write auth-read needs extra margin between lines.
+            // drain_quiet: new firmware silences within ~200ms after sys_log_enable
+            //   off; 400ms gives a 2× margin.
             "ESP32" | "ESP32C3" | "ESP32C6" | "ESP32S3" => Self {
                 boot_probe_start: Duration::from_millis(1000),
                 boot_probe_interval: Duration::from_millis(50),
                 boot_max_wait: Duration::from_millis(3500),
-                cmd_idle_timeout: Duration::from_millis(200),
+                cmd_idle_timeout: Duration::from_millis(120),
                 write_settle_wait: Duration::from_secs(3),
+                drain_quiet: Duration::from_millis(400),
             },
             _ => Self::default(),
         }
@@ -114,6 +121,7 @@ impl Default for AuthTiming {
             boot_max_wait: Duration::from_millis(3000),
             cmd_idle_timeout: Duration::from_millis(200),
             write_settle_wait: Duration::from_secs(3),
+            drain_quiet: Duration::from_millis(800),
         }
     }
 }
@@ -256,9 +264,10 @@ impl AuthSession<SerialAuthIo> {
 }
 
 impl<T: AuthIo> AuthSession<T> {
-    /// Read and discard bytes until the line has been quiet for [`DRAIN_QUIET`]
+    /// Read and discard bytes until the line has been quiet for `timing.drain_quiet`
     /// or [`DRAIN_MAX`] has elapsed. Returns total bytes consumed.
     fn drain_boot_output(&mut self) -> usize {
+        let drain_quiet = self.timing.drain_quiet;
         let deadline = Instant::now() + DRAIN_MAX;
         let mut last_data = Instant::now();
         let mut total = 0usize;
@@ -276,7 +285,7 @@ impl<T: AuthIo> AuthSession<T> {
                     }
                 }
                 _ => {
-                    if Instant::now().duration_since(last_data) >= DRAIN_QUIET {
+                    if Instant::now().duration_since(last_data) >= drain_quiet {
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(20));
@@ -335,9 +344,10 @@ impl<T: AuthIo> AuthSession<T> {
         max_timeout: Duration,
         idle_timeout: Duration,
     ) -> Vec<String> {
+        let fn_start = Instant::now();
         let mut raw_buf: Vec<u8> = Vec::new();
         let mut lines: Vec<String> = Vec::new();
-        let end_time = Instant::now() + max_timeout;
+        let end_time = fn_start + max_timeout;
         let mut last_data: Option<Instant> = None;
         let mut tmp = [0u8; 256];
 
@@ -349,6 +359,12 @@ impl<T: AuthIo> AuthSession<T> {
                 Ok(n) if n > 0 => {
                     let to_read = (n as usize).min(tmp.len());
                     if let Ok(read) = self.port.read(&mut tmp[..to_read]) {
+                        if last_data.is_none() {
+                            log::info!(
+                                "flash.log.auth.firstByte: rtt={}ms",
+                                fn_start.elapsed().as_millis()
+                            );
+                        }
                         raw_buf.extend_from_slice(&tmp[..read]);
                         last_data = Some(Instant::now());
                         while let Some(pos) = raw_buf.iter().position(|&b| b == b'\n') {
@@ -416,19 +432,21 @@ impl<T: AuthIo> AuthSession<T> {
 
     /// Send `auth <uuid> <authkey>` and return the response lines.
     ///
-    /// Uses a longer idle timeout (2 s) because some firmware versions reboot
-    /// after writing auth — we want to capture the full reboot banner.
+    /// `idle` controls how long to wait after the last byte before declaring
+    /// the response complete. Use `timing.cmd_idle_timeout` for new firmware
+    /// (which does not reboot after writing auth) and 2 s for old firmware
+    /// (which may reboot, producing a longer silent gap before the banner).
     /// Callers must verify success via [`Self::auth_read`] rather than
     /// inspecting the returned lines, since not all firmware versions print
     /// `"Authorization write succeeds."` before rebooting.
-    fn auth_write(&mut self, uuid: &str, authkey: &str) -> Vec<String> {
+    fn auth_write(&mut self, uuid: &str, authkey: &str, idle: Duration) -> Vec<String> {
         if self
             .send_cmd(&format!("auth {} {}", uuid, authkey))
             .is_err()
         {
             return vec![];
         }
-        self.read_response_idle(Duration::from_millis(2000))
+        self.read_response_idle(idle)
     }
 
     /// Send `read_mac` and parse the MAC address from the response.
@@ -739,7 +757,10 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
-                let _lines = sess.auth_write(&uuid, &authkey);
+                // Keep 2000ms idle: device may reboot after writing auth on some
+                // firmware builds; a short idle would exit before the reboot banner
+                // and leave drain_boot_output unable to clear it in time.
+                let _lines = sess.auth_write(&uuid, &authkey, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
@@ -850,7 +871,7 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
-                let _lines = sess.auth_write(&uuid, &authkey);
+                let _lines = sess.auth_write(&uuid, &authkey, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
@@ -1010,7 +1031,7 @@ where
 
             // Write
             progress(BatchAuthStep::WritingAuth);
-            let _lines = sess.auth_write(uuid, authkey);
+            let _lines = sess.auth_write(uuid, authkey, Duration::from_millis(2000));
             check_cancel!();
 
             // No 3s settle for new firmware
@@ -1088,7 +1109,7 @@ where
             }
 
             progress(BatchAuthStep::WritingAuth);
-            let _lines = sess.auth_write(uuid, authkey);
+            let _lines = sess.auth_write(uuid, authkey, Duration::from_millis(2000));
             check_cancel!();
 
             let settle_wait = sess.timing.write_settle_wait;
@@ -1330,7 +1351,7 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response("auth uuid key\r\nAuthorization write succeeds.\r\n");
         let mut sess = session(mock);
-        let _ = sess.auth_write("myuuid", "mykey");
+        let _ = sess.auth_write("myuuid", "mykey", Duration::from_millis(200));
         assert!(sess.port.sent_str().contains("auth myuuid mykey\r\n"));
     }
 
@@ -1555,7 +1576,11 @@ mod tests {
         let existing = sess.auth_read();
         assert!(existing.is_none());
         // auth_write
-        let _lines = sess.auth_write("testuuid12345678901", "testkey1234567890123456789012");
+        let _lines = sess.auth_write(
+            "testuuid12345678901",
+            "testkey1234567890123456789012",
+            Duration::from_millis(200),
+        );
         sess.drain_boot_output();
         sess.wake_shell(); // no timing arg — uses self.timing
                            // verify
