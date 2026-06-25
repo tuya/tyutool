@@ -340,6 +340,9 @@ fn milestone_text(m: &FlashMilestone) -> String {
         FlashMilestone::Rebooted => "Device rebooted".into(),
         FlashMilestone::AuthReadComplete { .. } => "Auth read complete".into(),
         FlashMilestone::AuthReadEmpty => "No authorization found on device".into(),
+        FlashMilestone::AuthConflict { .. } => {
+            "Authorization conflict: device already authorized".into()
+        }
     }
 }
 
