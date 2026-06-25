@@ -48,6 +48,10 @@ pub enum ClientMessage {
         bytes: Vec<u8>,
     },
     SerialDebugState,
+    /// Frontend response to `flash_progress` `auth_conflict` milestone.
+    AuthorizeConfirm {
+        confirmed: bool,
+    },
 }
 
 // ── Server → Client ──────────────────────────────────────────────────────────
@@ -119,6 +123,8 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
 
     let (sink, mut stream) = ws.split();
     let cancel = Arc::new(AtomicBool::new(false));
+    let pending_confirm: Arc<Mutex<Option<std::sync::mpsc::Sender<bool>>>> =
+        Arc::new(Mutex::new(None));
 
     // ── mpsc sink pump ───────────────────────────────────────────────────────
     // Background tasks (progress callbacks, serial-debug reader thread) need to
@@ -209,6 +215,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                     &mut job,
                     file_content,
                     file_contents,
+                    Arc::clone(&pending_confirm),
                 )
                 .await;
             }
@@ -285,6 +292,12 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 };
                 let _ = sink_tx.send(ServerMessage::SerialDebugStateInfo { open, cfg });
             }
+            ClientMessage::AuthorizeConfirm { confirmed } => {
+                let mut guard = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(tx) = guard.take() {
+                    let _ = tx.send(confirmed);
+                }
+            }
         }
     }
 
@@ -309,6 +322,7 @@ async fn handle_run_job(
     job: &mut FlashJob,
     file_content: Option<String>,
     file_contents: Option<Vec<String>>,
+    pending_confirm: Arc<Mutex<Option<std::sync::mpsc::Sender<bool>>>>,
 ) {
     let mut temp_paths: Vec<String> = Vec::new();
 
@@ -366,7 +380,30 @@ async fn handle_run_job(
         None
     };
 
-    let job_clone = job.clone();
+    let mut job_clone = job.clone();
+
+    // Inject confirm_overwrite AFTER cloning because Clone resets it to None
+    // (see impl Clone for FlashJob in crates/tyutool-core/src/job.rs).
+    let sink_for_confirm = sink_tx.clone();
+    let confirm_store = Arc::clone(&pending_confirm);
+    job_clone.confirm_overwrite = Some(Box::new(move |existing_uuid, existing_authkey| {
+        use tyutool_core::{FlashEvent, FlashMilestone};
+        if let Ok(v) = serde_json::to_value(FlashEvent::Milestone {
+            milestone: FlashMilestone::AuthConflict {
+                existing_uuid,
+                existing_authkey,
+            },
+        }) {
+            let _ = sink_for_confirm.send(ServerMessage::Progress { payload: v });
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<bool>();
+        {
+            let mut guard = confirm_store.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = Some(tx);
+        }
+        rx.recv().unwrap_or(false)
+    }));
+
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
 
     // Run job in a blocking thread; collect file output there too.
@@ -595,6 +632,16 @@ mod tests {
         match msg {
             ClientMessage::SerialDebugSend { bytes } => assert_eq!(bytes, vec![1, 2, 255]),
             other => panic!("expected SerialDebugSend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserialize_authorize_confirm() {
+        let msg: ClientMessage =
+            serde_json::from_str(r#"{"type":"authorize_confirm","confirmed":true}"#).unwrap();
+        match msg {
+            ClientMessage::AuthorizeConfirm { confirmed } => assert!(confirmed),
+            other => panic!("expected AuthorizeConfirm, got {other:?}"),
         }
     }
 
