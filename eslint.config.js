@@ -7,7 +7,7 @@ import prettierConfig from 'eslint-config-prettier';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'src-tauri/**', 'src/**/*.d.ts'],
+    ignores: ['dist/**', 'node_modules/**', 'src-tauri/**', 'src/**/*.d.ts', 'coverage/**', 'target/**'],
   },
   // TypeScript files
   {
