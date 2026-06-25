@@ -117,6 +117,8 @@ pub enum FlashMilestone {
         existing_uuid: String,
         existing_authkey: String,
     },
+    /// Write skipped because the device already holds the exact credentials requested.
+    AuthWriteSkipped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

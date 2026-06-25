@@ -343,6 +343,9 @@ fn milestone_text(m: &FlashMilestone) -> String {
         FlashMilestone::AuthConflict { .. } => {
             "Authorization conflict: existing credentials will be overwritten".into()
         }
+        FlashMilestone::AuthWriteSkipped => {
+            "Device already has matching credentials — write skipped".into()
+        }
     }
 }
 
