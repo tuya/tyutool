@@ -204,6 +204,11 @@ fn flash_run(
         job.baud_rate
     );
 
+    // Clear any stale confirm sender from a previous run that exited abnormally.
+    if let Ok(mut g) = confirm_state.sender.lock() {
+        *g = None;
+    }
+
     // Create a fresh cancel flag for this operation and signal the old one.
     // Swapping atomically under the mutex ensures the old Arc stays `true`
     // while the new Arc starts at `false` — the two operations never share a
