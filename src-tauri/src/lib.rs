@@ -548,6 +548,7 @@ fn batch_auth_start(
 
             let result = tyutool_core::run_batch_auth_slot(
                 &port_clone,
+                "",
                 &uuid,
                 &authkey,
                 conflict_policy,
