@@ -7,7 +7,7 @@
 //!
 //! `detect_firmware` opens the serial port, drains stale output, hardware-resets
 //! the device, and polls for firmware kind by repeatedly sending `sys_log_enable off`:
-//! - Response `OK: log disable` → new firmware (shell ready; logging disabled)
+//! - Response `OK: log disabled` → new firmware (shell ready; logging disabled)
 //! - Response contains "No command" or a `tuya>` prompt → old firmware (shell ready)
 //! - No recognizable response within `boot_max_wait` → old firmware (timeout fallback)
 //!
@@ -362,6 +362,7 @@ impl<T: AuthIo> AuthSession<T> {
                         }
                         raw_buf.extend_from_slice(&tmp[..read]);
                         last_data = Some(Instant::now());
+                        let mut got_prompt = false;
                         while let Some(pos) = raw_buf.iter().position(|&b| b == b'\n') {
                             let chunk: Vec<u8> = raw_buf.drain(..=pos).collect();
                             let s = String::from_utf8_lossy(&chunk)
@@ -369,8 +370,14 @@ impl<T: AuthIo> AuthSession<T> {
                                 .to_string();
                             let s = strip_ansi(&s).trim().to_string();
                             if !s.is_empty() {
+                                if is_shell_prompt(&s) {
+                                    got_prompt = true;
+                                }
                                 lines.push(s);
                             }
+                        }
+                        if got_prompt {
+                            break;
                         }
                     }
                 }
@@ -461,7 +468,7 @@ impl<T: AuthIo> AuthSession<T> {
     ///
     /// Polls by repeatedly sending `sys_log_enable off` starting at
     /// `timing.boot_probe_start` after reset, every `timing.boot_probe_interval`:
-    /// - `OK: log disable` in response → new firmware; returns immediately.
+    /// - `OK: log disabled` in response → new firmware; returns immediately.
     /// - "No command" or `tuya>` in response → old firmware; returns immediately.
     /// - No recognizable response by `timing.boot_max_wait` → old firmware fallback.
     fn detect_firmware(&mut self, cancel: &AtomicBool) -> Result<FirmwareKind, FlashError> {
@@ -497,7 +504,7 @@ impl<T: AuthIo> AuthSession<T> {
 
             let is_new = lines
                 .iter()
-                .any(|l| l.to_lowercase().contains("ok: log disable"));
+                .any(|l| l.to_lowercase().contains("ok: log disabled"));
             let is_old = !is_new
                 && lines.iter().any(|l| {
                     let lower = l.to_lowercase();
@@ -1455,7 +1462,7 @@ mod tests {
     fn detect_firmware_new_returns_new_kind() {
         let mut io = MockAuthIo::new();
         // Response 0: sys_log_enable off → OK
-        io.add_response("OK: log disable\r\n");
+        io.add_response("OK: log disabled\r\n");
         // Response 1: wake_shell clear_input → empty
         io.add_response("");
         // Response 2: version command
@@ -1524,7 +1531,7 @@ mod tests {
         use crate::job::FlashMode;
         let mut io = MockAuthIo::new();
         // detect_firmware: sys_log_enable off → OK, wake_shell, version
-        io.add_response("OK: log disable\r\n"); // sys_log_enable off
+        io.add_response("OK: log disabled\r\n"); // sys_log_enable off
         io.add_response(""); // wake_shell clear_input
         io.add_response("CLI version: 1.0.0\r\n"); // version
                                                    // auth_read (check existing) → None (device fresh)
@@ -1599,7 +1606,7 @@ mod tests {
     #[test]
     fn run_authorize_new_firmware_conflict_cancelled() {
         let mut io = MockAuthIo::new();
-        io.add_response("OK: log disable\r\n");
+        io.add_response("OK: log disabled\r\n");
         io.add_response("");
         io.add_response("CLI version: 1.0.0\r\n");
         // auth_read → existing different credentials
