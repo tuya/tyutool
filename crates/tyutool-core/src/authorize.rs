@@ -91,11 +91,13 @@ impl AuthTiming {
                 cmd_idle_timeout: Duration::from_millis(50),
                 write_settle_wait: Duration::from_secs(3),
             },
-            // ESP32 family: timing not yet measured; use conservative defaults.
+            // ESP32 family: measured boot-ready ~1112ms (ESP32, 2026-06-25).
+            // boot_max_wait = 3× 1112ms ≈ 3336ms → 3500ms.
+            // cmd_idle_timeout: first-byte RTT not yet measured; keep conservative.
             "ESP32" | "ESP32C3" | "ESP32C6" | "ESP32S3" => Self {
-                boot_probe_start: Duration::from_millis(500),
+                boot_probe_start: Duration::from_millis(1000),
                 boot_probe_interval: Duration::from_millis(50),
-                boot_max_wait: Duration::from_millis(3000),
+                boot_max_wait: Duration::from_millis(3500),
                 cmd_idle_timeout: Duration::from_millis(200),
                 write_settle_wait: Duration::from_secs(3),
             },
