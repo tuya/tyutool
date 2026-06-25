@@ -354,7 +354,6 @@
       "authExistsFound": "Device already authorized: UUID={uuid}, AuthKey={authkey}",
       "authOverwritePrompt": "The device already has authorization. Confirm in the dialog whether to overwrite.",
       "authOverwriteCancelled": "Overwrite cancelled.",
-      "authProbeSkipped": "Could not read device authorization before write ({msg}); proceeding with write.",
       "operationDuration": "Operation duration: {duration}",
       "portBusy": "Port {port} is busy or unavailable.",
       "portBusyDetail": "Error: {msg}",

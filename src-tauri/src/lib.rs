@@ -635,10 +635,16 @@ fn batch_auth_cancel_all(state: State<'_, BatchAuthState>) -> Result<(), String>
 }
 
 #[tauri::command]
-fn flash_cancel(state: State<'_, FlashState>) {
+fn flash_cancel(state: State<'_, FlashState>, confirm_state: State<'_, ConfirmState>) {
     log::info!("[Flash] User cancelled operation");
     if let Ok(guard) = state.cancel.lock() {
         guard.store(true, Ordering::SeqCst);
+    }
+    // Wake any thread blocked in confirm_overwrite so it can return Cancelled.
+    if let Ok(mut sender_guard) = confirm_state.sender.lock() {
+        if let Some(tx) = sender_guard.take() {
+            let _ = tx.send(false);
+        }
     }
 }
 

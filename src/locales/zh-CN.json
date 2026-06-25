@@ -354,7 +354,6 @@
       "authExistsFound": "设备已有授权：UUID={uuid}，AuthKey={authkey}",
       "authOverwritePrompt": "设备已存在授权信息，请在对话框中确认是否覆盖写入。",
       "authOverwriteCancelled": "取消覆盖授权。",
-      "authProbeSkipped": "写入前无法读取设备授权信息（{msg}），将继续尝试写入。",
       "operationDuration": "本次操作耗时：{duration}",
       "portBusy": "串口 {port} 正忙或不可用。",
       "portBusyDetail": "错误：{msg}",
