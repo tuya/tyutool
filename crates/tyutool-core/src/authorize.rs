@@ -44,6 +44,23 @@ const POST_RESET_WAIT: Duration = Duration::from_secs(3);
 /// Devices shipped un-authorized carry this placeholder UUID.
 const PLACEHOLDER_UUID: &str = "uuidxxxxxxxxxxxxxxxx";
 
+// ── Firmware version detection ────────────────────────────────────────────
+
+/// Parsed CLI version string from `version` command response.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CliVersion(u32, u32, u32);
+
+const NEW_FIRMWARE_MIN: CliVersion = CliVersion(1, 0, 0);
+
+/// Firmware capability tier detected via `sys_log_enable off` + `version`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FirmwareKind {
+    /// `sys_log_enable` command absent — legacy flow, logging unchanged.
+    Old,
+    /// `sys_log_enable` present, version >= 1.0.0 — logging disabled, new flow.
+    New(CliVersion),
+}
+
 /// Parsed device authorization (used by GUI / [`probe_device_authorization`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -303,12 +320,15 @@ impl<T: AuthIo> AuthSession<T> {
         let _ = self.port.clear_input();
     }
 
-    /// Read response lines within [`CMD_TIMEOUT`], returning early after
-    /// `idle_timeout` of silence once data has started arriving.
-    fn read_response_idle(&mut self, idle_timeout: Duration) -> Vec<String> {
+    /// Read response with a custom total timeout and idle timeout.
+    fn read_response_timed(
+        &mut self,
+        max_timeout: Duration,
+        idle_timeout: Duration,
+    ) -> Vec<String> {
         let mut raw_buf: Vec<u8> = Vec::new();
         let mut lines: Vec<String> = Vec::new();
-        let end_time = Instant::now() + CMD_TIMEOUT;
+        let end_time = Instant::now() + max_timeout;
         let mut last_data: Option<Instant> = None;
         let mut tmp = [0u8; 256];
 
@@ -322,7 +342,6 @@ impl<T: AuthIo> AuthSession<T> {
                     if let Ok(read) = self.port.read(&mut tmp[..to_read]) {
                         raw_buf.extend_from_slice(&tmp[..read]);
                         last_data = Some(Instant::now());
-                        // Extract complete `\n`-terminated lines
                         while let Some(pos) = raw_buf.iter().position(|&b| b == b'\n') {
                             let chunk: Vec<u8> = raw_buf.drain(..=pos).collect();
                             let s = String::from_utf8_lossy(&chunk)
@@ -345,7 +364,6 @@ impl<T: AuthIo> AuthSession<T> {
                 }
             }
         }
-        // Flush any remaining bytes that didn't end with `\n`
         if !raw_buf.is_empty() {
             let s = String::from_utf8_lossy(&raw_buf).trim().to_string();
             let s = strip_ansi(&s).trim().to_string();
@@ -356,9 +374,12 @@ impl<T: AuthIo> AuthSession<T> {
         lines
     }
 
-    /// Shorthand: read response with the default [`IDLE_TIMEOUT`].
+    fn read_response_idle(&mut self, idle_timeout: Duration) -> Vec<String> {
+        self.read_response_timed(CMD_TIMEOUT, idle_timeout)
+    }
+
     fn read_response(&mut self) -> Vec<String> {
-        self.read_response_idle(IDLE_TIMEOUT)
+        self.read_response_timed(CMD_TIMEOUT, IDLE_TIMEOUT)
     }
 
     /// Send `auth-read` and return `(uuid, authkey)` or `None`.
@@ -412,6 +433,82 @@ impl<T: AuthIo> AuthSession<T> {
         }
         None
     }
+
+    /// Hardware-reset the device, detect firmware version via `sys_log_enable off`,
+    /// and leave the shell ready for commands.
+    ///
+    /// Replaces the old `hardware_reset → POST_RESET_WAIT(3s) → drain → wake_shell` sequence.
+    /// On return:
+    /// - `FirmwareKind::New(v)` — `sys_log_enable off` succeeded; logging is disabled; shell ready.
+    /// - `FirmwareKind::Old` — command absent; logging unchanged; shell ready (3s elapsed).
+    fn detect_firmware(&mut self, cancel: &AtomicBool) -> Result<FirmwareKind, FlashError> {
+        self.hardware_reset()?;
+
+        // Give device 500ms to initialize serial before sending commands.
+        let sleep_end = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < sleep_end {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        if cancel.load(Ordering::Relaxed) {
+            return Err(FlashError::Cancelled);
+        }
+
+        // Attempt sys_log_enable off — 300ms window covers new-firmware shell response.
+        let _ = self.send_cmd("sys_log_enable off");
+        let lines =
+            self.read_response_timed(Duration::from_millis(300), Duration::from_millis(300));
+        let got_ok = lines
+            .iter()
+            .any(|l| l.to_lowercase().contains("ok: log disable"));
+
+        if got_ok {
+            // New firmware: logging disabled, shell is up.
+            self.drain_boot_output();
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            self.wake_shell();
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            // Identify exact version for future branching.
+            let _ = self.send_cmd("version");
+            let vlines = self.read_response();
+            let version = vlines.iter().find_map(|l| parse_cli_version(l));
+            let kind = match version {
+                Some(v) if v >= NEW_FIRMWARE_MIN => FirmwareKind::New(v),
+                // Responded to sys_log_enable but version unparseable — treat as minimum.
+                _ => FirmwareKind::New(NEW_FIRMWARE_MIN),
+            };
+            Ok(kind)
+        } else {
+            // Old firmware: wait out the remainder of the 3s post-reset window.
+            // 500ms init + up to 300ms detection = up to 800ms elapsed; need ~2200ms more.
+            let wait_end = Instant::now() + Duration::from_millis(2200);
+            while Instant::now() < wait_end {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(FlashError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            self.drain_boot_output();
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            self.wake_shell();
+            Ok(FirmwareKind::Old)
+        }
+    }
+
+    /// Send `sys_log_enable on` and drain the response (used at read-only flow end).
+    fn syslog_on(&mut self) {
+        let _ = self.send_cmd("sys_log_enable on");
+        let _ = self.read_response();
+    }
 }
 
 fn parse_mac_from_str(s: &str) -> Option<String> {
@@ -435,6 +532,21 @@ fn parse_mac_from_str(s: &str) -> Option<String> {
             None
         }
     })
+}
+
+/// Parse "CLI version: X.Y.Z" from a single response line.
+fn parse_cli_version(line: &str) -> Option<CliVersion> {
+    let lower = strip_ansi(line).to_lowercase();
+    let rest = lower.strip_prefix("cli version:")?.trim().to_string();
+    let parts: Vec<&str> = rest.splitn(3, '.').collect();
+    if parts.len() == 3 {
+        let major = parts[0].trim().parse().ok()?;
+        let minor = parts[1].trim().parse().ok()?;
+        let patch = parts[2].trim().parse().ok()?;
+        Some(CliVersion(major, minor, patch))
+    } else {
+        None
+    }
 }
 
 // ── Batch auth types ──────────────────────────────────────────────────────
@@ -1084,5 +1196,63 @@ mod tests {
     fn parse_mac_returns_none_for_no_mac() {
         assert_eq!(parse_mac_from_str("no mac here"), None);
         assert_eq!(parse_mac_from_str(""), None);
+    }
+
+    #[test]
+    fn detect_firmware_new_returns_new_kind() {
+        let mut io = MockAuthIo::new();
+        // Response 0: sys_log_enable off → OK
+        io.add_response("OK: log disable\r\n");
+        // Response 1: wake_shell clear_input → empty
+        io.add_response("");
+        // Response 2: version command
+        io.add_response("CLI version: 1.0.0\r\n");
+        let mut sess = AuthSession { port: io };
+        let cancel = AtomicBool::new(false);
+        let result = sess.detect_firmware(&cancel).unwrap();
+        assert_eq!(result, FirmwareKind::New(CliVersion(1, 0, 0)));
+        assert!(sess.port.sent_str().contains("sys_log_enable off\r\n"));
+        assert!(sess.port.sent_str().contains("version\r\n"));
+    }
+
+    #[test]
+    fn detect_firmware_old_returns_old_kind() {
+        let mut io = MockAuthIo::new();
+        // Response 0: sys_log_enable off → not recognized
+        io.add_response("No command or file name\r\n");
+        // Response 1: wake_shell clear_input → empty
+        io.add_response("");
+        let mut sess = AuthSession { port: io };
+        let cancel = AtomicBool::new(false);
+        let result = sess.detect_firmware(&cancel).unwrap();
+        assert_eq!(result, FirmwareKind::Old);
+        // version command must NOT be sent for old firmware
+        assert!(!sess.port.sent_str().contains("version\r\n"));
+    }
+
+    #[test]
+    fn detect_firmware_no_response_returns_old_kind() {
+        let mut io = MockAuthIo::new();
+        // Response 0: empty (device not yet up)
+        io.add_response("");
+        // Response 1: wake_shell clear_input
+        io.add_response("");
+        let mut sess = AuthSession { port: io };
+        let cancel = AtomicBool::new(false);
+        let result = sess.detect_firmware(&cancel).unwrap();
+        assert_eq!(result, FirmwareKind::Old);
+    }
+
+    #[test]
+    fn parse_cli_version_parses_correctly() {
+        assert_eq!(
+            parse_cli_version("CLI version: 1.0.0"),
+            Some(CliVersion(1, 0, 0))
+        );
+        assert_eq!(
+            parse_cli_version("\x1b[32mCLI version: 2.3.4\x1b[0m"),
+            Some(CliVersion(2, 3, 4))
+        );
+        assert_eq!(parse_cli_version("unknown"), None);
     }
 }
