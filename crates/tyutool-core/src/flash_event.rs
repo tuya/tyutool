@@ -111,6 +111,12 @@ pub enum FlashMilestone {
     /// Auth read completed but device has no valid authorization.
     /// Covers both placeholder UUID and no-data cases.
     AuthReadEmpty,
+    /// Device already has conflicting authorization — GUI must pause and ask user.
+    /// `existing_uuid`/`existing_authkey`: what the device currently holds.
+    AuthConflict {
+        existing_uuid: String,
+        existing_authkey: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +276,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: Some("u".into()),
             authorize_key: None,
+            confirm_overwrite: None,
         };
         let s = JobSummary::from_job(&job);
         assert!(s.device.is_none());
@@ -306,6 +313,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: None,
             authorize_key: None,
+            confirm_overwrite: None,
         };
         let s = JobSummary::from_job(&job);
         assert_eq!(s.device, Some("BK7231N".into()));

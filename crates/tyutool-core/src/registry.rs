@@ -232,6 +232,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: None,
             authorize_key: None,
+            confirm_overwrite: None,
         };
         let cancel = AtomicBool::new(false);
         let res = run_job(&job, &cancel, |_| {});
@@ -261,6 +262,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: None,
             authorize_key: None,
+            confirm_overwrite: None,
         };
         let cancel = AtomicBool::new(false);
         let saw_done = AtomicBool::new(false);
