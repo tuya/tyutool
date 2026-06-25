@@ -14,12 +14,26 @@ function make() {
   const appendLog = vi.fn();
   const logOperationDuration = vi.fn();
   const onOperationSettled = vi.fn();
+  const getAuthorizeUuid = vi.fn(() => "new-uuid");
+  const getAuthorizeAuthKey = vi.fn(() => "new-key");
+  const sendAuthorizeConfirm = vi.fn(async (_confirmed: boolean) => {});
   const p = useFlashProgress({
     appendLog,
     logOperationDuration,
     onOperationSettled,
+    getAuthorizeUuid,
+    getAuthorizeAuthKey,
+    sendAuthorizeConfirm,
   });
-  return { p, appendLog, logOperationDuration, onOperationSettled };
+  return {
+    p,
+    appendLog,
+    logOperationDuration,
+    onOperationSettled,
+    getAuthorizeUuid,
+    getAuthorizeAuthKey,
+    sendAuthorizeConfirm,
+  };
 }
 
 describe("useFlashProgress reducer", () => {
@@ -219,6 +233,27 @@ describe("useFlashProgress reducer", () => {
       expect.objectContaining({ kind: "warning", showCancel: false }),
     );
     expect(appendLog).toHaveBeenCalled();
+  });
+
+  it("auth_conflict milestone shows confirm dialog and calls sendAuthorizeConfirm", async () => {
+    showConfirmDialog.mockResolvedValueOnce(true);
+    const { p, sendAuthorizeConfirm } = make();
+    p.handleFlashProgressPayload({
+      kind: "milestone",
+      milestone: {
+        auth_conflict: {
+          existing_uuid: "old-uuid",
+          existing_authkey: "old-key",
+        },
+      },
+    } as never);
+    // The handler is async inside a void IIFE; flush the microtask queue
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(showConfirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "warning" }),
+    );
+    expect(sendAuthorizeConfirm).toHaveBeenCalledWith(true);
   });
 
   // ── warning ─────────────────────────────────────────────────────
