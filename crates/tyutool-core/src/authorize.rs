@@ -622,6 +622,9 @@ where
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == &uuid && ex_k == &authkey {
                         log::info!("flash.log.auth.alreadySame");
+                        progress(FlashEvent::Milestone {
+                            milestone: FlashMilestone::AuthWriteSkipped,
+                        });
                         sess.hardware_reset()?;
                         return Ok(());
                     }
@@ -705,6 +708,9 @@ where
                         && ex_k == &authkey
                     {
                         log::info!("flash.log.auth.alreadySame");
+                        progress(FlashEvent::Milestone {
+                            milestone: FlashMilestone::AuthWriteSkipped,
+                        });
                         return Ok(());
                     }
                     // Conflict check (non-placeholder, differs)
