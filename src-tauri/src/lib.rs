@@ -271,6 +271,8 @@ struct BatchFlashStartConfig {
     chip_id: String,
     baud_rate: u32,
     firmware_path: String,
+    flash_start_hex: Option<String>,
+    flash_end_hex: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -278,7 +280,10 @@ struct BatchFlashStartConfig {
 struct BatchAuthStartConfig {
     chip_id: String,
     baud_rate: u32,
+    auth_baud_rate: u32,
     firmware_path: Option<String>,
+    flash_start_hex: Option<String>,
+    flash_end_hex: Option<String>,
     excel_path: String,
     conflict_policy: String,
 }
@@ -339,8 +344,8 @@ fn batch_flash_start(
                 baud_rate: config_clone.baud_rate,
                 firmware_path: Some(config_clone.firmware_path.clone()),
                 segments: None,
-                flash_start_hex: None,
-                flash_end_hex: None,
+                flash_start_hex: config_clone.flash_start_hex.clone(),
+                flash_end_hex: config_clone.flash_end_hex.clone(),
                 erase_start_hex: None,
                 erase_end_hex: None,
                 read_start_hex: None,
@@ -498,8 +503,8 @@ fn batch_auth_start(
                         baud_rate: config_clone.baud_rate,
                         firmware_path: Some(fw_path.clone()),
                         segments: None,
-                        flash_start_hex: None,
-                        flash_end_hex: None,
+                        flash_start_hex: config_clone.flash_start_hex.clone(),
+                        flash_end_hex: config_clone.flash_end_hex.clone(),
                         erase_start_hex: None,
                         erase_end_hex: None,
                         read_start_hex: None,
@@ -542,6 +547,7 @@ fn batch_auth_start(
                 &config_clone.chip_id,
                 &uuid,
                 &authkey,
+                config_clone.auth_baud_rate,
                 conflict_policy,
                 &cancel_clone,
                 |step| {

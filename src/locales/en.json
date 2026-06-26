@@ -534,7 +534,8 @@
     "config": {
       "sharedConfig": "Shared Config",
       "chip": "Chip",
-      "baud": "Baud Rate",
+      "flashBaud": "Flash Baud Rate",
+      "authBaud": "Auth Baud Rate",
       "firmware": "Firmware File",
       "browse": "Browse",
       "noFile": "No file selected",

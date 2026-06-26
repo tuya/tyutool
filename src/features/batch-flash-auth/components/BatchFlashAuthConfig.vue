@@ -32,6 +32,13 @@ const baudRateStr = computed({
   },
 });
 
+const authBaudRateStr = computed({
+  get: () => String(store.authBaudRate),
+  set: (v: string) => {
+    store.authBaudRate = Number(v);
+  },
+});
+
 async function browseFirmware() {
   if (!isTauriRuntime()) return;
   const { open } = await import("@tauri-apps/plugin-dialog");
@@ -84,13 +91,25 @@ async function onSelectSource(source: "local" | "default") {
         />
       </div>
 
-      <!-- Baud rate -->
+      <!-- Flash baud rate -->
       <div class="flex min-w-[8rem] flex-col gap-1">
         <label class="text-xs text-[var(--ty-text-muted)]">{{
-          t("batchFlashAuth.config.baud")
+          t("batchFlashAuth.config.flashBaud")
         }}</label>
         <TySelect
           v-model="baudRateStr"
+          :options="baudOptions"
+          :disabled="store.isBusy"
+        />
+      </div>
+
+      <!-- Auth baud rate -->
+      <div class="flex min-w-[8rem] flex-col gap-1">
+        <label class="text-xs text-[var(--ty-text-muted)]">{{
+          t("batchFlashAuth.config.authBaud")
+        }}</label>
+        <TySelect
+          v-model="authBaudRateStr"
           :options="baudOptions"
           :disabled="store.isBusy"
         />
@@ -158,7 +177,10 @@ async function onSelectSource(source: "local" | "default") {
             :options="versionOptions"
             :placeholder="t('batchFlashAuth.config.selectVersion')"
             :disabled="
-              store.isBusy || store.defaultFirmwareStatus === 'loading'
+              store.isBusy ||
+              store.defaultFirmwareStatus === 'loading' ||
+              (store.defaultFirmwareStatus === 'error' &&
+                store.defaultFirmwareEntries.length === 0)
             "
           />
           <p class="text-xs text-[var(--ty-text-muted)]">

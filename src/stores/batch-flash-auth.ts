@@ -1,6 +1,7 @@
 import { ref, computed } from "vue";
 import { defineStore } from "pinia";
 import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
+import { chipManifest } from "@/features/firmware-flash/chip-manifests";
 import { isTauriRuntime } from "@/runtime";
 import {
   BATCH_FLASH_CAPABLE_CHIPS,
@@ -51,6 +52,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const slots = ref<BatchSlotState[]>([]);
   const chipId = ref<string>("esp32");
   const baudRate = ref<number>(115200);
+  const authBaudRate = ref<number>(115200);
   const firmwarePath = ref<string>("");
   const firmwareSource = ref<BatchFirmwareSource>("local");
   const selectedDefaultVersion = ref<string>("");
@@ -238,10 +240,22 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     }
 
     const { invoke } = await import("@tauri-apps/api/core");
+    const fw = firmwarePath.value || undefined;
+    let flashStartHex: string | undefined;
+    let flashEndHex: string | undefined;
+    if (fw) {
+      const m = chipManifest(chipId.value);
+      const preset = m.erasePresets.fullChipNoRf ?? m.erasePresets.fullChip;
+      flashStartHex = preset?.start ?? "0x00000000";
+      flashEndHex = preset?.end ?? m.flashSize;
+    }
     const config: BatchAuthStartConfig = {
       chipId: chipId.value,
       baudRate: baudRate.value,
-      firmwarePath: firmwarePath.value || undefined,
+      authBaudRate: authBaudRate.value,
+      firmwarePath: fw,
+      flashStartHex,
+      flashEndHex,
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
     };
@@ -483,6 +497,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     slots,
     chipId,
     baudRate,
+    authBaudRate,
     firmwarePath,
     authConfig,
     filterConfig,

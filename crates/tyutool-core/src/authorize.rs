@@ -246,8 +246,8 @@ struct AuthSession<T: AuthIo> {
 }
 
 impl AuthSession<SerialAuthIo> {
-    fn open(port_name: &str, timing: AuthTiming) -> Result<Self, FlashError> {
-        let mut port = serialport::new(port_name, BAUD)
+    fn open(port_name: &str, timing: AuthTiming, baud_rate: u32) -> Result<Self, FlashError> {
+        let mut port = serialport::new(port_name, baud_rate)
             .timeout(Duration::from_millis(50))
             .open()
             .map_err(|e| FlashError::Plugin(format!("cannot open {}: {}", port_name, e)))?;
@@ -677,7 +677,7 @@ where
     // ── Step 1: Open serial ───────────────────────────────────────────
     log::info!("flash.log.auth.openingPort: port={}", job.port);
     let timing = AuthTiming::for_chip(&job.chip_id);
-    let mut sess = AuthSession::open(&job.port, timing)?;
+    let mut sess = AuthSession::open(&job.port, timing, BAUD)?;
 
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
@@ -967,6 +967,7 @@ pub fn run_batch_auth_slot<F>(
     chip_id: &str,
     uuid: &str,
     authkey: &str,
+    auth_baud_rate: u32,
     conflict_policy: ConflictPolicy,
     cancel: &AtomicBool,
     progress: F,
@@ -984,7 +985,7 @@ where
 
     log::info!("[batch-auth] slot start  port={port} chip={chip_id} uuid={uuid}");
     let timing = AuthTiming::for_chip(chip_id);
-    let mut sess = AuthSession::open(port, timing)?;
+    let mut sess = AuthSession::open(port, timing, auth_baud_rate)?;
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -1005,7 +1006,7 @@ where
                     }
                     std::thread::sleep(Duration::from_millis(500));
                 }
-                mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
+                mac_opt.ok_or_else(|| FlashError::Plugin("Failed to read MAC address".into()))?
             };
             log::info!("[batch-auth] read mac  port={port} mac={mac}");
 
@@ -1101,7 +1102,7 @@ where
                     }
                     std::thread::sleep(Duration::from_millis(500));
                 }
-                mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
+                mac_opt.ok_or_else(|| FlashError::Plugin("Failed to read MAC address".into()))?
             };
             log::info!("[batch-auth] read mac (old fw)  port={port} mac={mac}");
 
