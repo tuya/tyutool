@@ -470,6 +470,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 firmware_path: None,
                 authorize_uuid: uuid,
                 authorize_key: authkey,
+                authorize_storage: None,
                 confirm_overwrite: None,
             };
             let reporter = CliReporter::new(force_plain);
@@ -519,6 +520,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 firmware_path: Some(file),
                 authorize_uuid: None,
                 authorize_key: None,
+                authorize_storage: None,
                 confirm_overwrite: None,
             };
             run_job(&job, &cancel, reporter.callback())
@@ -561,6 +563,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 firmware_path: None,
                 authorize_uuid: None,
                 authorize_key: None,
+                authorize_storage: None,
                 confirm_overwrite: None,
             };
             run_job(&job, &cancel, reporter.callback())
@@ -602,6 +605,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 firmware_path: None,
                 authorize_uuid: None,
                 authorize_key: None,
+                authorize_storage: None,
                 confirm_overwrite: None,
             };
             run_job(&job, &cancel, reporter.callback())

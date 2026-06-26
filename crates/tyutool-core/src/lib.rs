@@ -13,7 +13,9 @@ mod serial_debug;
 mod tuya_dev_usb;
 mod usb_port_survey;
 
-pub use authorize::{run_batch_auth_slot, BatchAuthSlotResult, BatchAuthStep, ConflictPolicy};
+pub use authorize::{
+    run_batch_auth_slot, AuthStorage, BatchAuthSlotResult, BatchAuthStep, ConflictPolicy,
+};
 pub use error::FlashError;
 pub use flash_event::{
     FlashEvent, FlashMilestone, FlashPhase, FlashResult, JobDetails, JobSummary,

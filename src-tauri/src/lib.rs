@@ -353,6 +353,7 @@ fn batch_flash_start(
                 read_file_path: None,
                 authorize_uuid: None,
                 authorize_key: None,
+                authorize_storage: None,
                 confirm_overwrite: None,
             };
 
@@ -525,6 +526,7 @@ fn batch_auth_start(
                         read_file_path: None,
                         authorize_uuid: None,
                         authorize_key: None,
+                        authorize_storage: None,
                         confirm_overwrite: None,
                     };
                     let app2 = app_clone.clone();
