@@ -551,6 +551,8 @@
       "storageKv": "KV",
       "storageOtp": "OTP / eFuse",
       "storageOtpWarning": "Credentials will be permanently burned into eFuse and cannot be changed or erased.",
+      "otpLockToggle": "Burn eFuse after successful auth write + verify (permanently lock OTP)",
+      "otpLockDescription": "When enabled, sends auth-otp-lock to burn the eFuse. Future OTP writes will be rejected by hardware and this cannot be undone. Check only when this batch needs permanent locking; this toggle is reset to off on every app start.",
       "excelTotal": "Total",
       "excelUsed": "Used",
       "excelRemaining": "Remaining",
