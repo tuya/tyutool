@@ -77,6 +77,20 @@ function showErrorDetail(): void {
     onExtraAction: () => navigator.clipboard?.writeText(error),
   });
 }
+
+function showExcelError(): void {
+  const error = props.portSlot.excelError;
+  if (!error) return;
+  void showConfirmDialog({
+    title: `${props.portSlot.port} — ${t("batchFlashAuth.slot.excelErrorTitle")}`,
+    message: error,
+    kind: "warning",
+    showCancel: false,
+    okLabel: t("common.closeDialog"),
+    extraActionLabel: t("common.copy"),
+    onExtraAction: () => navigator.clipboard?.writeText(error),
+  });
+}
 </script>
 
 <template>
@@ -142,11 +156,25 @@ function showErrorDetail(): void {
         (portSlot.status === 'done' || portSlot.status === 'skipped') &&
         portSlot.mac
       "
-      class="flex min-w-0 flex-1 items-center"
+      class="flex min-w-0 flex-1 items-center gap-1.5"
     >
       <span class="font-mono text-xs text-[var(--ty-text-muted)]">{{
         portSlot.mac
       }}</span>
+      <button
+        v-if="portSlot.excelError"
+        type="button"
+        class="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-warning)] transition-colors hover:bg-[var(--ty-surface-muted)]"
+        :title="t('batchFlashAuth.slot.excelErrorTitle')"
+        :aria-label="t('batchFlashAuth.slot.excelErrorTitle')"
+        @click="showExcelError"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'triangle-exclamation']"
+          class="size-3"
+          aria-hidden="true"
+        />
+      </button>
     </div>
 
     <!-- Error summary (failed state) -->

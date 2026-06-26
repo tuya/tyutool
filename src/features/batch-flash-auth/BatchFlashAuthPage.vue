@@ -31,7 +31,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (!store.isBusy) store.cleanup();
+  store.cleanup();
 });
 </script>
 

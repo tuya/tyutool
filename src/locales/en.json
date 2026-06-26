@@ -554,10 +554,12 @@
       "selectVersion": "Select version",
       "firmwareLoading": "Loading versions…",
       "firmwareDownloading": "Downloading firmware…",
+      "firmwareDownloadingPct": "Downloading firmware… {pct}%",
       "firmwareReady": "Firmware ready",
       "firmwareLoadFailed": "Failed to load versions",
       "firmwareDownloadFailed": "Download failed",
-      "firmwareNoVersions": "No versions available"
+      "firmwareNoVersions": "No versions available",
+      "firmwareNetworkHint": "(Switch to \"Local File\" to use an offline firmware)"
     },
     "toolbar": {
       "autoAssign": "Auto Assign",
@@ -582,7 +584,8 @@
       "empty": "No ports",
       "emptyHint": "Click Auto Assign to scan available ports",
       "viewError": "View full error",
-      "errorTitle": "Flash error"
+      "errorTitle": "Flash error",
+      "excelErrorTitle": "Excel write failed"
     },
     "status": {
       "idle": "Idle",

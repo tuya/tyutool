@@ -434,9 +434,11 @@ fn batch_auth_start(
     let allocator = {
         let path = std::path::Path::new(&config.excel_path);
         let mut alloc_guard = state.allocator.lock().map_err(|e| e.to_string())?;
-        // Reuse existing allocator if present; otherwise load from disk
-        if let Some(ref existing) = *alloc_guard {
-            existing.clone()
+        // Reuse existing allocator only when the Excel path is unchanged.
+        // If the user picks a different file, reload so confirm_row writes to the correct file.
+        let reuse = alloc_guard.as_ref().map_or(false, |a| a.path_matches(path));
+        if reuse {
+            alloc_guard.as_ref().unwrap().clone()
         } else {
             let alloc = std::sync::Arc::new(batch_auth::ExcelRowAllocator::load(path)?);
             *alloc_guard = Some(alloc.clone());
@@ -444,14 +446,13 @@ fn batch_auth_start(
         }
     };
 
-    for port in ports {
-        // 1. Remove old slot and wait for it (under lock, but quickly)
+    // Phase 1: cancel all old slots simultaneously, collect their join receivers.
+    let mut old_join_rxs: Vec<(String, std::sync::mpsc::Receiver<()>)> = Vec::new();
+    for port in &ports {
         let old_slot = {
             let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
-            slots.remove(&port)
+            slots.remove(port)
         };
-
-        // 2. Wait for old thread OUTSIDE the lock
         if let Some(old) = old_slot {
             old.cancel.store(true, Ordering::SeqCst);
             let (tx, rx) = std::sync::mpsc::channel::<()>();
@@ -459,12 +460,24 @@ fn batch_auth_start(
                 let _ = old.thread.join();
                 let _ = tx.send(());
             });
-            if rx.recv_timeout(Duration::from_secs(3)).is_err() {
+            old_join_rxs.push((port.clone(), rx));
+        }
+    }
+
+    // Phase 2: wait for all old threads with a shared 3-second deadline.
+    if !old_join_rxs.is_empty() {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        for (port, rx) in &old_join_rxs {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if rx.recv_timeout(remaining).is_err() {
                 return Err(format!("port {} not stopped; retry in a few seconds", port));
             }
         }
+    }
 
-        // 3. Allocate row (outside lock)
+    // Phase 3: allocate rows and spawn new threads.
+    for port in ports {
+        // Allocate row (outside lock)
         let row = match allocator.allocate_row() {
             Ok(r) => r,
             Err(e) => {
@@ -565,21 +578,19 @@ fn batch_auth_start(
             );
 
             match result {
-                Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
+                Ok(tyutool_core::BatchAuthSlotResult::Done { mac })
+                | Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
                     log::info!("[batch-auth] slot done  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
-                    let _ = alloc_clone.confirm_row(row_idx, mac.clone());
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
-                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
-                    );
-                }
-                Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
-                    log::info!("[batch-auth] slot already-done  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
-                    let _ = alloc_clone.confirm_row(row_idx, mac.clone());
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
-                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
-                    );
+                    let excel_err = alloc_clone.confirm_row(row_idx, mac.clone()).err();
+                    if let Some(ref e) = excel_err {
+                        log::error!("[batch-auth] excel-write-failed  port={port_clone} row={row_idx} error={e}");
+                    }
+                    let mut payload =
+                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac });
+                    if let Some(e) = excel_err {
+                        payload["excelError"] = serde_json::Value::String(e);
+                    }
+                    let _ = app_clone.emit("batch-auth-progress", payload);
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac }) => {
                     log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
@@ -594,6 +605,10 @@ fn batch_auth_start(
                         "[batch-auth] slot cancelled  port={port_clone} excel_row={row_idx}"
                     );
                     alloc_clone.release_row(row_idx);
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "cancelled" }),
+                    );
                 }
                 Err(e) => {
                     log::warn!("[batch-auth] slot failed  port={port_clone} uuid={uuid} excel_row={row_idx} error={e}");
@@ -925,18 +940,37 @@ async fn download_auth_firmware(
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let actual = sha256_hex(&bytes);
+    let bytes_total = resp.content_length();
+    let mut bytes_vec: Vec<u8> = Vec::new();
+    let mut resp = resp;
+    loop {
+        match resp.chunk().await.map_err(|e| e.to_string())? {
+            Some(chunk) => {
+                bytes_vec.extend_from_slice(&chunk);
+                if let Some(total) = bytes_total {
+                    let _ = app.emit(
+                        "auth-firmware-download-progress",
+                        serde_json::json!({
+                            "bytesDone": bytes_vec.len(),
+                            "bytesTotal": total
+                        }),
+                    );
+                }
+            }
+            None => break,
+        }
+    }
+    let actual = sha256_hex(&bytes_vec);
     if actual != expected {
         return Err(format!(
             "SHA-256 mismatch: expected {}, got {}",
             expected, actual
         ));
     }
-    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    std::fs::write(&dest, &bytes_vec).map_err(|e| e.to_string())?;
     log::info!(
         "[AuthFw] downloaded {} bytes -> {}",
-        bytes.len(),
+        bytes_vec.len(),
         dest.display()
     );
     Ok(dest.to_string_lossy().into_owned())

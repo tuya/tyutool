@@ -63,6 +63,10 @@ pub struct ExcelRowAllocator {
 }
 
 impl ExcelRowAllocator {
+    pub fn path_matches(&self, path: &Path) -> bool {
+        self.state.lock().map(|s| s.path == path).unwrap_or(false)
+    }
+
     pub fn load(path: &Path) -> Result<Self, String> {
         let mut wb =
             open_workbook_auto(path).map_err(|e| format!("Cannot open Excel file: {e}"))?;

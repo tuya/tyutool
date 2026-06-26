@@ -188,25 +188,32 @@ async function onSelectSource(source: "local" | "default") {
               t("batchFlashAuth.config.firmwareLoading")
             }}</span>
             <span v-else-if="store.defaultFirmwareStatus === 'downloading'">{{
-              t("batchFlashAuth.config.firmwareDownloading")
+              store.firmwareDownloadProgress !== null
+                ? t("batchFlashAuth.config.firmwareDownloadingPct", {
+                    pct: store.firmwareDownloadProgress,
+                  })
+                : t("batchFlashAuth.config.firmwareDownloading")
             }}</span>
             <span
               v-else-if="store.defaultFirmwareStatus === 'ready'"
               class="text-[var(--ty-success,#16a34a)]"
               >{{ t("batchFlashAuth.config.firmwareReady") }}</span
             >
-            <span
-              v-else-if="store.defaultFirmwareStatus === 'error'"
-              class="text-[var(--ty-danger,#dc2626)]"
-              >{{
+            <template v-else-if="store.defaultFirmwareStatus === 'error'">
+              <span class="text-[var(--ty-danger,#dc2626)]">{{
                 (store.defaultFirmwareEntries.length === 0
                   ? t("batchFlashAuth.config.firmwareLoadFailed")
                   : t("batchFlashAuth.config.firmwareDownloadFailed")) +
                 (store.defaultFirmwareError
                   ? `: ${store.defaultFirmwareError}`
                   : "")
-              }}</span
-            >
+              }}</span>
+              <span
+                v-if="store.defaultFirmwareEntries.length === 0"
+                class="ml-2"
+                >{{ t("batchFlashAuth.config.firmwareNetworkHint") }}</span
+              >
+            </template>
             <span v-else-if="versionOptions.length === 0">{{
               t("batchFlashAuth.config.firmwareNoVersions")
             }}</span>
