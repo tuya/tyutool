@@ -606,7 +606,15 @@
       "authorized": "已授权",
       "notAuthorized": "未授权",
       "readError": "读取失败",
-      "lockFailedLabel": "OTP 已写入但 eFuse 未锁定 — 需物理隔离该设备"
+      "lockFailedLabel": "OTP 已写入但 eFuse 未锁定 — 需物理隔离该设备",
+      "lockFailedBadge": "锁失败",
+      "emptyHintNoPorts": "未检测到串口；请插入设备后点击自动分配"
+    },
+    "errors": {
+      "excel": {
+        "fileNotFound": "文件不存在",
+        "notXlsxFormat": "请选择 .xlsx 格式文件"
+      }
     },
     "status": {
       "idle": "空闲",

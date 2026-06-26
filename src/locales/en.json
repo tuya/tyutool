@@ -606,7 +606,15 @@
       "authorized": "Authorized",
       "notAuthorized": "Not authorized",
       "readError": "Read failed",
-      "lockFailedLabel": "OTP written but eFuse lock failed — physically isolate this device"
+      "lockFailedLabel": "OTP written but eFuse lock failed — physically isolate this device",
+      "lockFailedBadge": "Lock failed",
+      "emptyHintNoPorts": "No serial ports detected; insert a device and click Auto Assign"
+    },
+    "errors": {
+      "excel": {
+        "fileNotFound": "File not found",
+        "notXlsxFormat": "Please select an .xlsx file"
+      }
     },
     "status": {
       "idle": "Idle",
