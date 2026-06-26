@@ -33,6 +33,7 @@ import {
   saveBatchFlashAuthFilterConfig,
   saveBatchFlashAuthFirmwareConfig,
   saveBatchFlashAuthConfig,
+  saveBatchFlashAuthSharedConfig,
 } from "@/stores/batch-flash-auth-workspace";
 
 const ACTIVE_STATUSES: BatchSlotStatus[] = [
@@ -507,6 +508,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       filter,
       firmware,
       authConfig: savedAuthConfig,
+      sharedConfig,
     } = await loadBatchFlashAuthWorkspace();
     if (cumulative) cumulativeStats.value = cumulative;
     if (filter) filterConfig.value = filter;
@@ -515,6 +517,16 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         ...savedAuthConfig,
         authStorage: (savedAuthConfig.authStorage as "kv" | "otp") ?? "kv",
       };
+    }
+    if (sharedConfig) {
+      chipId.value = sharedConfig.chipId;
+      baudRate.value = sharedConfig.baudRate;
+      authBaudRate.value = sharedConfig.authBaudRate;
+    } else {
+      // First run: apply manifest defaults for the initial chip.
+      const m = chipManifest(chipId.value);
+      baudRate.value = m.defaultBaudRate;
+      authBaudRate.value = m.defaultAuthBaudRate;
     }
     if (firmware) {
       firmwareSource.value = firmware.source;
@@ -535,6 +547,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function saveAuthConfig() {
     await saveBatchFlashAuthConfig(authConfig.value);
+  }
+
+  async function saveSharedConfig() {
+    await saveBatchFlashAuthSharedConfig({
+      chipId: chipId.value,
+      baudRate: baudRate.value,
+      authBaudRate: authBaudRate.value,
+    });
   }
 
   // ── Event listener lifecycle ──────────────────────────────────────────────
@@ -583,6 +603,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   watch(authConfig, () => void saveAuthConfig(), { deep: true });
+  watch([chipId, baudRate, authBaudRate], () => void saveSharedConfig());
 
   return {
     // State
