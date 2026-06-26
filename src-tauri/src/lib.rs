@@ -592,13 +592,24 @@ fn batch_auth_start(
                     }
                     let _ = app_clone.emit("batch-auth-progress", payload);
                 }
-                Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac }) => {
-                    log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
+                Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac, existing_uuid }) => {
+                    log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} existing_uuid={existing_uuid} new_row={row_idx}");
+                    // Release the newly-allocated row (we won't write a new auth code).
                     alloc_clone.release_row(row_idx);
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
-                        serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac }),
-                    );
+                    // Mark the device's existing auth-code row as Used so the same
+                    // code isn't handed out to another device.
+                    let excel_err = alloc_clone
+                        .find_and_confirm_by_uuid(&existing_uuid, mac.clone())
+                        .err();
+                    if let Some(ref e) = excel_err {
+                        log::error!("[batch-auth] excel-confirm-skipped-failed  port={port_clone} existing_uuid={existing_uuid} error={e}");
+                    }
+                    let mut payload =
+                        serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac });
+                    if let Some(e) = excel_err {
+                        payload["excelError"] = serde_json::Value::String(e);
+                    }
+                    let _ = app_clone.emit("batch-auth-progress", payload);
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::Cancelled) => {
                     log::info!(

@@ -222,6 +222,40 @@ impl ExcelRowAllocator {
         }
     }
 
+    /// Find the row whose UUID matches `uuid` and confirm it as Used (mark MAC +
+    /// timestamp and persist). If the row is already Used this is a no-op.
+    /// Returns the row index that was confirmed, or None if uuid was not found.
+    pub fn find_and_confirm_by_uuid(
+        &self,
+        uuid: &str,
+        mac: String,
+    ) -> Result<Option<usize>, String> {
+        let row_idx = {
+            let state = self.state.lock().unwrap();
+            state
+                .rows
+                .iter()
+                .enumerate()
+                .find(|(_, r)| r.uuid == uuid)
+                .map(|(i, _)| i)
+        };
+        match row_idx {
+            None => Ok(None),
+            Some(idx) => {
+                // Only confirm rows that haven't been marked Used yet.
+                let already_used = {
+                    let state = self.state.lock().unwrap();
+                    state.rows[idx].status == RowStatus::Used
+                };
+                if already_used {
+                    return Ok(Some(idx));
+                }
+                self.confirm_row(idx, mac)?;
+                Ok(Some(idx))
+            }
+        }
+    }
+
     pub fn confirm_row(&self, row_idx: usize, mac: String) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
 

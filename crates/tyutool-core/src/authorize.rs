@@ -671,7 +671,9 @@ pub enum BatchAuthSlotResult {
     /// Device already had the exact credentials — nothing written.
     AlreadyDone { mac: String },
     /// Auth on device didn't match but conflict_policy=Skip — nothing written.
-    Skipped { mac: String },
+    /// `existing_uuid` is the UUID already on the device, so the caller can
+    /// find and confirm that Excel row.
+    Skipped { mac: String, existing_uuid: String },
     /// Operation was cancelled.
     Cancelled,
 }
@@ -1079,7 +1081,10 @@ where
                         log::info!(
                             "[batch-auth] skipped  port={port} mac={mac} existing_uuid={ex_uuid}"
                         );
-                        return Ok(BatchAuthSlotResult::Skipped { mac });
+                        return Ok(BatchAuthSlotResult::Skipped {
+                            mac,
+                            existing_uuid: ex_uuid.clone(),
+                        });
                     }
                 }
             }
@@ -1175,7 +1180,10 @@ where
                     }
                     if conflict_policy == ConflictPolicy::Skip {
                         log::info!("[batch-auth] skipped (old fw)  port={port} mac={mac} existing_uuid={ex_uuid}");
-                        return Ok(BatchAuthSlotResult::Skipped { mac });
+                        return Ok(BatchAuthSlotResult::Skipped {
+                            mac,
+                            existing_uuid: ex_uuid.clone(),
+                        });
                     }
                 }
             }

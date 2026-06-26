@@ -51,9 +51,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   // ── Session state ─────────────────────────────────────────────────────────
   const slots = ref<BatchSlotState[]>([]);
-  // O(1) port→slot lookup; kept in sync by addPorts/removeSlot/addBlockedPort.
-  // Falls back to linear scan for test cases that assign store.slots directly.
-  const _slotMap = new Map<string, BatchSlotState>();
   const chipId = ref<string>("esp32");
   const baudRate = ref<number>(115200);
   const authBaudRate = ref<number>(115200);
@@ -112,7 +109,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   // ── Slot helpers ──────────────────────────────────────────────────────────
   function findSlot(port: string): BatchSlotState | undefined {
-    return _slotMap.get(port) ?? slots.value.find((s) => s.port === port);
+    return slots.value.find((s) => s.port === port);
   }
 
   function updateSlot(port: string, patch: Partial<BatchSlotState>) {
@@ -132,7 +129,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
           currentPhase: "",
         };
         slots.value.push(entry);
-        _slotMap.set(port, entry);
         existing.add(port);
       }
     }
@@ -147,7 +143,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       slot.status === "skipped"
     ) {
       slots.value = slots.value.filter((s) => s.port !== port);
-      _slotMap.delete(port);
     }
   }
 
@@ -249,6 +244,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         progress: 0,
         currentPhase: "reading_mac",
         error: undefined,
+        excelError: undefined,
       });
     }
 
@@ -288,6 +284,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         progress: 0,
         currentPhase: "",
         error: undefined,
+        excelError: undefined,
       });
     }
     await startBatch();
@@ -367,7 +364,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "skipped") {
-      updateSlot(port, { status: "skipped", currentPhase: "", mac: ev.mac });
+      updateSlot(port, {
+        status: "skipped",
+        currentPhase: "",
+        mac: ev.mac,
+        excelError: ev.excelError,
+      });
       checkBatchCompletion();
     } else if (step === "cancelled") {
       // Rust cancelled the slot (e.g. user hit cancel mid-flight).
@@ -438,13 +440,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!filterConfig.value.blockedPorts.includes(normalized)) {
       filterConfig.value.blockedPorts.push(normalized);
     }
-    // Remove idle slots that are now filtered; sync _slotMap accordingly
-    const removed = slots.value.filter(
-      (s) =>
-        s.status === "idle" &&
-        filterConfig.value.blockedPorts.includes(normalizePortName(s.port)),
-    );
-    for (const s of removed) _slotMap.delete(s.port);
     slots.value = slots.value.filter(
       (s) =>
         s.status !== "idle" ||
