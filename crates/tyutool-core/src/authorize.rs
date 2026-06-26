@@ -47,6 +47,15 @@ use crate::job::FlashJob;
 const BAUD: u32 = 115_200;
 /// Per-command absolute read deadline (hard ceiling regardless of idle).
 const CMD_TIMEOUT: Duration = Duration::from_secs(3);
+/// Total upper bound for the `auth-otp-lock` response wait.
+/// eFuse burning is a physical write that may take significantly longer
+/// than a normal shell command. This MUST be confirmed against real
+/// hardware before release (see hardware verification scenario 7 in the spec).
+const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+/// Idle window — wait this long after the last byte before declaring the
+/// response complete. Set deliberately longer than `cmd_idle_timeout` to
+/// avoid premature termination during eFuse settling.
+const AUTH_OTP_LOCK_IDLE: Duration = Duration::from_millis(500);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Devices shipped un-authorized carry this placeholder UUID.
@@ -454,6 +463,47 @@ impl<T: AuthIo> AuthSession<T> {
     fn read_response(&mut self) -> Vec<String> {
         let idle = self.timing.cmd_idle_timeout;
         self.read_response_timed(CMD_TIMEOUT, idle)
+    }
+
+    /// Send `auth-otp-lock` and parse the response.
+    ///
+    /// Returns `Ok(())` when the firmware confirms with
+    /// `"Authorization otp lock succeeds."`, `Err(FlashError::Plugin)`
+    /// otherwise (including explicit `"Authorization otp lock failure."`,
+    /// no response, and any other unrecognised output).
+    ///
+    /// **WARNING**: this command burns the eFuse and is irreversible.
+    /// Callers must gate it behind an explicit user opt-in.
+    ///
+    /// Uses [`AUTH_OTP_LOCK_TIMEOUT`] / [`AUTH_OTP_LOCK_IDLE`] rather than
+    /// the default shell-command timing because eFuse settling may delay
+    /// the response beyond the standard 50ms idle window.
+    fn auth_otp_lock(&mut self) -> Result<(), FlashError> {
+        self.send_cmd("auth-otp-lock")
+            .map_err(|e| FlashError::Plugin(format!("auth-otp-lock send failed: {e}")))?;
+        let lines = self.read_response_timed(AUTH_OTP_LOCK_TIMEOUT, AUTH_OTP_LOCK_IDLE);
+
+        let mut saw_success = false;
+        let mut saw_failure = false;
+        for line in &lines {
+            let lower = line.to_lowercase();
+            let trimmed = lower.trim();
+            if trimmed.starts_with("authorization otp lock succeeds") {
+                saw_success = true;
+            } else if trimmed.starts_with("authorization otp lock failure") {
+                saw_failure = true;
+            }
+        }
+
+        match (saw_success, saw_failure) {
+            (true, _) => Ok(()),
+            (false, true) => Err(FlashError::Plugin(
+                "auth-otp-lock: device returned failure".into(),
+            )),
+            (false, false) => Err(FlashError::Plugin(
+                "auth-otp-lock: no recognisable response".into(),
+            )),
+        }
     }
 
     /// Send `auth-read` (or `auth-read <n>` for non-KV storage) and return `(uuid, authkey)` or `None`.
@@ -1943,5 +1993,63 @@ mod tests {
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
             ))
         );
+    }
+
+    // ── auth_otp_lock ──────────────────────────────────────────────────
+
+    #[test]
+    fn auth_otp_lock_succeeds_on_success_line() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-otp-lock\r\nAuthorization otp lock succeeds.\r\ntuya> \r\n");
+        let mut sess = session(mock);
+        assert!(sess.auth_otp_lock().is_ok());
+    }
+
+    #[test]
+    fn auth_otp_lock_fails_on_failure_line() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-otp-lock\r\nAuthorization otp lock failure.\r\ntuya> \r\n");
+        let mut sess = session(mock);
+        let err = sess.auth_otp_lock().unwrap_err();
+        match err {
+            FlashError::Plugin(msg) => assert!(
+                msg.contains("device returned failure"),
+                "unexpected message: {msg}"
+            ),
+            other => panic!("expected Plugin error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auth_otp_lock_fails_on_no_response() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("");
+        let mut sess = session(mock);
+        let err = sess.auth_otp_lock().unwrap_err();
+        match err {
+            FlashError::Plugin(msg) => assert!(
+                msg.contains("no recognisable response"),
+                "unexpected message: {msg}"
+            ),
+            other => panic!("expected Plugin error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auth_otp_lock_is_case_insensitive() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-otp-lock\r\nAUTHORIZATION OTP LOCK SUCCEEDS.\r\ntuya> \r\n");
+        let mut sess = session(mock);
+        assert!(sess.auth_otp_lock().is_ok());
+    }
+
+    #[test]
+    fn auth_otp_lock_ignores_unrelated_log_lines() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-otp-lock\r\n[04-24 10:30:00] [INFO] efuse settling\r\nAuthorization otp lock succeeds.\r\n[04-24 10:30:01] noise\r\ntuya> \r\n",
+        );
+        let mut sess = session(mock);
+        assert!(sess.auth_otp_lock().is_ok());
     }
 }
