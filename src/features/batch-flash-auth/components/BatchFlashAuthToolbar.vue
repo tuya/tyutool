@@ -130,16 +130,18 @@ async function handleAutoAssign() {
         :title="
           !store.authConfig.excelPath
             ? t('batchFlashAuth.toolbar.selectExcelFirst')
-            : store.excelStats?.remaining === 0
-              ? t('batchFlashAuth.toolbar.excelExhausted')
-              : !store.slots.some(
-                    (s) =>
-                      s.status === 'idle' ||
-                      s.status === 'failed' ||
-                      s.status === 'no_code',
-                  )
-                ? t('batchFlashAuth.toolbar.noIdlePorts')
-                : undefined
+            : store.excelError
+              ? t('batchFlashAuth.toolbar.excelInvalid')
+              : store.excelStats?.remaining === 0
+                ? t('batchFlashAuth.toolbar.excelExhausted')
+                : !store.slots.some(
+                      (s) =>
+                        s.status === 'idle' ||
+                        s.status === 'failed' ||
+                        s.status === 'no_code',
+                    )
+                  ? t('batchFlashAuth.toolbar.noIdlePorts')
+                  : undefined
         "
         @click="handleStart"
       >
