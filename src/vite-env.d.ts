@@ -23,6 +23,6 @@ declare module 'vue-router' {
     /** Window title segment (paired with app name in `router.afterEach`). */
     title?: string;
     /** Shell layout: full-bleed main area for dense tools (e.g. flash). */
-    layout?: 'default' | 'fullBleed';
+    layout?: 'default' | 'fullBleed' | 'fullBleedScroll';
   }
 }

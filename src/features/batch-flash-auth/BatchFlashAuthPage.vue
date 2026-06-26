@@ -36,7 +36,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-3">
+  <div class="flex flex-col gap-3">
     <div>
       <ToolboxBreadcrumb :toolName="t('toolbox.batchFlashAuth.name')" />
       <h1 class="text-lg font-semibold text-[var(--ty-text)]">
@@ -47,7 +47,9 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <BatchFlashAuthDashboard />
+    <div class="sticky top-0 z-10 bg-[var(--ty-bg)] pb-1">
+      <BatchFlashAuthDashboard />
+    </div>
 
     <!-- Collapsible configuration disclosure: shrinks out of the way once
          a batch is running so the slot grid dominates the viewport. -->
@@ -100,6 +102,6 @@ onUnmounted(() => {
     </section>
 
     <BatchFlashAuthToolbar />
-    <BatchFlashAuthSlotList class="min-h-0 flex-1" />
+    <BatchFlashAuthSlotList />
   </div>
 </template>
