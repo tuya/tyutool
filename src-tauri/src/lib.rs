@@ -286,6 +286,7 @@ struct BatchAuthStartConfig {
     flash_end_hex: Option<String>,
     excel_path: String,
     conflict_policy: String,
+    auth_storage: Option<String>,
 }
 
 #[tauri::command]
@@ -431,6 +432,10 @@ fn batch_auth_start(
         "overwrite" => tyutool_core::ConflictPolicy::Overwrite,
         _ => tyutool_core::ConflictPolicy::Skip,
     };
+    let auth_storage = match config.auth_storage.as_deref() {
+        Some("otp") => tyutool_core::AuthStorage::Otp,
+        _ => tyutool_core::AuthStorage::Kv,
+    };
 
     let allocator = {
         let path = std::path::Path::new(&config.excel_path);
@@ -564,7 +569,7 @@ fn batch_auth_start(
                 &authkey,
                 config_clone.auth_baud_rate,
                 conflict_policy,
-                tyutool_core::AuthStorage::Kv, // TODO(Task 3): pass real value from config
+                auth_storage,
                 &cancel_clone,
                 |step| {
                     let step_str = match step {
