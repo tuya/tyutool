@@ -23,7 +23,8 @@ function formatElapsed(ms: number): string {
 onMounted(() => {
   ticker = setInterval(() => {
     if (store.batchStartTime !== null) {
-      elapsedDisplay.value = formatElapsed(Date.now() - store.batchStartTime);
+      const end = store.batchEndTime ?? Date.now();
+      elapsedDisplay.value = formatElapsed(end - store.batchStartTime);
     }
   }, 1000);
 });
