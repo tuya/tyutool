@@ -22,6 +22,12 @@ async function onRetry(port: string) {
 function onRemove(port: string) {
   store.removeSlot(port);
 }
+function onBlock(port: string) {
+  store.blockPort(port);
+}
+async function onRead(port: string) {
+  await store.readPort(port);
+}
 </script>
 
 <template>
@@ -48,6 +54,8 @@ function onRemove(port: string) {
         @cancel="onCancel"
         @retry="onRetry"
         @remove="onRemove"
+        @block="onBlock"
+        @read="onRead"
       />
     </div>
 
