@@ -42,6 +42,7 @@ export interface PortFilterConfig {
 export interface BatchAuthConfigData {
   excelPath: string;
   conflictPolicy: "skip" | "overwrite";
+  authStorage: "kv" | "otp";
 }
 
 /** `batch-flash-progress` event payload from Rust. */
@@ -81,6 +82,8 @@ export interface BatchAuthStartConfig {
   flashEndHex?: string;
   excelPath: string;
   conflictPolicy: "skip" | "overwrite";
+  /** Auth storage destination. Only T5AI supports "otp"; defaults to "kv". */
+  authStorage?: "kv" | "otp";
 }
 
 /** Stats returned by validate_excel_cmd. */
