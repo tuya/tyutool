@@ -564,6 +564,7 @@ fn batch_auth_start(
                 &authkey,
                 config_clone.auth_baud_rate,
                 conflict_policy,
+                tyutool_core::AuthStorage::Kv, // TODO(Task 3): pass real value from config
                 &cancel_clone,
                 |step| {
                     let step_str = match step {
