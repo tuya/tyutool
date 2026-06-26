@@ -579,6 +579,7 @@
       "selectExcelFirst": "Select an auth table first",
       "noIdlePorts": "No idle ports",
       "excelExhausted": "Auth codes exhausted — please add more to the Excel and retry",
+      "excelInvalid": "Auth table is invalid — please fix or reselect the file",
       "readAll": "Read All",
       "readAllHint": "Read MAC and auth status for all ports",
       "readAllBusy": "Busy, cannot read now"

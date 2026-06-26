@@ -113,7 +113,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
           s.status === "no_code",
       ) &&
       inputsValid.value &&
-      (excelStats.value === null || excelStats.value.remaining > 0),
+      !excelError.value &&
+      excelStats.value !== null &&
+      excelStats.value.remaining > 0,
   );
   const canCancel = computed(() => isBusy.value);
   const canRetry = computed(() =>

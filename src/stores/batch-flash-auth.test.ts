@@ -189,12 +189,37 @@ describe("canStart / canRetry / canCancel", () => {
     expect(store.canStart).toBe(false);
   });
 
-  it("canStart is true when idle slot exists and excel is set", () => {
+  it("canStart is true when idle slot exists, excel is set and stats show remaining codes", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.chipId = "esp32";
     store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = { total: 10, used: 0, remaining: 10 };
     expect(store.canStart).toBe(true);
+  });
+
+  it("canStart is false when excel path is set but stats are unknown (validation pending)", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    // excelStats stays null until validateExcel resolves
+    expect(store.canStart).toBe(false);
+  });
+
+  it("canStart is false when excel validation errored", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/bad.xlsx";
+    store.excelError = "file not found";
+    expect(store.canStart).toBe(false);
+  });
+
+  it("canStart is false when excel codes are exhausted", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = { total: 10, used: 10, remaining: 0 };
+    expect(store.canStart).toBe(false);
   });
 
   it("canRetry is false when no failed slots", () => {

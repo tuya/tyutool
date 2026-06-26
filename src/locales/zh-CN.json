@@ -579,6 +579,7 @@
       "selectExcelFirst": "请先选择授权表",
       "noIdlePorts": "暂无空闲串口",
       "excelExhausted": "授权码已全部使用，请补充 Excel 后重试",
+      "excelInvalid": "授权表无效，请修复或重新选择文件",
       "readAll": "全部读取",
       "readAllHint": "读取所有串口的 MAC 和授权状态",
       "readAllBusy": "任务进行中，不可读取"
