@@ -220,7 +220,7 @@ function showExcelError(): void {
 
     <!-- Status label -->
     <span
-      class="w-24 shrink-0 text-xs font-medium"
+      class="w-28 shrink-0 text-xs font-medium leading-tight"
       :style="{ color: statusColor }"
     >
       <span
