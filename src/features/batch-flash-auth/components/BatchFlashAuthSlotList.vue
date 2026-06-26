@@ -11,13 +11,7 @@ async function onCancel(port: string) {
   await store.cancelPort(port);
 }
 async function onRetry(port: string) {
-  const s = store.slots.find((sl) => sl.port === port);
-  if (s && s.status === "failed") {
-    s.status = "idle";
-    s.progress = 0;
-    s.error = undefined;
-  }
-  await store.startBatch();
+  await store.retryPort(port);
 }
 function onRemove(port: string) {
   store.removeSlot(port);
@@ -66,7 +60,7 @@ async function onRead(port: string) {
     >
       <FontAwesomeIcon :icon="['fas', 'plug']" class="text-3xl opacity-40" />
       <p class="text-sm">{{ t("batchFlashAuth.slot.empty") }}</p>
-      <p class="text-xs">{{ t("batchFlashAuth.slot.emptyHint") }}</p>
+      <p class="text-xs">{{ t("batchFlashAuth.slot.emptyHintNoPorts") }}</p>
     </div>
   </div>
 </template>
