@@ -158,7 +158,7 @@ watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
           <!-- Storage mode group (T5AI only) -->
           <div
             v-if="store.chipId === 't5ai'"
-            class="flex shrink-0 items-center gap-4"
+            class="ml-auto flex shrink-0 items-center gap-4"
           >
             <span>{{ t("batchFlashAuth.config.storageMode") }}：</span>
             <label class="flex cursor-pointer items-center gap-1">

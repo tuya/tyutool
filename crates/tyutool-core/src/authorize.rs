@@ -456,9 +456,14 @@ impl<T: AuthIo> AuthSession<T> {
         self.read_response_timed(CMD_TIMEOUT, idle)
     }
 
-    /// Send `auth-read` and return `(uuid, authkey)` or `None`.
-    fn auth_read(&mut self) -> Option<(String, String)> {
-        self.send_cmd("auth-read").ok()?;
+    /// Send `auth-read` (or `auth-read <n>` for non-KV storage) and return `(uuid, authkey)` or `None`.
+    fn auth_read(&mut self, storage: AuthStorage) -> Option<(String, String)> {
+        let cmd = if storage == AuthStorage::Kv {
+            "auth-read".to_string()
+        } else {
+            format!("auth-read {}", storage.as_u8())
+        };
+        self.send_cmd(&cmd).ok()?;
         let lines = self.read_response();
         let relevant: Vec<&str> = lines
             .iter()
@@ -778,13 +783,14 @@ where
             FirmwareKind::New(_) => {
                 // ── New firmware: 2 retries / 200ms to absorb single-frame noise ──
                 log::info!("flash.log.auth.readDeviceAuth");
+                let storage = job.authorize_storage.unwrap_or_default();
                 let existing_auth = {
                     let mut auth = None;
                     for _ in 0..2u32 {
                         if cancel.load(Ordering::Relaxed) {
                             return Err(FlashError::Cancelled);
                         }
-                        auth = sess.auth_read();
+                        auth = sess.auth_read(storage);
                         if auth.is_some() {
                             break;
                         }
@@ -839,7 +845,6 @@ where
                 // Keep 2000ms idle: device may reboot after writing auth on some
                 // firmware builds; a short idle would exit before the reboot banner
                 // and leave drain_boot_output unable to clear it in time.
-                let storage = job.authorize_storage.unwrap_or_default();
                 let _lines = sess.auth_write(&uuid, &authkey, storage, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
@@ -862,7 +867,7 @@ where
                         if cancel.load(Ordering::Relaxed) {
                             return Err(FlashError::Cancelled);
                         }
-                        result = sess.auth_read();
+                        result = sess.auth_read(storage);
                         if result.is_some() {
                             break;
                         }
@@ -896,12 +901,13 @@ where
 
                 // Optional read: skip write if device already matches
                 log::info!("flash.log.auth.readDeviceAuth");
+                let storage = job.authorize_storage.unwrap_or_default();
                 let mut existing_auth: Option<(String, String)> = None;
                 for _attempt in 1..=5u32 {
                     if cancel.load(Ordering::Relaxed) {
                         return Err(FlashError::Cancelled);
                     }
-                    existing_auth = sess.auth_read();
+                    existing_auth = sess.auth_read(storage);
                     if existing_auth.is_some() {
                         break;
                     }
@@ -951,7 +957,6 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
-                let storage = job.authorize_storage.unwrap_or_default();
                 let _lines = sess.auth_write(&uuid, &authkey, storage, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
@@ -976,7 +981,7 @@ where
                 }
 
                 log::info!("flash.log.auth.verify");
-                match sess.auth_read() {
+                match sess.auth_read(storage) {
                     Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                         log::info!("flash.log.auth.verifyOk");
                         Ok(())
@@ -999,7 +1004,7 @@ where
     } else {
         // ── Read-only flow ────────────────────────────────────────────────────
         log::info!("flash.log.auth.readCurrent");
-        match sess.auth_read() {
+        match sess.auth_read(AuthStorage::default()) {
             Some((existing_uuid, existing_key)) => {
                 if existing_uuid == PLACEHOLDER_UUID {
                     progress(FlashEvent::Milestone {
@@ -1094,7 +1099,7 @@ where
                 let mut auth = None;
                 for _ in 0..sess.timing.auth_read_retries {
                     check_cancel!();
-                    auth = sess.auth_read();
+                    auth = sess.auth_read(auth_storage);
                     if auth.is_some() {
                         break;
                     }
@@ -1139,7 +1144,7 @@ where
                 let mut result = None;
                 for _ in 0..sess.timing.auth_read_retries {
                     check_cancel!();
-                    result = sess.auth_read();
+                    result = sess.auth_read(auth_storage);
                     if result.is_some() {
                         break;
                     }
@@ -1194,7 +1199,7 @@ where
                 let old_retry_ms = sess.timing.auth_read_retry_ms * 4;
                 for _ in 0..sess.timing.auth_read_retries + 1 {
                     check_cancel!();
-                    auth = sess.auth_read();
+                    auth = sess.auth_read(auth_storage);
                     if auth.is_some() {
                         break;
                     }
@@ -1240,7 +1245,7 @@ where
             let mut verify_result = None;
             for _ in 0..sess.timing.auth_read_retries {
                 check_cancel!();
-                verify_result = sess.auth_read();
+                verify_result = sess.auth_read(auth_storage);
                 if verify_result.is_some() {
                     break;
                 }
@@ -1363,7 +1368,7 @@ mod tests {
         );
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(),
+            sess.auth_read(AuthStorage::Kv),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -1381,7 +1386,7 @@ mod tests {
         );
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(),
+            sess.auth_read(AuthStorage::Kv),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -1395,7 +1400,7 @@ mod tests {
         mock.add_response("auth-read\r\n\x1b[32muuid12345678901234\x1b[0m\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\n");
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(),
+            sess.auth_read(AuthStorage::Kv),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -1409,7 +1414,7 @@ mod tests {
         // Only one relevant line after filtering — not enough for a pair.
         mock.add_response("auth-read\r\nuuid12345678901234\r\ntuya>\r\n");
         let mut sess = session(mock);
-        assert_eq!(sess.auth_read(), None);
+        assert_eq!(sess.auth_read(AuthStorage::Kv), None);
     }
 
     #[test]
@@ -1417,7 +1422,7 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response("");
         let mut sess = session(mock);
-        assert_eq!(sess.auth_read(), None);
+        assert_eq!(sess.auth_read(AuthStorage::Kv), None);
     }
 
     #[test]
@@ -1425,7 +1430,7 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response("auth-read\r\n[04-24 10:30:00] [INFO] only logs\r\ntuya>\r\n");
         let mut sess = session(mock);
-        assert_eq!(sess.auth_read(), None);
+        assert_eq!(sess.auth_read(AuthStorage::Kv), None);
     }
 
     #[test]
@@ -1439,7 +1444,7 @@ mod tests {
         ));
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(),
+            sess.auth_read(AuthStorage::Kv),
             Some((
                 PLACEHOLDER_UUID.to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -1709,7 +1714,7 @@ mod tests {
         let firmware = sess.detect_firmware(&cancel2).unwrap();
         assert_eq!(firmware, FirmwareKind::New(CliVersion(1, 0, 0)));
         // auth_read → None (fresh device)
-        let existing = sess.auth_read();
+        let existing = sess.auth_read(AuthStorage::Kv);
         assert!(existing.is_none());
         // auth_write
         let _lines = sess.auth_write(
@@ -1721,7 +1726,7 @@ mod tests {
         sess.drain_boot_output();
         sess.wake_shell(); // no timing arg — uses self.timing
                            // verify
-        let verified = sess.auth_read();
+        let verified = sess.auth_read(AuthStorage::Kv);
         assert_eq!(
             verified,
             Some((
@@ -1754,7 +1759,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let firmware = sess.detect_firmware(&cancel).unwrap();
         assert!(matches!(firmware, FirmwareKind::New(_)));
-        let existing = sess.auth_read();
+        let existing = sess.auth_read(AuthStorage::Kv);
         assert!(existing.is_some());
         let (ex_u, _ex_k) = existing.unwrap();
         assert_eq!(ex_u, "existinguuid1234567");
@@ -1791,5 +1796,35 @@ mod tests {
             Duration::from_millis(200),
         );
         assert!(sess.port.sent_str().contains("auth myuuid mykey 1\r\n"));
+    }
+
+    #[test]
+    fn auth_read_kv_omits_storage_param() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-read\r\nuuid12345678901234\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\n",
+        );
+        let mut sess = session(mock);
+        let _ = sess.auth_read(AuthStorage::Kv);
+        assert!(sess.port.sent_str().contains("auth-read\r\n"));
+        assert!(!sess.port.sent_str().contains("auth-read 0\r\n"));
+    }
+
+    #[test]
+    fn auth_read_otp_appends_storage_param() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-read 1\r\nuuid12345678901234\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\n",
+        );
+        let mut sess = session(mock);
+        let result = sess.auth_read(AuthStorage::Otp);
+        assert!(sess.port.sent_str().contains("auth-read 1\r\n"));
+        assert_eq!(
+            result,
+            Some((
+                "uuid12345678901234".to_string(),
+                "keyabcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
     }
 }
