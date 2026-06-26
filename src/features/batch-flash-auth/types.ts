@@ -70,7 +70,12 @@ export interface BatchAuthProgressEvent {
 export interface BatchAuthStartConfig {
   chipId: string;
   baudRate: number;
+  authBaudRate: number;
   firmwarePath?: string;
+  /** Flash start address for the firmware (e.g. "0x00000000"). Required when firmwarePath is set. */
+  flashStartHex?: string;
+  /** Flash end address for the firmware (e.g. "0x001EDFFF"). Required when firmwarePath is set. */
+  flashEndHex?: string;
   excelPath: string;
   conflictPolicy: "skip" | "overwrite";
 }
