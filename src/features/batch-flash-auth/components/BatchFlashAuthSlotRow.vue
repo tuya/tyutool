@@ -53,7 +53,15 @@ const FLASH_PHASE_STATUS_LABELS = computed<Record<string, string>>(() => ({
   verify: t("batchFlashAuth.status.verifying"),
 }));
 
+const isLockFailed = computed(
+  () =>
+    props.portSlot.status === "failed" && props.portSlot.lockFailed === true,
+);
+
 const statusLabel = computed(() => {
+  if (isLockFailed.value) {
+    return t("batchFlashAuth.slot.lockFailedBadge");
+  }
   if (props.portSlot.status === "flashing" && props.portSlot.currentPhase) {
     return (
       FLASH_PHASE_STATUS_LABELS.value[props.portSlot.currentPhase] ??
@@ -90,6 +98,8 @@ const BORDER_COLORS: Record<string, string> = {
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
 const rowBg = computed(() => {
+  if (isLockFailed.value)
+    return "color-mix(in srgb, var(--ty-danger) 12%, transparent)";
   if (props.portSlot.status === "failed")
     return "color-mix(in srgb, var(--ty-danger) 6%, transparent)";
   if (props.portSlot.status === "no_code")
@@ -169,10 +179,23 @@ function showExcelError(): void {
   </Teleport>
 
   <div
-    class="flex h-10 min-w-0 items-center gap-3 border-l-[3px] px-3 text-sm transition-colors"
+    class="relative flex h-10 min-w-0 items-center gap-3 px-3 text-sm transition-colors"
+    :class="isLockFailed ? 'border-l-[4px]' : 'border-l-[3px]'"
     :style="{ borderLeftColor: borderColor, backgroundColor: rowBg }"
     @contextmenu="onContextMenu"
   >
+    <span
+      v-if="isLockFailed"
+      class="absolute right-1 top-0.5 flex size-4 items-center justify-center"
+      :style="{ color: 'var(--ty-danger)' }"
+      :title="t('batchFlashAuth.slot.lockFailedLabel')"
+    >
+      <FontAwesomeIcon
+        :icon="['fas', 'triangle-exclamation']"
+        class="size-3.5"
+        aria-hidden="true"
+      />
+    </span>
     <!-- Port name -->
     <span class="w-20 shrink-0 font-mono text-xs text-[var(--ty-text)]">{{
       portSlot.port
@@ -364,7 +387,7 @@ function showExcelError(): void {
         {{ t("batchFlashAuth.slot.cancel") }}
       </button>
       <button
-        v-if="portSlot.status === 'failed'"
+        v-if="portSlot.status === 'failed' && !portSlot.lockFailed"
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
         @click="$emit('retry', portSlot.port)"
