@@ -578,7 +578,10 @@
       "noFailedPorts": "暂无失败端口",
       "selectExcelFirst": "请先选择授权表",
       "noIdlePorts": "暂无空闲串口",
-      "excelExhausted": "授权码已全部使用，请补充 Excel 后重试"
+      "excelExhausted": "授权码已全部使用，请补充 Excel 后重试",
+      "readAll": "全部读取",
+      "readAllHint": "读取所有串口的 MAC 和授权状态",
+      "readAllBusy": "任务进行中，不可读取"
     },
     "slot": {
       "port": "串口",
@@ -594,7 +597,12 @@
       "errorTitle": "烧录错误",
       "excelErrorTitle": "Excel 写入失败",
       "noCode": "授权码不足，请补充 Excel 后重试",
-      "blockPort": "屏蔽此端口"
+      "blockPort": "屏蔽此端口",
+      "read": "读取",
+      "readHint": "读取 MAC 和授权状态",
+      "authorized": "已授权",
+      "notAuthorized": "未授权",
+      "readError": "读取失败"
     },
     "status": {
       "idle": "空闲",
