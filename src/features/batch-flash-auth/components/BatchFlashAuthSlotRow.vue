@@ -326,7 +326,7 @@ function showExcelError(): void {
         >{{ portSlot.authUuid }}</span
       >
       <span
-        v-if="portSlot.readError && !portSlot.mac"
+        v-if="portSlot.readError"
         class="min-w-0 truncate text-xs"
         :style="{ color: 'var(--ty-warning, #f59e0b)' }"
         >{{ t("batchFlashAuth.slot.readError") }}</span

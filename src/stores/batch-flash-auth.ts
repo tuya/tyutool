@@ -535,6 +535,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } else if (step === "failed") {
       updateSlot(port, {
         status: "idle",
+        mac: undefined,
+        authUuid: undefined,
+        isAuthorized: undefined,
         readError: ev.error,
       });
     } else if (step === "cancelled") {
