@@ -106,7 +106,10 @@ function toggleLang() {
             class="size-5 shrink-0"
             aria-hidden="true"
           />
-          <span class="min-w-0 truncate">{{ item.label }}</span>
+          <span
+            class="min-w-0 truncate md:whitespace-normal md:overflow-visible md:leading-tight"
+            >{{ item.label }}</span
+          >
         </RouterLink>
       </nav>
 

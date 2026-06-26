@@ -128,57 +128,64 @@ watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
         </div>
       </div>
 
-      <!-- Conflict policy -->
-      <div class="flex items-center gap-4 text-xs text-[var(--ty-text-muted)]">
-        <span>{{ t("batchFlashAuth.config.conflictPolicy") }}：</span>
-        <label class="flex cursor-pointer items-center gap-1">
-          <input
-            type="radio"
-            v-model="store.authConfig.conflictPolicy"
-            value="skip"
-            :disabled="store.isBusy"
-          />
-          {{ t("batchFlashAuth.config.skip") }}
-        </label>
-        <label class="flex cursor-pointer items-center gap-1">
-          <input
-            type="radio"
-            v-model="store.authConfig.conflictPolicy"
-            value="overwrite"
-            :disabled="store.isBusy"
-          />
-          {{ t("batchFlashAuth.config.overwrite") }}
-        </label>
-      </div>
-
-      <!-- Storage mode (T5AI only) -->
-      <div v-if="store.chipId === 't5ai'" class="flex flex-col gap-1.5">
+      <!-- Conflict policy + Storage mode (T5AI): same row when space allows, wraps otherwise -->
+      <div class="flex flex-col gap-1.5">
         <div
-          class="flex items-center gap-4 text-xs text-[var(--ty-text-muted)]"
+          class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--ty-text-muted)]"
         >
-          <span>{{ t("batchFlashAuth.config.storageMode") }}：</span>
-          <label class="flex cursor-pointer items-center gap-1">
-            <input
-              type="radio"
-              v-model="store.authConfig.authStorage"
-              value="kv"
-              :disabled="store.isBusy"
-            />
-            {{ t("batchFlashAuth.config.storageKv") }}
-          </label>
-          <label class="flex cursor-pointer items-center gap-1">
-            <input
-              type="radio"
-              v-model="store.authConfig.authStorage"
-              value="otp"
-              :disabled="store.isBusy"
-            />
-            {{ t("batchFlashAuth.config.storageOtp") }}
-          </label>
+          <!-- Conflict policy group -->
+          <div class="flex shrink-0 items-center gap-4">
+            <span>{{ t("batchFlashAuth.config.conflictPolicy") }}：</span>
+            <label class="flex cursor-pointer items-center gap-1">
+              <input
+                type="radio"
+                v-model="store.authConfig.conflictPolicy"
+                value="skip"
+                :disabled="store.isBusy"
+              />
+              {{ t("batchFlashAuth.config.skip") }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-1">
+              <input
+                type="radio"
+                v-model="store.authConfig.conflictPolicy"
+                value="overwrite"
+                :disabled="store.isBusy"
+              />
+              {{ t("batchFlashAuth.config.overwrite") }}
+            </label>
+          </div>
+          <!-- Storage mode group (T5AI only) -->
+          <div
+            v-if="store.chipId === 't5ai'"
+            class="flex shrink-0 items-center gap-4"
+          >
+            <span>{{ t("batchFlashAuth.config.storageMode") }}：</span>
+            <label class="flex cursor-pointer items-center gap-1">
+              <input
+                type="radio"
+                v-model="store.authConfig.authStorage"
+                value="kv"
+                :disabled="store.isBusy"
+              />
+              {{ t("batchFlashAuth.config.storageKv") }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-1">
+              <input
+                type="radio"
+                v-model="store.authConfig.authStorage"
+                value="otp"
+                :disabled="store.isBusy"
+              />
+              {{ t("batchFlashAuth.config.storageOtp") }}
+            </label>
+          </div>
         </div>
         <!-- OTP irreversibility warning -->
         <div
-          v-if="store.authConfig.authStorage === 'otp'"
+          v-if="
+            store.chipId === 't5ai' && store.authConfig.authStorage === 'otp'
+          "
           class="flex items-start gap-1.5 rounded-lg border border-[var(--ty-warning,#f59e0b)] bg-[color-mix(in_srgb,var(--ty-warning,#f59e0b)_10%,transparent)] px-2.5 py-2 text-xs"
           :style="{ color: 'var(--ty-warning, #f59e0b)' }"
         >
