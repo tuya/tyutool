@@ -549,3 +549,387 @@ describe("useBatchFlashAuthStore firmware source", () => {
     expect(store.defaultFirmwareStatus).toBe("idle");
   });
 });
+
+describe("removeSlot — additional statuses", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("cannot remove a reading_mac slot", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "reading_mac";
+    store.removeSlot("COM3");
+    expect(store.slots).toHaveLength(1);
+  });
+
+  it("cannot remove an authorizing slot", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.removeSlot("COM3");
+    expect(store.slots).toHaveLength(1);
+  });
+
+  it("cannot remove a failed slot", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.removeSlot("COM3");
+    expect(store.slots).toHaveLength(1);
+  });
+});
+
+describe("slot defaults and field merging", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("initial slot has correct default fields including excelError", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    const s = store.slots[0];
+    expect(s.status).toBe("idle");
+    expect(s.progress).toBe(0);
+    expect(s.currentPhase).toBe("");
+    expect(s.mac).toBeUndefined();
+    expect(s.error).toBeUndefined();
+    expect(s.excelError).toBeUndefined();
+  });
+
+  it("updateSlot patch only changes named fields — mac preserved when updating phase", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].mac = "112233445566";
+    store.handleAuthProgress({ port: "COM3", step: "reading_mac" });
+    expect(store.slots[0].mac).toBe("112233445566");
+  });
+
+  it("excelError: undefined in patch clears the field", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].excelError = "row not found";
+    store.handleAuthProgress({ port: "COM3", step: "cancelled" });
+    expect(store.slots[0].excelError).toBeUndefined();
+  });
+});
+
+describe("handleFlashProgress — port isolation", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("only updates the matching port", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.slots[0].status = "flashing";
+    store.slots[1].status = "flashing";
+    store.handleFlashProgress({
+      port: "COM3",
+      event: { kind: "percent", value: 75 },
+    });
+    expect(store.slots[0].progress).toBe(75);
+    expect(store.slots[1].progress).toBe(0);
+  });
+});
+
+describe("handleAuthProgress — excelError", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("skipped step propagates excelError to slot", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "skipped",
+      mac: "aabbccddeeff",
+      excelError: "row not found in spreadsheet",
+    });
+    expect(store.slots[0].excelError).toBe("row not found in spreadsheet");
+  });
+
+  it("skipped step without excelError leaves excelError undefined", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "skipped",
+      mac: "aabbccddeeff",
+    });
+    expect(store.slots[0].excelError).toBeUndefined();
+  });
+
+  it("done step propagates excelError when present in event", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "done",
+      mac: "aabb",
+      excelError: "confirm failed",
+    });
+    expect(store.slots[0].excelError).toBe("confirm failed");
+  });
+});
+
+describe("retryFailed", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("clears excelError on failed slot", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.slots[0].error = "some error";
+    store.slots[0].excelError = "confirm_row failed";
+    await store.retryFailed();
+    expect(store.slots[0].excelError).toBeUndefined();
+  });
+
+  it("clears error on failed slot", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.slots[0].error = "timeout";
+    await store.retryFailed();
+    expect(store.slots[0].error).toBeUndefined();
+  });
+
+  it("only resets failed slots — done and skipped are unchanged", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5", "COM7"]);
+    store.slots[0].status = "failed";
+    store.slots[1].status = "done";
+    store.slots[1].mac = "aabb";
+    store.slots[2].status = "skipped";
+    store.slots[2].mac = "ccdd";
+    await store.retryFailed();
+    expect(store.slots[0].status).toBe("idle");
+    expect(store.slots[1].status).toBe("done");
+    expect(store.slots[1].mac).toBe("aabb");
+    expect(store.slots[2].status).toBe("skipped");
+    expect(store.slots[2].mac).toBe("ccdd");
+  });
+
+  it("is a no-op when canRetry is false (no failed slots)", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.completionBanner = { kind: "all-success", count: 1 };
+    await store.retryFailed();
+    expect(store.completionBanner).not.toBeNull();
+  });
+});
+
+describe("checkBatchCompletion — active slot gate", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("no-ops when any slot is still active", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.batchStartTime = Date.now();
+    store.slots[0].status = "authorizing";
+    store.slots[1].status = "done";
+    store.checkBatchCompletion();
+    expect(store.completionBanner).toBeNull();
+  });
+
+  it("banner appears only after all active slots finish", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.batchStartTime = Date.now();
+    store.currentBatchPorts = ["COM3", "COM5"];
+    store.slots[0].status = "authorizing";
+    store.slots[1].status = "done";
+    store.checkBatchCompletion();
+    expect(store.completionBanner).toBeNull();
+    store.slots[0].status = "done";
+    store.checkBatchCompletion();
+    expect(store.completionBanner?.kind).toBe("all-success");
+  });
+});
+
+describe("resetAuthStats", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("resets only auth cumulative to zero, flash stats unchanged", () => {
+    const store = useBatchFlashAuthStore();
+    store.cumulativeStats.auth = { total: 10, success: 8, fail: 2 };
+    store.cumulativeStats.flash = { total: 5, success: 4, fail: 1 };
+    store.resetAuthStats();
+    expect(store.cumulativeStats.auth).toEqual({
+      total: 0,
+      success: 0,
+      fail: 0,
+    });
+    expect(store.cumulativeStats.flash).toEqual({
+      total: 5,
+      success: 4,
+      fail: 1,
+    });
+  });
+
+  it("subsequent auth events accumulate from zero after reset", () => {
+    const store = useBatchFlashAuthStore();
+    store.cumulativeStats.auth = { total: 10, success: 8, fail: 2 };
+    store.resetAuthStats();
+    store.addPorts(["COM3"]);
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({ port: "COM3", step: "done", mac: "aabb" });
+    expect(store.cumulativeStats.auth.total).toBe(1);
+    expect(store.cumulativeStats.auth.success).toBe(1);
+  });
+});
+
+describe("addBlockedPort / removeBlockedPort", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("addBlockedPort adds to blockedPorts list", () => {
+    const store = useBatchFlashAuthStore();
+    store.addBlockedPort("/dev/ttyUSB0");
+    expect(store.filterConfig.blockedPorts).toContain("/dev/ttyUSB0");
+  });
+
+  it("addBlockedPort removes idle slot that matches the newly blocked port", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["/dev/ttyUSB0", "/dev/ttyUSB1"]);
+    store.addBlockedPort("/dev/ttyUSB0");
+    expect(store.slots.map((s) => s.port)).not.toContain("/dev/ttyUSB0");
+    expect(store.slots.map((s) => s.port)).toContain("/dev/ttyUSB1");
+  });
+
+  it("addBlockedPort does NOT remove an active slot", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["/dev/ttyUSB0"]);
+    store.slots[0].status = "authorizing";
+    store.addBlockedPort("/dev/ttyUSB0");
+    expect(store.slots).toHaveLength(1);
+  });
+
+  it("addBlockedPort is idempotent — no duplicates in blocklist", () => {
+    const store = useBatchFlashAuthStore();
+    store.addBlockedPort("/dev/ttyUSB0");
+    store.addBlockedPort("/dev/ttyUSB0");
+    expect(
+      store.filterConfig.blockedPorts.filter((p) => p === "/dev/ttyUSB0"),
+    ).toHaveLength(1);
+  });
+
+  it("removeBlockedPort removes from blockedPorts list", () => {
+    const store = useBatchFlashAuthStore();
+    store.addBlockedPort("/dev/ttyUSB0");
+    store.removeBlockedPort("/dev/ttyUSB0");
+    expect(store.filterConfig.blockedPorts).not.toContain("/dev/ttyUSB0");
+  });
+
+  it("filterActive reflects blockedPorts non-empty state", () => {
+    const store = useBatchFlashAuthStore();
+    expect(store.filterActive).toBe(false);
+    store.addBlockedPort("/dev/ttyUSB0");
+    expect(store.filterActive).toBe(true);
+    store.removeBlockedPort("/dev/ttyUSB0");
+    expect(store.filterActive).toBe(false);
+  });
+});
+
+describe("isBusy computed", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("is false when all slots are terminal (done / failed / skipped / idle)", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.slots[0].status = "done";
+    store.slots[1].status = "failed";
+    expect(store.isBusy).toBe(false);
+  });
+
+  it("is true for each active status", () => {
+    for (const status of ["flashing", "reading_mac", "authorizing"] as const) {
+      setActivePinia(createPinia());
+      const s = useBatchFlashAuthStore();
+      s.addPorts(["COM3"]);
+      s.slots[0].status = status;
+      expect(s.isBusy).toBe(true);
+    }
+  });
+});
+
+describe("startBatch / cancelAll / cancelPort — web mode no-ops", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("startBatch does not throw and leaves slots unchanged", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    await store.startBatch();
+    expect(store.slots[0].status).toBe("idle");
+  });
+
+  it("cancelAll does not throw", async () => {
+    const store = useBatchFlashAuthStore();
+    await expect(store.cancelAll()).resolves.toBeUndefined();
+  });
+
+  it("cancelPort does not throw", async () => {
+    const store = useBatchFlashAuthStore();
+    await expect(store.cancelPort("COM3")).resolves.toBeUndefined();
+  });
+});
+
+describe("loadPersistedData — web mode", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("is a no-op — returns without throwing", async () => {
+    const store = useBatchFlashAuthStore();
+    await expect(store.loadPersistedData()).resolves.toBeUndefined();
+  });
+
+  it("does not alter state", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "t5ai";
+    store.authConfig.excelPath = "/my/path.xlsx";
+    await store.loadPersistedData();
+    expect(store.authConfig.excelPath).toBe("/my/path.xlsx");
+  });
+});
+
+describe("dismissBanner", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("clears the completion banner", () => {
+    const store = useBatchFlashAuthStore();
+    store.completionBanner = { kind: "all-success", count: 1 };
+    store.dismissBanner();
+    expect(store.completionBanner).toBeNull();
+  });
+});
+
+describe("currentStats computed", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("counts active / done / failed / skipped correctly", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["a", "b", "c", "d", "e"]);
+    store.slots[0].status = "authorizing";
+    store.slots[1].status = "done";
+    store.slots[2].status = "failed";
+    store.slots[3].status = "skipped";
+    expect(store.currentStats).toEqual({
+      active: 1,
+      done: 1,
+      failed: 1,
+      skipped: 1,
+    });
+  });
+});
+
+describe("addPorts — cross-call deduplication", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("deduplicates ports across multiple addPorts calls", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["/dev/ttyUSB0", "/dev/ttyUSB1"]);
+    store.addPorts(["/dev/ttyUSB1", "/dev/ttyUSB2"]);
+    expect(store.slots).toHaveLength(3);
+    expect(store.slots.map((s) => s.port)).toEqual([
+      "/dev/ttyUSB0",
+      "/dev/ttyUSB1",
+      "/dev/ttyUSB2",
+    ]);
+  });
+});
