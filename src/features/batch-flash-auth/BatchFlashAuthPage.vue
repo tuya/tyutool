@@ -28,6 +28,7 @@ watch(
 onMounted(async () => {
   await store.loadPersistedData();
   await store.ensureListener();
+  await store.autoAssign();
 });
 
 onUnmounted(() => {

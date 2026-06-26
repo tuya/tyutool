@@ -1,16 +1,11 @@
 <!-- src/features/batch-flash/components/BatchAuthConfig.vue -->
 <script setup lang="ts">
-import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
-import type { ExcelStats } from "../types";
 
 const { t } = useI18n();
 const store = useBatchFlashAuthStore();
-
-const excelStats = ref<ExcelStats | null>(null);
-const excelError = ref<string | null>(null);
 
 async function browseExcel() {
   if (!isTauriRuntime()) return;
@@ -22,25 +17,6 @@ async function browseExcel() {
     store.authConfig.excelPath = file;
   }
 }
-
-async function validateExcel(path: string) {
-  if (!path || !isTauriRuntime()) {
-    excelStats.value = null;
-    excelError.value = null;
-    return;
-  }
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const stats = await invoke<ExcelStats>("validate_excel_cmd", { path });
-    excelStats.value = stats;
-    excelError.value = null;
-  } catch (e) {
-    excelStats.value = null;
-    excelError.value = String(e);
-  }
-}
-
-watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
 </script>
 
 <template>
@@ -82,39 +58,41 @@ watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
 
         <!-- Validation feedback -->
         <div
-          v-if="excelError"
+          v-if="store.excelError"
           class="text-xs"
           :style="{ color: 'var(--ty-danger)' }"
         >
-          {{ excelError }}
+          {{ store.excelError }}
         </div>
         <div
-          v-else-if="excelStats"
+          v-else-if="store.excelStats"
           class="flex flex-wrap items-center gap-3 text-xs"
         >
           <span class="text-[var(--ty-text-muted)]">
             {{ t("batchFlashAuth.config.excelTotal") }}
             <strong class="text-[var(--ty-text)]">{{
-              excelStats.total
+              store.excelStats.total
             }}</strong>
           </span>
           <span class="text-[var(--ty-text-muted)]">
             {{ t("batchFlashAuth.config.excelUsed") }}
-            <strong class="text-[var(--ty-text)]">{{ excelStats.used }}</strong>
+            <strong class="text-[var(--ty-text)]">{{
+              store.excelStats.used
+            }}</strong>
           </span>
           <span
             :style="{
               color:
-                excelStats.remaining === 0
+                store.excelStats.remaining === 0
                   ? 'var(--ty-danger)'
                   : 'var(--ty-success)',
             }"
           >
             {{ t("batchFlashAuth.config.excelRemaining") }}
-            <strong>{{ excelStats.remaining }}</strong>
+            <strong>{{ store.excelStats.remaining }}</strong>
           </span>
           <span
-            v-if="excelStats.remaining === 0"
+            v-if="store.excelStats.remaining === 0"
             class="flex items-center gap-1 font-medium"
             :style="{ color: 'var(--ty-accent)' }"
           >
