@@ -47,7 +47,7 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <div class="sticky top-0 z-10 bg-[var(--ty-bg)] pb-1">
+    <div class="sticky top-0 z-10 bg-[var(--ty-canvas)] pb-2 pt-1">
       <BatchFlashAuthDashboard />
     </div>
 
