@@ -906,6 +906,37 @@ describe("isBusy computed", () => {
   });
 });
 
+describe("retryFailed — lockFailed exclusion (F-Audit-1)", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("retryFailed does not reset lockFailed slots", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    // lockFailed slot
+    store.slots[0].status = "failed";
+    store.slots[0].lockFailed = true;
+    store.slots[0].error = "otp lock failed";
+    // normal failed slot
+    store.slots[1].status = "failed";
+    store.slots[1].error = "timeout";
+    await store.retryFailed();
+    // lockFailed slot must remain unchanged
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].lockFailed).toBe(true);
+    // normal failed slot must be reset to idle
+    expect(store.slots[1].status).toBe("idle");
+    expect(store.slots[1].error).toBeUndefined();
+  });
+
+  it("canRetry is false when only lockFailed slots remain", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.slots[0].lockFailed = true;
+    expect(store.canRetry).toBe(false);
+  });
+});
+
 describe("startBatch / cancelAll / cancelPort — web mode no-ops", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
