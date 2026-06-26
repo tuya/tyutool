@@ -11,10 +11,17 @@ export interface BatchFirmwareConfig {
   version: string;
 }
 
+export interface BatchSharedConfig {
+  chipId: string;
+  baudRate: number;
+  authBaudRate: number;
+}
+
 const FIRMWARE_KEY = "batch-flash-auth-firmware";
 const CUMULATIVE_KEY = "batch-flash-auth-cumulative";
 const FILTER_KEY = "batch-flash-auth-port-filter";
 const AUTH_CONFIG_KEY = "batch-flash-auth-config";
+const SHARED_CONFIG_KEY = "batch-flash-auth-shared-config";
 const LEGACY_CUMULATIVE_KEY = "batch-flash-cumulative";
 const LEGACY_FILTER_KEY = "batch-flash-port-filter";
 const STORE_FILE = "settings.json";
@@ -24,9 +31,16 @@ export async function loadBatchFlashAuthWorkspace(): Promise<{
   filter: PortFilterConfig | null;
   firmware: BatchFirmwareConfig | null;
   authConfig: BatchAuthConfigData | null;
+  sharedConfig: BatchSharedConfig | null;
 }> {
   if (!isTauriRuntime()) {
-    return { cumulative: null, filter: null, firmware: null, authConfig: null };
+    return {
+      cumulative: null,
+      filter: null,
+      firmware: null,
+      authConfig: null,
+      sharedConfig: null,
+    };
   }
   try {
     const { Store } = await import("@tauri-apps/plugin-store");
@@ -57,13 +71,22 @@ export async function loadBatchFlashAuthWorkspace(): Promise<{
     const authConfig =
       (await store.get<BatchAuthConfigData>(AUTH_CONFIG_KEY)) ?? null;
 
-    return { cumulative, filter, firmware, authConfig };
+    const sharedConfig =
+      (await store.get<BatchSharedConfig>(SHARED_CONFIG_KEY)) ?? null;
+
+    return { cumulative, filter, firmware, authConfig, sharedConfig };
   } catch (e) {
     console.warn(
       "[batch-flash-auth] workspace load failed, using defaults:",
       e,
     );
-    return { cumulative: null, filter: null, firmware: null, authConfig: null };
+    return {
+      cumulative: null,
+      filter: null,
+      firmware: null,
+      authConfig: null,
+      sharedConfig: null,
+    };
   }
 }
 
@@ -120,5 +143,19 @@ export async function saveBatchFlashAuthConfig(
     await store.save();
   } catch (e) {
     console.warn("[batch-flash-auth] auth config save failed:", e);
+  }
+}
+
+export async function saveBatchFlashAuthSharedConfig(
+  cfg: BatchSharedConfig,
+): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const { Store } = await import("@tauri-apps/plugin-store");
+    const store = await Store.load(STORE_FILE);
+    await store.set(SHARED_CONFIG_KEY, cfg);
+    await store.save();
+  } catch (e) {
+    console.warn("[batch-flash-auth] shared config save failed:", e);
   }
 }
