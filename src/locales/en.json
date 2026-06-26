@@ -132,6 +132,7 @@
       "esp32": "USB–UART hard-reset sequence (same as after a flash completes; line mapping depends on the board). Free the serial port first.",
       "esp32c3": "Reset follows the detected USB serial/JTAG path—same as post-flash reset. Free the serial port first.",
       "esp32c6": "Hard reset matches post-flash reset; interface type is auto-detected. Free the serial port first.",
+      "esp32p4": "Hard reset matches post-flash reset; interface type is auto-detected. Free the serial port first.",
       "esp32s3": "Some boards use a USB-JTAG/serial bridge; reset timing matches post-flash reset. Free the serial port first."
     },
     "deviceOps": "Device & operation",
@@ -147,6 +148,7 @@
       "esp32": "ESP32",
       "esp32c3": "ESP32-C3",
       "esp32c6": "ESP32-C6",
+      "esp32p4": "ESP32-P4",
       "esp32s3": "ESP32-S3",
       "bk7231n": "BK7231N",
       "ln882h": "LN882H",
