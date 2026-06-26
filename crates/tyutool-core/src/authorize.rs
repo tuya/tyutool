@@ -739,6 +739,12 @@ pub enum BatchAuthSlotResult {
     Skipped { mac: String, existing_uuid: String },
     /// No auth code available in Excel — device was probed but not written.
     InsufficientCodes { mac: String },
+    /// Auth was written and verified successfully, but the subsequent
+    /// `auth-otp-lock` command failed. The credential **has been written
+    /// to the device's OTP region**, so callers must mark the allocated
+    /// Excel row as used (NOT release it) to avoid handing the same
+    /// UUID/Key out to another device.
+    LockFailed { mac: String, lock_error: String },
     /// Operation was cancelled.
     Cancelled,
 }
@@ -1105,6 +1111,7 @@ pub fn run_batch_auth_slot<F, G>(
     auth_baud_rate: u32,
     conflict_policy: ConflictPolicy,
     auth_storage: AuthStorage,
+    lock_otp: bool,
     cancel: &AtomicBool,
     progress: F,
 ) -> Result<BatchAuthSlotResult, FlashError>
@@ -1221,6 +1228,27 @@ where
             };
             match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
+                    log::info!("[batch-auth] verify ok  port={port} mac={mac} uuid={uuid}");
+                    if lock_otp {
+                        log::warn!(
+                            "[batch-auth] sending auth-otp-lock (irreversible)  port={port} mac={mac}"
+                        );
+                        match sess.auth_otp_lock() {
+                            Ok(()) => {
+                                log::info!(
+                                    "[batch-auth] otp-lock succeeded  port={port} mac={mac}"
+                                );
+                            }
+                            Err(e) => {
+                                let lock_error = e.to_string();
+                                log::warn!(
+                                    "[batch-auth] otp-lock failed  port={port} mac={mac} err={lock_error}"
+                                );
+                                let _ = sess.hardware_reset();
+                                return Ok(BatchAuthSlotResult::LockFailed { mac, lock_error });
+                            }
+                        }
+                    }
                     log::info!("[batch-auth] done  port={port} mac={mac} uuid={uuid}");
                     sess.hardware_reset()?;
                     Ok(BatchAuthSlotResult::Done { mac })
