@@ -237,6 +237,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: None,
             authorize_key: None,
+            authorize_storage: None,
             confirm_overwrite: None,
         };
         let cancel = AtomicBool::new(false);
@@ -267,6 +268,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: None,
             authorize_key: None,
+            authorize_storage: None,
             confirm_overwrite: None,
         };
         let cancel = AtomicBool::new(false);

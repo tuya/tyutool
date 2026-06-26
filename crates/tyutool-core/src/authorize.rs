@@ -487,11 +487,19 @@ impl<T: AuthIo> AuthSession<T> {
     /// Callers must verify success via [`Self::auth_read`] rather than
     /// inspecting the returned lines, since not all firmware versions print
     /// `"Authorization write succeeds."` before rebooting.
-    fn auth_write(&mut self, uuid: &str, authkey: &str, idle: Duration) -> Vec<String> {
-        if self
-            .send_cmd(&format!("auth {} {}", uuid, authkey))
-            .is_err()
-        {
+    fn auth_write(
+        &mut self,
+        uuid: &str,
+        authkey: &str,
+        storage: AuthStorage,
+        idle: Duration,
+    ) -> Vec<String> {
+        let cmd = if storage == AuthStorage::Kv {
+            format!("auth {} {}", uuid, authkey)
+        } else {
+            format!("auth {} {} {}", uuid, authkey, storage.as_u8())
+        };
+        if self.send_cmd(&cmd).is_err() {
             return vec![];
         }
         self.read_response_idle(idle)
@@ -685,6 +693,27 @@ pub enum ConflictPolicy {
     Overwrite,
 }
 
+/// Where to store the authorization credentials.
+/// Passed as the third argument to the `auth` command (0 = KV, 1 = OTP).
+/// `None` / `Kv` is the default and preserves existing behavior.
+/// OTP writes are irreversible — the UI must warn the user before selecting it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthStorage {
+    #[default]
+    Kv,
+    Otp,
+}
+
+impl AuthStorage {
+    fn as_u8(self) -> u8 {
+        match self {
+            AuthStorage::Kv => 0,
+            AuthStorage::Otp => 1,
+        }
+    }
+}
+
 /// Per-step progress marker emitted during a batch auth slot.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -810,7 +839,8 @@ where
                 // Keep 2000ms idle: device may reboot after writing auth on some
                 // firmware builds; a short idle would exit before the reboot banner
                 // and leave drain_boot_output unable to clear it in time.
-                let _lines = sess.auth_write(&uuid, &authkey, Duration::from_millis(2000));
+                let storage = job.authorize_storage.unwrap_or_default();
+                let _lines = sess.auth_write(&uuid, &authkey, storage, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
@@ -921,7 +951,8 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
-                let _lines = sess.auth_write(&uuid, &authkey, Duration::from_millis(2000));
+                let storage = job.authorize_storage.unwrap_or_default();
+                let _lines = sess.auth_write(&uuid, &authkey, storage, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
@@ -1093,7 +1124,8 @@ where
             // Write
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
-            let _lines = sess.auth_write(uuid, authkey, Duration::from_millis(2000));
+            let _lines =
+                sess.auth_write(uuid, authkey, AuthStorage::Kv, Duration::from_millis(2000));
             check_cancel!();
 
             // No 3s settle for new firmware
@@ -1191,7 +1223,8 @@ where
 
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
-            let _lines = sess.auth_write(uuid, authkey, Duration::from_millis(2000));
+            let _lines =
+                sess.auth_write(uuid, authkey, AuthStorage::Kv, Duration::from_millis(2000));
             check_cancel!();
 
             let settle_wait = sess.timing.write_settle_wait;
@@ -1449,7 +1482,12 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response("auth uuid key\r\nAuthorization write succeeds.\r\n");
         let mut sess = session(mock);
-        let _ = sess.auth_write("myuuid", "mykey", Duration::from_millis(200));
+        let _ = sess.auth_write(
+            "myuuid",
+            "mykey",
+            AuthStorage::Kv,
+            Duration::from_millis(200),
+        );
         assert!(sess.port.sent_str().contains("auth myuuid mykey\r\n"));
     }
 
@@ -1661,6 +1699,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: Some("testuuid12345678901".into()),
             authorize_key: Some("testkey1234567890123456789012".into()),
+            authorize_storage: None,
             confirm_overwrite: None,
         };
         // Call inner logic directly via a helper (see note below)
@@ -1677,6 +1716,7 @@ mod tests {
         let _lines = sess.auth_write(
             "testuuid12345678901",
             "testkey1234567890123456789012",
+            AuthStorage::Kv,
             Duration::from_millis(200),
         );
         sess.drain_boot_output();

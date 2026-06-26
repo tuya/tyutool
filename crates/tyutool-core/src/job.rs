@@ -1,3 +1,4 @@
+use crate::authorize::AuthStorage;
 use serde::{Deserialize, Serialize};
 
 /// Mirrors Python `FlashArgv.mode` (write / read); extended for GUI tabs.
@@ -41,6 +42,7 @@ pub struct FlashJob {
     pub firmware_path: Option<String>,
     pub authorize_uuid: Option<String>,
     pub authorize_key: Option<String>,
+    pub authorize_storage: Option<AuthStorage>,
     /// Called when a conflicting credential is found on-device during authorize.
     /// Returns `true` to proceed with overwrite, `false` to abort.
     /// `None` in CLI mode — conflict is always overwritten without prompting.
@@ -72,6 +74,7 @@ impl std::fmt::Debug for FlashJob {
             .field("firmware_path", &self.firmware_path)
             .field("authorize_uuid", &self.authorize_uuid)
             .field("authorize_key", &self.authorize_key)
+            .field("authorize_storage", &self.authorize_storage)
             .field(
                 "confirm_overwrite",
                 &self.confirm_overwrite.as_ref().map(|_| "<closure>"),
@@ -98,6 +101,7 @@ impl Clone for FlashJob {
             firmware_path: self.firmware_path.clone(),
             authorize_uuid: self.authorize_uuid.clone(),
             authorize_key: self.authorize_key.clone(),
+            authorize_storage: self.authorize_storage,
             confirm_overwrite: None, // closures are not Clone
         }
     }

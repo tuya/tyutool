@@ -278,6 +278,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: Some("u".into()),
             authorize_key: None,
+            authorize_storage: None,
             confirm_overwrite: None,
         };
         let s = JobSummary::from_job(&job);
@@ -315,6 +316,7 @@ mod tests {
             firmware_path: None,
             authorize_uuid: None,
             authorize_key: None,
+            authorize_storage: None,
             confirm_overwrite: None,
         };
         let s = JobSummary::from_job(&job);
