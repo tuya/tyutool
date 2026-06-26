@@ -958,3 +958,116 @@ describe("addPorts — cross-call deduplication", () => {
     ]);
   });
 });
+
+describe("lockOtpAfterAuth — initial default", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("is false by default on a fresh store", () => {
+    const store = useBatchFlashAuthStore();
+    expect(store.authConfig.lockOtpAfterAuth).toBe(false);
+  });
+});
+
+describe("lockOtpAfterAuth — runtime reset via watch", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("resets to false when chipId changes away from t5ai", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "t5ai";
+    store.authConfig.authStorage = "otp";
+    store.authConfig.lockOtpAfterAuth = true;
+    await new Promise((r) => setTimeout(r, 0)); // flush watch
+    expect(store.authConfig.lockOtpAfterAuth).toBe(true);
+
+    store.chipId = "esp32";
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store.authConfig.lockOtpAfterAuth).toBe(false);
+  });
+
+  it("resets to false when authStorage changes away from otp", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "t5ai";
+    store.authConfig.authStorage = "otp";
+    store.authConfig.lockOtpAfterAuth = true;
+    await new Promise((r) => setTimeout(r, 0));
+
+    store.authConfig.authStorage = "kv";
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store.authConfig.lockOtpAfterAuth).toBe(false);
+  });
+
+  it("does NOT reset when both chipId=t5ai and authStorage=otp", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "t5ai";
+    store.authConfig.authStorage = "otp";
+    store.authConfig.lockOtpAfterAuth = true;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store.authConfig.lockOtpAfterAuth).toBe(true);
+  });
+});
+
+describe("lockOtpAfterAuth — loadPersistedData forces false", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  it("forces false when persisted config has lockOtpAfterAuth: true", async () => {
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn().mockResolvedValue({
+        authConfig: {
+          excelPath: "/persisted/path.xlsx",
+          conflictPolicy: "overwrite",
+          authStorage: "otp",
+          lockOtpAfterAuth: true,
+        },
+        sharedConfig: {
+          chipId: "t5ai",
+          baudRate: 921600,
+          authBaudRate: 115200,
+        },
+      }),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const store = useStore();
+    await store.loadPersistedData();
+    expect(store.authConfig.lockOtpAfterAuth).toBe(false);
+    expect(store.authConfig.excelPath).toBe("/persisted/path.xlsx");
+  });
+
+  it("forces false when persisted config lacks the field entirely (schema migration)", async () => {
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn().mockResolvedValue({
+        authConfig: {
+          excelPath: "/persisted/path.xlsx",
+          conflictPolicy: "skip",
+          authStorage: "kv",
+          // no lockOtpAfterAuth
+        },
+        sharedConfig: {
+          chipId: "esp32",
+          baudRate: 921600,
+          authBaudRate: 115200,
+        },
+      }),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const store = useStore();
+    await store.loadPersistedData();
+    expect(store.authConfig.lockOtpAfterAuth).toBe(false);
+  });
+});
