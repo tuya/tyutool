@@ -154,7 +154,8 @@ enum Commands {
 // runtime — instead `device_list_matches_registry` asserts the two agree, so a
 // chip added to the registry can't silently drift out of the CLI.
 const SUPPORTED_DEVICES: &[&str] = &[
-    "bk7231n", "t2", "t3", "t1", "t5ai", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32s3",
+    "bk7231n", "t2", "t3", "t1", "t5ai", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32p4",
+    "esp32s3",
 ];
 
 fn chip_value_parser() -> impl TypedValueParser<Value = String> {
@@ -184,7 +185,7 @@ fn chip_value_parser() -> impl TypedValueParser<Value = String> {
 fn default_baud(device: &str) -> u32 {
     match device.to_ascii_lowercase().as_str() {
         "ln882h" => 115200,
-        "esp32" | "esp32c3" | "esp32c6" | "esp32s3" => 460800,
+        "esp32" | "esp32c3" | "esp32c6" | "esp32p4" | "esp32s3" => 460800,
         _ => 921600,
     }
 }
@@ -684,6 +685,7 @@ mod tests {
             ("ESP32", "esp32"),
             ("ESP32C3", "esp32c3"),
             ("ESP32C6", "esp32c6"),
+            ("ESP32P4", "esp32p4"),
             ("ESP32S3", "esp32s3"),
         ];
         for (input, canonical) in cases {
@@ -712,6 +714,7 @@ mod tests {
         assert_eq!(default_baud("esp32"), 460800);
         assert_eq!(default_baud("esp32c3"), 460800);
         assert_eq!(default_baud("esp32c6"), 460800);
+        assert_eq!(default_baud("esp32p4"), 460800);
         assert_eq!(default_baud("esp32s3"), 460800);
         assert_eq!(default_baud("bk7231n"), 921600);
         assert_eq!(default_baud("t5ai"), 921600);

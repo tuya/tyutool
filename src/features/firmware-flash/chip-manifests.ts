@@ -58,6 +58,17 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
       fullChip: { start: "0x00000000", end: "0x007FFFFF" },
     },
   },
+  esp32p4: {
+    rustPluginId: "ESP32P4",
+    defaultBaudRate: 460800,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
+    flashSize: "0x01000000", // 16 MiB
+    eraseRequires4KAlignment: true,
+    erasePresets: {
+      fullChip: { start: "0x00000000", end: "0x00FFFFFF" },
+    },
+  },
   esp32s3: {
     rustPluginId: "ESP32S3",
     defaultBaudRate: 460800,
