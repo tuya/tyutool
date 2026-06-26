@@ -1104,6 +1104,10 @@ where
 /// - `Skipped` → no row was allocated; caller should find-and-confirm the existing row.
 /// - `InsufficientCodes` → no row was allocated; nothing to release.
 /// - `Err`/`Cancelled` → caller should release the Excel row if one was allocated.
+/// - `LockFailed` → auth WAS written to device's OTP region but the
+///   subsequent `auth-otp-lock` failed; caller MUST `confirm_row` (NOT
+///   release) to prevent the same UUID/Key from being handed to another
+///   device whose OTP is still writable.
 pub fn run_batch_auth_slot<F, G>(
     port: &str,
     chip_id: &str,
@@ -1250,7 +1254,11 @@ where
                         }
                     }
                     log::info!("[batch-auth] done  port={port} mac={mac} uuid={uuid}");
-                    sess.hardware_reset()?;
+                    if let Err(e) = sess.hardware_reset() {
+                        log::warn!(
+                            "[batch-auth] hardware_reset after Done failed (eFuse already burned)  port={port} mac={mac} err={e}"
+                        );
+                    }
                     Ok(BatchAuthSlotResult::Done { mac })
                 }
                 Some((rb_uuid, rb_key)) => {
@@ -2076,6 +2084,20 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response(
             "auth-otp-lock\r\n[04-24 10:30:00] [INFO] efuse settling\r\nAuthorization otp lock succeeds.\r\n[04-24 10:30:01] noise\r\ntuya> \r\n",
+        );
+        let mut sess = session(mock);
+        assert!(sess.auth_otp_lock().is_ok());
+    }
+
+    #[test]
+    fn auth_otp_lock_treats_mixed_response_as_success() {
+        // Documents the policy: when both lines appear (e.g. echo residue),
+        // we trust the success line. The device's authoritative state is the
+        // last line printed; we don't expose the parser's order-sensitivity
+        // unless hardware verification reveals a real failure mode.
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-otp-lock\r\nAuthorization otp lock failure.\r\nAuthorization otp lock succeeds.\r\ntuya> \r\n",
         );
         let mut sess = session(mock);
         assert!(sess.auth_otp_lock().is_ok());
