@@ -687,6 +687,8 @@ pub enum BatchAuthSlotResult {
     /// `existing_uuid` is the UUID already on the device, so the caller can
     /// find and confirm that Excel row.
     Skipped { mac: String, existing_uuid: String },
+    /// No auth code available in Excel — device was probed but not written.
+    InsufficientCodes { mac: String },
     /// Operation was cancelled.
     Cancelled,
 }
@@ -1041,14 +1043,15 @@ where
 /// Single-device batch authorization slot: open UART, read MAC, read/write auth, verify.
 ///
 /// The caller pre-allocates `uuid`/`authkey` from an Excel row. On return:
-/// - `Done`/`AlreadyDone` → caller should confirm the Excel row (mark USED).
-/// - `Skipped`/`Err`/`Cancelled` → caller should release the Excel row.
-#[allow(clippy::too_many_arguments)]
-pub fn run_batch_auth_slot<F>(
+/// - `Done` → caller should confirm the Excel row (mark USED).
+/// - `AlreadyDone` → caller should release the Excel row (allocated but not consumed).
+/// - `Skipped` → no row was allocated; caller should find-and-confirm the existing row.
+/// - `InsufficientCodes` → no row was allocated; nothing to release.
+/// - `Err`/`Cancelled` → caller should release the Excel row if one was allocated.
+pub fn run_batch_auth_slot<F, G>(
     port: &str,
     chip_id: &str,
-    uuid: &str,
-    authkey: &str,
+    get_code: G,
     auth_baud_rate: u32,
     conflict_policy: ConflictPolicy,
     auth_storage: AuthStorage,
@@ -1057,6 +1060,7 @@ pub fn run_batch_auth_slot<F>(
 ) -> Result<BatchAuthSlotResult, FlashError>
 where
     F: Fn(BatchAuthStep),
+    G: FnOnce() -> Option<(String, String)>,
 {
     macro_rules! check_cancel {
         () => {
@@ -1066,7 +1070,7 @@ where
         };
     }
 
-    log::info!("[batch-auth] slot start  port={port} chip={chip_id} uuid={uuid}");
+    log::info!("[batch-auth] slot start  port={port} chip={chip_id}");
     let timing = AuthTiming::for_chip(chip_id);
     let mut sess = AuthSession::open(port, timing, auth_baud_rate)?;
     check_cancel!();
@@ -1108,29 +1112,42 @@ where
                 auth
             };
 
-            // Conflict check
+            // Conflict check: if policy=Skip and device already has auth, skip without allocating.
+            if let Some((ref ex_uuid, _)) = existing_auth {
+                if ex_uuid != PLACEHOLDER_UUID && conflict_policy == ConflictPolicy::Skip {
+                    log::info!(
+                        "[batch-auth] skipped  port={port} mac={mac} existing_uuid={ex_uuid}"
+                    );
+                    return Ok(BatchAuthSlotResult::Skipped {
+                        mac,
+                        existing_uuid: ex_uuid.clone(),
+                    });
+                }
+            }
+
+            // Lazily allocate an auth code — only now that we know the device needs one.
+            let (uuid, authkey) = match get_code() {
+                Some(c) => c,
+                None => {
+                    log::info!("[batch-auth] no-code  port={port} mac={mac}");
+                    return Ok(BatchAuthSlotResult::InsufficientCodes { mac });
+                }
+            };
+            log::info!("[batch-auth] allocated  port={port} mac={mac} uuid={uuid}");
+
+            // AlreadyDone: device has the exact credentials we just allocated.
             if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
-                if ex_uuid != PLACEHOLDER_UUID {
-                    if ex_uuid == uuid && ex_key == authkey {
-                        log::info!("[batch-auth] already-done  port={port} mac={mac} uuid={uuid}");
-                        return Ok(BatchAuthSlotResult::AlreadyDone { mac });
-                    }
-                    if conflict_policy == ConflictPolicy::Skip {
-                        log::info!(
-                            "[batch-auth] skipped  port={port} mac={mac} existing_uuid={ex_uuid}"
-                        );
-                        return Ok(BatchAuthSlotResult::Skipped {
-                            mac,
-                            existing_uuid: ex_uuid.clone(),
-                        });
-                    }
+                if ex_uuid != PLACEHOLDER_UUID && ex_uuid == &uuid && ex_key == &authkey {
+                    log::info!("[batch-auth] already-done  port={port} mac={mac} uuid={uuid}");
+                    return Ok(BatchAuthSlotResult::AlreadyDone { mac });
                 }
             }
 
             // Write
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
-            let _lines = sess.auth_write(uuid, authkey, auth_storage, Duration::from_millis(2000));
+            let _lines =
+                sess.auth_write(&uuid, &authkey, auth_storage, Duration::from_millis(2000));
             check_cancel!();
 
             // No 3s settle for new firmware
@@ -1166,7 +1183,7 @@ where
                 }
                 None => {
                     log::warn!(
-                        "[batch-auth] verify-fail  port={port} mac={mac} reason=no-response"
+                        "[batch-auth] verify-fail  port={port} mac={mac} uuid={uuid} reason=no-response"
                     );
                     Err(FlashError::Plugin(
                         "Verification failed: no response from auth-read".into(),
@@ -1208,27 +1225,41 @@ where
                 auth
             };
 
+            // Conflict check: if policy=Skip and device already has auth, skip without allocating.
+            if let Some((ref ex_uuid, _)) = existing_auth {
+                if ex_uuid != PLACEHOLDER_UUID && conflict_policy == ConflictPolicy::Skip {
+                    log::info!("[batch-auth] skipped (old fw)  port={port} mac={mac} existing_uuid={ex_uuid}");
+                    return Ok(BatchAuthSlotResult::Skipped {
+                        mac,
+                        existing_uuid: ex_uuid.clone(),
+                    });
+                }
+            }
+
+            // Lazily allocate an auth code — only now that we know the device needs one.
+            let (uuid, authkey) = match get_code() {
+                Some(c) => c,
+                None => {
+                    log::info!("[batch-auth] no-code (old fw)  port={port} mac={mac}");
+                    return Ok(BatchAuthSlotResult::InsufficientCodes { mac });
+                }
+            };
+            log::info!("[batch-auth] allocated (old fw)  port={port} mac={mac} uuid={uuid}");
+
+            // AlreadyDone: device has the exact credentials we just allocated.
             if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
-                if ex_uuid != PLACEHOLDER_UUID {
-                    if ex_uuid == uuid && ex_key == authkey {
-                        log::info!(
-                            "[batch-auth] already-done (old fw)  port={port} mac={mac} uuid={uuid}"
-                        );
-                        return Ok(BatchAuthSlotResult::AlreadyDone { mac });
-                    }
-                    if conflict_policy == ConflictPolicy::Skip {
-                        log::info!("[batch-auth] skipped (old fw)  port={port} mac={mac} existing_uuid={ex_uuid}");
-                        return Ok(BatchAuthSlotResult::Skipped {
-                            mac,
-                            existing_uuid: ex_uuid.clone(),
-                        });
-                    }
+                if ex_uuid != PLACEHOLDER_UUID && ex_uuid == &uuid && ex_key == &authkey {
+                    log::info!(
+                        "[batch-auth] already-done (old fw)  port={port} mac={mac} uuid={uuid}"
+                    );
+                    return Ok(BatchAuthSlotResult::AlreadyDone { mac });
                 }
             }
 
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
-            let _lines = sess.auth_write(uuid, authkey, auth_storage, Duration::from_millis(2000));
+            let _lines =
+                sess.auth_write(&uuid, &authkey, auth_storage, Duration::from_millis(2000));
             check_cancel!();
 
             let settle_wait = sess.timing.write_settle_wait;
@@ -1271,6 +1302,92 @@ where
             }
         }
     }
+}
+
+// ── Read-only probe ───────────────────────────────────────────────────────
+
+/// Result of a read-only auth probe (no write).
+pub struct ReadAuthProbeResult {
+    /// MAC address as returned by `read_mac`, e.g. `"AA:BB:CC:DD:EE:FF"`.
+    /// `None` if the device did not respond.
+    pub mac: Option<String>,
+    /// UUID from `auth-read`, or `None` when the device is un-authorized
+    /// (including the placeholder `"uuidxxxxxxxxxxxxxxxx"`).
+    pub uuid: Option<String>,
+}
+
+/// Open a serial connection to `port`, reset the device, and read its MAC
+/// address and existing authorization UUID without writing anything.
+///
+/// Mirrors the first half of [`run_batch_auth_slot`] but skips allocation
+/// and all write steps.
+pub fn read_auth_probe(
+    port: &str,
+    chip_id: &str,
+    baud_rate: u32,
+    storage: AuthStorage,
+    cancel: &AtomicBool,
+) -> Result<ReadAuthProbeResult, FlashError> {
+    macro_rules! check_cancel {
+        () => {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+        };
+    }
+
+    log::info!("[batch-auth] read-probe start  port={port} chip={chip_id}");
+    let timing = AuthTiming::for_chip(chip_id);
+    let mut sess = AuthSession::open(port, timing, baud_rate)?;
+    check_cancel!();
+    sess.drain_boot_output();
+    check_cancel!();
+    let firmware = sess.detect_firmware(cancel)?;
+    check_cancel!();
+
+    let old_fw = matches!(firmware, FirmwareKind::Old);
+
+    // Read MAC with retries
+    let mut mac_opt: Option<String> = None;
+    for _ in 0..sess.timing.mac_read_retries {
+        check_cancel!();
+        mac_opt = sess.read_mac();
+        if mac_opt.is_some() {
+            break;
+        }
+        std::thread::sleep(sess.timing.mac_read_retry_ms);
+    }
+    log::info!("[batch-auth] read-probe mac  port={port} mac={mac_opt:?}");
+
+    // Read auth with retries (old firmware uses slower intervals)
+    let retry_ms = if old_fw {
+        sess.timing.auth_read_retry_ms * 4
+    } else {
+        sess.timing.auth_read_retry_ms
+    };
+    let retries = if old_fw {
+        sess.timing.auth_read_retries + 1
+    } else {
+        sess.timing.auth_read_retries
+    };
+    let mut auth: Option<(String, String)> = None;
+    for _ in 0..retries {
+        check_cancel!();
+        auth = sess.auth_read(storage);
+        if auth.is_some() {
+            break;
+        }
+        std::thread::sleep(retry_ms);
+    }
+    log::info!(
+        "[batch-auth] read-probe auth  port={port} has_auth={}",
+        auth.is_some()
+    );
+
+    // Filter out the "un-authorized" placeholder UUID
+    let uuid = auth.filter(|(u, _)| u != PLACEHOLDER_UUID).map(|(u, _)| u);
+
+    Ok(ReadAuthProbeResult { mac: mac_opt, uuid })
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────

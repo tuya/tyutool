@@ -14,7 +14,8 @@ mod tuya_dev_usb;
 mod usb_port_survey;
 
 pub use authorize::{
-    run_batch_auth_slot, AuthStorage, BatchAuthSlotResult, BatchAuthStep, ConflictPolicy,
+    read_auth_probe, run_batch_auth_slot, AuthStorage, BatchAuthSlotResult, BatchAuthStep,
+    ConflictPolicy, ReadAuthProbeResult,
 };
 pub use error::FlashError;
 pub use flash_event::{
