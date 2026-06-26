@@ -122,7 +122,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const canCancel = computed(() => isBusy.value);
   const canRetry = computed(() =>
     slots.value.some(
-      (s) => (s.status === "failed" && !s.lockFailed) || s.status === "no_code",
+      (s) =>
+        (s.status === "failed" && !s.lockFailed && !s.cancelledAfterWrite) ||
+        s.status === "no_code",
     ),
   );
   const canReadAll = computed(() => !isBusy.value && slots.value.length > 0);
@@ -350,7 +352,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!canRetry.value) return;
     completionBanner.value = null;
     for (const slot of slots.value.filter(
-      (s) => (s.status === "failed" && !s.lockFailed) || s.status === "no_code",
+      (s) =>
+        (s.status === "failed" && !s.lockFailed && !s.cancelledAfterWrite) ||
+        s.status === "no_code",
     )) {
       updateSlot(slot.port, {
         status: "idle",
@@ -369,6 +373,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!slot) return;
     if (slot.status !== "failed" && slot.status !== "no_code") return;
     if (slot.lockFailed) return;
+    if (slot.cancelledAfterWrite) return;
     updateSlot(port, {
       status: "idle",
       progress: 0,
@@ -554,6 +559,22 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: undefined,
         excelError: undefined,
       });
+      checkBatchCompletion();
+    } else if (step === "cancelled_after_write") {
+      // auth_write was sent but cancel arrived before verify. The credential
+      // may already be on the device (KV overwritable, OTP permanent).
+      // Surface as failed with quarantine flag so operator can isolate device.
+      updateSlot(port, {
+        status: "failed",
+        error: "Cancelled after auth write — device may carry credential",
+        excelError: ev.excelError,
+        mac: ev.mac,
+        cancelledAfterWrite: true,
+        authUuid: ev.uuid,
+      });
+      cumulativeStats.value.auth.total++;
+      cumulativeStats.value.auth.fail++;
+      scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "flashing" && ev.event) {
       const e = ev.event as FlashProgressPayload;

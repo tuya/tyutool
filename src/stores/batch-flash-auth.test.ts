@@ -906,6 +906,73 @@ describe("isBusy computed", () => {
   });
 });
 
+describe("cancelledAfterWrite (B1 OTP-brick safety)", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("handleAuthProgress sets cancelledAfterWrite and emits failed status when payload step is cancelled_after_write", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "cancelled_after_write",
+      mac: "aabbccddeeff",
+      uuid: "uuid-abc-123",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].cancelledAfterWrite).toBe(true);
+    expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.slots[0].authUuid).toBe("uuid-abc-123");
+    expect(store.slots[0].error).toBe(
+      "Cancelled after auth write — device may carry credential",
+    );
+    expect(store.cumulativeStats.auth.total).toBe(1);
+    expect(store.cumulativeStats.auth.fail).toBe(1);
+  });
+
+  it("canRetry is false when only cancelledAfterWrite slots remain", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.slots[0].cancelledAfterWrite = true;
+    expect(store.canRetry).toBe(false);
+  });
+
+  it("retryFailed does not reset cancelledAfterWrite slots", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    // cancelledAfterWrite slot
+    store.slots[0].status = "failed";
+    store.slots[0].cancelledAfterWrite = true;
+    store.slots[0].error =
+      "Cancelled after auth write — device may carry credential";
+    // normal failed slot
+    store.slots[1].status = "failed";
+    store.slots[1].error = "timeout";
+    await store.retryFailed();
+    // cancelledAfterWrite slot must remain unchanged
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].cancelledAfterWrite).toBe(true);
+    // normal failed slot must be reset to idle
+    expect(store.slots[1].status).toBe("idle");
+    expect(store.slots[1].error).toBeUndefined();
+  });
+
+  it("retryPort refuses to restart a cancelledAfterWrite slot", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.slots[0].cancelledAfterWrite = true;
+    store.slots[0].error =
+      "Cancelled after auth write — device may carry credential";
+    await store.retryPort("COM3");
+    // slot must remain in failed state — not reset to idle
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].cancelledAfterWrite).toBe(true);
+  });
+});
+
 describe("retryFailed — lockFailed exclusion (F-Audit-1)", () => {
   beforeEach(() => setActivePinia(createPinia()));
 

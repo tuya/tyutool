@@ -58,7 +58,20 @@ const isLockFailed = computed(
     props.portSlot.status === "failed" && props.portSlot.lockFailed === true,
 );
 
+const isCancelledAfterWrite = computed(
+  () =>
+    props.portSlot.status === "failed" &&
+    props.portSlot.cancelledAfterWrite === true,
+);
+
+const isQuarantineRequired = computed(
+  () => isLockFailed.value || isCancelledAfterWrite.value,
+);
+
 const statusLabel = computed(() => {
+  if (isCancelledAfterWrite.value) {
+    return t("batchFlashAuth.slot.cancelledAfterWriteBadge");
+  }
   if (isLockFailed.value) {
     return t("batchFlashAuth.slot.lockFailedBadge");
   }
@@ -98,7 +111,7 @@ const BORDER_COLORS: Record<string, string> = {
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
 const rowBg = computed(() => {
-  if (isLockFailed.value)
+  if (isQuarantineRequired.value)
     return "color-mix(in srgb, var(--ty-danger) 12%, transparent)";
   if (props.portSlot.status === "failed")
     return "color-mix(in srgb, var(--ty-danger) 6%, transparent)";
@@ -180,15 +193,19 @@ function showExcelError(): void {
 
   <div
     class="relative flex h-10 min-w-0 items-center gap-3 px-3 text-sm transition-colors"
-    :class="isLockFailed ? 'border-l-[4px]' : 'border-l-[3px]'"
+    :class="isQuarantineRequired ? 'border-l-[4px]' : 'border-l-[3px]'"
     :style="{ borderLeftColor: borderColor, backgroundColor: rowBg }"
     @contextmenu="onContextMenu"
   >
     <span
-      v-if="isLockFailed"
+      v-if="isQuarantineRequired"
       class="absolute right-1 top-0.5 flex size-4 items-center justify-center"
       :style="{ color: 'var(--ty-danger)' }"
-      :title="t('batchFlashAuth.slot.lockFailedLabel')"
+      :title="
+        isCancelledAfterWrite
+          ? t('batchFlashAuth.slot.cancelledAfterWriteLabel')
+          : t('batchFlashAuth.slot.lockFailedLabel')
+      "
     >
       <FontAwesomeIcon
         :icon="['fas', 'triangle-exclamation']"
@@ -317,7 +334,14 @@ function showExcelError(): void {
         </button>
       </div>
       <span
-        v-if="portSlot.lockFailed"
+        v-if="portSlot.cancelledAfterWrite"
+        class="text-xs font-medium"
+        :style="{ color: 'var(--ty-danger)' }"
+      >
+        {{ t("batchFlashAuth.slot.cancelledAfterWriteLabel") }}
+      </span>
+      <span
+        v-else-if="portSlot.lockFailed"
         class="text-xs font-medium"
         :style="{ color: 'var(--ty-danger)' }"
       >
@@ -387,7 +411,11 @@ function showExcelError(): void {
         {{ t("batchFlashAuth.slot.cancel") }}
       </button>
       <button
-        v-if="portSlot.status === 'failed' && !portSlot.lockFailed"
+        v-if="
+          portSlot.status === 'failed' &&
+          !portSlot.lockFailed &&
+          !portSlot.cancelledAfterWrite
+        "
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
         @click="$emit('retry', portSlot.port)"

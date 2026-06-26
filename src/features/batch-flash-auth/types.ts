@@ -41,6 +41,12 @@ export interface BatchSlotState {
    * the operator must physically isolate this device to prevent UUID/Key reuse.
    */
   lockFailed?: boolean;
+  /**
+   * true ⇒ auth write command was sent to device but cancel arrived before
+   * verify completed. KV storage is overwritable; OTP is permanently written.
+   * Operator must physically isolate this device until manually verified.
+   */
+  cancelledAfterWrite?: boolean;
 }
 
 export interface CumulativeStats {
@@ -83,8 +89,10 @@ export interface BatchAuthProgressEvent {
     | "failed"
     | "skipped"
     | "no_code"
-    | "cancelled";
+    | "cancelled"
+    | "cancelled_after_write";
   mac?: string;
+  uuid?: string;
   error?: string;
   excelError?: string;
   event?: unknown;

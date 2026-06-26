@@ -608,6 +608,9 @@
       "readError": "Read failed",
       "lockFailedLabel": "OTP written but eFuse lock failed — physically isolate this device",
       "lockFailedBadge": "Lock failed",
+      "cancelledAfterWriteBadge": "Cancel after write",
+      "cancelledAfterWriteLabel": "Auth was sent to the device but not verified; KV is overwritable, OTP is permanent. Physically isolate this device for manual verification.",
+      "cancelledAfterWriteError": "Cancelled after auth write — device may carry credential",
       "emptyHintNoPorts": "No serial ports detected; insert a device and click Auto Assign"
     },
     "errors": {

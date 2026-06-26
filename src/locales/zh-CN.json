@@ -608,6 +608,9 @@
       "readError": "读取失败",
       "lockFailedLabel": "OTP 已写入但 eFuse 未锁定 — 需物理隔离该设备",
       "lockFailedBadge": "锁失败",
+      "cancelledAfterWriteBadge": "写入后取消",
+      "cancelledAfterWriteLabel": "授权数据已发往设备但未完成验证；KV 可覆盖、OTP 永久写入。请物理隔离并人工核查。",
+      "cancelledAfterWriteError": "授权写入后取消 — 设备可能已携带凭证",
       "emptyHintNoPorts": "未检测到串口；请插入设备后点击自动分配"
     },
     "errors": {
