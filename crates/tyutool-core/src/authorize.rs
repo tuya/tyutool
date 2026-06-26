@@ -1007,6 +1007,7 @@ where
 /// The caller pre-allocates `uuid`/`authkey` from an Excel row. On return:
 /// - `Done`/`AlreadyDone` → caller should confirm the Excel row (mark USED).
 /// - `Skipped`/`Err`/`Cancelled` → caller should release the Excel row.
+#[allow(clippy::too_many_arguments)]
 pub fn run_batch_auth_slot<F>(
     port: &str,
     chip_id: &str,
