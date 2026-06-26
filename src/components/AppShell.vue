@@ -12,6 +12,9 @@ const route = useRoute();
 const { t } = useI18n();
 
 const fullBleedMain = computed(() => route.meta.layout === "fullBleed");
+const fullBleedScrollMain = computed(
+  () => route.meta.layout === "fullBleedScroll",
+);
 const hideChrome = computed(() => route.meta.chrome === "none");
 
 const nav = computed(() =>
@@ -140,7 +143,9 @@ function toggleLang() {
       :class="
         fullBleedMain
           ? 'flex flex-col px-3 py-2 sm:px-4 sm:py-3 md:px-5 md:py-3 max-lg:overflow-y-auto lg:overflow-hidden'
-          : 'overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-8'
+          : fullBleedScrollMain
+            ? 'overflow-y-auto px-3 py-2 sm:px-4 sm:py-3 md:px-5 md:py-3'
+            : 'overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-8'
       "
       role="main"
       tabindex="-1"
@@ -148,7 +153,11 @@ function toggleLang() {
       <div
         class="w-full min-w-0"
         :class="
-          fullBleedMain ? 'flex min-h-0 flex-1 flex-col' : 'mx-auto max-w-5xl'
+          fullBleedMain
+            ? 'flex min-h-0 flex-1 flex-col'
+            : fullBleedScrollMain
+              ? ''
+              : 'mx-auto max-w-5xl'
         "
       >
         <div

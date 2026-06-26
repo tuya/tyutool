@@ -26,7 +26,7 @@ function onRemove(port: string) {
 
 <template>
   <div
-    class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ty-border)]"
+    class="flex flex-col overflow-hidden rounded-xl border border-[var(--ty-border)]"
   >
     <!-- Header row -->
     <div
@@ -39,12 +39,7 @@ function onRemove(port: string) {
     </div>
 
     <!-- Slot rows -->
-    <div
-      v-if="store.slots.length > 0"
-      class="min-h-0 flex-1 overflow-y-auto"
-      aria-live="polite"
-      aria-relevant="text"
-    >
+    <div v-if="store.slots.length > 0" aria-live="polite" aria-relevant="text">
       <BatchFlashAuthSlotRow
         v-for="s in store.slots"
         :key="s.port"
@@ -59,7 +54,7 @@ function onRemove(port: string) {
     <!-- Empty state -->
     <div
       v-else
-      class="flex flex-1 flex-col items-center justify-center gap-2 py-10 text-[var(--ty-text-muted)]"
+      class="flex flex-col items-center justify-center gap-2 py-10 text-[var(--ty-text-muted)]"
     >
       <FontAwesomeIcon :icon="['fas', 'plug']" class="text-3xl opacity-40" />
       <p class="text-sm">{{ t("batchFlashAuth.slot.empty") }}</p>

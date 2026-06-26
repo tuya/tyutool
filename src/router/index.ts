@@ -16,7 +16,7 @@ import { i18n } from "../i18n";
 declare module "vue-router" {
   interface RouteMeta {
     titleKey?: string;
-    layout?: "fullBleed" | "default";
+    layout?: "fullBleed" | "fullBleedScroll" | "default";
   }
 }
 
@@ -54,7 +54,7 @@ export const router = createRouter({
       component: BatchFlashAuthPage,
       meta: {
         titleKey: "toolbox.batchFlashAuth.name",
-        layout: "fullBleed",
+        layout: "fullBleedScroll",
       },
     },
     {
