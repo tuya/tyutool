@@ -102,7 +102,7 @@ function showErrorDetail(): void {
       {{ statusLabel }}
     </span>
 
-    <!-- Progress bar + percent (active states) -->
+    <!-- Progress bar + percent (flash stage with percentage) -->
     <div v-if="showProgress" class="flex min-w-0 flex-1 items-center gap-2">
       <div
         class="h-1 flex-1 overflow-hidden rounded-full"
@@ -119,6 +119,34 @@ function showErrorDetail(): void {
       <span class="w-9 shrink-0 text-right text-xs text-[var(--ty-text-muted)]">
         {{ portSlot.progress }}%
       </span>
+    </div>
+
+    <!-- Active phase text (reading_mac / authorizing with no percentage) -->
+    <div
+      v-else-if="isActive && portSlot.currentPhase"
+      class="flex min-w-0 flex-1 items-center"
+    >
+      <span class="truncate text-xs text-[var(--ty-text-muted)]">
+        {{
+          t(
+            `batchFlashAuth.phase.${portSlot.currentPhase}`,
+            portSlot.currentPhase,
+          )
+        }}
+      </span>
+    </div>
+
+    <!-- MAC address (done / skipped state) -->
+    <div
+      v-else-if="
+        (portSlot.status === 'done' || portSlot.status === 'skipped') &&
+        portSlot.mac
+      "
+      class="flex min-w-0 flex-1 items-center"
+    >
+      <span class="font-mono text-xs text-[var(--ty-text-muted)]">{{
+        portSlot.mac
+      }}</span>
     </div>
 
     <!-- Error summary (failed state) -->

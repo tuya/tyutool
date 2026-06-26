@@ -592,6 +592,13 @@
       "failed": "Failed",
       "skipped": "Skipped"
     },
+    "phase": {
+      "reading_mac": "Reading MAC",
+      "reading_auth": "Reading auth",
+      "writing_auth": "Writing auth",
+      "verifying": "Verifying",
+      "flashing": "Flashing firmware"
+    },
     "filter": {
       "title": "Port Filter",
       "hint": "Add port names to block (exact match, case-insensitive on Windows). Auto-assign will skip these ports.",

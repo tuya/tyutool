@@ -982,6 +982,7 @@ where
         };
     }
 
+    log::info!("[batch-auth] slot start  port={port} chip={chip_id} uuid={uuid}");
     let timing = AuthTiming::for_chip(chip_id);
     let mut sess = AuthSession::open(port, timing)?;
     check_cancel!();
@@ -1006,6 +1007,7 @@ where
                 }
                 mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
             };
+            log::info!("[batch-auth] read mac  port={port} mac={mac}");
 
             // Read existing auth
             progress(BatchAuthStep::ReadingAuth);
@@ -1026,9 +1028,13 @@ where
             if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
                 if ex_uuid != PLACEHOLDER_UUID {
                     if ex_uuid == uuid && ex_key == authkey {
+                        log::info!("[batch-auth] already-done  port={port} mac={mac} uuid={uuid}");
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
                     }
                     if conflict_policy == ConflictPolicy::Skip {
+                        log::info!(
+                            "[batch-auth] skipped  port={port} mac={mac} existing_uuid={ex_uuid}"
+                        );
                         return Ok(BatchAuthSlotResult::Skipped { mac });
                     }
                 }
@@ -1036,6 +1042,7 @@ where
 
             // Write
             progress(BatchAuthStep::WritingAuth);
+            log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
             let _lines = sess.auth_write(uuid, authkey, Duration::from_millis(2000));
             check_cancel!();
 
@@ -1060,15 +1067,24 @@ where
             };
             match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
+                    log::info!("[batch-auth] done  port={port} mac={mac} uuid={uuid}");
                     sess.hardware_reset()?;
                     Ok(BatchAuthSlotResult::Done { mac })
                 }
-                Some((rb_uuid, rb_key)) => Err(FlashError::Plugin(format!(
-                    "Verification failed: wrote ({uuid}, {authkey}), read back ({rb_uuid}, {rb_key})"
-                ))),
-                None => Err(FlashError::Plugin(
-                    "Verification failed: no response from auth-read".into(),
-                )),
+                Some((rb_uuid, rb_key)) => {
+                    log::warn!("[batch-auth] verify-fail  port={port} mac={mac} wrote=({uuid},{authkey}) readback=({rb_uuid},{rb_key})");
+                    Err(FlashError::Plugin(format!(
+                        "Verification failed: wrote ({uuid}, {authkey}), read back ({rb_uuid}, {rb_key})"
+                    )))
+                }
+                None => {
+                    log::warn!(
+                        "[batch-auth] verify-fail  port={port} mac={mac} reason=no-response"
+                    );
+                    Err(FlashError::Plugin(
+                        "Verification failed: no response from auth-read".into(),
+                    ))
+                }
             }
         }
 
@@ -1087,6 +1103,7 @@ where
                 }
                 mac_opt.unwrap_or_else(|| "UNKNOWN".to_string())
             };
+            log::info!("[batch-auth] read mac (old fw)  port={port} mac={mac}");
 
             progress(BatchAuthStep::ReadingAuth);
             let existing_auth = {
@@ -1105,15 +1122,20 @@ where
             if let Some((ref ex_uuid, ref ex_key)) = existing_auth {
                 if ex_uuid != PLACEHOLDER_UUID {
                     if ex_uuid == uuid && ex_key == authkey {
+                        log::info!(
+                            "[batch-auth] already-done (old fw)  port={port} mac={mac} uuid={uuid}"
+                        );
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
                     }
                     if conflict_policy == ConflictPolicy::Skip {
+                        log::info!("[batch-auth] skipped (old fw)  port={port} mac={mac} existing_uuid={ex_uuid}");
                         return Ok(BatchAuthSlotResult::Skipped { mac });
                     }
                 }
             }
 
             progress(BatchAuthStep::WritingAuth);
+            log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
             let _lines = sess.auth_write(uuid, authkey, Duration::from_millis(2000));
             check_cancel!();
 
@@ -1130,14 +1152,21 @@ where
             progress(BatchAuthStep::Verifying);
             match sess.auth_read() {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
+                    log::info!("[batch-auth] done (old fw)  port={port} mac={mac} uuid={uuid}");
                     Ok(BatchAuthSlotResult::Done { mac })
                 }
-                Some((rb_uuid, rb_key)) => Err(FlashError::Plugin(format!(
-                    "Verification failed: wrote ({uuid}, {authkey}), read back ({rb_uuid}, {rb_key})"
-                ))),
-                None => Err(FlashError::Plugin(
-                    "Verification failed: no response from auth-read".into(),
-                )),
+                Some((rb_uuid, rb_key)) => {
+                    log::warn!("[batch-auth] verify-fail (old fw)  port={port} mac={mac} wrote=({uuid},{authkey}) readback=({rb_uuid},{rb_key})");
+                    Err(FlashError::Plugin(format!(
+                        "Verification failed: wrote ({uuid}, {authkey}), read back ({rb_uuid}, {rb_key})"
+                    )))
+                }
+                None => {
+                    log::warn!("[batch-auth] verify-fail (old fw)  port={port} mac={mac} reason=no-response");
+                    Err(FlashError::Plugin(
+                        "Verification failed: no response from auth-read".into(),
+                    ))
+                }
             }
         }
     }
