@@ -598,21 +598,24 @@ fn batch_auth_start(
 
             match result {
                 Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
-                    if let Some(idx) = row_idx {
+                    let excel_err = if let Some(idx) = row_idx {
                         log::info!(
                             "[batch-auth] slot done  port={port_clone} mac={mac} excel_row={idx}"
                         );
-                        let excel_err = alloc_clone.confirm_row(idx, mac.clone()).err();
-                        if let Some(ref e) = excel_err {
+                        let err = alloc_clone.confirm_row(idx, mac.clone()).err();
+                        if let Some(ref e) = err {
                             log::error!("[batch-auth] excel-write-failed  port={port_clone} row={idx} error={e}");
                         }
-                        let mut payload =
-                            serde_json::json!({ "port": port_clone, "step": "done", "mac": mac });
-                        if let Some(e) = excel_err {
-                            payload["excelError"] = serde_json::Value::String(e);
-                        }
-                        let _ = app_clone.emit("batch-auth-progress", payload);
+                        err
+                    } else {
+                        None
+                    };
+                    let mut payload =
+                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac });
+                    if let Some(e) = excel_err {
+                        payload["excelError"] = serde_json::Value::String(e);
                     }
+                    let _ = app_clone.emit("batch-auth-progress", payload);
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
                     // Row was allocated but the device already had these exact credentials;
