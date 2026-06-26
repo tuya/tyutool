@@ -150,6 +150,46 @@ watch(() => store.authConfig.excelPath, validateExcel, { immediate: true });
           {{ t("batchFlashAuth.config.overwrite") }}
         </label>
       </div>
+
+      <!-- Storage mode (T5AI only) -->
+      <div v-if="store.chipId === 't5ai'" class="flex flex-col gap-1.5">
+        <div
+          class="flex items-center gap-4 text-xs text-[var(--ty-text-muted)]"
+        >
+          <span>{{ t("batchFlashAuth.config.storageMode") }}：</span>
+          <label class="flex cursor-pointer items-center gap-1">
+            <input
+              type="radio"
+              v-model="store.authConfig.authStorage"
+              value="kv"
+              :disabled="store.isBusy"
+            />
+            {{ t("batchFlashAuth.config.storageKv") }}
+          </label>
+          <label class="flex cursor-pointer items-center gap-1">
+            <input
+              type="radio"
+              v-model="store.authConfig.authStorage"
+              value="otp"
+              :disabled="store.isBusy"
+            />
+            {{ t("batchFlashAuth.config.storageOtp") }}
+          </label>
+        </div>
+        <!-- OTP irreversibility warning -->
+        <div
+          v-if="store.authConfig.authStorage === 'otp'"
+          class="flex items-start gap-1.5 rounded-lg border border-[var(--ty-warning,#f59e0b)] bg-[color-mix(in_srgb,var(--ty-warning,#f59e0b)_10%,transparent)] px-2.5 py-2 text-xs"
+          :style="{ color: 'var(--ty-warning, #f59e0b)' }"
+        >
+          <FontAwesomeIcon
+            :icon="['fas', 'triangle-exclamation']"
+            class="mt-0.5 size-3 shrink-0"
+            aria-hidden="true"
+          />
+          <span>{{ t("batchFlashAuth.config.storageOtpWarning") }}</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
