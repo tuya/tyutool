@@ -13,12 +13,14 @@ export type BatchOpMode = "auth-only" | "flash-then-auth";
 
 export type BatchSlotStatus =
   | "idle"
+  | "reading"
   | "flashing"
   | "reading_mac"
   | "authorizing"
   | "done"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "no_code";
 
 export interface BatchSlotState {
   port: string;
@@ -26,6 +28,12 @@ export interface BatchSlotState {
   progress: number; // 0–100
   currentPhase: string;
   mac?: string;
+  /** UUID from auth-read (set after a successful read probe). */
+  authUuid?: string;
+  /** true = authorized, false = not authorized, undefined = never probed. */
+  isAuthorized?: boolean;
+  /** Error message from the last read probe (if it failed). */
+  readError?: string;
   error?: string;
   excelError?: string;
 }
@@ -63,11 +71,21 @@ export interface BatchAuthProgressEvent {
     | "done"
     | "failed"
     | "skipped"
+    | "no_code"
     | "cancelled";
   mac?: string;
   error?: string;
   excelError?: string;
   event?: unknown;
+}
+
+/** `batch-auth-read-progress` event from Rust (read-only probe). */
+export interface BatchAuthReadProgressEvent {
+  port: string;
+  step: "done" | "failed" | "cancelled";
+  mac?: string;
+  uuid?: string;
+  error?: string;
 }
 
 /** Mirrors Rust BatchAuthStartConfig. */

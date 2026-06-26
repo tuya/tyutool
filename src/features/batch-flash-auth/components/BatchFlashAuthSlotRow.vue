@@ -1,27 +1,42 @@
 <!-- src/features/batch-flash/components/BatchFlashSlotRow.vue -->
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import type { BatchSlotState } from "../types";
 
 const props = defineProps<{ portSlot: BatchSlotState }>();
-defineEmits<{
+const emit = defineEmits<{
   cancel: [port: string];
   retry: [port: string];
   remove: [port: string];
+  block: [port: string];
 }>();
+
+const contextMenu = ref<{ x: number; y: number } | null>(null);
+
+function onContextMenu(e: MouseEvent) {
+  e.preventDefault();
+  contextMenu.value = { x: e.clientX, y: e.clientY };
+}
+
+function onBlock() {
+  contextMenu.value = null;
+  emit("block", props.portSlot.port);
+}
 
 const { t } = useI18n();
 
 const STATUS_LABELS = computed(() => ({
   idle: t("batchFlashAuth.status.idle"),
+  reading: t("batchFlashAuth.status.reading"),
   flashing: t("batchFlashAuth.status.flashing"),
   reading_mac: t("batchFlashAuth.status.reading_mac"),
   authorizing: t("batchFlashAuth.status.authorizing"),
   done: t("batchFlashAuth.status.done"),
   failed: t("batchFlashAuth.status.failed"),
   skipped: t("batchFlashAuth.status.skipped"),
+  no_code: t("batchFlashAuth.status.no_code"),
 }));
 
 // Maps flash sub-phase keys to a coarser status-level label shown in the badge.
@@ -49,34 +64,42 @@ const statusLabel = computed(() => {
 
 const STATUS_COLORS: Record<string, string> = {
   idle: "var(--ty-text-muted)",
+  reading: "var(--ty-primary)",
   flashing: "var(--ty-primary)",
   reading_mac: "var(--ty-primary)",
   authorizing: "var(--ty-primary)",
   done: "var(--ty-success)",
   failed: "var(--ty-danger)",
   skipped: "var(--ty-text-muted)",
+  no_code: "var(--ty-warning, #f59e0b)",
 };
 const statusColor = computed(() => STATUS_COLORS[props.portSlot.status]);
 
 const BORDER_COLORS: Record<string, string> = {
   idle: "transparent",
+  reading: "var(--ty-primary)",
   flashing: "var(--ty-primary)",
   reading_mac: "var(--ty-primary)",
   authorizing: "var(--ty-primary)",
   done: "var(--ty-success)",
   failed: "var(--ty-danger)",
   skipped: "var(--ty-text-muted)",
+  no_code: "var(--ty-warning, #f59e0b)",
 };
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
-const rowBg = computed(() =>
-  props.portSlot.status === "failed"
-    ? "color-mix(in srgb, var(--ty-danger) 6%, transparent)"
-    : "transparent",
-);
+const rowBg = computed(() => {
+  if (props.portSlot.status === "failed")
+    return "color-mix(in srgb, var(--ty-danger) 6%, transparent)";
+  if (props.portSlot.status === "no_code")
+    return "color-mix(in srgb, var(--ty-warning, #f59e0b) 6%, transparent)";
+  return "transparent";
+});
 
 const isActive = computed(() =>
-  ["flashing", "reading_mac", "authorizing"].includes(props.portSlot.status),
+  ["reading", "flashing", "reading_mac", "authorizing"].includes(
+    props.portSlot.status,
+  ),
 );
 
 const showProgress = computed(
@@ -113,9 +136,39 @@ function showExcelError(): void {
 </script>
 
 <template>
+  <!-- Right-click overlay to dismiss the context menu -->
+  <Teleport to="body">
+    <div
+      v-if="contextMenu"
+      class="fixed inset-0 z-40"
+      @click="contextMenu = null"
+      @contextmenu.prevent="contextMenu = null"
+    />
+    <div
+      v-if="contextMenu"
+      class="fixed z-50 min-w-[10rem] overflow-hidden rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1 shadow-lg"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @click.stop
+    >
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--ty-text)] hover:bg-[var(--ty-surface-muted)]"
+        @click="onBlock"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'ban']"
+          class="size-3.5 text-[var(--ty-text-muted)]"
+          aria-hidden="true"
+        />
+        {{ t("batchFlashAuth.slot.blockPort") }}
+      </button>
+    </div>
+  </Teleport>
+
   <div
     class="flex h-10 min-w-0 items-center gap-3 border-l-[3px] px-3 text-sm transition-colors"
     :style="{ borderLeftColor: borderColor, backgroundColor: rowBg }"
+    @contextmenu="onContextMenu"
   >
     <!-- Port name -->
     <span class="w-20 shrink-0 font-mono text-xs text-[var(--ty-text)]">{{
@@ -167,6 +220,24 @@ function showExcelError(): void {
           )
         }}
       </span>
+    </div>
+
+    <!-- no_code: show MAC if available, plus a hint -->
+    <div
+      v-else-if="portSlot.status === 'no_code'"
+      class="flex min-w-0 flex-1 items-center gap-2"
+    >
+      <span
+        class="truncate text-xs"
+        :style="{ color: 'var(--ty-warning, #f59e0b)' }"
+      >
+        {{ t("batchFlashAuth.slot.noCode") }}
+      </span>
+      <span
+        v-if="portSlot.mac"
+        class="font-mono text-xs text-[var(--ty-text-muted)]"
+        >{{ portSlot.mac }}</span
+      >
     </div>
 
     <!-- MAC address (done / skipped state) -->
@@ -238,18 +309,6 @@ function showExcelError(): void {
         @click="$emit('retry', portSlot.port)"
       >
         {{ t("batchFlashAuth.slot.retry") }}
-      </button>
-      <button
-        v-if="
-          portSlot.status === 'idle' ||
-          portSlot.status === 'done' ||
-          portSlot.status === 'skipped'
-        "
-        type="button"
-        class="ty-btn-secondary min-h-7 cursor-pointer px-2 py-0.5 text-xs text-[var(--ty-text-muted)]"
-        @click="$emit('remove', portSlot.port)"
-      >
-        {{ t("batchFlashAuth.slot.remove") }}
       </button>
     </div>
   </div>

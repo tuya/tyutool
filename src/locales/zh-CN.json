@@ -577,7 +577,8 @@
       "autoAssignHint": "扫描并添加可用串口",
       "noFailedPorts": "暂无失败端口",
       "selectExcelFirst": "请先选择授权表",
-      "noIdlePorts": "暂无空闲串口"
+      "noIdlePorts": "暂无空闲串口",
+      "excelExhausted": "授权码已全部使用，请补充 Excel 后重试"
     },
     "slot": {
       "port": "串口",
@@ -591,10 +592,13 @@
       "emptyHint": "点击「自动分配」扫描可用串口，或手动添加",
       "viewError": "查看完整错误",
       "errorTitle": "烧录错误",
-      "excelErrorTitle": "Excel 写入失败"
+      "excelErrorTitle": "Excel 写入失败",
+      "noCode": "授权码不足，请补充 Excel 后重试",
+      "blockPort": "屏蔽此端口"
     },
     "status": {
       "idle": "空闲",
+      "reading": "读取中",
       "flashing": "烧录中",
       "connecting": "连接中",
       "erasing": "擦除中",
@@ -604,7 +608,8 @@
       "authorizing": "写入授权",
       "done": "成功",
       "failed": "失败",
-      "skipped": "已跳过"
+      "skipped": "已跳过",
+      "no_code": "授权码不足"
     },
     "phase": {
       "reading_mac": "读取MAC",

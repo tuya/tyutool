@@ -577,7 +577,8 @@
       "autoAssignHint": "Scan and add available ports",
       "noFailedPorts": "No failed ports",
       "selectExcelFirst": "Select an auth table first",
-      "noIdlePorts": "No idle ports"
+      "noIdlePorts": "No idle ports",
+      "excelExhausted": "Auth codes exhausted — please add more to the Excel and retry"
     },
     "slot": {
       "port": "Port",
@@ -591,10 +592,13 @@
       "emptyHint": "Click Auto Assign to scan available ports",
       "viewError": "View full error",
       "errorTitle": "Flash error",
-      "excelErrorTitle": "Excel write failed"
+      "excelErrorTitle": "Excel write failed",
+      "noCode": "Insufficient auth codes — add more to Excel and retry",
+      "blockPort": "Block port"
     },
     "status": {
       "idle": "Idle",
+      "reading": "Reading",
       "flashing": "Flashing",
       "connecting": "Connecting",
       "erasing": "Erasing",
@@ -604,7 +608,8 @@
       "authorizing": "Writing Auth",
       "done": "Done",
       "failed": "Failed",
-      "skipped": "Skipped"
+      "skipped": "Skipped",
+      "no_code": "Insufficient Codes"
     },
     "phase": {
       "reading_mac": "Reading MAC",
