@@ -578,7 +578,10 @@
       "noFailedPorts": "No failed ports",
       "selectExcelFirst": "Select an auth table first",
       "noIdlePorts": "No idle ports",
-      "excelExhausted": "Auth codes exhausted — please add more to the Excel and retry"
+      "excelExhausted": "Auth codes exhausted — please add more to the Excel and retry",
+      "readAll": "Read All",
+      "readAllHint": "Read MAC and auth status for all ports",
+      "readAllBusy": "Busy, cannot read now"
     },
     "slot": {
       "port": "Port",
@@ -594,7 +597,12 @@
       "errorTitle": "Flash error",
       "excelErrorTitle": "Excel write failed",
       "noCode": "Insufficient auth codes — add more to Excel and retry",
-      "blockPort": "Block port"
+      "blockPort": "Block port",
+      "read": "Read",
+      "readHint": "Read MAC and auth status",
+      "authorized": "Authorized",
+      "notAuthorized": "Not authorized",
+      "readError": "Read failed"
     },
     "status": {
       "idle": "Idle",
