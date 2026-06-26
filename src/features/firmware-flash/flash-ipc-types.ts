@@ -26,6 +26,8 @@ export interface FlashJobPayload {
   firmwarePath?: string | null;
   authorizeUuid?: string | null;
   authorizeKey?: string | null;
+  /** Storage destination for auth credentials (T5AI only). Not exposed in single-device auth UI yet; defaults to null → kv. */
+  authorizeStorage?: "kv" | "otp" | null;
 }
 
 // Types aligned with tyutool_core::FlashEvent (snake_case JSON tag "kind")
