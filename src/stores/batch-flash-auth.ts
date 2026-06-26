@@ -14,9 +14,11 @@ import {
   type BatchOpMode,
   type CompletionBanner,
   type BatchAuthProgressEvent,
+  type BatchAuthReadProgressEvent,
   type BatchAuthStartConfig,
   type AuthFirmwareEntry,
   type BatchFirmwareSource,
+  type ExcelStats,
 } from "@/features/batch-flash-auth/types";
 import {
   fetchAuthFirmwareManifest,
@@ -37,6 +39,7 @@ import {
 } from "@/stores/batch-flash-auth-workspace";
 
 const ACTIVE_STATUSES: BatchSlotStatus[] = [
+  "reading",
   "flashing",
   "reading_mac",
   "authorizing",
@@ -72,10 +75,13 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const completionBanner = ref<CompletionBanner | null>(null);
   const currentBatchPorts = ref<string[]>([]);
   const firmwareDownloadProgress = ref<number | null>(null);
+  const excelStats = ref<ExcelStats | null>(null);
+  const excelError = ref<string | null>(null);
 
   let unlisten: (() => void) | undefined;
   let unlistenAuth: (() => void) | undefined;
   let unlistenFwProgress: (() => void) | undefined;
+  let unlistenRead: (() => void) | undefined;
   let _saveStatsTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -99,12 +105,21 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   const isBusy = computed(() => currentStats.value.active > 0);
   const canStart = computed(
-    () => slots.value.some((s) => s.status === "idle") && inputsValid.value,
+    () =>
+      slots.value.some(
+        (s) =>
+          s.status === "idle" ||
+          s.status === "failed" ||
+          s.status === "no_code",
+      ) &&
+      inputsValid.value &&
+      (excelStats.value === null || excelStats.value.remaining > 0),
   );
   const canCancel = computed(() => isBusy.value);
   const canRetry = computed(() =>
-    slots.value.some((s) => s.status === "failed"),
+    slots.value.some((s) => s.status === "failed" || s.status === "no_code"),
   );
+  const canReadAll = computed(() => !isBusy.value && slots.value.length > 0);
   const filterActive = computed(
     () => filterConfig.value.blockedPorts.length > 0,
   );
@@ -148,6 +163,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     }
   }
 
+  function blockPort(port: string) {
+    addBlockedPort(port);
+    const slot = findSlot(port);
+    if (slot && !ACTIVE_STATUSES.includes(slot.status)) {
+      slots.value = slots.value.filter((s) => s.port !== port);
+    }
+  }
+
   async function autoAssign() {
     if (!isTauriRuntime()) return;
     const { invoke } = await import("@tauri-apps/api/core");
@@ -158,6 +181,26 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     );
     addPorts(filtered);
   }
+
+  async function validateExcel(path: string) {
+    if (!path || !isTauriRuntime()) {
+      excelStats.value = null;
+      excelError.value = null;
+      return;
+    }
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      excelStats.value = await invoke<ExcelStats>("validate_excel_cmd", {
+        path,
+      });
+      excelError.value = null;
+    } catch (e) {
+      excelStats.value = null;
+      excelError.value = String(e);
+    }
+  }
+
+  watch(() => authConfig.value.excelPath, validateExcel, { immediate: true });
 
   // ── Default-firmware download ─────────────────────────────────────────────
   async function saveFirmwareConfig() {
@@ -236,6 +279,18 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     batchStartTime.value = Date.now();
     completionBanner.value = null;
 
+    for (const slot of slots.value.filter(
+      (s) => s.status === "failed" || s.status === "no_code",
+    )) {
+      updateSlot(slot.port, {
+        status: "idle",
+        progress: 0,
+        currentPhase: "",
+        error: undefined,
+        excelError: undefined,
+      });
+    }
+
     const idlePorts = slots.value
       .filter((s) => s.status === "idle")
       .map((s) => s.port);
@@ -281,7 +336,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   async function retryFailed() {
     if (!canRetry.value) return;
     completionBanner.value = null;
-    for (const slot of slots.value.filter((s) => s.status === "failed")) {
+    for (const slot of slots.value.filter(
+      (s) => s.status === "failed" || s.status === "no_code",
+    )) {
       updateSlot(slot.port, {
         status: "idle",
         progress: 0,
@@ -303,6 +360,42 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!isTauriRuntime()) return;
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("batch_auth_cancel_all");
+  }
+
+  async function readPort(port: string) {
+    if (!isTauriRuntime()) return;
+    const slot = findSlot(port);
+    if (!slot || ACTIVE_STATUSES.includes(slot.status)) return;
+    updateSlot(port, { status: "reading", readError: undefined });
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("batch_auth_read_ports", {
+      config: {
+        chipId: chipId.value,
+        baudRate: authBaudRate.value,
+        authStorage: authConfig.value.authStorage,
+      },
+      ports: [port],
+    });
+  }
+
+  async function readAll() {
+    if (!isTauriRuntime()) return;
+    const readable = slots.value.filter(
+      (s) => !ACTIVE_STATUSES.includes(s.status),
+    );
+    if (!readable.length) return;
+    for (const s of readable) {
+      updateSlot(s.port, { status: "reading", readError: undefined });
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("batch_auth_read_ports", {
+      config: {
+        chipId: chipId.value,
+        baudRate: authBaudRate.value,
+        authStorage: authConfig.value.authStorage,
+      },
+      ports: readable.map((s) => s.port),
+    });
   }
 
   // ── Progress event handler ────────────────────────────────────────────────
@@ -379,6 +472,15 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       cumulativeStats.value.auth.fail++;
       scheduleSaveStats();
       checkBatchCompletion();
+    } else if (step === "no_code") {
+      updateSlot(port, {
+        status: "no_code",
+        currentPhase: "",
+        mac: ev.mac,
+        error: undefined,
+        excelError: undefined,
+      });
+      checkBatchCompletion();
     } else if (step === "skipped") {
       updateSlot(port, {
         status: "skipped",
@@ -419,6 +521,27 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     }
   }
 
+  function handleReadProgress(ev: BatchAuthReadProgressEvent) {
+    const { port, step } = ev;
+    if (!findSlot(port)) return;
+    if (step === "done") {
+      updateSlot(port, {
+        status: "idle",
+        mac: ev.mac,
+        authUuid: ev.uuid,
+        isAuthorized: typeof ev.uuid === "string",
+        readError: undefined,
+      });
+    } else if (step === "failed") {
+      updateSlot(port, {
+        status: "idle",
+        readError: ev.error,
+      });
+    } else if (step === "cancelled") {
+      updateSlot(port, { status: "idle" });
+    }
+  }
+
   function checkBatchCompletion() {
     const anyActive = slots.value.some((s) =>
       ACTIVE_STATUSES.includes(s.status),
@@ -434,7 +557,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         ? slots.value.filter((s) => batchPortSet.has(s.port))
         : slots.value;
     const done = batchSlots.filter((s) => s.status === "done").length;
-    const failed = batchSlots.filter((s) => s.status === "failed").length;
+    const failed = batchSlots.filter(
+      (s) => s.status === "failed" || s.status === "no_code",
+    ).length;
     const skipped = batchSlots.filter((s) => s.status === "skipped").length;
 
     if (done === 0 && failed === 0 && skipped > 0) {
@@ -589,6 +714,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         }
       });
     }
+    if (!unlistenRead) {
+      unlistenRead = await listen<BatchAuthReadProgressEvent>(
+        "batch-auth-read-progress",
+        ({ payload }) => {
+          handleReadProgress(payload);
+        },
+      );
+    }
   }
 
   function cleanup() {
@@ -600,6 +733,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     unlistenAuth = undefined;
     unlistenFwProgress?.();
     unlistenFwProgress = undefined;
+    unlistenRead?.();
+    unlistenRead = undefined;
   }
 
   watch(authConfig, () => void saveAuthConfig(), { deep: true });
@@ -622,6 +757,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     defaultFirmwareStatus,
     defaultFirmwareError,
     firmwareDownloadProgress,
+    excelStats,
+    excelError,
     // Computed
     canFlash,
     opMode,
@@ -631,6 +768,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     canStart,
     canCancel,
     canRetry,
+    canReadAll,
     filterActive,
     batchStartTime,
     // Actions
@@ -645,6 +783,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     retryFailed,
     cancelPort,
     cancelAll,
+    readPort,
+    readAll,
+    blockPort,
     addBlockedPort,
     removeBlockedPort,
     resetFlashStats,
@@ -656,6 +797,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     // Internal (exposed for testing)
     handleFlashProgress,
     handleAuthProgress,
+    handleReadProgress,
     checkBatchCompletion,
     currentBatchPorts,
   };
