@@ -11,6 +11,7 @@ const emit = defineEmits<{
   retry: [port: string];
   remove: [port: string];
   block: [port: string];
+  read: [port: string];
 }>();
 
 const contextMenu = ref<{ x: number; y: number } | null>(null);
@@ -101,6 +102,8 @@ const isActive = computed(() =>
     props.portSlot.status,
   ),
 );
+
+const canRead = computed(() => !isActive.value);
 
 const showProgress = computed(
   () => isActive.value && props.portSlot.progress > 0,
@@ -290,10 +293,59 @@ function showExcelError(): void {
       </button>
     </div>
 
+    <!-- Idle with read-probe results: MAC + auth status -->
+    <div
+      v-else-if="
+        portSlot.status === 'idle' && (portSlot.mac || portSlot.readError)
+      "
+      class="flex min-w-0 flex-1 items-center gap-2"
+    >
+      <span
+        v-if="portSlot.mac"
+        class="font-mono text-xs text-[var(--ty-text-muted)]"
+        >{{ portSlot.mac }}</span
+      >
+      <span
+        v-if="portSlot.isAuthorized !== undefined"
+        class="shrink-0 text-xs"
+        :style="{
+          color: portSlot.isAuthorized
+            ? 'var(--ty-success)'
+            : 'var(--ty-text-muted)',
+        }"
+        >{{
+          portSlot.isAuthorized
+            ? t("batchFlashAuth.slot.authorized")
+            : t("batchFlashAuth.slot.notAuthorized")
+        }}</span
+      >
+      <span
+        v-if="portSlot.authUuid"
+        class="min-w-0 truncate font-mono text-xs text-[var(--ty-text-muted)] opacity-70"
+        :title="portSlot.authUuid"
+        >{{ portSlot.authUuid }}</span
+      >
+      <span
+        v-if="portSlot.readError && !portSlot.mac"
+        class="min-w-0 truncate text-xs"
+        :style="{ color: 'var(--ty-warning, #f59e0b)' }"
+        >{{ t("batchFlashAuth.slot.readError") }}</span
+      >
+    </div>
+
     <div v-else class="flex-1" />
 
     <!-- Action buttons -->
     <div class="flex shrink-0 items-center gap-1">
+      <button
+        v-if="canRead"
+        type="button"
+        class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
+        :title="t('batchFlashAuth.slot.readHint')"
+        @click="$emit('read', portSlot.port)"
+      >
+        {{ t("batchFlashAuth.slot.read") }}
+      </button>
       <button
         v-if="isActive"
         type="button"
