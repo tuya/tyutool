@@ -79,6 +79,21 @@ async function handleAutoAssign() {
           >{{ store.filterConfig.blockedPorts.length }}</span
         >
       </button>
+
+      <button
+        type="button"
+        class="ty-btn-secondary flex items-center gap-1.5 text-sm"
+        :disabled="!store.canReadAll"
+        :title="
+          store.isBusy
+            ? t('batchFlashAuth.toolbar.readAllBusy')
+            : t('batchFlashAuth.toolbar.readAllHint')
+        "
+        @click="store.readAll()"
+      >
+        <FontAwesomeIcon :icon="['fas', 'magnifying-glass']" class="size-3.5" />
+        {{ t("batchFlashAuth.toolbar.readAll") }}
+      </button>
     </div>
 
     <div class="flex-1" />
@@ -115,9 +130,16 @@ async function handleAutoAssign() {
         :title="
           !store.authConfig.excelPath
             ? t('batchFlashAuth.toolbar.selectExcelFirst')
-            : !store.slots.some((s) => s.status === 'idle')
-              ? t('batchFlashAuth.toolbar.noIdlePorts')
-              : undefined
+            : store.excelStats?.remaining === 0
+              ? t('batchFlashAuth.toolbar.excelExhausted')
+              : !store.slots.some(
+                    (s) =>
+                      s.status === 'idle' ||
+                      s.status === 'failed' ||
+                      s.status === 'no_code',
+                  )
+                ? t('batchFlashAuth.toolbar.noIdlePorts')
+                : undefined
         "
         @click="handleStart"
       >
