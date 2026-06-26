@@ -36,6 +36,11 @@ export interface BatchSlotState {
   readError?: string;
   error?: string;
   excelError?: string;
+  /**
+   * true ⇒ auth was written to device OTP but the eFuse lock command failed;
+   * the operator must physically isolate this device to prevent UUID/Key reuse.
+   */
+  lockFailed?: boolean;
 }
 
 export interface CumulativeStats {
@@ -83,6 +88,9 @@ export interface BatchAuthProgressEvent {
   error?: string;
   excelError?: string;
   event?: unknown;
+  /** Present (and true) only when step="failed" was caused by a LockFailed
+   *  result — auth was written to OTP but eFuse lock subsequently failed. */
+  lockFailed?: boolean;
 }
 
 /** `batch-auth-read-progress` event from Rust (read-only probe). */

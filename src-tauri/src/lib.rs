@@ -702,6 +702,7 @@ fn batch_auth_start(
                         "step": "failed",
                         "mac": mac,
                         "error": lock_error,
+                        "lockFailed": true,
                     });
                     if let Some(e) = excel_err {
                         payload["excelError"] = serde_json::Value::String(e);
