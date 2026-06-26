@@ -287,6 +287,7 @@ struct BatchAuthStartConfig {
     excel_path: String,
     conflict_policy: String,
     auth_storage: Option<String>,
+    lock_otp_after_auth: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -445,6 +446,18 @@ fn batch_auth_start(
         _ => tyutool_core::AuthStorage::Kv,
     };
 
+    let lock_otp_after_auth = config.lock_otp_after_auth.unwrap_or(false)
+        && config.chip_id.eq_ignore_ascii_case("t5ai")
+        && matches!(auth_storage, tyutool_core::AuthStorage::Otp);
+
+    if config.lock_otp_after_auth.unwrap_or(false) && !lock_otp_after_auth {
+        log::warn!(
+            "[batch-auth] lock_otp_after_auth requested but suppressed (chip={} storage={:?}); request will not burn eFuse",
+            config.chip_id,
+            auth_storage
+        );
+    }
+
     let allocator = {
         let path = std::path::Path::new(&config.excel_path);
         let mut alloc_guard = state.allocator.lock().map_err(|e| e.to_string())?;
@@ -579,6 +592,7 @@ fn batch_auth_start(
                 config_clone.auth_baud_rate,
                 conflict_policy,
                 auth_storage,
+                lock_otp_after_auth,
                 &cancel_clone,
                 |step| {
                     let step_str = match step {
@@ -666,6 +680,33 @@ fn batch_auth_start(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": "cancelled" }),
                     );
+                }
+                Ok(tyutool_core::BatchAuthSlotResult::LockFailed { mac, lock_error }) => {
+                    let excel_err = if let Some(idx) = row_idx {
+                        log::warn!(
+                            "[batch-auth] slot lock-failed  port={port_clone} mac={mac} excel_row={idx} lock_err={lock_error}"
+                        );
+                        let err = alloc_clone.confirm_row(idx, mac.clone()).err();
+                        if let Some(ref e) = err {
+                            log::error!("[batch-auth] excel-confirm-after-lock-fail failed  port={port_clone} row={idx} error={e}");
+                        }
+                        err
+                    } else {
+                        log::warn!(
+                            "[batch-auth] slot lock-failed (no row alloc)  port={port_clone} mac={mac} lock_err={lock_error}"
+                        );
+                        None
+                    };
+                    let mut payload = serde_json::json!({
+                        "port": port_clone,
+                        "step": "failed",
+                        "mac": mac,
+                        "error": lock_error,
+                    });
+                    if let Some(e) = excel_err {
+                        payload["excelError"] = serde_json::Value::String(e);
+                    }
+                    let _ = app_clone.emit("batch-auth-progress", payload);
                 }
                 Err(e) => {
                     if let Some(idx) = row_idx {
