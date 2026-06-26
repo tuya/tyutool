@@ -681,6 +681,33 @@ fn batch_auth_start(
                         serde_json::json!({ "port": port_clone, "step": "cancelled" }),
                     );
                 }
+                Ok(tyutool_core::BatchAuthSlotResult::CancelledAfterWrite { mac, uuid }) => {
+                    let excel_err = if let Some(idx) = row_idx {
+                        log::warn!(
+                            "[batch-auth] slot cancelled AFTER auth_write  port={port_clone} mac={mac} uuid={uuid} excel_row={idx}"
+                        );
+                        let err = alloc_clone.confirm_row(idx, mac.clone()).err();
+                        if let Some(ref e) = err {
+                            log::error!("[batch-auth] excel-confirm-after-cancel-write failed  port={port_clone} row={idx} error={e}");
+                        }
+                        err
+                    } else {
+                        log::warn!(
+                            "[batch-auth] slot cancelled AFTER auth_write (no row alloc)  port={port_clone} mac={mac} uuid={uuid}"
+                        );
+                        None
+                    };
+                    let mut payload = serde_json::json!({
+                        "port": port_clone,
+                        "step": "cancelled_after_write",
+                        "mac": mac,
+                        "uuid": uuid,
+                    });
+                    if let Some(e) = excel_err {
+                        payload["excelError"] = serde_json::Value::String(e);
+                    }
+                    let _ = app_clone.emit("batch-auth-progress", payload);
+                }
                 Ok(tyutool_core::BatchAuthSlotResult::LockFailed { mac, lock_error }) => {
                     let excel_err = if let Some(idx) = row_idx {
                         log::warn!(
