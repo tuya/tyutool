@@ -289,6 +289,14 @@ struct BatchAuthStartConfig {
     auth_storage: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchAuthReadConfig {
+    chip_id: String,
+    baud_rate: u32,
+    auth_storage: Option<String>,
+}
+
 #[tauri::command]
 fn batch_flash_start(
     app: AppHandle,
@@ -481,38 +489,27 @@ fn batch_auth_start(
         }
     }
 
-    // Phase 3: allocate rows and spawn new threads.
+    // Phase 3: spawn threads — auth code allocation happens lazily inside each thread,
+    // after reading the device's existing auth status.
     for port in ports {
-        // Allocate row (outside lock)
-        let row = match allocator.allocate_row() {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = app.emit(
-                    "batch-auth-progress",
-                    serde_json::json!({
-                        "port": port,
-                        "step": "failed",
-                        "error": e
-                    }),
-                );
-                continue;
-            }
-        };
-
-        // 4. Set up cancel + spawn thread
+        // Set up cancel + spawn thread
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let app_clone = app.clone();
         let port_clone = port.clone();
         let config_clone = config.clone();
         let alloc_clone = allocator.clone();
-        let row_idx = row.row_idx;
-        let uuid = row.uuid.clone();
-        let authkey = row.authkey.clone();
+
+        // Tracks which Excel row was allocated inside the slot (None = no allocation yet).
+        let allocated_row: std::sync::Arc<std::sync::Mutex<Option<usize>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let allocated_row_clone = allocated_row.clone();
 
         let handle = std::thread::spawn(move || {
-            log::info!("[batch-auth] slot begin  port={port_clone} chip={} excel_row={row_idx} uuid={uuid}",
-                config_clone.chip_id);
+            log::info!(
+                "[batch-auth] slot begin  port={port_clone} chip={}",
+                config_clone.chip_id
+            );
             if let Some(ref fw_path) = config_clone.firmware_path {
                 if !fw_path.is_empty() {
                     let job = tyutool_core::FlashJob {
@@ -547,7 +544,6 @@ fn batch_auth_start(
                         );
                     });
                     if flash_result.is_err() || cancel_clone.load(Ordering::Relaxed) {
-                        alloc_clone.release_row(row_idx);
                         let _ = app_clone.emit(
                             "batch-auth-progress",
                             serde_json::json!({
@@ -562,11 +558,24 @@ fn batch_auth_start(
                 }
             }
 
+            // Lazy allocation closure: called by run_batch_auth_slot only when the device
+            // actually needs a new auth code (after probe confirms no existing auth / overwrite).
+            let alloc_for_get = alloc_clone.clone();
+            let row_cell = allocated_row_clone.clone();
+            let get_code = move || -> Option<(String, String)> {
+                match alloc_for_get.allocate_row() {
+                    Ok(row) => {
+                        *row_cell.lock().unwrap() = Some(row.row_idx);
+                        Some((row.uuid, row.authkey))
+                    }
+                    Err(_) => None,
+                }
+            };
+
             let result = tyutool_core::run_batch_auth_slot(
                 &port_clone,
                 &config_clone.chip_id,
-                &uuid,
-                &authkey,
+                get_code,
                 config_clone.auth_baud_rate,
                 conflict_policy,
                 auth_storage,
@@ -585,27 +594,51 @@ fn batch_auth_start(
                 },
             );
 
+            let row_idx = *allocated_row_clone.lock().unwrap();
+
             match result {
-                Ok(tyutool_core::BatchAuthSlotResult::Done { mac })
-                | Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
-                    log::info!("[batch-auth] slot done  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
-                    let excel_err = alloc_clone.confirm_row(row_idx, mac.clone()).err();
-                    if let Some(ref e) = excel_err {
-                        log::error!("[batch-auth] excel-write-failed  port={port_clone} row={row_idx} error={e}");
+                Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
+                    if let Some(idx) = row_idx {
+                        log::info!(
+                            "[batch-auth] slot done  port={port_clone} mac={mac} excel_row={idx}"
+                        );
+                        let excel_err = alloc_clone.confirm_row(idx, mac.clone()).err();
+                        if let Some(ref e) = excel_err {
+                            log::error!("[batch-auth] excel-write-failed  port={port_clone} row={idx} error={e}");
+                        }
+                        let mut payload =
+                            serde_json::json!({ "port": port_clone, "step": "done", "mac": mac });
+                        if let Some(e) = excel_err {
+                            payload["excelError"] = serde_json::Value::String(e);
+                        }
+                        let _ = app_clone.emit("batch-auth-progress", payload);
                     }
-                    let mut payload =
-                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac });
-                    if let Some(e) = excel_err {
-                        payload["excelError"] = serde_json::Value::String(e);
+                }
+                Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
+                    // Row was allocated but the device already had these exact credentials;
+                    // release it so it remains available for other devices.
+                    if let Some(idx) = row_idx {
+                        log::info!("[batch-auth] slot already-done  port={port_clone} mac={mac} excel_row={idx}");
+                        alloc_clone.release_row(idx);
                     }
-                    let _ = app_clone.emit("batch-auth-progress", payload);
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
+                    );
+                }
+                Ok(tyutool_core::BatchAuthSlotResult::InsufficientCodes { mac }) => {
+                    // No row was allocated — device was probed but there are no codes left.
+                    log::info!("[batch-auth] slot no-code  port={port_clone} mac={mac}");
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "no_code", "mac": mac }),
+                    );
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac, existing_uuid }) => {
-                    log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} existing_uuid={existing_uuid} new_row={row_idx}");
-                    // Release the newly-allocated row (we won't write a new auth code).
-                    alloc_clone.release_row(row_idx);
+                    // No row was allocated (skip decision made before get_code was called).
                     // Mark the device's existing auth-code row as Used so the same
                     // code isn't handed out to another device.
+                    log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} existing_uuid={existing_uuid}");
                     let excel_err = alloc_clone
                         .find_and_confirm_by_uuid(&existing_uuid, mac.clone())
                         .err();
@@ -620,18 +653,28 @@ fn batch_auth_start(
                     let _ = app_clone.emit("batch-auth-progress", payload);
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::Cancelled) => {
-                    log::info!(
-                        "[batch-auth] slot cancelled  port={port_clone} excel_row={row_idx}"
-                    );
-                    alloc_clone.release_row(row_idx);
+                    if let Some(idx) = row_idx {
+                        log::info!(
+                            "[batch-auth] slot cancelled  port={port_clone} excel_row={idx}"
+                        );
+                        alloc_clone.release_row(idx);
+                    }
                     let _ = app_clone.emit(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": "cancelled" }),
                     );
                 }
                 Err(e) => {
-                    log::warn!("[batch-auth] slot failed  port={port_clone} uuid={uuid} excel_row={row_idx} error={e}");
-                    alloc_clone.release_row(row_idx);
+                    if let Some(idx) = row_idx {
+                        log::warn!(
+                            "[batch-auth] slot failed  port={port_clone} excel_row={idx} error={e}"
+                        );
+                        alloc_clone.release_row(idx);
+                    } else {
+                        log::warn!(
+                            "[batch-auth] slot failed (pre-alloc)  port={port_clone} error={e}"
+                        );
+                    }
                     let _ = app_clone.emit(
                         "batch-auth-progress",
                         serde_json::json!({
@@ -675,6 +718,107 @@ fn batch_auth_cancel_all(state: State<'_, BatchAuthState>) -> Result<(), String>
     for slot in slots.values() {
         slot.cancel.store(true, Ordering::SeqCst);
     }
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_auth_read_ports(
+    app: AppHandle,
+    state: State<'_, BatchAuthState>,
+    config: BatchAuthReadConfig,
+    ports: Vec<String>,
+) -> Result<(), String> {
+    let auth_storage = match config.auth_storage.as_deref() {
+        Some("otp") => tyutool_core::AuthStorage::Otp,
+        _ => tyutool_core::AuthStorage::Kv,
+    };
+
+    // Phase 1: cancel any running slot on each port and collect join receivers.
+    let mut old_join_rxs: Vec<(String, std::sync::mpsc::Receiver<()>)> = Vec::new();
+    for port in &ports {
+        let old_slot = {
+            let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
+            slots.remove(port)
+        };
+        if let Some(old) = old_slot {
+            old.cancel.store(true, Ordering::SeqCst);
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                let _ = old.thread.join();
+                let _ = tx.send(());
+            });
+            old_join_rxs.push((port.clone(), rx));
+        }
+    }
+
+    // Phase 2: wait for old threads with a shared 3-second deadline.
+    if !old_join_rxs.is_empty() {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        for (port, rx) in &old_join_rxs {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if rx.recv_timeout(remaining).is_err() {
+                return Err(format!("port {} not stopped; retry in a few seconds", port));
+            }
+        }
+    }
+
+    // Phase 3: spawn one thread per port.
+    for port in ports {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_clone = cancel.clone();
+        let app_clone = app.clone();
+        let port_clone = port.clone();
+        let config_clone = config.clone();
+
+        let handle = std::thread::spawn(move || {
+            let result = tyutool_core::read_auth_probe(
+                &port_clone,
+                &config_clone.chip_id,
+                config_clone.baud_rate,
+                auth_storage,
+                &cancel_clone,
+            );
+            match result {
+                Ok(r) => {
+                    let _ = app_clone.emit(
+                        "batch-auth-read-progress",
+                        serde_json::json!({
+                            "port": port_clone,
+                            "step": "done",
+                            "mac":  r.mac,
+                            "uuid": r.uuid,
+                        }),
+                    );
+                }
+                Err(tyutool_core::FlashError::Cancelled) => {
+                    let _ = app_clone.emit(
+                        "batch-auth-read-progress",
+                        serde_json::json!({ "port": port_clone, "step": "cancelled" }),
+                    );
+                }
+                Err(e) => {
+                    let _ = app_clone.emit(
+                        "batch-auth-read-progress",
+                        serde_json::json!({
+                            "port": port_clone,
+                            "step": "failed",
+                            "error": e.to_string(),
+                        }),
+                    );
+                }
+            }
+        });
+
+        let mut slots = state.slots.lock().map_err(|e| e.to_string())?;
+        slots.insert(
+            port,
+            BatchSlot {
+                cancel,
+                thread: handle,
+            },
+        );
+    }
+
     Ok(())
 }
 
@@ -1478,6 +1622,7 @@ pub fn run() {
             batch_auth_start,
             batch_auth_cancel_port,
             batch_auth_cancel_all,
+            batch_auth_read_ports,
             device_reset_cmd,
             get_file_size,
             check_port_available_cmd,
