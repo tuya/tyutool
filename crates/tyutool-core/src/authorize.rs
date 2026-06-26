@@ -747,6 +747,12 @@ pub enum BatchAuthSlotResult {
     LockFailed { mac: String, lock_error: String },
     /// Operation was cancelled.
     Cancelled,
+    /// `auth_write` was sent to the device but the slot was cancelled
+    /// before verify could confirm. The credential MAY be on the device
+    /// (KV: overwritable; OTP: permanently written). The caller MUST
+    /// `confirm_row` (NOT release) to prevent the same UUID/Key from
+    /// being handed out to another device.
+    CancelledAfterWrite { mac: String, uuid: String },
 }
 
 /// What to do when device already has conflicting auth.
@@ -1209,19 +1215,36 @@ where
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
             let _lines =
                 sess.auth_write(&uuid, &authkey, auth_storage, Duration::from_millis(2000));
-            check_cancel!();
+            // auth_write has no failure indication; assume the command was delivered.
+            let wrote = true;
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
 
             // No 3s settle for new firmware
             sess.drain_boot_output();
             sess.wake_shell();
-            check_cancel!();
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
 
             // Verify
             progress(BatchAuthStep::Verifying);
             let verify_result = {
                 let mut result = None;
                 for _ in 0..sess.timing.auth_read_retries {
-                    check_cancel!();
+                    if cancel.load(Ordering::Relaxed) {
+                        return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                            mac: mac.clone(),
+                            uuid: uuid.clone(),
+                        });
+                    }
                     result = sess.auth_read(auth_storage);
                     if result.is_some() {
                         break;
@@ -1230,6 +1253,8 @@ where
                 }
                 result
             };
+            // wrote is set above; suppress unused-variable warning.
+            let _ = wrote;
             match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                     log::info!("[batch-auth] verify ok  port={port} mac={mac} uuid={uuid}");
@@ -1346,28 +1371,52 @@ where
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
             let _lines =
                 sess.auth_write(&uuid, &authkey, auth_storage, Duration::from_millis(2000));
-            check_cancel!();
+            // auth_write has no failure indication; assume the command was delivered.
+            let wrote = true;
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
 
             let settle_wait = sess.timing.write_settle_wait;
             let wait_end = Instant::now() + settle_wait;
             while Instant::now() < wait_end {
-                check_cancel!();
+                if cancel.load(Ordering::Relaxed) {
+                    return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                        mac: mac.clone(),
+                        uuid: uuid.clone(),
+                    });
+                }
                 std::thread::sleep(Duration::from_millis(200));
             }
             sess.drain_boot_output();
             sess.wake_shell();
-            check_cancel!();
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
 
             progress(BatchAuthStep::Verifying);
             let mut verify_result = None;
             for _ in 0..sess.timing.auth_read_retries {
-                check_cancel!();
+                if cancel.load(Ordering::Relaxed) {
+                    return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                        mac: mac.clone(),
+                        uuid: uuid.clone(),
+                    });
+                }
                 verify_result = sess.auth_read(auth_storage);
                 if verify_result.is_some() {
                     break;
                 }
                 std::thread::sleep(sess.timing.auth_read_retry_ms);
             }
+            // wrote is set above; suppress unused-variable warning.
+            let _ = wrote;
             match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                     log::info!("[batch-auth] done (old fw)  port={port} mac={mac} uuid={uuid}");
