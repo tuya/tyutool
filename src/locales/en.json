@@ -592,6 +592,10 @@
     "status": {
       "idle": "Idle",
       "flashing": "Flashing",
+      "connecting": "Connecting",
+      "erasing": "Erasing",
+      "writing": "Writing",
+      "verifying": "Verifying",
       "reading_mac": "Reading MAC",
       "authorizing": "Writing Auth",
       "done": "Done",
@@ -603,7 +607,19 @@
       "reading_auth": "Reading auth",
       "writing_auth": "Writing auth",
       "verifying": "Verifying",
-      "flashing": "Flashing firmware"
+      "flashing": "Flashing firmware",
+      "handshake": "Handshake",
+      "connect": "Connect",
+      "switch_baud": "Baud switch",
+      "read_flash_id": "Flash ID",
+      "load_ram": "Load RAM",
+      "erase": "Erase",
+      "write": "Write",
+      "write_segment": "Write",
+      "verify": "Verify",
+      "protect": "Protect",
+      "unprotect": "Unprotect",
+      "reboot": "Reboot"
     },
     "filter": {
       "title": "Port Filter",

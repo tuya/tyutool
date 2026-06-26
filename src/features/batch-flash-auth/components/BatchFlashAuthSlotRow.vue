@@ -24,9 +24,28 @@ const STATUS_LABELS = computed(() => ({
   skipped: t("batchFlashAuth.status.skipped"),
 }));
 
-const statusLabel = computed(
-  () => STATUS_LABELS.value[props.portSlot.status] ?? props.portSlot.status,
-);
+// Maps flash sub-phase keys to a coarser status-level label shown in the badge.
+const FLASH_PHASE_STATUS_LABELS = computed<Record<string, string>>(() => ({
+  handshake: t("batchFlashAuth.status.connecting"),
+  connect: t("batchFlashAuth.status.connecting"),
+  switch_baud: t("batchFlashAuth.status.connecting"),
+  read_flash_id: t("batchFlashAuth.status.connecting"),
+  load_ram: t("batchFlashAuth.status.connecting"),
+  erase: t("batchFlashAuth.status.erasing"),
+  write: t("batchFlashAuth.status.writing"),
+  write_segment: t("batchFlashAuth.status.writing"),
+  verify: t("batchFlashAuth.status.verifying"),
+}));
+
+const statusLabel = computed(() => {
+  if (props.portSlot.status === "flashing" && props.portSlot.currentPhase) {
+    return (
+      FLASH_PHASE_STATUS_LABELS.value[props.portSlot.currentPhase] ??
+      STATUS_LABELS.value.flashing
+    );
+  }
+  return STATUS_LABELS.value[props.portSlot.status] ?? props.portSlot.status;
+});
 
 const STATUS_COLORS: Record<string, string> = {
   idle: "var(--ty-text-muted)",

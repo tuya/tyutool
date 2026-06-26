@@ -303,6 +303,19 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   // ── Progress event handler ────────────────────────────────────────────────
+
+  function normalizePhase(phase: unknown): string {
+    if (typeof phase === "string") return phase;
+    if (phase !== null && typeof phase === "object") {
+      if ("write_segment" in (phase as object)) return "write_segment";
+      if ("other" in (phase as object))
+        return (phase as { other: string }).other;
+      const key = Object.keys(phase as object)[0];
+      if (key) return key;
+    }
+    return "unknown";
+  }
+
   function handleFlashProgress(ev: BatchFlashProgressEvent) {
     const { port, event: e } = ev;
     if (!findSlot(port)) return;
@@ -310,7 +323,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (e.kind === "percent") {
       updateSlot(port, { progress: e.value });
     } else if (e.kind === "phase") {
-      updateSlot(port, { currentPhase: String(e.phase) });
+      updateSlot(port, { currentPhase: normalizePhase(e.phase) });
     } else if (e.kind === "done") {
       const r = e.result;
       if ("ok" in r) {
@@ -387,7 +400,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       if (e.kind === "percent") {
         updateSlot(port, { progress: e.value });
       } else if (e.kind === "phase") {
-        updateSlot(port, { status: "flashing", currentPhase: String(e.phase) });
+        updateSlot(port, {
+          status: "flashing",
+          currentPhase: normalizePhase(e.phase),
+        });
       } else if (e.kind === "done" && "ok" in e.result) {
         // Flash sub-step completed; transition to auth phase while waiting for auth events.
         updateSlot(port, {

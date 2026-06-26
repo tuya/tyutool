@@ -592,6 +592,10 @@
     "status": {
       "idle": "空闲",
       "flashing": "烧录中",
+      "connecting": "连接中",
+      "erasing": "擦除中",
+      "writing": "写入中",
+      "verifying": "校验中",
       "reading_mac": "读取MAC",
       "authorizing": "写入授权",
       "done": "成功",
@@ -603,7 +607,19 @@
       "reading_auth": "读取授权",
       "writing_auth": "写入授权",
       "verifying": "校验中",
-      "flashing": "烧录固件"
+      "flashing": "烧录固件",
+      "handshake": "握手",
+      "connect": "连接",
+      "switch_baud": "切换波特率",
+      "read_flash_id": "读取Flash ID",
+      "load_ram": "加载",
+      "erase": "擦除",
+      "write": "写入",
+      "write_segment": "写入",
+      "verify": "校验",
+      "protect": "保护",
+      "unprotect": "解除保护",
+      "reboot": "重启"
     },
     "filter": {
       "title": "串口过滤",
