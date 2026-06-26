@@ -84,7 +84,7 @@
       "restartNow": "立即重启",
       "installing": "正在安装…",
       "toastNew": "发现新版本 v{version}，前往设置页更新",
-      "toastAction": "查看详情",
+      "toastAction": "前往设置",
       "toastClose": "关闭",
       "sourceGithub": "GitHub Releases",
       "sourceGitee": "Gitee Releases",

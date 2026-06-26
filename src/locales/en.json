@@ -84,7 +84,7 @@
       "restartNow": "Restart Now",
       "installing": "Installing…",
       "toastNew": "New version v{version} available. Go to Settings to update.",
-      "toastAction": "View Details",
+      "toastAction": "Open Settings",
       "toastClose": "Close",
       "sourceGithub": "GitHub Releases",
       "sourceGitee": "Gitee Releases",
