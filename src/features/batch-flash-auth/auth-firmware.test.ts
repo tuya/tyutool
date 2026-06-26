@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { filterByChip, AUTH_FIRMWARE_SOURCES } from "./auth-firmware";
+import {
+  filterByChip,
+  AUTH_FIRMWARE_SOURCES,
+  downloadAuthFirmware,
+} from "./auth-firmware";
 import type { AuthFirmwareEntry } from "./types";
 
 const mk = (version: string, chip: string): AuthFirmwareEntry => ({
@@ -67,5 +71,18 @@ describe("AUTH_FIRMWARE_SOURCES", () => {
     for (const s of AUTH_FIRMWARE_SOURCES) {
       expect(s.url).toContain("auth-firmware/auth-firmware.json");
     }
+  });
+});
+
+describe("downloadAuthFirmware", () => {
+  it("throws in web mode (isTauriRuntime=false)", async () => {
+    await expect(
+      downloadAuthFirmware({
+        version: "1.1.0",
+        chip: "t5ai",
+        url: "https://example.com/fw.bin",
+        sha256: "abc123",
+      }),
+    ).rejects.toThrow("download requires desktop runtime");
   });
 });
