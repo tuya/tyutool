@@ -65,6 +65,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const authConfig = ref<BatchAuthConfigData>({
     excelPath: "",
     conflictPolicy: "skip",
+    authStorage: "kv",
   });
   const batchStartTime = ref<number | null>(null);
   const completionBanner = ref<CompletionBanner | null>(null);
@@ -267,6 +268,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       flashEndHex,
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
+      authStorage: authConfig.value.authStorage,
     };
     await invoke("batch_auth_start", { config, ports: idlePorts });
   }
@@ -508,7 +510,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } = await loadBatchFlashAuthWorkspace();
     if (cumulative) cumulativeStats.value = cumulative;
     if (filter) filterConfig.value = filter;
-    if (savedAuthConfig) authConfig.value = savedAuthConfig;
+    if (savedAuthConfig) {
+      authConfig.value = {
+        ...savedAuthConfig,
+        authStorage: (savedAuthConfig.authStorage as "kv" | "otp") ?? "kv",
+      };
+    }
     if (firmware) {
       firmwareSource.value = firmware.source;
       selectedDefaultVersion.value = firmware.version;
