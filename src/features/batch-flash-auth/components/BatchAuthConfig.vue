@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const store = useBatchFlashAuthStore();
 
 async function browseExcel() {
@@ -62,7 +62,11 @@ async function browseExcel() {
           class="text-xs"
           :style="{ color: 'var(--ty-danger)' }"
         >
-          {{ store.excelError }}
+          {{
+            store.excelError && te(store.excelError)
+              ? t(store.excelError)
+              : store.excelError
+          }}
         </div>
         <div
           v-else-if="store.excelStats"

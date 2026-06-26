@@ -415,10 +415,10 @@ fn batch_flash_cancel_all(state: State<'_, BatchFlashState>) -> Result<(), Strin
 fn validate_excel_file(path: &str) -> Result<&std::path::Path, String> {
     let p = std::path::Path::new(path);
     if !p.exists() {
-        return Err("文件不存在".into());
+        return Err("excel.fileNotFound".into());
     }
     if p.extension().and_then(|e| e.to_str()) != Some("xlsx") {
-        return Err("请选择 .xlsx 格式文件".into());
+        return Err("excel.notXlsxFormat".into());
     }
     Ok(p)
 }
@@ -1966,7 +1966,7 @@ mod validate_excel_tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("nope.xlsx");
         let err = validate_excel_file(missing.to_str().unwrap()).unwrap_err();
-        assert_eq!(err, "文件不存在");
+        assert_eq!(err, "excel.fileNotFound");
     }
 
     #[test]
@@ -1975,7 +1975,7 @@ mod validate_excel_tests {
         let p = dir.path().join("data.csv");
         std::fs::write(&p, b"x").unwrap();
         let err = validate_excel_file(p.to_str().unwrap()).unwrap_err();
-        assert_eq!(err, "请选择 .xlsx 格式文件");
+        assert_eq!(err, "excel.notXlsxFormat");
     }
 
     #[test]
