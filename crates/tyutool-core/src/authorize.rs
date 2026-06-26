@@ -1046,6 +1046,7 @@ pub fn run_batch_auth_slot<F>(
     authkey: &str,
     auth_baud_rate: u32,
     conflict_policy: ConflictPolicy,
+    auth_storage: AuthStorage,
     cancel: &AtomicBool,
     progress: F,
 ) -> Result<BatchAuthSlotResult, FlashError>
@@ -1124,8 +1125,7 @@ where
             // Write
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
-            let _lines =
-                sess.auth_write(uuid, authkey, AuthStorage::Kv, Duration::from_millis(2000));
+            let _lines = sess.auth_write(uuid, authkey, auth_storage, Duration::from_millis(2000));
             check_cancel!();
 
             // No 3s settle for new firmware
@@ -1223,8 +1223,7 @@ where
 
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
-            let _lines =
-                sess.auth_write(uuid, authkey, AuthStorage::Kv, Duration::from_millis(2000));
+            let _lines = sess.auth_write(uuid, authkey, auth_storage, Duration::from_millis(2000));
             check_cancel!();
 
             let settle_wait = sess.timing.write_settle_wait;
@@ -1762,5 +1761,35 @@ mod tests {
         // Simulate confirm_overwrite returning false
         let confirmed = false;
         assert!(!confirmed, "should cancel when user declines");
+    }
+
+    #[test]
+    fn auth_write_kv_omits_storage_param() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("Authorization write succeeds.\r\n");
+        let mut sess = session(mock);
+        let _ = sess.auth_write(
+            "myuuid",
+            "mykey",
+            AuthStorage::Kv,
+            Duration::from_millis(200),
+        );
+        // KV is default — must NOT append "0" to stay backward-compatible
+        assert!(sess.port.sent_str().contains("auth myuuid mykey\r\n"));
+        assert!(!sess.port.sent_str().contains("auth myuuid mykey 0\r\n"));
+    }
+
+    #[test]
+    fn auth_write_otp_appends_storage_param() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("Authorization write succeeds.\r\n");
+        let mut sess = session(mock);
+        let _ = sess.auth_write(
+            "myuuid",
+            "mykey",
+            AuthStorage::Otp,
+            Duration::from_millis(200),
+        );
+        assert!(sess.port.sent_str().contains("auth myuuid mykey 1\r\n"));
     }
 }
