@@ -454,6 +454,38 @@ describe("handleAuthProgress", () => {
     expect(store.slots[0].error).toBe("Unknown auth error");
   });
 
+  it("handleAuthProgress sets slot.lockFailed when payload includes lockFailed=true", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "failed",
+      error: "otp lock failed",
+      mac: "aabbccddeeff",
+      lockFailed: true,
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].error).toBe("otp lock failed");
+    expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.slots[0].lockFailed).toBe(true);
+  });
+
+  it("handleAuthProgress does not set lockFailed for normal failed step", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "failed",
+      error: "verify mismatch",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].lockFailed).toBeUndefined();
+  });
+
   it("skipped step: status=skipped, mac saved, auth cumulative NOT incremented", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);

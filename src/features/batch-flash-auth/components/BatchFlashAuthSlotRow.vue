@@ -273,24 +273,33 @@ function showExcelError(): void {
     <!-- Error summary (failed state) -->
     <div
       v-else-if="portSlot.status === 'failed' && portSlot.error"
-      class="flex min-w-0 flex-1 items-center gap-1"
+      class="flex min-w-0 flex-1 flex-col justify-center gap-0.5"
     >
-      <span class="min-w-0 truncate text-xs text-[var(--ty-danger)]">{{
-        portSlot.error
-      }}</span>
-      <button
-        type="button"
-        class="ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
-        :title="t('batchFlashAuth.slot.viewError')"
-        :aria-label="t('batchFlashAuth.slot.viewError')"
-        @click="showErrorDetail"
+      <div class="flex min-w-0 items-center gap-1">
+        <span class="min-w-0 truncate text-xs text-[var(--ty-danger)]">{{
+          portSlot.error
+        }}</span>
+        <button
+          type="button"
+          class="ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
+          :title="t('batchFlashAuth.slot.viewError')"
+          :aria-label="t('batchFlashAuth.slot.viewError')"
+          @click="showErrorDetail"
+        >
+          <FontAwesomeIcon
+            :icon="['fas', 'circle-info']"
+            class="size-3.5"
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+      <span
+        v-if="portSlot.lockFailed"
+        class="text-xs font-medium"
+        :style="{ color: 'var(--ty-danger)' }"
       >
-        <FontAwesomeIcon
-          :icon="['fas', 'circle-info']"
-          class="size-3.5"
-          aria-hidden="true"
-        />
-      </button>
+        {{ t("batchFlashAuth.slot.lockFailedLabel") }}
+      </span>
     </div>
 
     <!-- Idle with read-probe results: MAC + auth status -->
