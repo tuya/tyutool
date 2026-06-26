@@ -27,6 +27,7 @@ export interface BatchSlotState {
   currentPhase: string;
   mac?: string;
   error?: string;
+  excelError?: string;
 }
 
 export interface CumulativeStats {
@@ -60,9 +61,11 @@ export interface BatchAuthProgressEvent {
     | "verifying"
     | "done"
     | "failed"
-    | "skipped";
+    | "skipped"
+    | "cancelled";
   mac?: string;
   error?: string;
+  excelError?: string;
   event?: unknown;
 }
 

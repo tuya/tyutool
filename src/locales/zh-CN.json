@@ -554,10 +554,12 @@
       "selectVersion": "选择版本",
       "firmwareLoading": "正在获取版本列表…",
       "firmwareDownloading": "正在下载固件…",
+      "firmwareDownloadingPct": "正在下载固件… {pct}%",
       "firmwareReady": "固件已就绪",
       "firmwareLoadFailed": "获取版本列表失败",
       "firmwareDownloadFailed": "下载失败",
-      "firmwareNoVersions": "暂无可用版本"
+      "firmwareNoVersions": "暂无可用版本",
+      "firmwareNetworkHint": "（可切换到『本地文件』使用离线固件）"
     },
     "toolbar": {
       "autoAssign": "自动分配",
@@ -582,7 +584,8 @@
       "empty": "暂无串口",
       "emptyHint": "点击「自动分配」扫描可用串口，或手动添加",
       "viewError": "查看完整错误",
-      "errorTitle": "烧录错误"
+      "errorTitle": "烧录错误",
+      "excelErrorTitle": "Excel 写入失败"
     },
     "status": {
       "idle": "空闲",

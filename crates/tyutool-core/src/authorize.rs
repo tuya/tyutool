@@ -69,6 +69,14 @@ struct AuthTiming {
     write_settle_wait: Duration,
     /// Stop draining when silent for this long (per-chip; see table below).
     drain_quiet: Duration,
+    /// Number of attempts when reading MAC (new firmware).
+    mac_read_retries: u8,
+    /// Delay between MAC read retries (ms).
+    mac_read_retry_ms: Duration,
+    /// Number of attempts when reading/verifying auth credentials.
+    auth_read_retries: u32,
+    /// Delay between auth read retries (ms).
+    auth_read_retry_ms: Duration,
 }
 
 // Per-chip timing table — all values in milliseconds.
@@ -78,24 +86,51 @@ struct AuthTiming {
 //   max_wait     ≥ 3 × measured_boot_ready
 //   cmd_idle     ≈ 3 × max_observed_first_byte_rtt
 //   drain_quiet  ≥ 2 × observed post-log-off settle time
+//   mac_retries  / auth_retries: number of attempts (0 = try once, no retry)
+//   mac_retry_ms / auth_retry_ms: wait between retries
 //
 // To add a chip: append one row; record the measurement date in the comment.
 //
-// columns:  chips                              start  int   max   idle settle drain_q
-// columns: chips, start, interval, max_wait, idle, settle, drain_quiet (all ms)
-type ChipTimingRow = (&'static [&'static str], u64, u64, u64, u64, u64, u64);
+// columns: chips, start, int, max, idle, settle, drain_q, mac_ret, mac_ms, auth_ret, auth_ms
+type ChipTimingRow = (
+    &'static [&'static str],
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u8,
+    u64,
+    u32,
+    u64,
+);
 
 #[rustfmt::skip]
 const CHIP_TIMING: &[ChipTimingRow] = &[
-    (&["T5AI", "T5"],                              600,  50,  2100,  50,  3000,   800), // ready ~703ms,  RTT ~11ms
-    (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400), // ready ~1108ms, RTT 20–40ms (2026-06-25)
+    //                                            start  int   max   idle settle drain_q  mac_ret mac_ms auth_ret auth_ms
+    (&["T5AI", "T5"],                              600,  50,  2100,  50,  3000,   800,       3,    500,      2,    200), // ready ~703ms,  RTT ~11ms
+    (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400,       3,    500,      2,    200), // ready ~1108ms, RTT 20–40ms (2026-06-25)
 ];
 
 impl AuthTiming {
     /// Select timing by chip ID (case-insensitive). Unrecognised chip → default.
     fn for_chip(chip_id: &str) -> Self {
         let id = chip_id.to_ascii_uppercase();
-        for &(chips, start, interval, max_wait, idle, settle, drain_q) in CHIP_TIMING {
+        for &(
+            chips,
+            start,
+            interval,
+            max_wait,
+            idle,
+            settle,
+            drain_q,
+            mac_ret,
+            mac_ms,
+            auth_ret,
+            auth_ms,
+        ) in CHIP_TIMING
+        {
             if chips.contains(&id.as_str()) {
                 return Self {
                     boot_probe_start: Duration::from_millis(start),
@@ -104,6 +139,10 @@ impl AuthTiming {
                     cmd_idle_timeout: Duration::from_millis(idle),
                     write_settle_wait: Duration::from_millis(settle),
                     drain_quiet: Duration::from_millis(drain_q),
+                    mac_read_retries: mac_ret,
+                    mac_read_retry_ms: Duration::from_millis(mac_ms),
+                    auth_read_retries: auth_ret,
+                    auth_read_retry_ms: Duration::from_millis(auth_ms),
                 };
             }
         }
@@ -120,6 +159,10 @@ impl Default for AuthTiming {
             cmd_idle_timeout: Duration::from_millis(200),
             write_settle_wait: Duration::from_secs(3),
             drain_quiet: Duration::from_millis(800),
+            mac_read_retries: 3,
+            mac_read_retry_ms: Duration::from_millis(500),
+            auth_read_retries: 2,
+            auth_read_retry_ms: Duration::from_millis(200),
         }
     }
 }
@@ -998,13 +1041,13 @@ where
             progress(BatchAuthStep::ReadingMac);
             let mac = {
                 let mut mac_opt = None;
-                for _ in 0..3u8 {
+                for _ in 0..sess.timing.mac_read_retries {
                     check_cancel!();
                     mac_opt = sess.read_mac();
                     if mac_opt.is_some() {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(500));
+                    std::thread::sleep(sess.timing.mac_read_retry_ms);
                 }
                 mac_opt.ok_or_else(|| FlashError::Plugin("Failed to read MAC address".into()))?
             };
@@ -1014,13 +1057,13 @@ where
             progress(BatchAuthStep::ReadingAuth);
             let existing_auth = {
                 let mut auth = None;
-                for _ in 0..2u32 {
+                for _ in 0..sess.timing.auth_read_retries {
                     check_cancel!();
                     auth = sess.auth_read();
                     if auth.is_some() {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(200));
+                    std::thread::sleep(sess.timing.auth_read_retry_ms);
                 }
                 auth
             };
@@ -1056,13 +1099,13 @@ where
             progress(BatchAuthStep::Verifying);
             let verify_result = {
                 let mut result = None;
-                for _ in 0..2u32 {
+                for _ in 0..sess.timing.auth_read_retries {
                     check_cancel!();
                     result = sess.auth_read();
                     if result.is_some() {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(200));
+                    std::thread::sleep(sess.timing.auth_read_retry_ms);
                 }
                 result
             };
@@ -1094,13 +1137,13 @@ where
             progress(BatchAuthStep::ReadingMac);
             let mac = {
                 let mut mac_opt = None;
-                for _ in 0..3u8 {
+                for _ in 0..sess.timing.mac_read_retries {
                     check_cancel!();
                     mac_opt = sess.read_mac();
                     if mac_opt.is_some() {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(500));
+                    std::thread::sleep(sess.timing.mac_read_retry_ms);
                 }
                 mac_opt.ok_or_else(|| FlashError::Plugin("Failed to read MAC address".into()))?
             };
@@ -1109,13 +1152,15 @@ where
             progress(BatchAuthStep::ReadingAuth);
             let existing_auth = {
                 let mut auth = None;
-                for _ in 0..3u8 {
+                // Old firmware is slower; use 3× the normal auth retry interval.
+                let old_retry_ms = sess.timing.auth_read_retry_ms * 4;
+                for _ in 0..sess.timing.auth_read_retries + 1 {
                     check_cancel!();
                     auth = sess.auth_read();
                     if auth.is_some() {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(800));
+                    std::thread::sleep(old_retry_ms);
                 }
                 auth
             };
@@ -1151,7 +1196,16 @@ where
             check_cancel!();
 
             progress(BatchAuthStep::Verifying);
-            match sess.auth_read() {
+            let mut verify_result = None;
+            for _ in 0..sess.timing.auth_read_retries {
+                check_cancel!();
+                verify_result = sess.auth_read();
+                if verify_result.is_some() {
+                    break;
+                }
+                std::thread::sleep(sess.timing.auth_read_retry_ms);
+            }
+            match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                     log::info!("[batch-auth] done (old fw)  port={port} mac={mac} uuid={uuid}");
                     Ok(BatchAuthSlotResult::Done { mac })

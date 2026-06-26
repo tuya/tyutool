@@ -1,4 +1,4 @@
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { defineStore } from "pinia";
 import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
@@ -32,6 +32,7 @@ import {
   saveBatchFlashAuthCumulative,
   saveBatchFlashAuthFilterConfig,
   saveBatchFlashAuthFirmwareConfig,
+  saveBatchFlashAuthConfig,
 } from "@/stores/batch-flash-auth-workspace";
 
 const ACTIVE_STATUSES: BatchSlotStatus[] = [
@@ -50,6 +51,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   // ── Session state ─────────────────────────────────────────────────────────
   const slots = ref<BatchSlotState[]>([]);
+  // O(1) port→slot lookup; kept in sync by addPorts/removeSlot/addBlockedPort.
+  // Falls back to linear scan for test cases that assign store.slots directly.
+  const _slotMap = new Map<string, BatchSlotState>();
   const chipId = ref<string>("esp32");
   const baudRate = ref<number>(115200);
   const authBaudRate = ref<number>(115200);
@@ -68,9 +72,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const batchStartTime = ref<number | null>(null);
   const completionBanner = ref<CompletionBanner | null>(null);
   const currentBatchPorts = ref<string[]>([]);
+  const firmwareDownloadProgress = ref<number | null>(null);
 
   let unlisten: (() => void) | undefined;
   let unlistenAuth: (() => void) | undefined;
+  let unlistenFwProgress: (() => void) | undefined;
+  let _saveStatsTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ── Computed ──────────────────────────────────────────────────────────────
   const canFlash = computed(() =>
@@ -105,7 +112,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   // ── Slot helpers ──────────────────────────────────────────────────────────
   function findSlot(port: string): BatchSlotState | undefined {
-    return slots.value.find((s) => s.port === port);
+    return _slotMap.get(port) ?? slots.value.find((s) => s.port === port);
   }
 
   function updateSlot(port: string, patch: Partial<BatchSlotState>) {
@@ -118,12 +125,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     const existing = new Set(slots.value.map((s) => s.port));
     for (const port of ports) {
       if (!existing.has(port)) {
-        slots.value.push({
+        const entry: BatchSlotState = {
           port,
           status: "idle",
           progress: 0,
           currentPhase: "",
-        });
+        };
+        slots.value.push(entry);
+        _slotMap.set(port, entry);
         existing.add(port);
       }
     }
@@ -138,6 +147,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       slot.status === "skipped"
     ) {
       slots.value = slots.value.filter((s) => s.port !== port);
+      _slotMap.delete(port);
     }
   }
 
@@ -182,6 +192,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     void saveFirmwareConfig();
     defaultFirmwareStatus.value = "downloading";
     defaultFirmwareError.value = "";
+    firmwareDownloadProgress.value = 0;
     try {
       firmwarePath.value = await downloadAuthFirmware(entry);
       defaultFirmwareStatus.value = "ready";
@@ -189,6 +200,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       firmwarePath.value = "";
       defaultFirmwareStatus.value = "error";
       defaultFirmwareError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      firmwareDownloadProgress.value = null;
     }
   }
 
@@ -315,7 +328,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         // cancelled — not counted in cumulative
         updateSlot(port, { status: "idle", progress: 0, currentPhase: "" });
       }
-      void saveCumulativeStats();
+      scheduleSaveStats();
       checkBatchCompletion();
     }
   }
@@ -338,10 +351,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         progress: 100,
         currentPhase: "",
         mac: ev.mac,
+        excelError: ev.excelError,
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.success++;
-      void saveCumulativeStats();
+      scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "failed") {
       updateSlot(port, {
@@ -350,10 +364,21 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.fail++;
-      void saveCumulativeStats();
+      scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "skipped") {
       updateSlot(port, { status: "skipped", currentPhase: "", mac: ev.mac });
+      checkBatchCompletion();
+    } else if (step === "cancelled") {
+      // Rust cancelled the slot (e.g. user hit cancel mid-flight).
+      // Reset to idle so the slot can be retried without remove+re-add.
+      updateSlot(port, {
+        status: "idle",
+        progress: 0,
+        currentPhase: "",
+        error: undefined,
+        excelError: undefined,
+      });
       checkBatchCompletion();
     } else if (step === "flashing" && ev.event) {
       const e = ev.event as FlashProgressPayload;
@@ -400,6 +425,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } else {
       completionBanner.value = { kind: "partial", done, failed };
     }
+    flushSaveStats();
   }
 
   function dismissBanner() {
@@ -412,7 +438,13 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!filterConfig.value.blockedPorts.includes(normalized)) {
       filterConfig.value.blockedPorts.push(normalized);
     }
-    // Remove idle slots that are now filtered
+    // Remove idle slots that are now filtered; sync _slotMap accordingly
+    const removed = slots.value.filter(
+      (s) =>
+        s.status === "idle" &&
+        filterConfig.value.blockedPorts.includes(normalizePortName(s.port)),
+    );
+    for (const s of removed) _slotMap.delete(s.port);
     slots.value = slots.value.filter(
       (s) =>
         s.status !== "idle" ||
@@ -432,20 +464,40 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   // ── Cumulative stats reset ────────────────────────────────────────────────
   function resetFlashStats() {
     cumulativeStats.value.flash = { total: 0, success: 0, fail: 0 };
-    void saveCumulativeStats();
+    flushSaveStats();
   }
 
   function resetAuthStats() {
     cumulativeStats.value.auth = { total: 0, success: 0, fail: 0 };
+    flushSaveStats();
+  }
+
+  // ── Debounced cumulative stats save ──────────────────────────────────────
+  function scheduleSaveStats() {
+    clearTimeout(_saveStatsTimer);
+    _saveStatsTimer = setTimeout(() => {
+      _saveStatsTimer = undefined;
+      void saveCumulativeStats();
+    }, 1000);
+  }
+
+  function flushSaveStats() {
+    clearTimeout(_saveStatsTimer);
+    _saveStatsTimer = undefined;
     void saveCumulativeStats();
   }
 
   // ── Persistence ───────────────────────────────────────────────────────────
   async function loadPersistedData() {
-    const { cumulative, filter, firmware } =
-      await loadBatchFlashAuthWorkspace();
+    const {
+      cumulative,
+      filter,
+      firmware,
+      authConfig: savedAuthConfig,
+    } = await loadBatchFlashAuthWorkspace();
     if (cumulative) cumulativeStats.value = cumulative;
     if (filter) filterConfig.value = filter;
+    if (savedAuthConfig) authConfig.value = savedAuthConfig;
     if (firmware) {
       firmwareSource.value = firmware.source;
       selectedDefaultVersion.value = firmware.version;
@@ -461,6 +513,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function saveFilterConfig() {
     await saveBatchFlashAuthFilterConfig(filterConfig.value);
+  }
+
+  async function saveAuthConfig() {
+    await saveBatchFlashAuthConfig(authConfig.value);
   }
 
   // ── Event listener lifecycle ──────────────────────────────────────────────
@@ -483,14 +539,32 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         },
       );
     }
+    if (!unlistenFwProgress) {
+      unlistenFwProgress = await listen<{
+        bytesDone: number;
+        bytesTotal: number;
+      }>("auth-firmware-download-progress", ({ payload }) => {
+        if (payload.bytesTotal > 0) {
+          firmwareDownloadProgress.value = Math.round(
+            (payload.bytesDone / payload.bytesTotal) * 100,
+          );
+        }
+      });
+    }
   }
 
   function cleanup() {
+    clearTimeout(_saveStatsTimer);
+    _saveStatsTimer = undefined;
     unlisten?.();
     unlisten = undefined;
     unlistenAuth?.();
     unlistenAuth = undefined;
+    unlistenFwProgress?.();
+    unlistenFwProgress = undefined;
   }
+
+  watch(authConfig, () => void saveAuthConfig(), { deep: true });
 
   return {
     // State
@@ -508,6 +582,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     defaultFirmwareEntries,
     defaultFirmwareStatus,
     defaultFirmwareError,
+    firmwareDownloadProgress,
     // Computed
     canFlash,
     opMode,
