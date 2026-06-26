@@ -248,5 +248,6 @@ PRs that modify `crates/tyutool-cli/src/main.rs` (command definitions) without u
 ### Testing
 
 - Test files live next to their source, same name with `.test.ts` suffix; Rust uses inline `#[cfg(test)] mod tests`
+- **Before creating a test file:** run `ls` in the source file's directory to check whether a co-located `.test.ts` already exists. If it does, append to it — never create a parallel file with suffixes like `-extended`, `-v2`, etc.
 - Pure logic (utility functions, type conversions) must have unit tests; Vue components and stores as needed
 - Frontend tests run in the `node` environment — no DOM
