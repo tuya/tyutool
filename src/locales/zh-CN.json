@@ -592,6 +592,13 @@
       "failed": "失败",
       "skipped": "已跳过"
     },
+    "phase": {
+      "reading_mac": "读取MAC",
+      "reading_auth": "读取授权",
+      "writing_auth": "写入授权",
+      "verifying": "校验中",
+      "flashing": "烧录固件"
+    },
     "filter": {
       "title": "串口过滤",
       "hint": "添加要屏蔽的串口名称（精确匹配，Windows 不区分大小写）。规则生效后，自动分配时将跳过这些串口。",

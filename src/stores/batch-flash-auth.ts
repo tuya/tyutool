@@ -339,7 +339,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       void saveCumulativeStats();
       checkBatchCompletion();
     } else if (step === "skipped") {
-      updateSlot(port, { status: "skipped", currentPhase: "" });
+      updateSlot(port, { status: "skipped", currentPhase: "", mac: ev.mac });
       checkBatchCompletion();
     } else if (step === "flashing" && ev.event) {
       const e = ev.event as FlashProgressPayload;

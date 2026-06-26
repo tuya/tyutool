@@ -43,6 +43,21 @@ describe("i18n instance", () => {
   });
 });
 
+describe("dynamic key families", () => {
+  it("batchFlashAuth.phase.* keys are defined for all currentPhase values", () => {
+    const phases = [
+      "reading_mac",
+      "reading_auth",
+      "writing_auth",
+      "verifying",
+      "flashing",
+    ];
+    for (const phase of phases) {
+      expect(i18n.global.te(`batchFlashAuth.phase.${phase}`, "en")).toBe(true);
+    }
+  });
+});
+
 describe("i18n key coverage", () => {
   const enKeys = new Set(flatten(en as Record<string, unknown>));
   const zhKeys = new Set(flatten(zhCN as Record<string, unknown>));

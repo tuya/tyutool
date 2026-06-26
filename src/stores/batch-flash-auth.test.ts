@@ -337,6 +337,191 @@ describe("web-mode no-op for default firmware", () => {
   });
 });
 
+describe("handleAuthProgress", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("reading_mac step transitions to reading_mac status", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.handleAuthProgress({ port: "COM3", step: "reading_mac" });
+    expect(store.slots[0].status).toBe("reading_mac");
+    expect(store.slots[0].currentPhase).toBe("reading_mac");
+  });
+
+  it("reading_auth step transitions to authorizing with phase", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.handleAuthProgress({ port: "COM3", step: "reading_auth" });
+    expect(store.slots[0].status).toBe("authorizing");
+    expect(store.slots[0].currentPhase).toBe("reading_auth");
+  });
+
+  it("writing_auth step transitions to authorizing with phase", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.handleAuthProgress({ port: "COM3", step: "writing_auth" });
+    expect(store.slots[0].status).toBe("authorizing");
+    expect(store.slots[0].currentPhase).toBe("writing_auth");
+  });
+
+  it("verifying step transitions to authorizing with phase", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.handleAuthProgress({ port: "COM3", step: "verifying" });
+    expect(store.slots[0].status).toBe("authorizing");
+    expect(store.slots[0].currentPhase).toBe("verifying");
+  });
+
+  it("done step: status=done, mac saved, auth cumulative incremented", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "done",
+      mac: "aabbccddeeff",
+    });
+    expect(store.slots[0].status).toBe("done");
+    expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.slots[0].progress).toBe(100);
+    expect(store.cumulativeStats.auth.total).toBe(1);
+    expect(store.cumulativeStats.auth.success).toBe(1);
+    expect(store.cumulativeStats.auth.fail).toBe(0);
+  });
+
+  it("done step: flash cumulative NOT incremented (only auth counter goes up)", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "done",
+      mac: "aabbccddeeff",
+    });
+    expect(store.cumulativeStats.flash.total).toBe(0);
+  });
+
+  it("failed step: status=failed, error saved, auth fail incremented", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "failed",
+      error: "verify mismatch",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].error).toBe("verify mismatch");
+    expect(store.cumulativeStats.auth.total).toBe(1);
+    expect(store.cumulativeStats.auth.fail).toBe(1);
+    expect(store.cumulativeStats.auth.success).toBe(0);
+  });
+
+  it("failed step with no error message falls back to default", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({ port: "COM3", step: "failed" });
+    expect(store.slots[0].error).toBe("Unknown auth error");
+  });
+
+  it("skipped step: status=skipped, mac saved, auth cumulative NOT incremented", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "skipped",
+      mac: "aabbccddeeff",
+    });
+    expect(store.slots[0].status).toBe("skipped");
+    expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.slots[0].currentPhase).toBe("");
+    // skipped does NOT count in auth cumulative
+    expect(store.cumulativeStats.auth.total).toBe(0);
+  });
+
+  it("skipped step triggers completion banner when all ports complete", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    store.currentBatchPorts = ["COM3"];
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "skipped",
+      mac: "aabbccddeeff",
+    });
+    expect(store.completionBanner?.kind).toBe("all-skipped");
+  });
+
+  it("flashing sub-step percent: updates slot progress", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "flashing",
+      event: { kind: "percent", value: 55 },
+    });
+    expect(store.slots[0].progress).toBe(55);
+  });
+
+  it("flashing sub-step done/ok: transitions to reading_mac for auth phase", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "flashing",
+      event: { kind: "done", result: { ok: { elapsed_secs: 10 } } },
+    });
+    expect(store.slots[0].status).toBe("reading_mac");
+    expect(store.slots[0].progress).toBe(0);
+    expect(store.slots[0].currentPhase).toBe("reading_mac");
+  });
+
+  it("ignores events for unknown ports", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    // should not throw
+    store.handleAuthProgress({ port: "COM999", step: "done", mac: "aabb" });
+    expect(store.slots[0].status).toBe("idle");
+  });
+
+  it("completion banner: all-success when 2 ports both done", () => {
+    const store = useBatchFlashAuthStore();
+    store.batchStartTime = Date.now();
+    store.addPorts(["COM3", "COM5"]);
+    store.slots.forEach((s) => (s.status = "authorizing"));
+    store.currentBatchPorts = ["COM3", "COM5"];
+    store.handleAuthProgress({ port: "COM3", step: "done", mac: "aabb" });
+    expect(store.completionBanner).toBeNull(); // COM5 still active
+    store.handleAuthProgress({ port: "COM5", step: "done", mac: "ccdd" });
+    expect(store.completionBanner?.kind).toBe("all-success");
+  });
+
+  it("completion banner: partial when 1 done + 1 failed", () => {
+    const store = useBatchFlashAuthStore();
+    store.batchStartTime = Date.now();
+    store.addPorts(["COM3", "COM5"]);
+    store.slots.forEach((s) => (s.status = "authorizing"));
+    store.currentBatchPorts = ["COM3", "COM5"];
+    store.handleAuthProgress({ port: "COM3", step: "done", mac: "aabb" });
+    store.handleAuthProgress({
+      port: "COM5",
+      step: "failed",
+      error: "timeout",
+    });
+    expect(store.completionBanner?.kind).toBe("partial");
+  });
+});
+
 describe("useBatchFlashAuthStore firmware source", () => {
   beforeEach(() => {
     setActivePinia(createPinia());

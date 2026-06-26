@@ -487,6 +487,8 @@ fn batch_auth_start(
         let authkey = row.authkey.clone();
 
         let handle = std::thread::spawn(move || {
+            log::info!("[batch-auth] slot begin  port={port_clone} chip={} excel_row={row_idx} uuid={uuid}",
+                config_clone.chip_id);
             if let Some(ref fw_path) = config_clone.firmware_path {
                 if !fw_path.is_empty() {
                     let job = tyutool_core::FlashJob {
@@ -558,6 +560,7 @@ fn batch_auth_start(
 
             match result {
                 Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
+                    log::info!("[batch-auth] slot done  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
                     let _ = alloc_clone.confirm_row(row_idx, mac.clone());
                     let _ = app_clone.emit(
                         "batch-auth-progress",
@@ -565,6 +568,7 @@ fn batch_auth_start(
                     );
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
+                    log::info!("[batch-auth] slot already-done  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
                     let _ = alloc_clone.confirm_row(row_idx, mac.clone());
                     let _ = app_clone.emit(
                         "batch-auth-progress",
@@ -572,6 +576,7 @@ fn batch_auth_start(
                     );
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac }) => {
+                    log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} uuid={uuid} excel_row={row_idx}");
                     alloc_clone.release_row(row_idx);
                     let _ = app_clone.emit(
                         "batch-auth-progress",
@@ -579,9 +584,13 @@ fn batch_auth_start(
                     );
                 }
                 Ok(tyutool_core::BatchAuthSlotResult::Cancelled) => {
+                    log::info!(
+                        "[batch-auth] slot cancelled  port={port_clone} excel_row={row_idx}"
+                    );
                     alloc_clone.release_row(row_idx);
                 }
                 Err(e) => {
+                    log::warn!("[batch-auth] slot failed  port={port_clone} uuid={uuid} excel_row={row_idx} error={e}");
                     alloc_clone.release_row(row_idx);
                     let _ = app_clone.emit(
                         "batch-auth-progress",
