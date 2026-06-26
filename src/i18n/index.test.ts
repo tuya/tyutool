@@ -46,11 +46,25 @@ describe("i18n instance", () => {
 describe("dynamic key families", () => {
   it("batchFlashAuth.phase.* keys are defined for all currentPhase values", () => {
     const phases = [
+      // auth sub-phases
       "reading_mac",
       "reading_auth",
       "writing_auth",
       "verifying",
       "flashing",
+      // flash sub-phases (from FlashPhase Rust enum)
+      "handshake",
+      "connect",
+      "switch_baud",
+      "read_flash_id",
+      "load_ram",
+      "erase",
+      "write",
+      "write_segment",
+      "verify",
+      "protect",
+      "unprotect",
+      "reboot",
     ];
     for (const phase of phases) {
       expect(i18n.global.te(`batchFlashAuth.phase.${phase}`, "en")).toBe(true);
