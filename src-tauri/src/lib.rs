@@ -685,9 +685,14 @@ fn batch_auth_start(
                         serde_json::json!({ "port": port_clone, "step": "no_code", "mac": mac }),
                     );
                 }
-                // Skipped — no row allocation in new flow; state unchanged in Excel
+                // Skipped — device already carries auth we didn't (knowingly) write.
+                // If that UUID is still an unclaimed row in our sheet, claim it for this
+                // MAC so the same code can't later be handed to a different device.
                 Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac, existing_uuid }) => {
                     log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} existing_uuid={existing_uuid}");
+                    if let Err(e) = alloc_clone.confirm_existing_uuid(&existing_uuid, &mac) {
+                        log::error!("[batch-auth] excel-confirm-skipped-failed  port={port_clone} existing_uuid={existing_uuid} err={e}");
+                    }
                     let _ = app_clone.emit(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac, "existingUuid": existing_uuid }),
