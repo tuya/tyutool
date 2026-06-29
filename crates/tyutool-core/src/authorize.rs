@@ -1130,6 +1130,7 @@ where
 ///   subsequent `auth-otp-lock` failed; caller MUST `confirm_row` (NOT
 ///   release) to prevent the same UUID/Key from being handed to another
 ///   device whose OTP is still writable.
+#[allow(clippy::too_many_arguments)]
 pub fn run_batch_auth_slot<F, G>(
     port: &str,
     chip_id: &str,
