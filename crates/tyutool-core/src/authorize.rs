@@ -373,6 +373,7 @@ impl<T: AuthIo> AuthSession<T> {
 
     /// Clear RX buffer then write `cmd\r\n`.
     fn send_cmd(&mut self, cmd: &str) -> Result<(), FlashError> {
+        log::debug!("[serial] port={} >> {}", self.port_name, cmd);
         let _ = self.port.clear_input();
         let data = format!("{}\r\n", cmd);
         self.port
@@ -463,6 +464,12 @@ impl<T: AuthIo> AuthSession<T> {
                 lines.push(s);
             }
         }
+        log::debug!(
+            "[serial] port={} << {:?} ({}ms)",
+            self.port_name,
+            lines,
+            fn_start.elapsed().as_millis()
+        );
         lines
     }
 
