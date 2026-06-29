@@ -53,6 +53,8 @@ const AUTH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Idle window for `auth` OTP writes — eFuse burning causes a long silent
 /// gap between the command echo and the response; must exceed worst-case burn time.
 const AUTH_WRITE_OTP_IDLE: Duration = Duration::from_secs(30);
+/// Total write attempts for `auth_write` in batch auth slots (first + retries).
+const AUTH_WRITE_MAX_ATTEMPTS: u8 = 3;
 /// Hard ceiling for `auth-read` responses.
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Total upper bound for the `auth-otp-lock` response wait.
@@ -1451,16 +1453,43 @@ where
             } else {
                 Duration::from_millis(2000)
             };
-            if let Err(e) = sess.auth_write(&uuid, &authkey, config.auth_storage, auth_idle) {
-                update_row(
-                    row_idx,
-                    &mac,
-                    BatchAuthRowUpdate::StepFailed {
-                        step: "auth_write",
-                        error: e.to_string(),
-                    },
-                );
-                return Err(e);
+            {
+                let mut last_err: Option<FlashError> = None;
+                for attempt in 0..AUTH_WRITE_MAX_ATTEMPTS {
+                    if attempt > 0 {
+                        check_cancel!();
+                        sess.drain_boot_output();
+                        sess.wake_shell();
+                        log::warn!(
+                            "[batch-auth] auth-write retry {attempt}  port={port} mac={mac}"
+                        );
+                    }
+                    check_cancel!();
+                    match sess.auth_write(&uuid, &authkey, config.auth_storage, auth_idle) {
+                        Ok(()) => {
+                            last_err = None;
+                            break;
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[batch-auth] auth-write attempt {} failed  port={port}: {e}",
+                                attempt + 1
+                            );
+                            last_err = Some(e);
+                        }
+                    }
+                }
+                if let Some(e) = last_err {
+                    update_row(
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::StepFailed {
+                            step: "auth_write",
+                            error: e.to_string(),
+                        },
+                    );
+                    return Err(e);
+                }
             }
             if cancel.load(Ordering::Relaxed) {
                 return Ok(BatchAuthSlotResult::CancelledAfterWrite {
