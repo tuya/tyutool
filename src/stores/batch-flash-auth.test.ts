@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 // src/stores/batch-flash-auth.test.ts
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";

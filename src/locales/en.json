@@ -621,6 +621,7 @@
       "cancelledAfterWriteError": "Cancelled after auth write — device may carry credential",
       "emptyHintNoPorts": "No serial ports detected; insert a device and click Auto Assign"
     },
+    "defaultMacError": "Device MAC is factory default (not personalized); flash the MAC before authorizing",
     "errors": {
       "excel": {
         "fileNotFound": "File not found",

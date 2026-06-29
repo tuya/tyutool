@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
 import { isTauriRuntime } from "@/runtime";
+import { i18n } from "@/i18n";
 import {
   BATCH_FLASH_CAPABLE_CHIPS,
   type BatchSlotState,
@@ -46,6 +47,8 @@ const ACTIVE_STATUSES: BatchSlotStatus[] = [
 ];
 
 export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
+  const t = i18n.global.t;
+
   // ── Persisted config ──────────────────────────────────────────────────────
   const filterConfig = ref<PortFilterConfig>({ blockedPorts: [] });
   const cumulativeStats = ref<CumulativeStats>({
@@ -59,6 +62,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const baudRate = ref<number>(115200);
   const authBaudRate = ref<number>(115200);
   const firmwarePath = ref<string>("");
+  const localFirmwarePath = ref<string>("");
   const firmwareSource = ref<BatchFirmwareSource>("local");
   const selectedDefaultVersion = ref<string>("");
   const defaultFirmwareEntries = ref<AuthFirmwareEntry[]>([]);
@@ -220,7 +224,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     await saveBatchFlashAuthFirmwareConfig({
       source: firmwareSource.value,
       version: selectedDefaultVersion.value,
+      localPath: localFirmwarePath.value,
     });
+  }
+
+  function setLocalFirmwarePath(path: string) {
+    firmwarePath.value = path;
+    localFirmwarePath.value = path;
+    void saveFirmwareConfig();
   }
 
   function setFirmwareSource(source: BatchFirmwareSource) {
@@ -578,6 +589,17 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       cumulativeStats.value.auth.fail++;
       scheduleSaveStats();
       checkBatchCompletion();
+    } else if (step === "default_mac") {
+      updateSlot(port, {
+        status: "failed",
+        currentPhase: "",
+        mac: ev.mac,
+        error: t("batchFlashAuth.defaultMacError"),
+      });
+      cumulativeStats.value.auth.total++;
+      cumulativeStats.value.auth.fail++;
+      scheduleSaveStats();
+      checkBatchCompletion();
     } else if (step === "flashing" && ev.event) {
       const e = ev.event as FlashProgressPayload;
       if (e.kind === "percent") {
@@ -742,7 +764,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (firmware) {
       firmwareSource.value = firmware.source;
       selectedDefaultVersion.value = firmware.version;
-      if (firmware.source === "default") {
+      if (firmware.localPath) {
+        localFirmwarePath.value = firmware.localPath;
+      }
+      if (firmware.source === "local" && firmware.localPath) {
+        firmwarePath.value = firmware.localPath;
+      } else if (firmware.source === "default") {
         await loadDefaultFirmwareList();
       }
     }
@@ -873,6 +900,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     removeSlot,
     autoAssign,
     setFirmwareSource,
+    setLocalFirmwarePath,
     loadDefaultFirmwareList,
     downloadDefaultFirmware,
     startAuth,
