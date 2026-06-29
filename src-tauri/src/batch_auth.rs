@@ -197,6 +197,18 @@ impl ExcelRowAllocator {
             });
         }
 
+        // Warn on duplicate non-empty MAC bindings: find_by_mac returns the
+        // first match, so a duplicated MAC (manual edit, copy/paste) would route
+        // a device to the wrong row. We don't block loading — just surface it.
+        let mut seen_macs = HashSet::new();
+        for row in &rows {
+            if let Some(mac) = row.mac.as_deref().filter(|m| !m.is_empty()) {
+                if !seen_macs.insert(mac.to_string()) {
+                    log::warn!("[batch-auth] duplicate MAC in Excel: {mac}");
+                }
+            }
+        }
+
         Ok(Self {
             state: Mutex::new(AllocatorState {
                 path: path.to_owned(),
@@ -732,5 +744,26 @@ mod tests {
         assert_eq!(found.1, "uuid-a");
         assert!(alloc.find_by_mac("22:22").is_none());
         assert_eq!(alloc.stats().used, 1);
+    }
+
+    #[test]
+    fn load_with_duplicate_mac_does_not_error_and_first_row_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.xlsx");
+        // Two rows carry the same MAC (e.g. an operator copy/paste error).
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY", "STATUS", "MAC"],
+            &[
+                vec!["uuid-a", "key-a", "DONE", "AA:BB:CC:DD:EE:FF"],
+                vec!["uuid-b", "key-b", "DONE", "AA:BB:CC:DD:EE:FF"],
+            ],
+        );
+        // Load succeeds (the duplicate only triggers a log::warn).
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+        // find_by_mac returns the first matching row deterministically.
+        let found = alloc.find_by_mac("AA:BB:CC:DD:EE:FF").unwrap();
+        assert_eq!(found.0, 0);
+        assert_eq!(found.1, "uuid-a");
     }
 }
