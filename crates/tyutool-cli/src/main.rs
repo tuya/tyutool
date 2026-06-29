@@ -253,41 +253,44 @@ fn parse_hex_addr(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
     u64::from_str_radix(raw, 16).map_err(|e| format!("invalid hex address '{}': {}", s, e).into())
 }
 
-const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024; // 5 MB, matches the GUI cap
-const LOG_KEEP: usize = 3;
+const MAX_LOG_FILES: usize = 100;
+const MAX_LOG_BYTES_TOTAL: u64 = 100 * 1024 * 1024; // 100 MB
 
-/// `tyutool.log` -> `tyutool.log.1`, `.1` -> `.2`, ... up to `keep`.
-fn with_ext_num(log_path: &std::path::Path, n: usize) -> std::path::PathBuf {
-    let mut s = log_path.as_os_str().to_os_string();
-    s.push(format!(".{n}"));
-    std::path::PathBuf::from(s)
-}
+/// Delete the oldest per-session log files until the collection is within both
+/// the file-count and total-size limits. Only manages files whose stem starts
+/// with "tyutool-"; always retains at least one file.
+fn prune_log_files(log_dir: &std::path::Path) {
+    let mut files: Vec<(std::path::PathBuf, u64)> = match std::fs::read_dir(log_dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().map(|x| x == "log").unwrap_or(false)
+                    && p.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.starts_with("tyutool-"))
+                        .unwrap_or(false)
+            })
+            .filter_map(|p| {
+                let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                Some((p, size))
+            })
+            .collect(),
+        Err(_) => return,
+    };
 
-/// Ordered (from, to) renames to rotate `log_path`, oldest shifted out last.
-fn rotation_plan(
-    log_path: &std::path::Path,
-    keep: usize,
-) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
-    let mut moves = Vec::new();
-    for i in (1..keep).rev() {
-        moves.push((with_ext_num(log_path, i), with_ext_num(log_path, i + 1)));
-    }
-    moves.push((log_path.to_path_buf(), with_ext_num(log_path, 1)));
-    moves
-}
+    files.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
 
-/// Rotate the log if it exceeds `LOG_MAX_BYTES`. Best-effort: rotation failures
-/// are ignored so logging still proceeds.
-fn rotate_if_needed(log_path: &std::path::Path) {
-    let too_big = std::fs::metadata(log_path)
-        .map(|m| m.len() > LOG_MAX_BYTES)
-        .unwrap_or(false);
-    if !too_big {
-        return;
-    }
-    let _ = std::fs::remove_file(with_ext_num(log_path, LOG_KEEP));
-    for (from, to) in rotation_plan(log_path, LOG_KEEP) {
-        let _ = std::fs::rename(&from, &to);
+    let mut count = files.len();
+    let mut total: u64 = files.iter().map(|(_, s)| s).sum();
+
+    for (path, size) in &files {
+        if count <= 1 || (count <= MAX_LOG_FILES && total <= MAX_LOG_BYTES_TOTAL) {
+            break;
+        }
+        let _ = std::fs::remove_file(path);
+        count -= 1;
+        total = total.saturating_sub(*size);
     }
 }
 
@@ -296,9 +299,8 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("tyutool");
     std::fs::create_dir_all(&log_dir)?;
-    let log_path = log_dir.join("tyutool.log");
-
-    rotate_if_needed(&log_path);
+    let stem = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let log_path = log_dir.join(format!("tyutool-{stem}.log"));
 
     let fmt = |out: fern::FormatCallback<'_>,
                message: &std::fmt::Arguments<'_>,
@@ -334,6 +336,7 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
     }
 
     dispatch.apply()?;
+    prune_log_files(&log_dir);
     Ok(log_path)
 }
 
@@ -741,66 +744,77 @@ mod tests {
 }
 
 #[cfg(test)]
-mod rotation_tests {
+mod prune_tests {
     use super::*;
-    use std::path::Path;
 
-    #[test]
-    fn with_ext_num_appends_numeric_suffix() {
-        let base = Path::new("/var/log/tyutool.log");
-        assert_eq!(
-            with_ext_num(base, 1).display().to_string(),
-            "/var/log/tyutool.log.1"
-        );
-        assert_eq!(
-            with_ext_num(base, 3).display().to_string(),
-            "/var/log/tyutool.log.3"
-        );
+    fn touch(dir: &std::path::Path, name: &str, size: u64) {
+        let path = dir.join(name);
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(size).unwrap();
+    }
+
+    fn names(dir: &std::path::Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        v.sort();
+        v
     }
 
     #[test]
-    fn rotation_plan_keep_1_only_moves_base() {
-        let base = Path::new("/tmp/tyutool.log");
-        let moves: Vec<(String, String)> = rotation_plan(base, 1)
-            .iter()
-            .map(|(a, b): &(std::path::PathBuf, std::path::PathBuf)| {
-                (a.display().to_string(), b.display().to_string())
-            })
-            .collect();
-        assert_eq!(
-            moves,
-            vec![(
-                "/tmp/tyutool.log".to_string(),
-                "/tmp/tyutool.log.1".to_string()
-            )]
-        );
+    fn prune_removes_oldest_when_over_count_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 1..=(MAX_LOG_FILES + 2) {
+            touch(dir.path(), &format!("tyutool-20240101-{i:06}.log"), 1024);
+        }
+        prune_log_files(dir.path());
+        assert_eq!(names(dir.path()).len(), MAX_LOG_FILES);
+        // The oldest two should be gone.
+        assert!(!dir.path().join("tyutool-20240101-000001.log").exists());
+        assert!(!dir.path().join("tyutool-20240101-000002.log").exists());
     }
 
     #[test]
-    fn rotation_plan_keep_3_shifts_oldest_last() {
-        let base = Path::new("/tmp/tyutool.log");
-        let moves: Vec<(String, String)> = rotation_plan(base, 3)
+    fn prune_removes_oldest_when_over_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        // 5 files each 15 MB → total 75 MB > 50 MB limit
+        for i in 1..=5 {
+            touch(
+                dir.path(),
+                &format!("tyutool-20240101-{i:06}.log"),
+                15 * 1024 * 1024,
+            );
+        }
+        prune_log_files(dir.path());
+        let remaining = names(dir.path());
+        let total: u64 = remaining
             .iter()
-            .map(|(a, b): &(std::path::PathBuf, std::path::PathBuf)| {
-                (a.display().to_string(), b.display().to_string())
-            })
-            .collect();
-        assert_eq!(
-            moves,
-            vec![
-                (
-                    "/tmp/tyutool.log.2".to_string(),
-                    "/tmp/tyutool.log.3".to_string()
-                ),
-                (
-                    "/tmp/tyutool.log.1".to_string(),
-                    "/tmp/tyutool.log.2".to_string()
-                ),
-                (
-                    "/tmp/tyutool.log".to_string(),
-                    "/tmp/tyutool.log.1".to_string()
-                ),
-            ]
+            .map(|n| std::fs::metadata(dir.path().join(n)).unwrap().len())
+            .sum();
+        assert!(total <= MAX_LOG_BYTES_TOTAL);
+    }
+
+    #[test]
+    fn prune_always_keeps_at_least_one_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // One enormous file that exceeds both limits by itself.
+        touch(
+            dir.path(),
+            "tyutool-20240101-000001.log",
+            MAX_LOG_BYTES_TOTAL + 1,
         );
+        prune_log_files(dir.path());
+        assert_eq!(names(dir.path()).len(), 1);
+    }
+
+    #[test]
+    fn prune_ignores_legacy_tyutool_log() {
+        let dir = tempfile::tempdir().unwrap();
+        // Legacy file should not be touched.
+        touch(dir.path(), "tyutool.log", 1024);
+        prune_log_files(dir.path());
+        assert!(dir.path().join("tyutool.log").exists());
     }
 }
