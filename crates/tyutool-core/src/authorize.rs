@@ -59,15 +59,15 @@ const AUTH_WRITE_OTP_IDLE: Duration = Duration::from_secs(30);
 const AUTH_WRITE_MAX_ATTEMPTS: u8 = 3;
 /// Hard ceiling for `auth-read` responses.
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Idle window for `auth-read` with OTP storage.
+const AUTH_READ_OTP_IDLE: Duration = Duration::from_secs(30);
 /// Total upper bound for the `auth-otp-lock` response wait.
 /// eFuse burning is a physical write that may take significantly longer
 /// than a normal shell command. This MUST be confirmed against real
 /// hardware before release (see hardware verification scenario 7 in the spec).
 const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
-/// Idle window — wait this long after the last byte before declaring the
-/// response complete. Set deliberately longer than `cmd_idle_timeout` to
-/// avoid premature termination during eFuse settling.
-const AUTH_OTP_LOCK_IDLE: Duration = Duration::from_millis(500);
+/// Idle window for `auth-otp-lock`.
+const AUTH_OTP_LOCK_IDLE: Duration = Duration::from_secs(30);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Maximum time to wait for natural device boot after firmware flash.
@@ -622,6 +622,7 @@ impl<T: AuthIo> AuthSession<T> {
         self.send_cmd("auth-otp-lock")
             .map_err(|e| FlashError::Plugin(format!("auth-otp-lock send failed: {e}")))?;
         let lines = self.read_response_timed(AUTH_OTP_LOCK_TIMEOUT, AUTH_OTP_LOCK_IDLE);
+        log::debug!("[serial] auth-otp-lock raw={:?}", lines);
 
         let mut saw_success = false;
         let mut saw_failure = false;
@@ -654,7 +655,11 @@ impl<T: AuthIo> AuthSession<T> {
             format!("auth-read {}", storage.as_u8())
         };
         self.send_cmd(&cmd).ok()?;
-        let idle = self.timing.cmd_idle_timeout;
+        let idle = if storage == AuthStorage::Otp {
+            AUTH_READ_OTP_IDLE
+        } else {
+            self.timing.cmd_idle_timeout
+        };
         let lines = self.read_response_timed(AUTH_READ_TIMEOUT, idle);
         let relevant: Vec<&str> = lines
             .iter()

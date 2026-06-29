@@ -1737,7 +1737,7 @@ pub fn run() {
                 .max_file_size(10 * 1024 * 1024)
                 .rotation_strategy(RotationStrategy::KeepAll)
                 .timezone_strategy(TimezoneStrategy::UseLocal)
-                .level(log::LevelFilter::Info)
+                .level(log::LevelFilter::Debug)
                 .build(),
         )
         .plugin(tauri_plugin_store::Builder::default().build())
