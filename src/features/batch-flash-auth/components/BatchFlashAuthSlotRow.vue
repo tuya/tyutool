@@ -53,27 +53,17 @@ const FLASH_PHASE_STATUS_LABELS = computed<Record<string, string>>(() => ({
   verify: t("batchFlashAuth.status.verifying"),
 }));
 
-const isLockFailed = computed(
-  () =>
-    props.portSlot.status === "failed" && props.portSlot.lockFailed === true,
-);
-
 const isCancelledAfterWrite = computed(
   () =>
     props.portSlot.status === "failed" &&
     props.portSlot.cancelledAfterWrite === true,
 );
 
-const isQuarantineRequired = computed(
-  () => isLockFailed.value || isCancelledAfterWrite.value,
-);
+const isQuarantineRequired = computed(() => isCancelledAfterWrite.value);
 
 const statusLabel = computed(() => {
   if (isCancelledAfterWrite.value) {
     return t("batchFlashAuth.slot.cancelledAfterWriteBadge");
-  }
-  if (isLockFailed.value) {
-    return t("batchFlashAuth.slot.lockFailedBadge");
   }
   if (props.portSlot.status === "flashing" && props.portSlot.currentPhase) {
     return (
@@ -201,11 +191,7 @@ function showExcelError(): void {
       v-if="isQuarantineRequired"
       class="absolute right-1 top-0.5 flex size-4 items-center justify-center"
       :style="{ color: 'var(--ty-danger)' }"
-      :title="
-        isCancelledAfterWrite
-          ? t('batchFlashAuth.slot.cancelledAfterWriteLabel')
-          : t('batchFlashAuth.slot.lockFailedLabel')
-      "
+      :title="t('batchFlashAuth.slot.cancelledAfterWriteLabel')"
     >
       <FontAwesomeIcon
         :icon="['fas', 'triangle-exclamation']"
@@ -313,13 +299,6 @@ function showExcelError(): void {
       >
         {{ t("batchFlashAuth.slot.cancelledAfterWriteLabel") }}
       </span>
-      <span
-        v-else-if="portSlot.lockFailed"
-        class="text-xs font-medium"
-        :style="{ color: 'var(--ty-danger)' }"
-      >
-        {{ t("batchFlashAuth.slot.lockFailedLabel") }}
-      </span>
     </div>
 
     <!-- Unified result: done / skipped / idle-with-probe -->
@@ -392,11 +371,7 @@ function showExcelError(): void {
         {{ t("batchFlashAuth.slot.cancel") }}
       </button>
       <button
-        v-if="
-          portSlot.status === 'failed' &&
-          !portSlot.lockFailed &&
-          !portSlot.cancelledAfterWrite
-        "
+        v-if="portSlot.status === 'failed' && !portSlot.cancelledAfterWrite"
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
         @click="$emit('retry', portSlot.port)"

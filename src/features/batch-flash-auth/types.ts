@@ -37,11 +37,6 @@ export interface BatchSlotState {
   error?: string;
   excelError?: string;
   /**
-   * true ⇒ auth was written to device OTP but the eFuse lock command failed;
-   * the operator must physically isolate this device to prevent UUID/Key reuse.
-   */
-  lockFailed?: boolean;
-  /**
    * true ⇒ auth write command was sent to device but cancel arrived before
    * verify completed. KV storage is overwritable; OTP is permanently written.
    * Operator must physically isolate this device until manually verified.

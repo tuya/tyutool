@@ -127,7 +127,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const canRetry = computed(() =>
     slots.value.some(
       (s) =>
-        (s.status === "failed" && !s.lockFailed && !s.cancelledAfterWrite) ||
+        (s.status === "failed" && !s.cancelledAfterWrite) ||
         s.status === "no_code",
     ),
   );
@@ -364,7 +364,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     completionBanner.value = null;
     for (const slot of slots.value.filter(
       (s) =>
-        (s.status === "failed" && !s.lockFailed && !s.cancelledAfterWrite) ||
+        (s.status === "failed" && !s.cancelledAfterWrite) ||
         s.status === "no_code",
     )) {
       updateSlot(slot.port, {
@@ -383,7 +383,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     const slot = findSlot(port);
     if (!slot) return;
     if (slot.status !== "failed" && slot.status !== "no_code") return;
-    if (slot.lockFailed) return;
     if (slot.cancelledAfterWrite) return;
     updateSlot(port, {
       status: "idle",
