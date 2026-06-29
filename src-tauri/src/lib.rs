@@ -601,22 +601,25 @@ fn batch_auth_start(
                 move |row_idx: usize, mac: &str, update: tyutool_core::BatchAuthRowUpdate| {
                     use crate::batch_auth::RowStatus;
                     use tyutool_core::BatchAuthRowUpdate as U;
-                    let (status, step_name, error): (RowStatus, &str, Option<String>) = match update
-                    {
-                        U::MacRead => (RowStatus::MacRead, "mac_read", None),
-                        U::AuthWritten => (RowStatus::AuthWritten, "auth_written", None),
-                        U::AuthVerified => (RowStatus::AuthVerified, "auth_verified", None),
-                        U::OtpLocked => (RowStatus::OtpLocked, "otp_locked", None),
-                        U::Done => (RowStatus::Done, "done", None),
-                        U::StepFailed { step, error } => {
-                            let status = if step == "auth_write" {
-                                RowStatus::MacRead
-                            } else {
-                                RowStatus::AuthWritten
-                            };
-                            (status, step, Some(error))
-                        }
-                    };
+                    let (status, step_name, error): (RowStatus, Option<&str>, Option<String>) =
+                        match update {
+                            U::MacRead => (RowStatus::MacRead, Some("mac_read"), None),
+                            U::AuthWritten => (RowStatus::AuthWritten, Some("auth_written"), None),
+                            U::AuthVerified => {
+                                (RowStatus::AuthVerified, Some("auth_verified"), None)
+                            }
+                            U::OtpLocked => (RowStatus::OtpLocked, Some("otp_locked"), None),
+                            // Done: keep last step in Excel (STATUS=DONE is sufficient)
+                            U::Done => (RowStatus::Done, None, None),
+                            U::StepFailed { step, error } => {
+                                let status = if step == "auth_write" {
+                                    RowStatus::MacRead
+                                } else {
+                                    RowStatus::AuthWritten
+                                };
+                                (status, Some(step), Some(error))
+                            }
+                        };
                     if let Err(e) = alloc_update.update_row_state(
                         row_idx,
                         mac,
