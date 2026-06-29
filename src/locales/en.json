@@ -603,7 +603,6 @@
       "blockPort": "Block port",
       "read": "Read",
       "readHint": "Read MAC and auth status",
-      "authorized": "Authorized",
       "notAuthorized": "Not authorized",
       "readError": "Read failed",
       "lockFailedLabel": "OTP written but eFuse lock failed — physically isolate this device",
