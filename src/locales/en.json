@@ -682,6 +682,32 @@
       "allSuccess": "Batch complete: all {count} succeeded",
       "allFailed": "Batch failed entirely — check connections and retry",
       "partial": "Batch complete: {done} succeeded, {failed} failed — click Retry Failed"
+    },
+    "disclaimer": {
+      "title": "⚠️ Important Notice Before Use",
+      "item1": {
+        "title": "Device MAC Address Uniqueness",
+        "body": "Every authorized device must have a globally unique MAC address. This tool does not validate MAC conflicts across devices. The operator is solely responsible for ensuring each device's MAC is unique. Authorization credentials are bound to the MAC address. Duplicate MACs cause different devices to share the same authorization code, undermining credential uniqueness and leading to device identification failures on the Tuya platform."
+      },
+      "item2": {
+        "title": "OTP Authorization Is Permanent and Irreversible",
+        "body": "When OTP storage mode is enabled with eFuse locking, authorization data is permanently burned into the chip and cannot be erased, modified, or revoked. Devices with a failed lock (lockFailed) or interrupted write must be physically isolated from the production line for manual verification before any further use or shipment."
+      },
+      "item3": {
+        "title": "Keep the Authorization Excel File Secure",
+        "body": "The Excel file contains sensitive device credentials (UUID / Key). Keep it secure, prevent unauthorized access, and back it up after operations."
+      },
+      "item4": {
+        "title": "Devices with Default MAC Cannot Be Authorized",
+        "body": "T5AI chips without firmware return a default MAC address. This tool automatically rejects authorization for such devices. Ensure firmware is correctly flashed before running authorization."
+      },
+      "item5": {
+        "title": "Operator Responsibility",
+        "body": "This tool assists batch operations. The operator and production line supervisor are solely responsible for MAC uniqueness, authorization integrity, and product compliance."
+      },
+      "dontShowAgain": "Don't show again",
+      "confirm": "I Have Read and Understood, Continue",
+      "cancel": "Go Back"
     }
   },
   "toolbox": {
