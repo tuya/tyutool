@@ -83,7 +83,7 @@ const DEFAULT_MAC_T5: &str = "C8:47:8C:00:00:18";
 /// 返回 true 当 chip_id 为 T5 系列且 mac 是出厂默认值。
 fn is_default_mac(chip_id: &str, mac: &str) -> bool {
     let id = chip_id.to_ascii_uppercase();
-    (id == "T5AI" || id == "T5") && mac.to_ascii_uppercase() == DEFAULT_MAC_T5.to_ascii_uppercase()
+    (id == "T5AI" || id == "T5") && mac.eq_ignore_ascii_case(DEFAULT_MAC_T5)
 }
 
 // ── Per-chip timing ───────────────────────────────────────────────────────
@@ -1329,6 +1329,7 @@ pub fn wait_after_firmware_flash(port: &str, baud_rate: u32, chip_id: &str, canc
 /// - `allocate_row` — lazily allocate a fresh, unbound row (called at most once).
 /// - `update_row(row_idx, mac, update)` — notify caller of per-step state changes.
 /// - `cancel` / `progress` — unchanged semantics.
+#[allow(clippy::too_many_arguments)]
 pub fn run_batch_auth_slot<F, B, A, U>(
     port: &str,
     chip_id: &str,
