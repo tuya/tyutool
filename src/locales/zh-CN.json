@@ -99,7 +99,16 @@
       "copy": "复制",
       "copied": "已复制",
       "refresh": "刷新",
-      "close": "关闭"
+      "close": "关闭",
+      "fileList": "应用日志",
+      "currentSession": "当前会话",
+      "fileName": "文件名",
+      "size": "大小",
+      "modifiedTime": "修改时间",
+      "searchPlaceholder": "搜索日志…",
+      "matchCount": "第 {current} / 共 {total} 条",
+      "noMatches": "无匹配",
+      "truncated": "仅显示最后 256 KB"
     },
     "reportIssue": {
       "title": "报告问题",

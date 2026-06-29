@@ -99,7 +99,16 @@
       "copy": "Copy",
       "copied": "Copied",
       "refresh": "Refresh",
-      "close": "Close"
+      "close": "Close",
+      "fileList": "App Logs",
+      "currentSession": "Current session",
+      "fileName": "File",
+      "size": "Size",
+      "modifiedTime": "Modified",
+      "searchPlaceholder": "Search logs…",
+      "matchCount": "{current} of {total}",
+      "noMatches": "No matches",
+      "truncated": "Showing last 256 KB only"
     },
     "reportIssue": {
       "title": "Report an Issue",
