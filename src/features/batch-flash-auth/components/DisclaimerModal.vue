@@ -100,7 +100,7 @@ watch(
         <div class="flex flex-col gap-2 sm:flex-row-reverse">
           <button
             type="button"
-            class="ty-btn-primary flex-1"
+            class="ty-btn-primary-solid flex-1"
             @click="emit('confirm', dontShowAgain)"
           >
             {{ t("batchFlashAuth.disclaimer.confirm") }}

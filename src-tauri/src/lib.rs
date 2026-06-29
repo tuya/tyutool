@@ -579,8 +579,9 @@ fn batch_auth_start(
 
             // find_by_mac: look up Excel row by device MAC address
             let alloc_find = alloc_clone.clone();
-            let find_by_mac =
-                move |mac: &str| -> Option<(usize, String, String)> { alloc_find.find_by_mac(mac) };
+            let find_by_mac = move |mac: &str| -> Option<(usize, String, String, bool)> {
+                alloc_find.find_by_mac(mac)
+            };
 
             // allocate_row: claim a new unused row
             let alloc_alloc = alloc_clone.clone();

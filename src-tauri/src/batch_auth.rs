@@ -254,12 +254,15 @@ impl ExcelRowAllocator {
         Err("Authorization codes exhausted — no available rows in Excel".into())
     }
 
-    /// 按 MAC 查找已绑定的行。返回 `(row_idx, uuid, authkey)`，未找到返回 `None`。
-    pub fn find_by_mac(&self, mac: &str) -> Option<(usize, String, String)> {
+    /// 按 MAC 查找已绑定的行。返回 `(row_idx, uuid, authkey, already_otp_locked)`，未找到返回 `None`。
+    /// `already_otp_locked` 为 `true` 表示上次已完成 OTP 熔断（STATUS=OtpLocked 或 STEP=otp_locked）。
+    pub fn find_by_mac(&self, mac: &str) -> Option<(usize, String, String, bool)> {
         let state = self.state.lock().unwrap();
         state.rows.iter().enumerate().find_map(|(i, r)| {
             if r.mac.as_deref() == Some(mac) {
-                Some((i, r.uuid.clone(), r.authkey.clone()))
+                let already_otp_locked = matches!(r.status, RowStatus::OtpLocked)
+                    || r.step.as_deref() == Some("otp_locked");
+                Some((i, r.uuid.clone(), r.authkey.clone(), already_otp_locked))
             } else {
                 None
             }
