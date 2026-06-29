@@ -1465,6 +1465,54 @@ fn collect_log_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LogFileInfo {
+    name: String,
+    size_bytes: u64,
+    modified_ms: i64,
+}
+
+fn list_log_files_impl(dir: &std::path::Path) -> Vec<LogFileInfo> {
+    let mut files: Vec<LogFileInfo> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().map(|x| x == "log").unwrap_or(false)
+                && p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with("tyutool"))
+                    .unwrap_or(false)
+        })
+        .filter_map(|p| {
+            let meta = std::fs::metadata(&p).ok()?;
+            let name = p.file_name()?.to_str()?.to_owned();
+            let size_bytes = meta.len();
+            let modified_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            Some(LogFileInfo {
+                name,
+                size_bytes,
+                modified_ms,
+            })
+        })
+        .collect();
+    files.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    files
+}
+
+#[tauri::command]
+fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    Ok(list_log_files_impl(&dir))
+}
+
 fn build_report_info(name: &str, version: &str, install: &str, session_id: &str) -> String {
     format!(
         "tyutool report-info\nname: {name}\nversion: {version}\nos: {}\narch: {}\nfamily: {}\ninstall: {install}\nsession: {session_id}\n",
@@ -1755,6 +1803,7 @@ pub fn run() {
             serial_debug_state,
             write_text_file,
             append_text_file,
+            list_log_files,
             read_log_tail,
             export_logs_zip,
             open_external_url,
@@ -2026,6 +2075,36 @@ mod log_tools_tests {
         assert!(names.contains(&"report-info.txt".to_string()));
         assert!(names.contains(&"tyutool.log".to_string()));
         assert!(!names.contains(&"notes.txt".to_string()));
+    }
+
+    #[test]
+    fn list_log_files_impl_returns_tyutool_logs_sorted_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create two tyutool-* logs with different sizes (mtime may be identical in fast tests)
+        std::fs::write(dir.path().join("tyutool-20250101-100000.log"), b"old").unwrap();
+        std::fs::write(dir.path().join("tyutool-20250629-120000.log"), b"new").unwrap();
+        // Non-matching file must be excluded
+        std::fs::write(dir.path().join("other.log"), b"x").unwrap();
+
+        let files = list_log_files_impl(dir.path());
+        // Must include only tyutool*.log files
+        assert!(files.iter().all(|f| f.name.starts_with("tyutool")));
+        assert!(!files.iter().any(|f| f.name == "other.log"));
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn list_log_files_impl_returns_empty_for_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(list_log_files_impl(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn list_log_files_impl_size_bytes_matches_file_size() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool.log"), b"hello").unwrap();
+        let files = list_log_files_impl(dir.path());
+        assert_eq!(files[0].size_bytes, 5);
     }
 }
 
