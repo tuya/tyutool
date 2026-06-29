@@ -51,7 +51,8 @@ jobs:
             echo "creating release $TAG"
             gh release create "$TAG" \
               --title "默认授权固件 (auth-firmware)" \
-              --notes "batch-flash-auth 默认授权固件。资产由 release-auth-firmware workflow 自动维护。"
+              --notes "batch-flash-auth 默认授权固件。资产由 release-auth-firmware workflow 自动维护。" \
+              --prerelease
           fi
           mapfile -t existing < <(gh release view "$TAG" --json assets -q '.assets[].name')
           is_existing() { printf '%s\n' "${existing[@]}" | grep -qxF "$1"; }
