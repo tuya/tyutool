@@ -303,6 +303,7 @@ impl AuthIo for SerialAuthIo {
 struct AuthSession<T: AuthIo> {
     port: T,
     timing: AuthTiming,
+    port_name: String,
 }
 
 impl AuthSession<SerialAuthIo> {
@@ -317,6 +318,7 @@ impl AuthSession<SerialAuthIo> {
         Ok(Self {
             port: SerialAuthIo { port },
             timing,
+            port_name: port_name.to_string(),
         })
     }
 }
@@ -1618,6 +1620,7 @@ mod tests {
         AuthSession {
             port: mock,
             timing: AuthTiming::default(),
+            port_name: String::new(),
         }
     }
 
@@ -1871,6 +1874,7 @@ mod tests {
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
+            port_name: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
@@ -1889,6 +1893,7 @@ mod tests {
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
+            port_name: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
@@ -1907,6 +1912,7 @@ mod tests {
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
+            port_name: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
@@ -1948,6 +1954,7 @@ mod tests {
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
+            port_name: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let job = FlashJob {
@@ -2018,6 +2025,7 @@ mod tests {
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
+            port_name: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let firmware = sess.detect_firmware(&cancel).unwrap();
