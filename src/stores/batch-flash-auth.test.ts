@@ -406,9 +406,13 @@ describe("handleAuthProgress", () => {
       port: "COM3",
       step: "done",
       mac: "aabbccddeeff",
+      uuid: "550e8400-e29b-41d4-a716-446655440000",
     });
     expect(store.slots[0].status).toBe("done");
     expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.slots[0].authUuid).toBe(
+      "550e8400-e29b-41d4-a716-446655440000",
+    );
     expect(store.slots[0].progress).toBe(100);
     expect(store.cumulativeStats.auth.total).toBe(1);
     expect(store.cumulativeStats.auth.success).toBe(1);
@@ -495,9 +499,13 @@ describe("handleAuthProgress", () => {
       port: "COM3",
       step: "skipped",
       mac: "aabbccddeeff",
+      uuid: "550e8400-e29b-41d4-a716-446655440001",
     });
     expect(store.slots[0].status).toBe("skipped");
     expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.slots[0].authUuid).toBe(
+      "550e8400-e29b-41d4-a716-446655440001",
+    );
     expect(store.slots[0].currentPhase).toBe("");
     // skipped does NOT count in auth cumulative
     expect(store.cumulativeStats.auth.total).toBe(0);

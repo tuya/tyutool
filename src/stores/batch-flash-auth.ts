@@ -514,6 +514,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         progress: 100,
         currentPhase: "",
         mac: ev.mac,
+        authUuid: ev.uuid,
         excelError: ev.excelError,
       });
       cumulativeStats.value.auth.total++;
@@ -546,6 +547,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         status: "skipped",
         currentPhase: "",
         mac: ev.mac,
+        authUuid: ev.uuid,
         excelError: ev.excelError,
       });
       checkBatchCompletion();
