@@ -1970,6 +1970,8 @@ mod log_tools_tests {
     fn pick_active_log_prefers_exact_name() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("tyutool_2026-06-18_10-00-00.log"), b"old").unwrap();
+        // Sleep to ensure tyutool.log has a strictly newer mtime on all platforms.
+        std::thread::sleep(std::time::Duration::from_millis(10));
         std::fs::write(dir.path().join("tyutool.log"), b"current").unwrap();
         let picked = pick_active_log(dir.path()).unwrap();
         assert_eq!(picked.file_name().unwrap(), "tyutool.log");
