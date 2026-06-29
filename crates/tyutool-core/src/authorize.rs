@@ -53,7 +53,9 @@ const AUTH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Idle window for `auth` OTP writes — eFuse burning causes a long silent
 /// gap between the command echo and the response; must exceed worst-case burn time.
 const AUTH_WRITE_OTP_IDLE: Duration = Duration::from_secs(30);
-/// Total write attempts for `auth_write` in batch auth slots (first + retries).
+/// Total `auth_write` attempts per slot (first attempt + retries).
+/// OTP retries are safe because OTP storage can be rewritten until `auth-otp-lock` is issued.
+/// Old firmware does not support OTP, so retries on that path are always KV.
 const AUTH_WRITE_MAX_ATTEMPTS: u8 = 3;
 /// Hard ceiling for `auth-read` responses.
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
