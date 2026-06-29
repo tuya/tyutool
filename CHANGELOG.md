@@ -2,6 +2,14 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.1.1] - 2026-06-29
+
+### 问题修复 / Bug Fixes
+
+- `authorize`：将 `auth-otp-lock` idle 超时从 500ms 延长至 30s，修复慢速 eFuse 设备授权中途断开的问题
+- `authorize`：`auth-read` 在 OTP 存储模式下使用独立 30s idle 超时，避免慢速设备读取被提前终止
+- `ci`：auth-firmware 发布标记为预发布版本，防止意外抢占 Latest 标签
+
 ## [3.1.0] - 2026-06-29
 
 ### 新功能 / Features
