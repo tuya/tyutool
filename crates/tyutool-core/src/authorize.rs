@@ -1695,21 +1695,48 @@ where
             // ── 9. Write auth ────────────────────────────────────────────
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
-            if let Err(e) = sess.auth_write(
-                &uuid,
-                &authkey,
-                config.auth_storage,
-                Duration::from_millis(2000),
-            ) {
-                update_row(
-                    row_idx,
-                    &mac,
-                    BatchAuthRowUpdate::StepFailed {
-                        step: "auth_write",
-                        error: e.to_string(),
-                    },
-                );
-                return Err(e);
+            {
+                let mut last_err: Option<FlashError> = None;
+                for attempt in 0..AUTH_WRITE_MAX_ATTEMPTS {
+                    if attempt > 0 {
+                        check_cancel!();
+                        sess.drain_boot_output();
+                        sess.wake_shell();
+                        log::warn!(
+                            "[batch-auth] auth-write retry {attempt} (old fw)  port={port} mac={mac}"
+                        );
+                    }
+                    check_cancel!();
+                    match sess.auth_write(
+                        &uuid,
+                        &authkey,
+                        config.auth_storage,
+                        Duration::from_millis(2000),
+                    ) {
+                        Ok(()) => {
+                            last_err = None;
+                            break;
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[batch-auth] auth-write attempt {} failed (old fw)  port={port}: {e}",
+                                attempt + 1
+                            );
+                            last_err = Some(e);
+                        }
+                    }
+                }
+                if let Some(e) = last_err {
+                    update_row(
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::StepFailed {
+                            step: "auth_write",
+                            error: e.to_string(),
+                        },
+                    );
+                    return Err(e);
+                }
             }
             if cancel.load(Ordering::Relaxed) {
                 return Ok(BatchAuthSlotResult::CancelledAfterWrite {
