@@ -1161,6 +1161,7 @@ where
     check_cancel!();
     let firmware = sess.detect_firmware(cancel)?;
     check_cancel!();
+    log::debug!("[batch-auth] firmware  port={port} kind={firmware:?}");
 
     match firmware {
         FirmwareKind::New(_) => {
@@ -1168,7 +1169,11 @@ where
             progress(BatchAuthStep::ReadingMac);
             let mac = {
                 let mut mac_opt = None;
-                for _ in 0..sess.timing.mac_read_retries {
+                let mac_total = sess.timing.mac_read_retries;
+                for i in 0..mac_total {
+                    if i > 0 {
+                        log::debug!("[batch-auth] mac-read retry {i}/{mac_total}  port={port}");
+                    }
                     check_cancel!();
                     mac_opt = sess.read_mac();
                     if mac_opt.is_some() {
@@ -1184,7 +1189,11 @@ where
             progress(BatchAuthStep::ReadingAuth);
             let existing_auth = {
                 let mut auth = None;
-                for _ in 0..sess.timing.auth_read_retries {
+                let auth_total = sess.timing.auth_read_retries;
+                for i in 0..auth_total {
+                    if i > 0 {
+                        log::debug!("[batch-auth] auth-read retry {i}/{auth_total}  port={port}");
+                    }
                     check_cancel!();
                     auth = sess.auth_read(auth_storage);
                     if auth.is_some() {
@@ -1194,6 +1203,14 @@ where
                 }
                 auth
             };
+            match &existing_auth {
+                Some((uuid, _)) => log::debug!(
+                    "[batch-auth] existing-auth  port={port} mac={mac} result=uuid={uuid}"
+                ),
+                None => {
+                    log::debug!("[batch-auth] existing-auth  port={port} mac={mac} result=none")
+                }
+            }
 
             // Conflict check: if policy=Skip and device already has auth, skip without allocating.
             if let Some((ref ex_uuid, _)) = existing_auth {
@@ -1258,7 +1275,13 @@ where
             progress(BatchAuthStep::Verifying);
             let verify_result = {
                 let mut result = None;
-                for _ in 0..sess.timing.auth_read_retries {
+                let verify_total = sess.timing.auth_read_retries;
+                for i in 0..verify_total {
+                    if i > 0 {
+                        log::debug!(
+                            "[batch-auth] verify auth-read retry {i}/{verify_total}  port={port}"
+                        );
+                    }
                     if cancel.load(Ordering::Relaxed) {
                         return Ok(BatchAuthSlotResult::CancelledAfterWrite {
                             mac: mac.clone(),
@@ -1328,7 +1351,11 @@ where
             progress(BatchAuthStep::ReadingMac);
             let mac = {
                 let mut mac_opt = None;
-                for _ in 0..sess.timing.mac_read_retries {
+                let mac_total = sess.timing.mac_read_retries;
+                for i in 0..mac_total {
+                    if i > 0 {
+                        log::debug!("[batch-auth] mac-read retry {i}/{mac_total}  port={port}");
+                    }
                     check_cancel!();
                     mac_opt = sess.read_mac();
                     if mac_opt.is_some() {
@@ -1345,7 +1372,11 @@ where
                 let mut auth = None;
                 // Old firmware is slower; use 3× the normal auth retry interval.
                 let old_retry_ms = sess.timing.auth_read_retry_ms * 4;
-                for _ in 0..sess.timing.auth_read_retries + 1 {
+                let auth_total = sess.timing.auth_read_retries + 1;
+                for i in 0..auth_total {
+                    if i > 0 {
+                        log::debug!("[batch-auth] auth-read retry {i}/{auth_total}  port={port}");
+                    }
                     check_cancel!();
                     auth = sess.auth_read(auth_storage);
                     if auth.is_some() {
@@ -1355,6 +1386,14 @@ where
                 }
                 auth
             };
+            match &existing_auth {
+                Some((uuid, _)) => log::debug!(
+                    "[batch-auth] existing-auth (old fw)  port={port} mac={mac} result=uuid={uuid}"
+                ),
+                None => log::debug!(
+                    "[batch-auth] existing-auth (old fw)  port={port} mac={mac} result=none"
+                ),
+            }
 
             // Conflict check: if policy=Skip and device already has auth, skip without allocating.
             if let Some((ref ex_uuid, _)) = existing_auth {
@@ -1422,7 +1461,13 @@ where
 
             progress(BatchAuthStep::Verifying);
             let mut verify_result = None;
-            for _ in 0..sess.timing.auth_read_retries {
+            let verify_total = sess.timing.auth_read_retries;
+            for i in 0..verify_total {
+                if i > 0 {
+                    log::debug!(
+                        "[batch-auth] verify auth-read retry {i}/{verify_total}  port={port}"
+                    );
+                }
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(BatchAuthSlotResult::CancelledAfterWrite {
                         mac: mac.clone(),
