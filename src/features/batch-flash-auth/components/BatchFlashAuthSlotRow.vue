@@ -283,33 +283,6 @@ function showExcelError(): void {
       >
     </div>
 
-    <!-- MAC address (done / skipped state) -->
-    <div
-      v-else-if="
-        (portSlot.status === 'done' || portSlot.status === 'skipped') &&
-        portSlot.mac
-      "
-      class="flex min-w-0 flex-1 items-center gap-1.5"
-    >
-      <span class="font-mono text-xs text-[var(--ty-text-muted)]">{{
-        portSlot.mac
-      }}</span>
-      <button
-        v-if="portSlot.excelError"
-        type="button"
-        class="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-warning)] transition-colors hover:bg-[var(--ty-surface-muted)]"
-        :title="t('batchFlashAuth.slot.excelErrorTitle')"
-        :aria-label="t('batchFlashAuth.slot.excelErrorTitle')"
-        @click="showExcelError"
-      >
-        <FontAwesomeIcon
-          :icon="['fas', 'triangle-exclamation']"
-          class="size-3"
-          aria-hidden="true"
-        />
-      </button>
-    </div>
-
     <!-- Error summary (failed state) -->
     <div
       v-else-if="portSlot.status === 'failed' && portSlot.error"
@@ -349,38 +322,46 @@ function showExcelError(): void {
       </span>
     </div>
 
-    <!-- Idle with read-probe results: MAC + auth status -->
+    <!-- Unified result: done / skipped / idle-with-probe -->
     <div
       v-else-if="
-        portSlot.status === 'idle' && (portSlot.mac || portSlot.readError)
+        portSlot.mac ||
+        portSlot.authUuid ||
+        portSlot.isAuthorized === false ||
+        portSlot.readError
       "
       class="flex min-w-0 flex-1 items-center gap-2"
     >
       <span
         v-if="portSlot.mac"
-        class="font-mono text-xs text-[var(--ty-text-muted)]"
+        class="shrink-0 font-mono text-xs text-[var(--ty-text-muted)]"
         >{{ portSlot.mac }}</span
       >
       <span
-        v-if="portSlot.isAuthorized !== undefined"
-        class="shrink-0 text-xs"
-        :style="{
-          color: portSlot.isAuthorized
-            ? 'var(--ty-success)'
-            : 'var(--ty-text-muted)',
-        }"
-        >{{
-          portSlot.isAuthorized
-            ? t("batchFlashAuth.slot.authorized")
-            : t("batchFlashAuth.slot.notAuthorized")
-        }}</span
-      >
-      <span
         v-if="portSlot.authUuid"
-        class="min-w-0 truncate font-mono text-xs text-[var(--ty-text-muted)] opacity-70"
+        class="min-w-0 truncate font-mono text-[10px] text-[var(--ty-text-muted)] opacity-50"
         :title="portSlot.authUuid"
         >{{ portSlot.authUuid }}</span
       >
+      <span
+        v-else-if="portSlot.isAuthorized === false"
+        class="shrink-0 text-xs text-[var(--ty-text-muted)]"
+        >{{ t("batchFlashAuth.slot.notAuthorized") }}</span
+      >
+      <button
+        v-if="portSlot.excelError"
+        type="button"
+        class="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-warning)] transition-colors hover:bg-[var(--ty-surface-muted)]"
+        :title="t('batchFlashAuth.slot.excelErrorTitle')"
+        :aria-label="t('batchFlashAuth.slot.excelErrorTitle')"
+        @click="showExcelError"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'triangle-exclamation']"
+          class="size-3"
+          aria-hidden="true"
+        />
+      </button>
       <span
         v-if="portSlot.readError"
         class="min-w-0 truncate text-xs"

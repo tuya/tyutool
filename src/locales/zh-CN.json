@@ -603,7 +603,6 @@
       "blockPort": "屏蔽此端口",
       "read": "读取",
       "readHint": "读取 MAC 和授权状态",
-      "authorized": "已授权",
       "notAuthorized": "未授权",
       "readError": "读取失败",
       "lockFailedLabel": "OTP 已写入但 eFuse 未锁定 — 需物理隔离该设备",
