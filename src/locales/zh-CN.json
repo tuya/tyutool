@@ -614,8 +614,6 @@
       "readHint": "读取 MAC 和授权状态",
       "notAuthorized": "未授权",
       "readError": "读取失败",
-      "lockFailedLabel": "OTP 已写入但 eFuse 未锁定 — 需物理隔离该设备",
-      "lockFailedBadge": "锁失败",
       "cancelledAfterWriteBadge": "写入后取消",
       "cancelledAfterWriteLabel": "授权数据已发往设备但未完成验证；KV 可覆盖、OTP 永久写入。请物理隔离并人工核查。",
       "cancelledAfterWriteError": "授权写入后取消 — 设备可能已携带凭证",
@@ -691,7 +689,7 @@
       },
       "item2": {
         "title": "OTP 授权永久不可撤销",
-        "body": "选择 OTP 存储模式并启用 eFuse 锁定时，授权数据将永久写入芯片，无法擦除、修改或撤销。锁定失败（lockFailed）或写入中途取消的设备必须从产线隔离，不得出货，需人工核查。"
+        "body": "选择 OTP 存储模式并启用 eFuse 锁定时，授权数据将永久写入芯片，无法擦除、修改或撤销。锁定失败或写入中途取消的设备必须从产线隔离，不得出货，需人工核查。"
       },
       "item3": {
         "title": "Excel 授权文件须妥善保管",

@@ -473,22 +473,6 @@ describe("handleAuthProgress", () => {
     expect(store.slots[0].status).toBe("failed");
     expect(store.slots[0].error).toBe("otp lock failed");
     expect(store.slots[0].mac).toBe("aabbccddeeff");
-    // lockFailed is no longer set from the event (backend no longer emits it)
-    expect(store.slots[0].lockFailed).toBeUndefined();
-  });
-
-  it("handleAuthProgress: normal failed step does not set lockFailed", () => {
-    const store = useBatchFlashAuthStore();
-    store.addPorts(["COM3"]);
-    store.slots[0].status = "authorizing";
-    store.batchStartTime = Date.now();
-    store.handleAuthProgress({
-      port: "COM3",
-      step: "failed",
-      error: "verify mismatch",
-    });
-    expect(store.slots[0].status).toBe("failed");
-    expect(store.slots[0].lockFailed).toBeUndefined();
   });
 
   it("skipped step: status=skipped, mac saved, auth cumulative NOT incremented", () => {
@@ -979,37 +963,6 @@ describe("cancelledAfterWrite (B1 OTP-brick safety)", () => {
     // slot must remain in failed state — not reset to idle
     expect(store.slots[0].status).toBe("failed");
     expect(store.slots[0].cancelledAfterWrite).toBe(true);
-  });
-});
-
-describe("retryFailed — lockFailed exclusion (F-Audit-1)", () => {
-  beforeEach(() => setActivePinia(createPinia()));
-
-  it("retryFailed does not reset lockFailed slots", async () => {
-    const store = useBatchFlashAuthStore();
-    store.addPorts(["COM3", "COM5"]);
-    // lockFailed slot
-    store.slots[0].status = "failed";
-    store.slots[0].lockFailed = true;
-    store.slots[0].error = "otp lock failed";
-    // normal failed slot
-    store.slots[1].status = "failed";
-    store.slots[1].error = "timeout";
-    await store.retryFailed();
-    // lockFailed slot must remain unchanged
-    expect(store.slots[0].status).toBe("failed");
-    expect(store.slots[0].lockFailed).toBe(true);
-    // normal failed slot must be reset to idle
-    expect(store.slots[1].status).toBe("idle");
-    expect(store.slots[1].error).toBeUndefined();
-  });
-
-  it("canRetry is false when only lockFailed slots remain", () => {
-    const store = useBatchFlashAuthStore();
-    store.addPorts(["COM3"]);
-    store.slots[0].status = "failed";
-    store.slots[0].lockFailed = true;
-    expect(store.canRetry).toBe(false);
   });
 });
 
