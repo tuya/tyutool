@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 import BatchFlashAuthDashboard from "./components/BatchFlashAuthDashboard.vue";
 import BatchFlashAuthConfig from "./components/BatchFlashAuthConfig.vue";
@@ -9,9 +10,26 @@ import BatchAuthConfig from "./components/BatchAuthConfig.vue";
 import BatchFlashAuthToolbar from "./components/BatchFlashAuthToolbar.vue";
 import BatchFlashAuthSlotList from "./components/BatchFlashAuthSlotList.vue";
 import ToolboxBreadcrumb from "@/features/toolbox/components/ToolboxBreadcrumb.vue";
+import DisclaimerModal from "./components/DisclaimerModal.vue";
 
 const { t } = useI18n();
 const store = useBatchFlashAuthStore();
+
+const router = useRouter();
+
+const DISCLAIMER_KEY = "tyutool-batch-auth-disclaimer-v1";
+const showDisclaimer = ref(false);
+
+function onDisclaimerConfirm(dontShowAgain: boolean) {
+  if (dontShowAgain) {
+    localStorage.setItem(DISCLAIMER_KEY, "true");
+  }
+  showDisclaimer.value = false;
+}
+
+function onDisclaimerCancel() {
+  router.push("/toolbox");
+}
 
 // The Config + AuthConfig pair is auto-collapsed when a batch starts so
 // the live SlotList grid gets the room; users can manually re-open while
@@ -26,6 +44,9 @@ watch(
 );
 
 onMounted(async () => {
+  if (localStorage.getItem(DISCLAIMER_KEY) !== "true") {
+    showDisclaimer.value = true;
+  }
   await store.loadPersistedData();
   await store.ensureListener();
   await store.autoAssign();
@@ -38,6 +59,11 @@ onUnmounted(() => {
 
 <template>
   <div class="flex flex-col gap-3">
+    <DisclaimerModal
+      :show="showDisclaimer"
+      @confirm="onDisclaimerConfirm"
+      @cancel="onDisclaimerCancel"
+    />
     <div>
       <ToolboxBreadcrumb :toolName="t('toolbox.batchFlashAuth.name')" />
       <h1 class="text-lg font-semibold text-[var(--ty-text)]">
