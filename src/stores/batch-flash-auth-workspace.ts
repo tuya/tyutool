@@ -9,6 +9,7 @@ import type {
 export interface BatchFirmwareConfig {
   source: BatchFirmwareSource;
   version: string;
+  localPath?: string;
 }
 
 export interface BatchSharedConfig {

@@ -609,7 +609,12 @@ fn batch_auth_start(
                         U::OtpLocked => (RowStatus::OtpLocked, "otp_locked", None),
                         U::Done => (RowStatus::Done, "done", None),
                         U::StepFailed { step, error } => {
-                            (RowStatus::AuthWritten, step, Some(error))
+                            let status = if step == "auth_write" {
+                                RowStatus::MacRead
+                            } else {
+                                RowStatus::AuthWritten
+                            };
+                            (status, step, Some(error))
                         }
                     };
                     if let Err(e) = alloc_update.update_row_state(

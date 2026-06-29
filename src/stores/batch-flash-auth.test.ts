@@ -459,7 +459,7 @@ describe("handleAuthProgress", () => {
     expect(store.slots[0].error).toBe("Unknown auth error");
   });
 
-  it("handleAuthProgress sets slot.lockFailed when payload includes lockFailed=true", () => {
+  it("handleAuthProgress sets slot status/error/mac for failed step", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.slots[0].status = "authorizing";
@@ -469,15 +469,15 @@ describe("handleAuthProgress", () => {
       step: "failed",
       error: "otp lock failed",
       mac: "aabbccddeeff",
-      lockFailed: true,
     });
     expect(store.slots[0].status).toBe("failed");
     expect(store.slots[0].error).toBe("otp lock failed");
     expect(store.slots[0].mac).toBe("aabbccddeeff");
-    expect(store.slots[0].lockFailed).toBe(true);
+    // lockFailed is no longer set from the event (backend no longer emits it)
+    expect(store.slots[0].lockFailed).toBeUndefined();
   });
 
-  it("handleAuthProgress does not set lockFailed for normal failed step", () => {
+  it("handleAuthProgress: normal failed step does not set lockFailed", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.slots[0].status = "authorizing";

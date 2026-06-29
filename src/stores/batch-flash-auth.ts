@@ -538,7 +538,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: ev.error ?? "Unknown auth error",
         excelError: ev.excelError,
         mac: ev.mac,
-        lockFailed: ev.lockFailed,
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.fail++;
