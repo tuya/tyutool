@@ -1341,18 +1341,478 @@ where
     A: FnOnce() -> Option<(usize, String, String)>,
     U: Fn(usize, &str, BatchAuthRowUpdate),
 {
-    // TODO Task 3: rewrite function body with MAC-first logic.
-    let _ = (
-        port,
-        chip_id,
-        config,
-        find_by_mac,
-        allocate_row,
-        update_row,
-        cancel,
-        progress,
-    );
-    todo!("Task 3 will implement this body")
+    macro_rules! check_cancel {
+        () => {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::Cancelled);
+            }
+        };
+    }
+
+    let timing = AuthTiming::for_chip(chip_id);
+    let mut sess = AuthSession::open(port, timing, config.auth_baud_rate)?;
+    check_cancel!();
+    sess.drain_boot_output();
+    check_cancel!();
+    let firmware = sess.detect_firmware(cancel)?;
+    check_cancel!();
+
+    match firmware {
+        FirmwareKind::New(_) => {
+            // ── 1. Read MAC ──────────────────────────────────────────────
+            progress(BatchAuthStep::ReadingMac);
+            let mac = {
+                let mut mac_opt = None;
+                for i in 0..sess.timing.mac_read_retries {
+                    if i > 0 {
+                        log::debug!("[batch-auth] mac-read retry {i}  port={port}");
+                    }
+                    check_cancel!();
+                    mac_opt = sess.read_mac();
+                    if mac_opt.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(sess.timing.mac_read_retry_ms);
+                }
+                mac_opt.ok_or_else(|| FlashError::Plugin("Failed to read MAC address".into()))?
+            };
+            log::info!("[batch-auth] read mac  port={port} mac={mac}");
+
+            // ── 2. Default MAC check ─────────────────────────────────────
+            if is_default_mac(chip_id, &mac) {
+                log::warn!("[batch-auth] default-mac  port={port} mac={mac}");
+                return Ok(BatchAuthSlotResult::DefaultMac { mac });
+            }
+
+            // ── 3. Find existing row by MAC ──────────────────────────────
+            let found_row = find_by_mac(&mac);
+
+            // ── 4. Read existing auth ────────────────────────────────────
+            progress(BatchAuthStep::ReadingAuth);
+            let existing_auth = {
+                let mut auth = None;
+                for i in 0..sess.timing.auth_read_retries {
+                    if i > 0 {
+                        log::debug!("[batch-auth] auth-read retry {i}  port={port}");
+                    }
+                    check_cancel!();
+                    auth = sess.auth_read(config.auth_storage);
+                    if auth.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(sess.timing.auth_read_retry_ms);
+                }
+                auth
+            };
+
+            // ── 5. AlreadyDone check (MAC found + credentials match) ─────
+            if let Some((found_idx, ref found_uuid, ref found_key)) = found_row {
+                if let Some((ref ex_u, ref ex_k)) = existing_auth {
+                    if ex_u == found_uuid && ex_k == found_key {
+                        log::info!("[batch-auth] already-done  port={port} mac={mac}");
+                        update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
+                        return Ok(BatchAuthSlotResult::AlreadyDone { mac });
+                    }
+                }
+            }
+
+            // ── 6. Conflict / Skip check ─────────────────────────────────
+            if let Some((ref ex_u, _)) = existing_auth {
+                if ex_u != PLACEHOLDER_UUID && config.conflict_policy == ConflictPolicy::Skip {
+                    log::info!("[batch-auth] skipped  port={port} mac={mac} existing_uuid={ex_u}");
+                    return Ok(BatchAuthSlotResult::Skipped {
+                        mac,
+                        existing_uuid: ex_u.clone(),
+                    });
+                }
+            }
+
+            // ── 7. Get row (found or allocate) ───────────────────────────
+            let (row_idx, uuid, authkey) = match found_row {
+                Some(r) => r,
+                None => match allocate_row() {
+                    Some(r) => r,
+                    None => {
+                        log::info!("[batch-auth] no-code  port={port} mac={mac}");
+                        return Ok(BatchAuthSlotResult::InsufficientCodes { mac });
+                    }
+                },
+            };
+            log::info!("[batch-auth] allocated  port={port} mac={mac} uuid={uuid}");
+
+            // ── 8. Bind MAC to row immediately ───────────────────────────
+            update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
+
+            // ── 9. Write auth ────────────────────────────────────────────
+            progress(BatchAuthStep::WritingAuth);
+            log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
+            let auth_idle = if config.auth_storage == AuthStorage::Otp {
+                AUTH_WRITE_OTP_IDLE
+            } else {
+                Duration::from_millis(2000)
+            };
+            if let Err(e) = sess.auth_write(&uuid, &authkey, config.auth_storage, auth_idle) {
+                update_row(
+                    row_idx,
+                    &mac,
+                    BatchAuthRowUpdate::StepFailed {
+                        step: "auth_write",
+                        error: e.to_string(),
+                    },
+                );
+                return Err(e);
+            }
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
+
+            // ── 10. Persist AuthWritten (OTP 已烧，行不可再 release) ─────
+            update_row(row_idx, &mac, BatchAuthRowUpdate::AuthWritten);
+            sess.drain_boot_output();
+            sess.wake_shell();
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
+
+            // ── 11. Verify ───────────────────────────────────────────────
+            progress(BatchAuthStep::Verifying);
+            let verify_result = {
+                let mut result = None;
+                for i in 0..sess.timing.auth_read_retries {
+                    if i > 0 {
+                        log::debug!("[batch-auth] verify retry {i}  port={port}");
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                            mac: mac.clone(),
+                            uuid: uuid.clone(),
+                        });
+                    }
+                    result = sess.auth_read(config.auth_storage);
+                    if result.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(sess.timing.auth_read_retry_ms);
+                }
+                result
+            };
+            match verify_result {
+                Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
+                    log::info!("[batch-auth] verify ok  port={port} mac={mac}");
+                    update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
+                }
+                Some((rb_u, rb_k)) => {
+                    let msg =
+                        format!("Verify failed: wrote ({uuid},{authkey}), read ({rb_u},{rb_k})");
+                    log::warn!("[batch-auth] verify-fail  port={port} mac={mac} reason={msg}");
+                    update_row(
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::StepFailed {
+                            step: "verify",
+                            error: msg.clone(),
+                        },
+                    );
+                    return Err(FlashError::Plugin(msg));
+                }
+                None => {
+                    let msg = "Verification failed: no response from auth-read".to_string();
+                    log::warn!(
+                        "[batch-auth] verify-fail  port={port} mac={mac} reason=no-response"
+                    );
+                    update_row(
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::StepFailed {
+                            step: "verify",
+                            error: msg.clone(),
+                        },
+                    );
+                    return Err(FlashError::Plugin(msg));
+                }
+            }
+
+            // ── 12. OTP lock (optional) ──────────────────────────────────
+            if config.lock_otp {
+                log::warn!(
+                    "[batch-auth] sending auth-otp-lock (irreversible)  port={port} mac={mac}"
+                );
+                match sess.auth_otp_lock() {
+                    Ok(()) => {
+                        log::info!("[batch-auth] otp-lock succeeded  port={port} mac={mac}");
+                        update_row(row_idx, &mac, BatchAuthRowUpdate::OtpLocked);
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        log::warn!("[batch-auth] otp-lock failed  port={port} mac={mac} err={msg}");
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "otp_lock",
+                                error: msg.clone(),
+                            },
+                        );
+                        let _ = sess.hardware_reset();
+                        return Err(FlashError::Plugin(format!("auth-otp-lock failed: {msg}")));
+                    }
+                }
+            }
+
+            // ── 13. Done ─────────────────────────────────────────────────
+            log::info!("[batch-auth] done  port={port} mac={mac} uuid={uuid}");
+            if let Err(e) = sess.hardware_reset() {
+                log::warn!("[batch-auth] hardware_reset after Done failed  port={port}: {e}");
+            }
+            update_row(row_idx, &mac, BatchAuthRowUpdate::Done);
+            Ok(BatchAuthSlotResult::Done { mac })
+        }
+
+        FirmwareKind::Old => {
+            // ── 1. Read MAC ──────────────────────────────────────────────
+            progress(BatchAuthStep::ReadingMac);
+            let mac = {
+                let mut mac_opt = None;
+                for i in 0..sess.timing.mac_read_retries {
+                    if i > 0 {
+                        log::debug!("[batch-auth] mac-read retry {i} (old fw)  port={port}");
+                    }
+                    check_cancel!();
+                    mac_opt = sess.read_mac();
+                    if mac_opt.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(sess.timing.mac_read_retry_ms);
+                }
+                mac_opt.ok_or_else(|| FlashError::Plugin("Failed to read MAC address".into()))?
+            };
+            log::info!("[batch-auth] read mac (old fw)  port={port} mac={mac}");
+
+            // ── 2. Default MAC check ─────────────────────────────────────
+            if is_default_mac(chip_id, &mac) {
+                log::warn!("[batch-auth] default-mac (old fw)  port={port} mac={mac}");
+                return Ok(BatchAuthSlotResult::DefaultMac { mac });
+            }
+
+            // ── 3. Find existing row by MAC ──────────────────────────────
+            let found_row = find_by_mac(&mac);
+
+            // ── 4. Read existing auth (old fw uses slower retries) ───────
+            progress(BatchAuthStep::ReadingAuth);
+            let old_retry_ms = sess.timing.auth_read_retry_ms * 4;
+            let auth_retries = sess.timing.auth_read_retries + 1;
+            let existing_auth = {
+                let mut auth = None;
+                for i in 0..auth_retries {
+                    if i > 0 {
+                        log::debug!("[batch-auth] auth-read retry {i} (old fw)  port={port}");
+                    }
+                    check_cancel!();
+                    auth = sess.auth_read(config.auth_storage);
+                    if auth.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(old_retry_ms);
+                }
+                auth
+            };
+
+            // ── 5. AlreadyDone check ─────────────────────────────────────
+            if let Some((found_idx, ref found_uuid, ref found_key)) = found_row {
+                if let Some((ref ex_u, ref ex_k)) = existing_auth {
+                    if ex_u == found_uuid && ex_k == found_key {
+                        log::info!("[batch-auth] already-done (old fw)  port={port} mac={mac}");
+                        update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
+                        return Ok(BatchAuthSlotResult::AlreadyDone { mac });
+                    }
+                }
+            }
+
+            // ── 6. Conflict / Skip check ─────────────────────────────────
+            if let Some((ref ex_u, _)) = existing_auth {
+                if ex_u != PLACEHOLDER_UUID && config.conflict_policy == ConflictPolicy::Skip {
+                    log::info!(
+                        "[batch-auth] skipped (old fw)  port={port} mac={mac} existing={ex_u}"
+                    );
+                    return Ok(BatchAuthSlotResult::Skipped {
+                        mac,
+                        existing_uuid: ex_u.clone(),
+                    });
+                }
+            }
+
+            // ── 7. Get row (found or allocate) ───────────────────────────
+            let (row_idx, uuid, authkey) = match found_row {
+                Some(r) => r,
+                None => match allocate_row() {
+                    Some(r) => r,
+                    None => {
+                        log::info!("[batch-auth] no-code (old fw)  port={port} mac={mac}");
+                        return Ok(BatchAuthSlotResult::InsufficientCodes { mac });
+                    }
+                },
+            };
+            log::info!("[batch-auth] allocated (old fw)  port={port} mac={mac} uuid={uuid}");
+
+            // ── 8. Bind MAC to row immediately ───────────────────────────
+            update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
+
+            // ── 9. Write auth ────────────────────────────────────────────
+            progress(BatchAuthStep::WritingAuth);
+            log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
+            if let Err(e) = sess.auth_write(
+                &uuid,
+                &authkey,
+                config.auth_storage,
+                Duration::from_millis(2000),
+            ) {
+                update_row(
+                    row_idx,
+                    &mac,
+                    BatchAuthRowUpdate::StepFailed {
+                        step: "auth_write",
+                        error: e.to_string(),
+                    },
+                );
+                return Err(e);
+            }
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
+
+            // ── 10. Persist AuthWritten ───────────────────────────────────
+            update_row(row_idx, &mac, BatchAuthRowUpdate::AuthWritten);
+
+            // ── 11. Settle wait (old fw may reboot after auth write) ──────
+            let settle_wait = sess.timing.write_settle_wait;
+            let wait_end = Instant::now() + settle_wait;
+            while Instant::now() < wait_end {
+                if cancel.load(Ordering::Relaxed) {
+                    return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                        mac: mac.clone(),
+                        uuid: uuid.clone(),
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            sess.drain_boot_output();
+            sess.wake_shell();
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
+
+            // ── 12. Verify ───────────────────────────────────────────────
+            progress(BatchAuthStep::Verifying);
+            let verify_result = {
+                let mut result = None;
+                for i in 0..auth_retries {
+                    if i > 0 {
+                        log::debug!("[batch-auth] verify retry {i} (old fw)  port={port}");
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                            mac: mac.clone(),
+                            uuid: uuid.clone(),
+                        });
+                    }
+                    result = sess.auth_read(config.auth_storage);
+                    if result.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(old_retry_ms);
+                }
+                result
+            };
+            match verify_result {
+                Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
+                    log::info!("[batch-auth] verify ok (old fw)  port={port} mac={mac}");
+                    update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
+                }
+                Some((rb_u, rb_k)) => {
+                    let msg =
+                        format!("Verify failed: wrote ({uuid},{authkey}), read ({rb_u},{rb_k})");
+                    log::warn!("[batch-auth] verify-fail (old fw)  port={port} mac={mac}");
+                    update_row(
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::StepFailed {
+                            step: "verify",
+                            error: msg.clone(),
+                        },
+                    );
+                    return Err(FlashError::Plugin(msg));
+                }
+                None => {
+                    let msg = "Verification failed: no response from auth-read".to_string();
+                    log::warn!(
+                        "[batch-auth] verify-fail (old fw) no-response  port={port} mac={mac}"
+                    );
+                    update_row(
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::StepFailed {
+                            step: "verify",
+                            error: msg.clone(),
+                        },
+                    );
+                    return Err(FlashError::Plugin(msg));
+                }
+            }
+
+            // ── 13. OTP lock (optional) ──────────────────────────────────
+            if config.lock_otp {
+                log::warn!(
+                    "[batch-auth] sending auth-otp-lock (irreversible) (old fw)  port={port} mac={mac}"
+                );
+                match sess.auth_otp_lock() {
+                    Ok(()) => {
+                        log::info!(
+                            "[batch-auth] otp-lock succeeded (old fw)  port={port} mac={mac}"
+                        );
+                        update_row(row_idx, &mac, BatchAuthRowUpdate::OtpLocked);
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        log::warn!(
+                            "[batch-auth] otp-lock failed (old fw)  port={port} mac={mac} err={msg}"
+                        );
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "otp_lock",
+                                error: msg.clone(),
+                            },
+                        );
+                        let _ = sess.hardware_reset();
+                        return Err(FlashError::Plugin(format!("auth-otp-lock failed: {msg}")));
+                    }
+                }
+            }
+
+            // ── 14. Done ─────────────────────────────────────────────────
+            log::info!("[batch-auth] done (old fw)  port={port} mac={mac} uuid={uuid}");
+            if let Err(e) = sess.hardware_reset() {
+                log::warn!(
+                    "[batch-auth] hardware_reset after Done failed (old fw)  port={port}: {e}"
+                );
+            }
+            update_row(row_idx, &mac, BatchAuthRowUpdate::Done);
+            Ok(BatchAuthSlotResult::Done { mac })
+        }
+    }
 }
 
 // ── Read-only probe ───────────────────────────────────────────────────────
