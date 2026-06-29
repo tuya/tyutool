@@ -513,11 +513,6 @@ fn batch_auth_start(
         let config_clone = config.clone();
         let alloc_clone = allocator.clone();
 
-        // Tracks which Excel row was allocated inside the slot (None = no allocation yet).
-        let allocated_row: std::sync::Arc<std::sync::Mutex<Option<usize>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(None));
-        let allocated_row_clone = allocated_row.clone();
-
         let handle = std::thread::spawn(move || {
             log::info!(
                 "[batch-auth] slot begin  port={port_clone} chip={}",
@@ -568,22 +563,65 @@ fn batch_auth_start(
                         );
                         return;
                     }
+                    // Wait for the device to boot naturally after flash before the auth
+                    // slot issues a hardware reset. Non-fatal: times out after 3 s max.
+                    tyutool_core::wait_after_firmware_flash(
+                        &port_clone,
+                        config_clone.auth_baud_rate,
+                        &config_clone.chip_id,
+                        &cancel_clone,
+                    );
+                    if cancel_clone.load(Ordering::Relaxed) {
+                        return;
+                    }
                 }
             }
 
-            // Lazy allocation closure: called by run_batch_auth_slot only when the device
-            // actually needs a new auth code (after probe confirms no existing auth / overwrite).
-            let alloc_for_get = alloc_clone.clone();
-            let row_cell = allocated_row_clone.clone();
-            let get_code = move || -> Option<(String, String)> {
-                match alloc_for_get.allocate_row() {
-                    Ok(row) => {
-                        *row_cell.lock().unwrap() = Some(row.row_idx);
-                        Some((row.uuid, row.authkey))
+            // find_by_mac: look up Excel row by device MAC address
+            let alloc_find = alloc_clone.clone();
+            let find_by_mac =
+                move |mac: &str| -> Option<(usize, String, String)> { alloc_find.find_by_mac(mac) };
+
+            // allocate_row: claim a new unused row
+            let alloc_alloc = alloc_clone.clone();
+            let allocate_row = move || -> Option<(usize, String, String)> {
+                match alloc_alloc.allocate_row() {
+                    Ok(row) => Some((row.row_idx, row.uuid, row.authkey)),
+                    Err(e) => {
+                        log::warn!("[batch-auth] allocate_row error: {e}");
+                        None
                     }
-                    Err(_) => None,
                 }
             };
+
+            // update_row: translate BatchAuthRowUpdate → RowStatus + step_name, then write to Excel
+            let alloc_update = alloc_clone.clone();
+            let port_for_update = port_clone.clone();
+            let update_row =
+                move |row_idx: usize, mac: &str, update: tyutool_core::BatchAuthRowUpdate| {
+                    use crate::batch_auth::RowStatus;
+                    use tyutool_core::BatchAuthRowUpdate as U;
+                    let (status, step_name, error): (RowStatus, &str, Option<String>) = match update
+                    {
+                        U::MacRead => (RowStatus::MacRead, "mac_read", None),
+                        U::AuthWritten => (RowStatus::AuthWritten, "auth_written", None),
+                        U::AuthVerified => (RowStatus::AuthVerified, "auth_verified", None),
+                        U::OtpLocked => (RowStatus::OtpLocked, "otp_locked", None),
+                        U::Done => (RowStatus::Done, "done", None),
+                        U::StepFailed { step, error } => {
+                            (RowStatus::AuthWritten, step, Some(error))
+                        }
+                    };
+                    if let Err(e) = alloc_update.update_row_state(
+                        row_idx,
+                        mac,
+                        status,
+                        step_name,
+                        error.as_deref(),
+                    ) {
+                        log::error!("[batch-auth] excel-update-failed  port={port_for_update} row={row_idx} err={e}");
+                    }
+                };
 
             let slot_config = tyutool_core::BatchAuthSlotConfig {
                 auth_baud_rate: config_clone.auth_baud_rate,
@@ -595,7 +633,9 @@ fn batch_auth_start(
                 &port_clone,
                 &config_clone.chip_id,
                 &slot_config,
-                get_code,
+                find_by_mac,
+                allocate_row,
+                update_row,
                 &cancel_clone,
                 |step| {
                     let step_str = match step {
@@ -611,152 +651,69 @@ fn batch_auth_start(
                 },
             );
 
-            let row_idx = *allocated_row_clone.lock().unwrap();
-
             match result {
+                // Done — state already written to Excel by update_row(Done)
                 Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
-                    let excel_err = if let Some(idx) = row_idx {
-                        log::info!(
-                            "[batch-auth] slot done  port={port_clone} mac={mac} excel_row={idx}"
-                        );
-                        let err = alloc_clone.confirm_row(idx, mac.clone()).err();
-                        if let Some(ref e) = err {
-                            log::error!("[batch-auth] excel-write-failed  port={port_clone} row={idx} error={e}");
-                        }
-                        err
-                    } else {
-                        None
-                    };
-                    let mut payload =
-                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac });
-                    if let Some(e) = excel_err {
-                        payload["excelError"] = serde_json::Value::String(e);
-                    }
-                    let _ = app_clone.emit("batch-auth-progress", payload);
-                }
-                Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
-                    // Row was allocated but the device already had these exact credentials;
-                    // release it so it remains available for other devices.
-                    if let Some(idx) = row_idx {
-                        log::info!("[batch-auth] slot already-done  port={port_clone} mac={mac} excel_row={idx}");
-                        alloc_clone.release_row(idx);
-                    }
+                    log::info!("[batch-auth] slot done  port={port_clone} mac={mac}");
                     let _ = app_clone.emit(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
                     );
                 }
+                // AlreadyDone — state already written to Excel by update_row(Done) in authorize.rs
+                Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
+                    log::info!("[batch-auth] slot already-done  port={port_clone} mac={mac}");
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
+                    );
+                }
+                // InsufficientCodes — no row was allocated, nothing to write
                 Ok(tyutool_core::BatchAuthSlotResult::InsufficientCodes { mac }) => {
-                    // No row was allocated — device was probed but there are no codes left.
                     log::info!("[batch-auth] slot no-code  port={port_clone} mac={mac}");
                     let _ = app_clone.emit(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": "no_code", "mac": mac }),
                     );
                 }
+                // Skipped — no row allocation in new flow; state unchanged in Excel
                 Ok(tyutool_core::BatchAuthSlotResult::Skipped { mac, existing_uuid }) => {
-                    // No row was allocated (skip decision made before get_code was called).
-                    // Mark the device's existing auth-code row as Used so the same
-                    // code isn't handed out to another device.
                     log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} existing_uuid={existing_uuid}");
-                    let excel_err = alloc_clone
-                        .find_and_confirm_by_uuid(&existing_uuid, mac.clone())
-                        .err();
-                    if let Some(ref e) = excel_err {
-                        log::error!("[batch-auth] excel-confirm-skipped-failed  port={port_clone} existing_uuid={existing_uuid} error={e}");
-                    }
-                    let mut payload =
-                        serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac });
-                    if let Some(e) = excel_err {
-                        payload["excelError"] = serde_json::Value::String(e);
-                    }
-                    let _ = app_clone.emit("batch-auth-progress", payload);
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac, "existingUuid": existing_uuid }),
+                    );
                 }
+                // Cancelled — pre-write cancel; if MacRead was written, row stays in MacRead state (recoverable)
                 Ok(tyutool_core::BatchAuthSlotResult::Cancelled) => {
-                    if let Some(idx) = row_idx {
-                        log::info!(
-                            "[batch-auth] slot cancelled  port={port_clone} excel_row={idx}"
-                        );
-                        alloc_clone.release_row(idx);
-                    }
+                    log::info!("[batch-auth] slot cancelled  port={port_clone}");
                     let _ = app_clone.emit(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": "cancelled" }),
                     );
                 }
+                // CancelledAfterWrite — state already written to Excel by update_row(AuthWritten)
                 Ok(tyutool_core::BatchAuthSlotResult::CancelledAfterWrite { mac, uuid }) => {
-                    let excel_err = if let Some(idx) = row_idx {
-                        log::warn!(
-                            "[batch-auth] slot cancelled AFTER auth_write  port={port_clone} mac={mac} uuid={uuid} excel_row={idx}"
-                        );
-                        let err = alloc_clone.confirm_row(idx, mac.clone()).err();
-                        if let Some(ref e) = err {
-                            log::error!("[batch-auth] excel-confirm-after-cancel-write failed  port={port_clone} row={idx} error={e}");
-                        }
-                        err
-                    } else {
-                        log::warn!(
-                            "[batch-auth] slot cancelled AFTER auth_write (no row alloc)  port={port_clone} mac={mac} uuid={uuid}"
-                        );
-                        None
-                    };
-                    let mut payload = serde_json::json!({
-                        "port": port_clone,
-                        "step": "cancelled_after_write",
-                        "mac": mac,
-                        "uuid": uuid,
-                    });
-                    if let Some(e) = excel_err {
-                        payload["excelError"] = serde_json::Value::String(e);
-                    }
-                    let _ = app_clone.emit("batch-auth-progress", payload);
-                }
-                Ok(tyutool_core::BatchAuthSlotResult::LockFailed { mac, lock_error }) => {
-                    let excel_err = if let Some(idx) = row_idx {
-                        log::warn!(
-                            "[batch-auth] slot lock-failed  port={port_clone} mac={mac} excel_row={idx} lock_err={lock_error}"
-                        );
-                        let err = alloc_clone.confirm_row(idx, mac.clone()).err();
-                        if let Some(ref e) = err {
-                            log::error!("[batch-auth] excel-confirm-after-lock-fail failed  port={port_clone} row={idx} error={e}");
-                        }
-                        err
-                    } else {
-                        log::warn!(
-                            "[batch-auth] slot lock-failed (no row alloc)  port={port_clone} mac={mac} lock_err={lock_error}"
-                        );
-                        None
-                    };
-                    let mut payload = serde_json::json!({
-                        "port": port_clone,
-                        "step": "failed",
-                        "mac": mac,
-                        "error": lock_error,
-                        "lockFailed": true,
-                    });
-                    if let Some(e) = excel_err {
-                        payload["excelError"] = serde_json::Value::String(e);
-                    }
-                    let _ = app_clone.emit("batch-auth-progress", payload);
-                }
-                Err(e) => {
-                    if let Some(idx) = row_idx {
-                        log::warn!(
-                            "[batch-auth] slot failed  port={port_clone} excel_row={idx} error={e}"
-                        );
-                        alloc_clone.release_row(idx);
-                    } else {
-                        log::warn!(
-                            "[batch-auth] slot failed (pre-alloc)  port={port_clone} error={e}"
-                        );
-                    }
+                    log::warn!("[batch-auth] slot cancelled AFTER auth_write  port={port_clone} mac={mac} uuid={uuid}");
                     let _ = app_clone.emit(
                         "batch-auth-progress",
-                        serde_json::json!({
-                            "port": port_clone,
-                            "step": "failed",
-                            "error": e.to_string()
-                        }),
+                        serde_json::json!({ "port": port_clone, "step": "cancelled_after_write", "mac": mac, "uuid": uuid }),
+                    );
+                }
+                // DefaultMac — T5/T5AI factory default MAC; no row allocation
+                Ok(tyutool_core::BatchAuthSlotResult::DefaultMac { mac }) => {
+                    log::warn!("[batch-auth] slot default-mac  port={port_clone} mac={mac}");
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "default_mac", "mac": mac }),
+                    );
+                }
+                // Err — state already written by update_row(StepFailed) inside authorize.rs
+                Err(e) => {
+                    log::warn!("[batch-auth] slot failed  port={port_clone} error={e}");
+                    let _ = app_clone.emit(
+                        "batch-auth-progress",
+                        serde_json::json!({ "port": port_clone, "step": "failed", "error": e.to_string() }),
                     );
                 }
             }
@@ -1760,7 +1717,7 @@ pub fn run() {
                     Target::new(TargetKind::Stdout),
                 ])
                 .timezone_strategy(TimezoneStrategy::UseLocal)
-                .level(log::LevelFilter::Info)
+                .level(log::LevelFilter::Trace)
                 .build(),
         )
         .plugin(tauri_plugin_store::Builder::default().build())
