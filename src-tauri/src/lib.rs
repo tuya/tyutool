@@ -1524,7 +1524,11 @@ fn list_log_files_impl(dir: &std::path::Path) -> Vec<LogFileInfo> {
             })
         })
         .collect();
-    files.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    files.sort_by(|a, b| {
+        b.modified_ms
+            .cmp(&a.modified_ms)
+            .then_with(|| b.name.cmp(&a.name))
+    });
     files
 }
 
@@ -2112,6 +2116,8 @@ mod log_tools_tests {
         assert!(files.iter().all(|f| f.name.starts_with("tyutool")));
         assert!(!files.iter().any(|f| f.name == "other.log"));
         assert_eq!(files.len(), 2);
+        // Newest-first: secondary sort by name descending when mtime is equal
+        assert_eq!(files[0].name, "tyutool-20250629-120000.log");
     }
 
     #[test]
