@@ -585,14 +585,17 @@ fn batch_auth_start(
                 }
             };
 
+            let slot_config = tyutool_core::BatchAuthSlotConfig {
+                auth_baud_rate: config_clone.auth_baud_rate,
+                conflict_policy,
+                auth_storage,
+                lock_otp: lock_otp_after_auth,
+            };
             let result = tyutool_core::run_batch_auth_slot(
                 &port_clone,
                 &config_clone.chip_id,
+                &slot_config,
                 get_code,
-                config_clone.auth_baud_rate,
-                conflict_policy,
-                auth_storage,
-                lock_otp_after_auth,
                 &cancel_clone,
                 |step| {
                     let step_str = match step {

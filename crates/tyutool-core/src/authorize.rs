@@ -769,6 +769,15 @@ pub enum BatchAuthSlotResult {
     CancelledAfterWrite { mac: String, uuid: String },
 }
 
+/// Per-batch configuration that is identical for every slot in one run.
+#[derive(Debug, Clone, Copy)]
+pub struct BatchAuthSlotConfig {
+    pub auth_baud_rate: u32,
+    pub conflict_policy: ConflictPolicy,
+    pub auth_storage: AuthStorage,
+    pub lock_otp: bool,
+}
+
 /// What to do when device already has conflicting auth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictPolicy {
@@ -1130,15 +1139,11 @@ where
 ///   subsequent `auth-otp-lock` failed; caller MUST `confirm_row` (NOT
 ///   release) to prevent the same UUID/Key from being handed to another
 ///   device whose OTP is still writable.
-#[allow(clippy::too_many_arguments)]
 pub fn run_batch_auth_slot<F, G>(
     port: &str,
     chip_id: &str,
+    config: &BatchAuthSlotConfig,
     get_code: G,
-    auth_baud_rate: u32,
-    conflict_policy: ConflictPolicy,
-    auth_storage: AuthStorage,
-    lock_otp: bool,
     cancel: &AtomicBool,
     progress: F,
 ) -> Result<BatchAuthSlotResult, FlashError>
@@ -1156,7 +1161,7 @@ where
 
     log::info!("[batch-auth] slot start  port={port} chip={chip_id}");
     let timing = AuthTiming::for_chip(chip_id);
-    let mut sess = AuthSession::open(port, timing, auth_baud_rate)?;
+    let mut sess = AuthSession::open(port, timing, config.auth_baud_rate)?;
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -1196,7 +1201,7 @@ where
                         log::debug!("[batch-auth] auth-read retry {i}/{auth_total}  port={port}");
                     }
                     check_cancel!();
-                    auth = sess.auth_read(auth_storage);
+                    auth = sess.auth_read(config.auth_storage);
                     if auth.is_some() {
                         break;
                     }
@@ -1215,7 +1220,7 @@ where
 
             // Conflict check: if policy=Skip and device already has auth, skip without allocating.
             if let Some((ref ex_uuid, _)) = existing_auth {
-                if ex_uuid != PLACEHOLDER_UUID && conflict_policy == ConflictPolicy::Skip {
+                if ex_uuid != PLACEHOLDER_UUID && config.conflict_policy == ConflictPolicy::Skip {
                     log::info!(
                         "[batch-auth] skipped  port={port} mac={mac} existing_uuid={ex_uuid}"
                     );
@@ -1247,12 +1252,12 @@ where
             // Write
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
-            let auth_idle = if auth_storage == AuthStorage::Otp {
+            let auth_idle = if config.auth_storage == AuthStorage::Otp {
                 AUTH_WRITE_OTP_IDLE
             } else {
                 Duration::from_millis(2000)
             };
-            let _lines = sess.auth_write(&uuid, &authkey, auth_storage, auth_idle);
+            let _lines = sess.auth_write(&uuid, &authkey, config.auth_storage, auth_idle);
             // auth_write has no failure indication; assume the command was delivered.
             let wrote = true;
             if cancel.load(Ordering::Relaxed) {
@@ -1289,7 +1294,7 @@ where
                             uuid: uuid.clone(),
                         });
                     }
-                    result = sess.auth_read(auth_storage);
+                    result = sess.auth_read(config.auth_storage);
                     if result.is_some() {
                         break;
                     }
@@ -1302,7 +1307,7 @@ where
             match verify_result {
                 Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                     log::info!("[batch-auth] verify ok  port={port} mac={mac} uuid={uuid}");
-                    if lock_otp {
+                    if config.lock_otp {
                         log::warn!(
                             "[batch-auth] sending auth-otp-lock (irreversible)  port={port} mac={mac}"
                         );
@@ -1379,7 +1384,7 @@ where
                         log::debug!("[batch-auth] auth-read retry {i}/{auth_total}  port={port}");
                     }
                     check_cancel!();
-                    auth = sess.auth_read(auth_storage);
+                    auth = sess.auth_read(config.auth_storage);
                     if auth.is_some() {
                         break;
                     }
@@ -1398,7 +1403,7 @@ where
 
             // Conflict check: if policy=Skip and device already has auth, skip without allocating.
             if let Some((ref ex_uuid, _)) = existing_auth {
-                if ex_uuid != PLACEHOLDER_UUID && conflict_policy == ConflictPolicy::Skip {
+                if ex_uuid != PLACEHOLDER_UUID && config.conflict_policy == ConflictPolicy::Skip {
                     log::info!("[batch-auth] skipped (old fw)  port={port} mac={mac} existing_uuid={ex_uuid}");
                     return Ok(BatchAuthSlotResult::Skipped {
                         mac,
@@ -1429,8 +1434,12 @@ where
 
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
-            let _lines =
-                sess.auth_write(&uuid, &authkey, auth_storage, Duration::from_millis(2000));
+            let _lines = sess.auth_write(
+                &uuid,
+                &authkey,
+                config.auth_storage,
+                Duration::from_millis(2000),
+            );
             // auth_write has no failure indication; assume the command was delivered.
             let wrote = true;
             if cancel.load(Ordering::Relaxed) {
@@ -1475,7 +1484,7 @@ where
                         uuid: uuid.clone(),
                     });
                 }
-                verify_result = sess.auth_read(auth_storage);
+                verify_result = sess.auth_read(config.auth_storage);
                 if verify_result.is_some() {
                     break;
                 }
