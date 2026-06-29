@@ -196,7 +196,7 @@ Use `log::info!` / `log::debug!` / `log::warn!` / `log::error!` for diagnostic i
 
 | Platform | FlashEvent | log::* |
 |----------|-----------|--------|
-| CLI | CliReporter → stderr | `{data_dir}/tyutool/tyutool.log` (`--verbose` also → stderr) |
+| CLI | CliReporter → stderr | `{data_dir}/tyutool/tyutool-<timestamp>.log` (`--verbose` also → stderr) |
 | GUI (Tauri) | Tauri event → UI | tauri-plugin-log → file (level controlled by developer setting) |
 | Web/IDE | WebSocket JSON → browser UI | CLI-side log file |
 
@@ -205,14 +205,17 @@ Use `log::info!` / `log::debug!` / `log::warn!` / `log::error!` for diagnostic i
 Logs exist partly so users can file good bug reports. Preserve these guarantees:
 
 - **Locatable & exportable:** the GUI in-app log viewer (`read_log_tail`) and zip export
-  (`export_logs_zip`) must keep working. Don't break `appLogDir`/log-dir path assumptions,
-  and don't change the active log filename `tyutool.log` without updating
-  `pick_active_log` and the issue template.
+  (`export_logs_zip`) must keep working. Don't break `appLogDir`/log-dir path assumptions.
+  Logs are per-session files named `tyutool-<timestamp>.log`; the active file is resolved by
+  `pick_active_log` (newest `*.log` by mtime). Don't change that naming/resolution scheme
+  without updating `pick_active_log` and the issue template.
 - **Startup banner parity:** CLI and GUI must emit the same banner via the single shared
   helper `tyutool_core::diagnostics::log_session_banner` (name, type, version, OS, session
   id). Never re-inline a per-platform banner.
-- **Bounded growth:** log files are size-capped and rotated (CLI: 5 MB, keep 3, matching
-  the GUI's `tauri-plugin-log` cap). New log sinks must rotate too.
+- **Bounded growth:** each session log is size-capped at 10 MB and rolls over when exceeded
+  (CLI: `SessionLogWriter` → `tyutool-<ts>-N.log`; GUI: `tauri-plugin-log` `max_file_size` +
+  `RotationStrategy::KeepAll`). Across sessions, `prune_log_files` trims old files at startup
+  (≤100 files / ≤100 MB total). New log sinks must stay bounded too.
 - **Custom-command ACL:** new Tauri commands for logs need no capability entry — register
   them only in `invoke_handler`. Don't add redundant `fs`/`dialog` permissions.
 - Any change to log file locations must update `.github/ISSUE_TEMPLATE/bug_report.yml`.

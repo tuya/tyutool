@@ -13,10 +13,13 @@ Download the latest release binary from the GitHub Releases page. Place it on yo
 | `--verbose` | Write developer diagnostic logs to stderr (always written to log file) |
 | `--plain` | Force plain text output (ASCII-only, no spinner or progress bar) |
 
-**Log file location:**
-- Linux: `~/.local/share/tyutool/tyutool.log`
-- macOS: `~/Library/Application Support/tyutool/tyutool.log`
-- Windows: `%APPDATA%\tyutool\tyutool.log`
+**Log file location:** each run writes to its own session file named
+`tyutool-<timestamp>.log`; a session log is capped at 10 MB and rolls over to
+`tyutool-<timestamp>-1.log`, `-2.log`, … beyond that. Old session files are
+pruned at startup.
+- Linux: `~/.local/share/tyutool/tyutool-<timestamp>.log`
+- macOS: `~/Library/Application Support/tyutool/tyutool-<timestamp>.log`
+- Windows: `%APPDATA%\tyutool\tyutool-<timestamp>.log`
 
 **Port selection** (commands that take `-p/--port`): when `-p` is omitted, a single available port is used automatically. If multiple ports are present, you are prompted to choose one on an interactive terminal; in a non-interactive context (CI, pipe) the command errors and asks you to pass `-p` explicitly.
 

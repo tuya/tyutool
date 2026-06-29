@@ -63,7 +63,7 @@ body:
       description: >
         强烈建议附上日志：把导出的 zip 直接拖到此输入框即可上传。
         GUI：设置 → 应用日志 → 导出日志并反馈；
-        CLI：日志路径见启动时打印的 `log:` 行（如 `~/.local/share/tyutool/tyutool.log`）。
+        CLI：日志路径见启动时打印的 `log:` 行（每次运行生成独立文件，如 `~/.local/share/tyutool/tyutool-<时间戳>.log`）。
         Strongly recommended — drag the exported log zip into this box to upload it.
         GUI: Settings → Application Logs → Export Logs & Report Issue.
         CLI: the log path is printed in the startup banner (`log:` line).
