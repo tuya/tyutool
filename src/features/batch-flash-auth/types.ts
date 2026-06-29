@@ -90,7 +90,8 @@ export interface BatchAuthProgressEvent {
     | "skipped"
     | "no_code"
     | "cancelled"
-    | "cancelled_after_write";
+    | "cancelled_after_write"
+    | "default_mac";
   mac?: string;
   uuid?: string;
   error?: string;

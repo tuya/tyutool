@@ -621,6 +621,7 @@
       "cancelledAfterWriteError": "授权写入后取消 — 设备可能已携带凭证",
       "emptyHintNoPorts": "未检测到串口；请插入设备后点击自动分配"
     },
+    "defaultMacError": "设备 MAC 未烧写（出厂默认值），请先烧写 MAC 再授权",
     "errors": {
       "excel": {
         "fileNotFound": "文件不存在",
