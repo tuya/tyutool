@@ -269,6 +269,23 @@ impl ExcelRowAllocator {
         })
     }
 
+    /// Skip 场景:设备已自带授权码。若该 UUID 命中本表某「仍 Available」的行,
+    /// 绑定 MAC 并标记 Done,避免同一码再被分配给其他设备。
+    /// 已被占用(MacRead 及之后任意状态)的行不受影响——只认领尚未发出的码。
+    pub fn confirm_existing_uuid(&self, uuid: &str, mac: &str) -> Result<(), String> {
+        let row_idx = {
+            let state = self.state.lock().unwrap();
+            state
+                .rows
+                .iter()
+                .position(|r| r.uuid == uuid && r.status == RowStatus::Available)
+        };
+        match row_idx {
+            None => Ok(()), // 码不在本表或已占用,无需处理
+            Some(idx) => self.update_row_state(idx, mac, RowStatus::Done, None, None),
+        }
+    }
+
     /// 更新行状态并写入磁盘。每个关键步骤完成后调用一次。
     /// `mac`：本次读到的设备 MAC，首次调用时写入行；`error`：失败原因（可选）。
     pub fn update_row_state(
@@ -660,5 +677,60 @@ mod tests {
         // stats: in_progress = 1（AuthWritten 是 in_progress）
         assert_eq!(reloaded.stats().in_progress, 1);
         assert_eq!(reloaded.stats().remaining, 0);
+    }
+
+    #[test]
+    fn confirm_existing_uuid_claims_available_row_and_blocks_reallocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.xlsx");
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY"],
+            &[vec!["uuid-a", "key-a"], vec!["uuid-b", "key-b"]],
+        );
+
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+
+        // Device A already carries uuid-a (Skip path). Claim that row for A's MAC.
+        alloc
+            .confirm_existing_uuid("uuid-a", "AA:AA:AA:AA:AA:AA")
+            .unwrap();
+        let s = alloc.stats();
+        assert_eq!(s.used, 1);
+        assert_eq!(s.remaining, 1);
+        // The claimed row is now bound to A's MAC.
+        let found = alloc.find_by_mac("AA:AA:AA:AA:AA:AA").unwrap();
+        assert_eq!(found.1, "uuid-a");
+
+        // A later blank device must NOT get uuid-a again — it gets uuid-b.
+        let row = alloc.allocate_row().unwrap();
+        assert_eq!(row.uuid, "uuid-b");
+
+        // Persisted across reload.
+        let reloaded = ExcelRowAllocator::load(&path).unwrap();
+        assert!(reloaded.find_by_mac("AA:AA:AA:AA:AA:AA").is_some());
+    }
+
+    #[test]
+    fn confirm_existing_uuid_is_noop_for_unknown_or_claimed_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.xlsx");
+        write_xlsx(&path, &["UUID", "AUTHKEY"], &[vec!["uuid-a", "key-a"]]);
+
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+
+        // Unknown UUID → no error, nothing claimed.
+        alloc.confirm_existing_uuid("uuid-x", "AA:BB").unwrap();
+        assert_eq!(alloc.stats().used, 0);
+        assert_eq!(alloc.stats().remaining, 1);
+
+        // Bind uuid-a to one device, then a second device reporting the same
+        // UUID must not steal/overwrite the already-bound row.
+        alloc.confirm_existing_uuid("uuid-a", "11:11").unwrap();
+        alloc.confirm_existing_uuid("uuid-a", "22:22").unwrap();
+        let found = alloc.find_by_mac("11:11").unwrap();
+        assert_eq!(found.1, "uuid-a");
+        assert!(alloc.find_by_mac("22:22").is_none());
+        assert_eq!(alloc.stats().used, 1);
     }
 }
