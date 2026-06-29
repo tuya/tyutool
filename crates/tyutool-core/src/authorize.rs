@@ -47,11 +47,19 @@ use crate::job::FlashJob;
 const BAUD: u32 = 115_200;
 /// Per-command absolute read deadline (hard ceiling regardless of idle).
 const CMD_TIMEOUT: Duration = Duration::from_secs(3);
+/// Hard ceiling for the `auth` write command — OTP/eFuse burning on some
+/// chips can take tens of seconds.
+const AUTH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Idle window for `auth` OTP writes — eFuse burning causes a long silent
+/// gap between the command echo and the response; must exceed worst-case burn time.
+const AUTH_WRITE_OTP_IDLE: Duration = Duration::from_secs(30);
+/// Hard ceiling for `auth-read` responses.
+const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Total upper bound for the `auth-otp-lock` response wait.
 /// eFuse burning is a physical write that may take significantly longer
 /// than a normal shell command. This MUST be confirmed against real
 /// hardware before release (see hardware verification scenario 7 in the spec).
-const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 /// Idle window — wait this long after the last byte before declaring the
 /// response complete. Set deliberately longer than `cmd_idle_timeout` to
 /// avoid premature termination during eFuse settling.
@@ -456,10 +464,6 @@ impl<T: AuthIo> AuthSession<T> {
         lines
     }
 
-    fn read_response_idle(&mut self, idle_timeout: Duration) -> Vec<String> {
-        self.read_response_timed(CMD_TIMEOUT, idle_timeout)
-    }
-
     fn read_response(&mut self) -> Vec<String> {
         let idle = self.timing.cmd_idle_timeout;
         self.read_response_timed(CMD_TIMEOUT, idle)
@@ -514,7 +518,8 @@ impl<T: AuthIo> AuthSession<T> {
             format!("auth-read {}", storage.as_u8())
         };
         self.send_cmd(&cmd).ok()?;
-        let lines = self.read_response();
+        let idle = self.timing.cmd_idle_timeout;
+        let lines = self.read_response_timed(AUTH_READ_TIMEOUT, idle);
         let relevant: Vec<&str> = lines
             .iter()
             .filter(|l| {
@@ -557,7 +562,7 @@ impl<T: AuthIo> AuthSession<T> {
         if self.send_cmd(&cmd).is_err() {
             return vec![];
         }
-        self.read_response_idle(idle)
+        self.read_response_timed(AUTH_WRITE_TIMEOUT, idle)
     }
 
     /// Send `read_mac` and parse the MAC address from the response.
@@ -906,10 +911,12 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
-                // Keep 2000ms idle: device may reboot after writing auth on some
-                // firmware builds; a short idle would exit before the reboot banner
-                // and leave drain_boot_output unable to clear it in time.
-                let _lines = sess.auth_write(&uuid, &authkey, storage, Duration::from_millis(2000));
+                let auth_idle = if storage == AuthStorage::Otp {
+                    AUTH_WRITE_OTP_IDLE
+                } else {
+                    Duration::from_millis(2000)
+                };
+                let _lines = sess.auth_write(&uuid, &authkey, storage, auth_idle);
 
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
@@ -1213,8 +1220,12 @@ where
             // Write
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
-            let _lines =
-                sess.auth_write(&uuid, &authkey, auth_storage, Duration::from_millis(2000));
+            let auth_idle = if auth_storage == AuthStorage::Otp {
+                AUTH_WRITE_OTP_IDLE
+            } else {
+                Duration::from_millis(2000)
+            };
+            let _lines = sess.auth_write(&uuid, &authkey, auth_storage, auth_idle);
             // auth_write has no failure indication; assume the command was delivered.
             let wrote = true;
             if cancel.load(Ordering::Relaxed) {
