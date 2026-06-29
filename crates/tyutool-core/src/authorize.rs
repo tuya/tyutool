@@ -1341,7 +1341,7 @@ pub fn run_batch_auth_slot<F, B, A, U>(
 ) -> Result<BatchAuthSlotResult, FlashError>
 where
     F: Fn(BatchAuthStep),
-    B: Fn(&str) -> Option<(usize, String, String)>,
+    B: Fn(&str) -> Option<(usize, String, String, bool)>,
     A: FnOnce() -> Option<(usize, String, String)>,
     U: Fn(usize, &str, BatchAuthRowUpdate),
 {
@@ -1410,9 +1410,37 @@ where
             };
 
             // ── 5. AlreadyDone check (MAC found + credentials match) ─────
-            if let Some((found_idx, ref found_uuid, ref found_key)) = found_row {
+            if let Some((found_idx, ref found_uuid, ref found_key, already_locked)) = found_row {
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == found_uuid && ex_k == found_key {
+                        if config.lock_otp && !already_locked {
+                            log::warn!(
+                                "[batch-auth] already-done, supplementing otp-lock  port={port} mac={mac}"
+                            );
+                            match sess.auth_otp_lock() {
+                                Ok(()) => {
+                                    update_row(found_idx, &mac, BatchAuthRowUpdate::OtpLocked);
+                                }
+                                Err(e) => {
+                                    let msg = e.to_string();
+                                    log::warn!(
+                                        "[batch-auth] otp-lock failed  port={port} mac={mac} err={msg}"
+                                    );
+                                    update_row(
+                                        found_idx,
+                                        &mac,
+                                        BatchAuthRowUpdate::StepFailed {
+                                            step: "otp_lock",
+                                            error: msg.clone(),
+                                        },
+                                    );
+                                    let _ = sess.hardware_reset();
+                                    return Err(FlashError::Plugin(format!(
+                                        "auth-otp-lock failed: {msg}"
+                                    )));
+                                }
+                            }
+                        }
                         log::info!("[batch-auth] already-done  port={port} mac={mac}");
                         update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
@@ -1433,7 +1461,7 @@ where
 
             // ── 7. Get row (found or allocate) ───────────────────────────
             let (row_idx, uuid, authkey) = match found_row {
-                Some(r) => r,
+                Some((idx, u, k, _)) => (idx, u, k),
                 None => match allocate_row() {
                     Some(r) => r,
                     None => {
@@ -1655,9 +1683,37 @@ where
             };
 
             // ── 5. AlreadyDone check ─────────────────────────────────────
-            if let Some((found_idx, ref found_uuid, ref found_key)) = found_row {
+            if let Some((found_idx, ref found_uuid, ref found_key, already_locked)) = found_row {
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == found_uuid && ex_k == found_key {
+                        if config.lock_otp && !already_locked {
+                            log::warn!(
+                                "[batch-auth] already-done (old fw), supplementing otp-lock  port={port} mac={mac}"
+                            );
+                            match sess.auth_otp_lock() {
+                                Ok(()) => {
+                                    update_row(found_idx, &mac, BatchAuthRowUpdate::OtpLocked);
+                                }
+                                Err(e) => {
+                                    let msg = e.to_string();
+                                    log::warn!(
+                                        "[batch-auth] otp-lock failed (old fw)  port={port} mac={mac} err={msg}"
+                                    );
+                                    update_row(
+                                        found_idx,
+                                        &mac,
+                                        BatchAuthRowUpdate::StepFailed {
+                                            step: "otp_lock",
+                                            error: msg.clone(),
+                                        },
+                                    );
+                                    let _ = sess.hardware_reset();
+                                    return Err(FlashError::Plugin(format!(
+                                        "auth-otp-lock failed: {msg}"
+                                    )));
+                                }
+                            }
+                        }
                         log::info!("[batch-auth] already-done (old fw)  port={port} mac={mac}");
                         update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
@@ -1680,7 +1736,7 @@ where
 
             // ── 7. Get row (found or allocate) ───────────────────────────
             let (row_idx, uuid, authkey) = match found_row {
-                Some(r) => r,
+                Some((idx, u, k, _)) => (idx, u, k),
                 None => match allocate_row() {
                     Some(r) => r,
                     None => {
