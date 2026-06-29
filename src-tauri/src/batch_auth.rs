@@ -273,7 +273,7 @@ impl ExcelRowAllocator {
         row_idx: usize,
         mac: &str,
         status: RowStatus,
-        step_name: &str,
+        step_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<(), String> {
         {
@@ -293,7 +293,9 @@ impl ExcelRowAllocator {
                     row.mac = Some(mac.to_string());
                 }
                 row.timestamp = Some(utc_now_iso8601());
-                row.step = Some(step_name.to_string());
+                if let Some(s) = step_name {
+                    row.step = Some(s.to_string());
+                }
                 row.last_error = error.map(|e| e.to_string());
             }
         }
@@ -540,7 +542,7 @@ mod tests {
                 row_a.row_idx,
                 "11:22:33:44:55:66",
                 RowStatus::AuthVerified,
-                "auth_verified",
+                Some("auth_verified"),
                 None,
             )
             .unwrap();
@@ -587,7 +589,7 @@ mod tests {
                 row.row_idx,
                 "AA:BB:CC:DD:EE:FF",
                 RowStatus::MacRead,
-                "mac_read",
+                Some("mac_read"),
                 None,
             )
             .unwrap();
@@ -603,7 +605,7 @@ mod tests {
                 0,
                 "AA:BB:CC:DD:EE:FF",
                 RowStatus::AuthWritten,
-                "auth_written",
+                Some("auth_written"),
                 None,
             )
             .unwrap();
@@ -612,7 +614,7 @@ mod tests {
                 0,
                 "AA:BB:CC:DD:EE:FF",
                 RowStatus::AuthVerified,
-                "auth_verified",
+                Some("auth_verified"),
                 None,
             )
             .unwrap();
@@ -643,7 +645,7 @@ mod tests {
                 row.row_idx,
                 "11:22:33:44:55:66",
                 RowStatus::AuthWritten,
-                "auth_written",
+                Some("auth_written"),
                 Some("verify: no response"),
             )
             .unwrap();
