@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent, State};
-use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
 use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
 /// Set once at startup; included in exported issue-report metadata.
@@ -1377,12 +1377,50 @@ fn append_text_file(path: String, content: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Prefer the active log file by exact name; fall back to newest `*.log` by mtime.
-fn pick_active_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let active = dir.join("tyutool.log");
-    if active.is_file() {
-        return Some(active);
+const MAX_LOG_FILES: usize = 100;
+const MAX_LOG_BYTES_TOTAL: u64 = 100 * 1024 * 1024; // 100 MB
+
+/// Delete the oldest per-session log files until the collection is within both
+/// the file-count and total-size limits. Only manages files whose stem starts
+/// with "tyutool-" (per-session naming); legacy "tyutool.log" is left untouched.
+/// Always retains at least one file.
+fn prune_log_files(log_dir: &std::path::Path) {
+    let mut files: Vec<(std::path::PathBuf, u64)> = std::fs::read_dir(log_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().map(|x| x == "log").unwrap_or(false)
+                && p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with("tyutool-"))
+                    .unwrap_or(false)
+        })
+        .filter_map(|p| {
+            let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            Some((p, size))
+        })
+        .collect();
+
+    // Timestamped filenames are lexicographically chronological.
+    files.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
+
+    let mut count = files.len();
+    let mut total: u64 = files.iter().map(|(_, s)| s).sum();
+
+    for (path, size) in &files {
+        if count <= 1 || (count <= MAX_LOG_FILES && total <= MAX_LOG_BYTES_TOTAL) {
+            break;
+        }
+        let _ = std::fs::remove_file(path);
+        count -= 1;
+        total = total.saturating_sub(*size);
     }
+}
+
+/// Return the most recently modified `*.log` file in `dir`.
+fn pick_active_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     std::fs::read_dir(dir)
         .ok()?
         .filter_map(|e| e.ok())
@@ -1638,15 +1676,16 @@ fn open_external_url_linux(url: &str) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let session_log_name = format!("tyutool-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
-                    Target::new(TargetKind::LogDir { file_name: None }),
+                    Target::new(TargetKind::LogDir {
+                        file_name: Some(session_log_name),
+                    }),
                     Target::new(TargetKind::Stdout),
                 ])
-                .rotation_strategy(RotationStrategy::KeepAll)
-                .max_file_size(5 * 1024 * 1024) // 5MB
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(log::LevelFilter::Info)
                 .build(),
@@ -1683,6 +1722,9 @@ pub fn run() {
                 Some(&install_type),
             );
             let _ = SESSION_ID.set(session_id);
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                prune_log_files(&log_dir);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

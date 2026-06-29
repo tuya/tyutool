@@ -34,3 +34,6 @@ base64 = "0.22"
 anyhow = "1"
 indicatif = "0.17"
 console = "0.15"
+
+[dev-dependencies]
+tempfile = "3"
