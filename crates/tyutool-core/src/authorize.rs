@@ -698,8 +698,8 @@ impl<T: AuthIo> AuthSession<T> {
         } else {
             format!("auth {} {} {}", uuid, authkey, storage.as_u8())
         };
-        if self.send_cmd(&cmd).is_err() {
-            return Ok(());
+        if let Err(e) = self.send_cmd(&cmd) {
+            return Err(FlashError::Plugin(format!("auth_write send failed: {e}")));
         }
         let lines = self.read_response_timed(AUTH_WRITE_TIMEOUT, idle);
         log::debug!("[serial] auth-write response={:?}", lines);

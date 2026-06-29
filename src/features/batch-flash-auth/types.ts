@@ -94,12 +94,10 @@ export interface BatchAuthProgressEvent {
     | "default_mac";
   mac?: string;
   uuid?: string;
+  existingUuid?: string;
   error?: string;
   excelError?: string;
   event?: unknown;
-  /** Present (and true) only when step="failed" was caused by a LockFailed
-   *  result — auth was written to OTP but eFuse lock subsequently failed. */
-  lockFailed?: boolean;
 }
 
 /** `batch-auth-read-progress` event from Rust (read-only probe). */
