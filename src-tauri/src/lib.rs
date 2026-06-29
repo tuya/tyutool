@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent, State};
-use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
 
 /// Set once at startup; included in exported issue-report metadata.
@@ -1730,6 +1730,12 @@ pub fn run() {
                     }),
                     Target::new(TargetKind::Stdout),
                 ])
+                // Cap each session log at 10 MB; once exceeded the plugin rolls
+                // the file over (KeepAll keeps the rolled `tyutool-<ts>_<date>.log`,
+                // which prune_log_files / list_log_files still pick up). This bounds
+                // within-session growth; prune trims old sessions at startup.
+                .max_file_size(10 * 1024 * 1024)
+                .rotation_strategy(RotationStrategy::KeepAll)
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(log::LevelFilter::Info)
                 .build(),
@@ -1938,14 +1944,14 @@ mod log_tools_tests {
     use std::io::Write;
 
     #[test]
-    fn pick_active_log_prefers_exact_name() {
+    fn pick_active_log_returns_newest_by_mtime() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("tyutool_2026-06-18_10-00-00.log"), b"old").unwrap();
-        // Sleep to ensure tyutool.log has a strictly newer mtime on all platforms.
+        std::fs::write(dir.path().join("tyutool-20260618-100000.log"), b"old").unwrap();
+        // Sleep so the second file has a strictly newer mtime on all platforms.
         std::thread::sleep(std::time::Duration::from_millis(10));
-        std::fs::write(dir.path().join("tyutool.log"), b"current").unwrap();
+        std::fs::write(dir.path().join("tyutool-20260629-120000.log"), b"current").unwrap();
         let picked = pick_active_log(dir.path()).unwrap();
-        assert_eq!(picked.file_name().unwrap(), "tyutool.log");
+        assert_eq!(picked.file_name().unwrap(), "tyutool-20260629-120000.log");
     }
 
     #[test]

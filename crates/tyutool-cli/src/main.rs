@@ -255,6 +255,76 @@ fn parse_hex_addr(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
 
 const MAX_LOG_FILES: usize = 100;
 const MAX_LOG_BYTES_TOTAL: u64 = 100 * 1024 * 1024; // 100 MB
+const MAX_LOG_BYTES_PER_FILE: u64 = 10 * 1024 * 1024; // 10 MB per session file
+
+/// Size-capped log sink for one CLI session. Writes to `tyutool-<stem>.log`
+/// until it reaches `MAX_LOG_BYTES_PER_FILE`, then rolls over to
+/// `tyutool-<stem>-1.log`, `-2.log`, … so a long-running session can never grow
+/// a single file without bound. fern serializes writes, so no extra locking is
+/// needed here. All produced files share the `tyutool-` prefix, so
+/// `prune_log_files` reclaims them across sessions like any other session log.
+struct SessionLogWriter {
+    dir: std::path::PathBuf,
+    stem: String, // e.g. "tyutool-20240101-120000" (no extension)
+    index: u32,
+    file: std::fs::File,
+    size: u64,
+}
+
+impl SessionLogWriter {
+    fn path_for(dir: &std::path::Path, stem: &str, index: u32) -> std::path::PathBuf {
+        if index == 0 {
+            dir.join(format!("{stem}.log"))
+        } else {
+            dir.join(format!("{stem}-{index}.log"))
+        }
+    }
+
+    fn open(dir: &std::path::Path, stem: &str) -> std::io::Result<Self> {
+        let path = Self::path_for(dir, stem, 0);
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            stem: stem.to_string(),
+            index: 0,
+            file,
+            size,
+        })
+    }
+
+    fn roll(&mut self) -> std::io::Result<()> {
+        self.index += 1;
+        let path = Self::path_for(&self.dir, &self.stem, self.index);
+        self.file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        self.size = self.file.metadata().map(|m| m.len()).unwrap_or(0);
+        Ok(())
+    }
+}
+
+impl std::io::Write for SessionLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // Roll before a write that would push past the cap, but never roll an
+        // empty file — a single record larger than the cap still lands in one
+        // file rather than spinning forever.
+        if self.size > 0 && self.size + buf.len() as u64 > MAX_LOG_BYTES_PER_FILE {
+            self.roll()?;
+        }
+        let n = self.file.write(buf)?;
+        self.size += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
 
 /// Delete the oldest per-session log files until the collection is within both
 /// the file-count and total-size limits. Only manages files whose stem starts
@@ -299,8 +369,9 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("tyutool");
     std::fs::create_dir_all(&log_dir)?;
-    let stem = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let log_path = log_dir.join(format!("tyutool-{stem}.log"));
+    let stem = format!("tyutool-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+    let log_path = log_dir.join(format!("{stem}.log"));
+    let session_writer = SessionLogWriter::open(&log_dir, &stem)?;
 
     let fmt = |out: fern::FormatCallback<'_>,
                message: &std::fmt::Arguments<'_>,
@@ -317,7 +388,7 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
     let mut dispatch = fern::Dispatch::new()
         .format(fmt)
         .level(log::LevelFilter::Info)
-        .chain(fern::log_file(&log_path)?);
+        .chain(Box::new(session_writer) as Box<dyn std::io::Write + Send>);
 
     if verbose {
         dispatch = dispatch.chain(
@@ -816,5 +887,43 @@ mod prune_tests {
         touch(dir.path(), "tyutool.log", 1024);
         prune_log_files(dir.path());
         assert!(dir.path().join("tyutool.log").exists());
+    }
+
+    #[test]
+    fn session_writer_rolls_over_at_size_cap() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let stem = "tyutool-20240101-000000";
+        let mut w = SessionLogWriter::open(dir.path(), stem).unwrap();
+        // 11 MB in 1 MB chunks → base fills to 10 MB, the 11th rolls to `-1`.
+        let chunk = vec![b'x'; 1024 * 1024];
+        for _ in 0..11 {
+            w.write_all(&chunk).unwrap();
+        }
+        w.flush().unwrap();
+
+        let base = dir.path().join(format!("{stem}.log"));
+        let rolled = dir.path().join(format!("{stem}-1.log"));
+        assert!(base.exists());
+        assert!(rolled.exists());
+        assert!(std::fs::metadata(&base).unwrap().len() <= MAX_LOG_BYTES_PER_FILE);
+        // No bytes lost across the rollover.
+        let total =
+            std::fs::metadata(&base).unwrap().len() + std::fs::metadata(&rolled).unwrap().len();
+        assert_eq!(total, 11 * 1024 * 1024);
+    }
+
+    #[test]
+    fn session_writer_single_oversized_record_stays_in_one_file() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let stem = "tyutool-20240101-000001";
+        let mut w = SessionLogWriter::open(dir.path(), stem).unwrap();
+        // A first write larger than the cap must not roll (empty-file guard).
+        let big = vec![b'x'; (MAX_LOG_BYTES_PER_FILE + 4096) as usize];
+        w.write(&big).unwrap();
+        w.flush().unwrap();
+        assert!(dir.path().join(format!("{stem}.log")).exists());
+        assert!(!dir.path().join(format!("{stem}-1.log")).exists());
     }
 }
