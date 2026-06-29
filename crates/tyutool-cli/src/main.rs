@@ -271,9 +271,9 @@ fn prune_log_files(log_dir: &std::path::Path) {
                         .map(|s| s.starts_with("tyutool-"))
                         .unwrap_or(false)
             })
-            .filter_map(|p| {
+            .map(|p| {
                 let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                Some((p, size))
+                (p, size)
             })
             .collect(),
         Err(_) => return,
