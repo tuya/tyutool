@@ -1717,7 +1717,7 @@ pub fn run() {
                     Target::new(TargetKind::Stdout),
                 ])
                 .timezone_strategy(TimezoneStrategy::UseLocal)
-                .level(log::LevelFilter::Trace)
+                .level(log::LevelFilter::Info)
                 .build(),
         )
         .plugin(tauri_plugin_store::Builder::default().build())
