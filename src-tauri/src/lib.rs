@@ -1449,10 +1449,31 @@ fn read_log_tail_impl(dir: &std::path::Path, max_bytes: u64) -> std::io::Result<
     tail_bytes(&path, max_bytes)
 }
 
+fn read_named_log_impl(
+    dir: &std::path::Path,
+    filename: &str,
+    max_bytes: u64,
+) -> std::io::Result<String> {
+    if filename.contains('/') || filename.contains('\\') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "filename must not contain path separators",
+        ));
+    }
+    tail_bytes(&dir.join(filename), max_bytes)
+}
+
 #[tauri::command]
-fn read_log_tail(app: AppHandle, max_bytes: usize) -> Result<String, String> {
+fn read_log_tail(
+    app: AppHandle,
+    max_bytes: usize,
+    filename: Option<String>,
+) -> Result<String, String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-    read_log_tail_impl(&dir, max_bytes as u64).map_err(|e| e.to_string())
+    match filename {
+        None => read_log_tail_impl(&dir, max_bytes as u64).map_err(|e| e.to_string()),
+        Some(name) => read_named_log_impl(&dir, &name, max_bytes as u64).map_err(|e| e.to_string()),
+    }
 }
 
 fn collect_log_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -2105,6 +2126,36 @@ mod log_tools_tests {
         std::fs::write(dir.path().join("tyutool.log"), b"hello").unwrap();
         let files = list_log_files_impl(dir.path());
         assert_eq!(files[0].size_bytes, 5);
+    }
+
+    #[test]
+    fn read_named_log_impl_reads_specified_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool-old.log"), b"old content").unwrap();
+        std::fs::write(dir.path().join("tyutool-new.log"), b"new content").unwrap();
+        let result = read_named_log_impl(dir.path(), "tyutool-old.log", 1000).unwrap();
+        assert_eq!(result, "old content");
+    }
+
+    #[test]
+    fn read_named_log_impl_rejects_path_traversal_forward_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_named_log_impl(dir.path(), "../secret.log", 100).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn read_named_log_impl_rejects_path_traversal_backslash() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_named_log_impl(dir.path(), "..\\secret.log", 100).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn read_named_log_impl_errors_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_named_log_impl(dir.path(), "tyutool-ghost.log", 100).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 }
 
