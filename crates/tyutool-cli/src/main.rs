@@ -920,8 +920,11 @@ mod prune_tests {
         let stem = "tyutool-20240101-000001";
         let mut w = SessionLogWriter::open(dir.path(), stem).unwrap();
         // A first write larger than the cap must not roll (empty-file guard).
+        // Use a single write() call (not write_all) to exercise the guard; the
+        // returned count is asserted to satisfy unused_io_amount.
         let big = vec![b'x'; (MAX_LOG_BYTES_PER_FILE + 4096) as usize];
-        w.write(&big).unwrap();
+        let n = w.write(&big).unwrap();
+        assert!(n > 0);
         w.flush().unwrap();
         assert!(dir.path().join(format!("{stem}.log")).exists());
         assert!(!dir.path().join(format!("{stem}-1.log")).exists());
