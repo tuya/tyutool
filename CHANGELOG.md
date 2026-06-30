@@ -2,6 +2,15 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.1.3] - 2026-06-30
+
+### 问题修复 / Bug Fixes
+
+- `batch-auth`：批次完成后重新刷新 Excel 统计（已用 / 剩余），新增「占用中」计数显示失败槽位占用但未完成的行，确保总数始终对齐
+- `batch-auth`：修复适配器未拔插时 Done 槽位导致 Start All 永久灰置、无法开始下一批次的问题；Done 槽位现与 Failed / no_code 一同在重新运行时重置为 Idle
+- `batch-auth`：简化 `canStart` 逻辑，改为检查「无活跃槽位」而非枚举合法状态，确保批次部分完成时（如 3 Done 1 Running）按钮维持禁用
+- `batch-auth`：修复 Start 按钮 tooltip 在可点击状态下仍显示、两个槽位同时完成时 `checkBatchCompletion` 双重触发的问题；批次进行中增加独立 tooltip 提示
+
 ## [3.1.2] - 2026-06-30
 
 ### 新功能 / Features
