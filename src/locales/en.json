@@ -590,6 +590,7 @@
       "noFailedPorts": "No failed ports",
       "selectExcelFirst": "Select an auth table first",
       "noIdlePorts": "No idle ports",
+      "batchInProgress": "Batch in progress",
       "excelExhausted": "Auth codes exhausted — please add more to the Excel and retry",
       "excelInvalid": "Auth table is invalid — please fix or reselect the file",
       "readAll": "Read All",

@@ -124,7 +124,7 @@ export interface BatchAuthStartConfig {
   lockOtpAfterAuth?: boolean;
 }
 
-/** Stats returned by validate_excel_cmd. */
+// Mirrors src_tauri::batch_auth::ExcelStats
 export interface ExcelStats {
   total: number;
   used: number;

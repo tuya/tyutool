@@ -643,7 +643,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     const anyActive = slots.value.some((s) =>
       ACTIVE_STATUSES.includes(s.status),
     );
-    if (anyActive || batchStartTime.value === null) return;
+    if (
+      anyActive ||
+      batchStartTime.value === null ||
+      batchEndTime.value !== null
+    )
+      return;
 
     // Count only slots from the current run to avoid prior-run done slots skewing
     // the banner. currentBatchPorts is set by startAuth; when empty

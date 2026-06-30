@@ -590,6 +590,7 @@
       "noFailedPorts": "暂无失败端口",
       "selectExcelFirst": "请先选择授权表",
       "noIdlePorts": "暂无空闲串口",
+      "batchInProgress": "批次进行中",
       "excelExhausted": "授权码已全部使用，请补充 Excel 后重试",
       "excelInvalid": "授权表无效，请修复或重新选择文件",
       "readAll": "全部读取",

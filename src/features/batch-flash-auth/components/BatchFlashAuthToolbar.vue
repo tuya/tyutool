@@ -128,13 +128,17 @@ async function handleAutoAssign() {
         class="ty-btn-primary-solid text-sm"
         :disabled="!store.canStart"
         :title="
-          !store.authConfig.excelPath
-            ? t('batchFlashAuth.toolbar.selectExcelFirst')
-            : store.excelError
-              ? t('batchFlashAuth.toolbar.excelInvalid')
-              : store.excelStats?.remaining === 0
-                ? t('batchFlashAuth.toolbar.excelExhausted')
-                : t('batchFlashAuth.toolbar.noIdlePorts')
+          !store.canStart
+            ? store.isBusy
+              ? t('batchFlashAuth.toolbar.batchInProgress')
+              : !store.authConfig.excelPath
+                ? t('batchFlashAuth.toolbar.selectExcelFirst')
+                : store.excelError
+                  ? t('batchFlashAuth.toolbar.excelInvalid')
+                  : store.excelStats?.remaining === 0
+                    ? t('batchFlashAuth.toolbar.excelExhausted')
+                    : t('batchFlashAuth.toolbar.noIdlePorts')
+            : undefined
         "
         @click="handleStart"
       >
