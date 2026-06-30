@@ -11,7 +11,7 @@ const store = useBatchFlashAuthStore();
 const filterOpen = ref(false);
 
 async function handleStart() {
-  const idleCount = store.slots.filter((s) => s.status === "idle").length;
+  const idleCount = store.slots.length - store.currentStats.active;
   if (idleCount > 8) {
     const parts: string[] = [
       t("batchFlashAuth.dialog.aboutToOperate", { count: idleCount }),
@@ -134,14 +134,7 @@ async function handleAutoAssign() {
               ? t('batchFlashAuth.toolbar.excelInvalid')
               : store.excelStats?.remaining === 0
                 ? t('batchFlashAuth.toolbar.excelExhausted')
-                : !store.slots.some(
-                      (s) =>
-                        s.status === 'idle' ||
-                        s.status === 'failed' ||
-                        s.status === 'no_code',
-                    )
-                  ? t('batchFlashAuth.toolbar.noIdlePorts')
-                  : undefined
+                : t('batchFlashAuth.toolbar.noIdlePorts')
         "
         @click="handleStart"
       >

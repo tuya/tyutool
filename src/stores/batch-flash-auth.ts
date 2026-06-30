@@ -112,13 +112,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const isBusy = computed(() => currentStats.value.active > 0);
   const canStart = computed(
     () =>
-      slots.value.some(
-        (s) =>
-          s.status === "idle" ||
-          s.status === "done" ||
-          s.status === "failed" ||
-          s.status === "no_code",
-      ) &&
+      !isBusy.value &&
+      slots.value.length > 0 &&
       inputsValid.value &&
       !excelError.value &&
       excelStats.value !== null &&
@@ -306,8 +301,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     completionBanner.value = null;
 
     for (const slot of slots.value.filter(
-      (s) =>
-        s.status === "done" || s.status === "failed" || s.status === "no_code",
+      (s) => !ACTIVE_STATUSES.includes(s.status),
     )) {
       updateSlot(slot.port, {
         status: "idle",
