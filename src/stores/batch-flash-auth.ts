@@ -115,6 +115,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       slots.value.some(
         (s) =>
           s.status === "idle" ||
+          s.status === "done" ||
           s.status === "failed" ||
           s.status === "no_code",
       ) &&
@@ -305,7 +306,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     completionBanner.value = null;
 
     for (const slot of slots.value.filter(
-      (s) => s.status === "failed" || s.status === "no_code",
+      (s) =>
+        s.status === "done" || s.status === "failed" || s.status === "no_code",
     )) {
       updateSlot(slot.port, {
         status: "idle",
