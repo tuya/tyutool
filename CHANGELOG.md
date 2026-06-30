@@ -2,6 +2,14 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.1.2] - 2026-06-30
+
+### 新功能 / Features
+
+- `authorize`：OTP 锁成功后自动重启设备并二次验证（`auth-read`），确认 eFuse 锁定在重启后仍然生效
+- `authorize`：`auth-otp-lock` 超时从 30s 延长至 60s，适配更慢的 eFuse 烧写硬件
+- `authorize`：修复 OTP 锁失败时误触发硬件重置的问题
+
 ## [3.1.1] - 2026-06-29
 
 ### 问题修复 / Bug Fixes
