@@ -51,6 +51,34 @@ jobs:
             echo "file_label=${RESOLVED}.beta" >> "$GITHUB_OUTPUT"
           fi
 
+  # ── Frontend build (platform-independent, built once and shared) ─────────────
+  # vue-tsc + vite build → dist/; uploaded as artifact for all build-gui jobs.
+  # beforeBuildCommand in tauri.conf.json is cleared so tauri CLI does not
+  # re-run this automatically inside each build-gui job.
+  build-frontend:
+    name: Frontend (build)
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Sync version
+        run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      - uses: pnpm/action-setup@v5
+        with: { version: 10 }
+      - uses: actions/setup-node@v6
+        with: { node-version: "22", cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
   # ── CLI (5 platforms) ────────────────────────────────────────────────────────
   # Pure Rust binary, musl static linking (Linux), no Tauri / Node dependency
   # Artifacts: tyutool-cli_{platform}_{arch}_{ver}.tar.gz / .zip
@@ -123,7 +151,7 @@ jobs:
   # Artifacts: tyutool-gui_{platform}_{arch}_{type}_{ver}.ext
   build-gui:
     name: GUI · ${{ matrix.platform }}-${{ matrix.arch }} · ${{ matrix.install_type }}
-    needs: [prepare]
+    needs: [prepare, build-frontend]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -178,9 +206,14 @@ jobs:
           shared-key: "gui-${{ matrix.target }}"
           save-if: true
 
-      # ── Frontend + Tauri build ──
+      # ── Frontend dist (pre-built, platform-independent) ──
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: dist/
+
+      # ── Tauri build ──
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
       - name: Build Tauri app
         shell: bash
         # tauri_args is set in the matrix (e.g. "--target universal-apple-darwin"); empty for other platforms.
@@ -312,7 +345,10 @@ jobs:
         run: pnpm exec tsx scripts/changelog-section.ts
 
       - uses: actions/download-artifact@v8
-        with: { path: artifacts/ }
+        with:
+          path: artifacts/
+          pattern: "tyutool-*"
+          merge-multiple: false
 
       - run: find artifacts/ -type f | sort
 
