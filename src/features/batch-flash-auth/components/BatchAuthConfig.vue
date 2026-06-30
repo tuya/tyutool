@@ -85,6 +85,15 @@ async function browseExcel() {
             }}</strong>
           </span>
           <span
+            v-if="store.excelStats.inProgress > 0"
+            class="text-[var(--ty-text-muted)]"
+          >
+            {{ t("batchFlashAuth.config.excelInProgress") }}
+            <strong :style="{ color: 'var(--ty-warning, #f59e0b)' }">{{
+              store.excelStats.inProgress
+            }}</strong>
+          </span>
+          <span
             :style="{
               color:
                 store.excelStats.remaining === 0

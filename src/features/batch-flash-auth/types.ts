@@ -128,6 +128,8 @@ export interface BatchAuthStartConfig {
 export interface ExcelStats {
   total: number;
   used: number;
+  /** Rows in MacRead/AuthWritten state: code allocated but auth not yet confirmed. */
+  inProgress: number;
   remaining: number;
 }
 

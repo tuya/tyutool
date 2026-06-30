@@ -674,6 +674,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       completionBanner.value = { kind: "partial", done, failed };
     }
     flushSaveStats();
+    void validateExcel(authConfig.value.excelPath);
   }
 
   function dismissBanner() {
