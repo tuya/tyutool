@@ -195,7 +195,7 @@ describe("canStart / canRetry / canCancel", () => {
     store.addPorts(["COM3"]);
     store.chipId = "esp32";
     store.authConfig.excelPath = "/auth.xlsx";
-    store.excelStats = { total: 10, used: 0, remaining: 10 };
+    store.excelStats = { total: 10, used: 0, inProgress: 0, remaining: 10 };
     expect(store.canStart).toBe(true);
   });
 
@@ -219,7 +219,7 @@ describe("canStart / canRetry / canCancel", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.authConfig.excelPath = "/auth.xlsx";
-    store.excelStats = { total: 10, used: 10, remaining: 0 };
+    store.excelStats = { total: 10, used: 10, inProgress: 0, remaining: 0 };
     expect(store.canStart).toBe(false);
   });
 
