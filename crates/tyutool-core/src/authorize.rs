@@ -65,9 +65,11 @@ const AUTH_READ_OTP_IDLE: Duration = Duration::from_secs(30);
 /// eFuse burning is a physical write that may take significantly longer
 /// than a normal shell command. This MUST be confirmed against real
 /// hardware before release (see hardware verification scenario 7 in the spec).
-const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(60);
 /// Idle window for `auth-otp-lock`.
 const AUTH_OTP_LOCK_IDLE: Duration = Duration::from_secs(30);
+/// Delay between `auth-otp-lock` success and the subsequent `sys_reboot` command.
+const OTP_LOCK_REBOOT_DELAY: Duration = Duration::from_secs(1);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Maximum time to wait for natural device boot after firmware flash.
@@ -644,6 +646,84 @@ impl<T: AuthIo> AuthSession<T> {
             (false, false) => Err(FlashError::Plugin(
                 "auth-otp-lock: no recognisable response".into(),
             )),
+        }
+    }
+
+    /// Issue a software reboot via `sys_reboot` and wait for the shell to become ready again.
+    ///
+    /// Unlike [`detect_firmware`], this does NOT perform a hardware reset — the
+    /// `sys_reboot` command itself triggers the device restart. Uses the same
+    /// polling loop as `detect_firmware` so timing stays consistent per-chip.
+    ///
+    /// On timeout (device doesn't respond within `boot_max_wait`) the function
+    /// logs a warning and returns `Ok(())`, leaving `auth_read` to surface any
+    /// real failure. Returns `Err(FlashError::Cancelled)` if cancelled.
+    fn soft_reboot_and_detect(&mut self, cancel: &AtomicBool) -> Result<(), FlashError> {
+        log::info!(
+            "[serial] soft-reboot: sending sys_reboot  port={}",
+            self.port_name
+        );
+        let _ = self.send_cmd("sys_reboot");
+
+        let boot_probe_start = self.timing.boot_probe_start;
+        let boot_probe_interval = self.timing.boot_probe_interval;
+        let boot_max_wait = self.timing.boot_max_wait;
+
+        let reset_time = Instant::now();
+
+        let first_probe_at = reset_time + boot_probe_start;
+        while Instant::now() < first_probe_at {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let max_deadline = reset_time + boot_max_wait;
+
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+
+            let _ = self.send_cmd("sys_log_enable off");
+            let lines = self
+                .read_response_timed(boot_probe_interval.saturating_mul(2), boot_probe_interval);
+
+            let is_ready = lines.iter().any(|l| {
+                let lower = l.to_lowercase();
+                lower.contains("ok: log disabled")
+                    || lower.contains("no command")
+                    || is_shell_prompt(l)
+            });
+
+            if is_ready {
+                log::info!(
+                    "flash.log.auth.softRebootShellReady: elapsed={}ms port={}",
+                    reset_time.elapsed().as_millis(),
+                    self.port_name
+                );
+                self.drain_and_wake(cancel)?;
+                return Ok(());
+            }
+
+            if Instant::now() >= max_deadline {
+                log::warn!(
+                    "[serial] soft-reboot timed out waiting for shell  port={} elapsed={}ms",
+                    self.port_name,
+                    reset_time.elapsed().as_millis()
+                );
+                self.drain_and_wake(cancel)?;
+                return Ok(());
+            }
+
+            let next_probe_at = Instant::now() + boot_probe_interval;
+            while Instant::now() < next_probe_at {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(FlashError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 
@@ -1440,10 +1520,59 @@ where
                                             error: msg.clone(),
                                         },
                                     );
-                                    let _ = sess.hardware_reset();
                                     return Err(FlashError::Plugin(format!(
                                         "auth-otp-lock failed: {msg}"
                                     )));
+                                }
+                            }
+                            // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
+                            check_cancel!();
+                            std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
+                            log::info!(
+                                "[batch-auth] otp-lock: rebooting for secondary check  port={port} mac={mac}"
+                            );
+                            sess.soft_reboot_and_detect(cancel)?;
+                            check_cancel!();
+                            let post_lock_auth = sess.auth_read(config.auth_storage);
+                            match post_lock_auth {
+                                Some((rb_u, rb_k)) if rb_u == *found_uuid && rb_k == *found_key => {
+                                    log::info!(
+                                        "[batch-auth] otp-lock secondary verify ok  port={port} mac={mac}"
+                                    );
+                                }
+                                Some((rb_u, rb_k)) => {
+                                    let msg = format!(
+                                        "OTP lock secondary check failed: expected ({found_uuid},{found_key}), got ({rb_u},{rb_k})"
+                                    );
+                                    log::warn!(
+                                        "[batch-auth] otp-lock secondary verify mismatch  port={port} mac={mac}"
+                                    );
+                                    update_row(
+                                        found_idx,
+                                        &mac,
+                                        BatchAuthRowUpdate::StepFailed {
+                                            step: "otp_lock_verify",
+                                            error: msg.clone(),
+                                        },
+                                    );
+                                    return Err(FlashError::Plugin(msg));
+                                }
+                                None => {
+                                    let msg =
+                                        "OTP lock secondary check failed: no response from auth-read after reboot"
+                                            .to_string();
+                                    log::warn!(
+                                        "[batch-auth] otp-lock secondary verify no-response  port={port} mac={mac}"
+                                    );
+                                    update_row(
+                                        found_idx,
+                                        &mac,
+                                        BatchAuthRowUpdate::StepFailed {
+                                            step: "otp_lock_verify",
+                                            error: msg.clone(),
+                                        },
+                                    );
+                                    return Err(FlashError::Plugin(msg));
                                 }
                             }
                         }
@@ -1624,8 +1753,57 @@ where
                                 error: msg.clone(),
                             },
                         );
-                        let _ = sess.hardware_reset();
                         return Err(FlashError::Plugin(format!("auth-otp-lock failed: {msg}")));
+                    }
+                }
+                // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
+                check_cancel!();
+                std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
+                log::info!(
+                    "[batch-auth] otp-lock: rebooting for secondary check  port={port} mac={mac}"
+                );
+                sess.soft_reboot_and_detect(cancel)?;
+                check_cancel!();
+                let post_lock_auth = sess.auth_read(config.auth_storage);
+                match post_lock_auth {
+                    Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
+                        log::info!(
+                            "[batch-auth] otp-lock secondary verify ok  port={port} mac={mac}"
+                        );
+                    }
+                    Some((rb_u, rb_k)) => {
+                        let msg = format!(
+                            "OTP lock secondary check failed: expected ({uuid},{authkey}), got ({rb_u},{rb_k})"
+                        );
+                        log::warn!(
+                            "[batch-auth] otp-lock secondary verify mismatch  port={port} mac={mac}"
+                        );
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "otp_lock_verify",
+                                error: msg.clone(),
+                            },
+                        );
+                        return Err(FlashError::Plugin(msg));
+                    }
+                    None => {
+                        let msg =
+                            "OTP lock secondary check failed: no response from auth-read after reboot"
+                                .to_string();
+                        log::warn!(
+                            "[batch-auth] otp-lock secondary verify no-response  port={port} mac={mac}"
+                        );
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "otp_lock_verify",
+                                error: msg.clone(),
+                            },
+                        );
+                        return Err(FlashError::Plugin(msg));
                     }
                 }
             }
@@ -1713,10 +1891,59 @@ where
                                             error: msg.clone(),
                                         },
                                     );
-                                    let _ = sess.hardware_reset();
                                     return Err(FlashError::Plugin(format!(
                                         "auth-otp-lock failed: {msg}"
                                     )));
+                                }
+                            }
+                            // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
+                            check_cancel!();
+                            std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
+                            log::info!(
+                                "[batch-auth] otp-lock: rebooting for secondary check (old fw)  port={port} mac={mac}"
+                            );
+                            sess.soft_reboot_and_detect(cancel)?;
+                            check_cancel!();
+                            let post_lock_auth = sess.auth_read(config.auth_storage);
+                            match post_lock_auth {
+                                Some((rb_u, rb_k)) if rb_u == *found_uuid && rb_k == *found_key => {
+                                    log::info!(
+                                        "[batch-auth] otp-lock secondary verify ok (old fw)  port={port} mac={mac}"
+                                    );
+                                }
+                                Some((rb_u, rb_k)) => {
+                                    let msg = format!(
+                                        "OTP lock secondary check failed: expected ({found_uuid},{found_key}), got ({rb_u},{rb_k})"
+                                    );
+                                    log::warn!(
+                                        "[batch-auth] otp-lock secondary verify mismatch (old fw)  port={port} mac={mac}"
+                                    );
+                                    update_row(
+                                        found_idx,
+                                        &mac,
+                                        BatchAuthRowUpdate::StepFailed {
+                                            step: "otp_lock_verify",
+                                            error: msg.clone(),
+                                        },
+                                    );
+                                    return Err(FlashError::Plugin(msg));
+                                }
+                                None => {
+                                    let msg =
+                                        "OTP lock secondary check failed: no response from auth-read after reboot"
+                                            .to_string();
+                                    log::warn!(
+                                        "[batch-auth] otp-lock secondary verify no-response (old fw)  port={port} mac={mac}"
+                                    );
+                                    update_row(
+                                        found_idx,
+                                        &mac,
+                                        BatchAuthRowUpdate::StepFailed {
+                                            step: "otp_lock_verify",
+                                            error: msg.clone(),
+                                        },
+                                    );
+                                    return Err(FlashError::Plugin(msg));
                                 }
                             }
                         }
@@ -1916,8 +2143,57 @@ where
                                 error: msg.clone(),
                             },
                         );
-                        let _ = sess.hardware_reset();
                         return Err(FlashError::Plugin(format!("auth-otp-lock failed: {msg}")));
+                    }
+                }
+                // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
+                check_cancel!();
+                std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
+                log::info!(
+                    "[batch-auth] otp-lock: rebooting for secondary check (old fw)  port={port} mac={mac}"
+                );
+                sess.soft_reboot_and_detect(cancel)?;
+                check_cancel!();
+                let post_lock_auth = sess.auth_read(config.auth_storage);
+                match post_lock_auth {
+                    Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
+                        log::info!(
+                            "[batch-auth] otp-lock secondary verify ok (old fw)  port={port} mac={mac}"
+                        );
+                    }
+                    Some((rb_u, rb_k)) => {
+                        let msg = format!(
+                            "OTP lock secondary check failed: expected ({uuid},{authkey}), got ({rb_u},{rb_k})"
+                        );
+                        log::warn!(
+                            "[batch-auth] otp-lock secondary verify mismatch (old fw)  port={port} mac={mac}"
+                        );
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "otp_lock_verify",
+                                error: msg.clone(),
+                            },
+                        );
+                        return Err(FlashError::Plugin(msg));
+                    }
+                    None => {
+                        let msg =
+                            "OTP lock secondary check failed: no response from auth-read after reboot"
+                                .to_string();
+                        log::warn!(
+                            "[batch-auth] otp-lock secondary verify no-response (old fw)  port={port} mac={mac}"
+                        );
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "otp_lock_verify",
+                                error: msg.clone(),
+                            },
+                        );
+                        return Err(FlashError::Plugin(msg));
                     }
                 }
             }
