@@ -564,6 +564,7 @@
       "otpLockDescription": "When enabled, sends auth-otp-lock to burn the eFuse. Future OTP writes will be rejected by hardware and this cannot be undone. Check only when this batch needs permanent locking; this toggle is reset to off on every app start.",
       "excelTotal": "Total",
       "excelUsed": "Used",
+      "excelInProgress": "Occupied",
       "excelRemaining": "Remaining",
       "excelExhausted": "All auth codes used — please add more to the Excel",
       "sourceLocal": "Local File",

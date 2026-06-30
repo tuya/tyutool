@@ -564,6 +564,7 @@
       "otpLockDescription": "开启后将发送 auth-otp-lock 命令烧断 eFuse，此后任何 OTP 区写入都会被硬件拒绝，且不可恢复。仅在确认本批次设备需要永久锁定时勾选；每次启动该开关都会自动重置为关闭。",
       "excelTotal": "总计",
       "excelUsed": "已用",
+      "excelInProgress": "占用中",
       "excelRemaining": "剩余",
       "excelExhausted": "授权码已全部使用，请补充 Excel",
       "sourceLocal": "本地文件",
