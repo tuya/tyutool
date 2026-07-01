@@ -427,7 +427,15 @@ fn validate_excel_file(path: &str) -> Result<&std::path::Path, String> {
 fn validate_excel_cmd(path: String) -> Result<batch_auth::ExcelStats, String> {
     let p = validate_excel_file(&path)?;
     let alloc = batch_auth::ExcelRowAllocator::load(p)?;
-    Ok(alloc.stats())
+    let stats = alloc.stats();
+    log::info!(
+        "[batch-auth] excel validated: path={} total={} used={} remaining={}",
+        path,
+        stats.total,
+        stats.used,
+        stats.remaining,
+    );
+    Ok(stats)
 }
 
 #[tauri::command]
@@ -457,6 +465,17 @@ fn batch_auth_start(
             auth_storage
         );
     }
+
+    log::info!(
+        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} storage={:?} conflict={} lock_otp={}",
+        config.chip_id,
+        config.excel_path,
+        config.firmware_path.as_deref().unwrap_or("(none)"),
+        ports.len(),
+        auth_storage,
+        config.conflict_policy,
+        lock_otp_after_auth,
+    );
 
     let allocator = {
         let path = std::path::Path::new(&config.excel_path);
