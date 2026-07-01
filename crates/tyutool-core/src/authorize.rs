@@ -1646,6 +1646,25 @@ where
                     }
                 }
                 if let Some(e) = last_err {
+                    // 诊断性 auth-read：确认 OTP 当前状态，帮助区分硬件故障和写入状态
+                    let diag = sess.auth_read(config.auth_storage);
+                    match &diag {
+                        Some((u, _k)) if u == &uuid => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed but OTP already contains target credentials  port={port} mac={mac}"
+                            );
+                        }
+                        Some((u, _k)) => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed, OTP has different content  port={port} mac={mac} otp_uuid={u}"
+                            );
+                        }
+                        None => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed, post-fail auth-read: no response  port={port} mac={mac}"
+                            );
+                        }
+                    }
                     update_row(
                         row_idx,
                         &mac,
@@ -2019,6 +2038,24 @@ where
                     }
                 }
                 if let Some(e) = last_err {
+                    let diag = sess.auth_read(config.auth_storage);
+                    match &diag {
+                        Some((u, _k)) if u == &uuid => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed but OTP already contains target credentials (old fw)  port={port} mac={mac}"
+                            );
+                        }
+                        Some((u, _k)) => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed, OTP has different content (old fw)  port={port} mac={mac} otp_uuid={u}"
+                            );
+                        }
+                        None => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed, post-fail auth-read: no response (old fw)  port={port} mac={mac}"
+                            );
+                        }
+                    }
                     update_row(
                         row_idx,
                         &mac,
