@@ -550,8 +550,9 @@ impl<T: AuthIo> AuthSession<T> {
                     let to_read = (n as usize).min(tmp.len());
                     if let Ok(read) = self.port.read(&mut tmp[..to_read]) {
                         if last_data.is_none() {
-                            log::info!(
-                                "flash.log.auth.firstByte: rtt={}ms",
+                            log::debug!(
+                                "[serial] port={} firstByte rtt={}ms",
+                                self.port_name,
                                 fn_start.elapsed().as_millis()
                             );
                         }
