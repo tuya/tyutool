@@ -1160,13 +1160,27 @@ async fn download_auth_firmware(
         }
     }
 
+    let download_start = std::time::Instant::now();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let resp = client.get(&url).send().await.map_err(|e| {
+        log::warn!(
+            "[AuthFw] download request failed: version={} err={}",
+            version,
+            e
+        );
+        e.to_string()
+    })?;
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        let status = resp.status();
+        log::warn!(
+            "[AuthFw] download HTTP error: version={} status={}",
+            version,
+            status
+        );
+        return Err(format!("HTTP {}", status));
     }
     let bytes_total = resp.content_length();
     let mut bytes_vec: Vec<u8> = Vec::new();
@@ -1190,6 +1204,12 @@ async fn download_auth_firmware(
     }
     let actual = sha256_hex(&bytes_vec);
     if actual != expected {
+        log::warn!(
+            "[AuthFw] download SHA256 mismatch: version={} expected={} got={}",
+            version,
+            expected,
+            actual
+        );
         return Err(format!(
             "SHA-256 mismatch: expected {}, got {}",
             expected, actual
@@ -1197,9 +1217,10 @@ async fn download_auth_firmware(
     }
     std::fs::write(&dest, &bytes_vec).map_err(|e| e.to_string())?;
     log::info!(
-        "[AuthFw] downloaded {} bytes -> {}",
+        "[AuthFw] downloaded {} bytes -> {} ({:.1}s)",
         bytes_vec.len(),
-        dest.display()
+        dest.display(),
+        download_start.elapsed().as_secs_f64(),
     );
     Ok(dest.to_string_lossy().into_owned())
 }
