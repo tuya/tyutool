@@ -172,6 +172,12 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.file_label }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # ── macOS 代码签名与公证 ────────────────────────────────────────────────
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v6
 
@@ -213,6 +219,42 @@ jobs:
           path: dist/
 
       # ── Tauri build ──
+      # ── Import Apple signing certificate into a temporary keychain ─────────
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASS="$(uuidgen)"
+
+          # 解码 Base64 证书，创建临时 Keychain 并导入
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S "apple-tool:,apple:,codesign:" \
+            -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+
+          # 将临时 Keychain 加入搜索列表
+          security list-keychains -d user \
+            -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # 从证书中动态读取 Signing Identity，写入后续步骤可用的环境变量
+          SIGNING_IDENTITY=$(
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" \
+            | awk -F'"' '{print $2}' \
+            | head -1
+          )
+          echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+          # 删除临时 .p12 文件
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          
       - run: pnpm install --frozen-lockfile
       - name: Build Tauri app
         shell: bash
