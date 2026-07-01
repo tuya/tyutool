@@ -232,6 +232,21 @@ PRs that modify `crates/tyutool-cli/src/main.rs` (command definitions) without u
 
 ---
 
+## Branch Model
+
+```
+stable/master  ← production; hotfix PRs only
+refactor/v3    ← main development branch (default); feature PRs merge here
+<initials>/*   ← personal feature branches, based off refactor/v3
+```
+
+- **Never commit directly to `refactor/v3` or `master`.**
+- Feature work: branch off `refactor/v3` as `<initials>/<description>` (e.g. `yj/batch-auth-log`), PR back to `refactor/v3`.
+- Hotfix: branch off `master` as `hotfix/<description>`, PR to `master`.
+- When creating a PR, the base must be `refactor/v3` (not `master`) for normal feature work.
+
+---
+
 ## Conventions
 
 ### File and directory naming
