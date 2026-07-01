@@ -4,6 +4,7 @@ import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-t
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
 import { isTauriRuntime } from "@/runtime";
 import { i18n } from "@/i18n";
+import { rLog } from "@/utils/log";
 import {
   BATCH_FLASH_CAPABLE_CHIPS,
   type BatchSlotState,
@@ -202,6 +203,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         path,
       });
       excelError.value = null;
+      if (excelStats.value) {
+        rLog.info(
+          `[batch-auth] excel selected: path=${path} total=${excelStats.value.total} used=${excelStats.value.used} remaining=${excelStats.value.remaining}`,
+        );
+      }
     } catch (e) {
       excelStats.value = null;
       const raw = String(e);
@@ -227,6 +233,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   function setLocalFirmwarePath(path: string) {
     firmwarePath.value = path;
     localFirmwarePath.value = path;
+    rLog.info(`[batch-auth] firmware selected: source=local path=${path}`);
     void saveFirmwareConfig();
   }
 
@@ -255,6 +262,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     firmwareDownloadProgress.value = 0;
     try {
       firmwarePath.value = await downloadAuthFirmware(entry);
+      rLog.info(
+        `[batch-auth] firmware ready: source=default version=${version} path=${firmwarePath.value}`,
+      );
       defaultFirmwareStatus.value = "ready";
     } catch (e) {
       firmwarePath.value = "";
