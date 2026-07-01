@@ -1084,17 +1084,17 @@ async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, String> {
             e.to_string()
         })?;
     let resp = client.get(&url).send().await.map_err(|e| {
-        log::error!("[Update] fetch_url: request failed for {}: {}", url, e);
+        log::warn!("[Update] fetch_url: request failed for {}: {}", url, e);
         e.to_string()
     })?;
     let status = resp.status();
     log::info!("[Update] fetch_url: response status={}", status);
     if !status.is_success() {
-        log::error!("[Update] fetch_url: HTTP error {}", status);
+        log::warn!("[Update] fetch_url: HTTP error {}", status);
         return Err(format!("HTTP {}", status));
     }
     let body = resp.text().await.map_err(|e| {
-        log::error!("[Update] fetch_url: failed to read body: {}", e);
+        log::warn!("[Update] fetch_url: failed to read body: {}", e);
         e.to_string()
     })?;
     log::info!("[Update] fetch_url: body length={}", body.len());
