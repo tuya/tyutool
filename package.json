@@ -21,7 +21,7 @@
     "build:gui": "pnpm run build && tauri build",
     "release:cli": "pnpm exec tsx scripts/release-cli.ts",
     "release:gui": "pnpm exec tsx scripts/release-gui.ts",
-    "version:set": "node scripts/bump-version.mjs",
+    "version:set": "pnpm exec tsx scripts/bump-version.ts",
     "dev:web": "pnpm exec tsx scripts/dev-web.ts",
     "release": "pnpm exec tsx scripts/release.ts"
   },

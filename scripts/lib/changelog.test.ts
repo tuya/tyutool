@@ -10,13 +10,12 @@ import {
 const SKELETON = '# Changelog\n\nAll notable changes here.\n';
 
 describe('buildDraftSection', () => {
-  it('embeds the version, date, marker, and both language headings', () => {
-    const s = buildDraftSection('3.0.14', '2026-06-18', '- Fixed a bug');
+  it('embeds the version, date, marker, and bilingual section headings', () => {
+    const s = buildDraftSection('3.0.14', '2026-06-18');
     expect(s).toContain('## [3.0.14] - 2026-06-18');
     expect(s).toContain(DRAFT_MARKER);
-    expect(s).toContain('### 中文');
-    expect(s).toContain('### English');
-    expect(s).toContain('- Fixed a bug');
+    expect(s).toContain('### 新功能 / Features');
+    expect(s).toContain('### 问题修复 / Bug Fixes');
   });
 });
 

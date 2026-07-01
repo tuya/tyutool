@@ -2,20 +2,19 @@ export const DRAFT_MARKER = '<!-- 润色后删除本行 / remove this line after
 
 const HEADER = '# Changelog\n\n本项目所有重要变更记录于此 / All notable changes are documented here.\n';
 
-export function buildDraftSection(version: string, date: string, cliffBody: string): string {
-  const body = cliffBody.trim() || '- ';
+export function buildDraftSection(version: string, date: string): string {
   return [
     `## [${version}] - ${date}`,
     '',
     DRAFT_MARKER,
     '',
-    '### 中文',
+    '### 新功能 / Features',
     '',
-    body,
+    '- ',
     '',
-    '### English',
+    '### 问题修复 / Bug Fixes',
     '',
-    body,
+    '- ',
     '',
   ].join('\n');
 }
