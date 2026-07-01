@@ -1,6 +1,7 @@
 import { isTauriRuntime } from "@/runtime";
 import type { UpdateSource } from "@/features/settings/update-sources";
 import type { AuthFirmwareEntry, AuthFirmwareManifest } from "./types";
+import { rLog } from "@/utils/log";
 
 /** Manifest sources for the designated `auth-firmware` release.
  *  GitHub first, Gitee as fallback — mirrors the update-source resolution. */
@@ -65,15 +66,20 @@ async function fetchManifest(
 export async function fetchAuthFirmwareManifest(
   timeoutMs = 8000,
 ): Promise<{ sourceId: "github" | "gitee"; manifest: AuthFirmwareManifest }> {
+  const errors: string[] = [];
   for (const source of AUTH_FIRMWARE_SOURCES) {
     try {
       const manifest = await fetchManifest(source.url, timeoutMs);
       return { sourceId: source.id, manifest };
-    } catch {
-      // try next source
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      rLog.warn(`[AuthFw] manifest source '${source.id}' failed: ${reason}`);
+      errors.push(`${source.id}: ${reason}`);
     }
   }
-  throw new Error("All auth firmware sources failed");
+  const msg = `All auth firmware sources failed (${errors.join("; ")})`;
+  rLog.warn(`[AuthFw] ${msg}`);
+  throw new Error(msg);
 }
 
 /** Download (and SHA-256 verify) a firmware entry via the Rust command.
