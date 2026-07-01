@@ -2,6 +2,25 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.1.4] - 2026-07-01
+
+### 新功能 / Features
+
+- `log`：记录固件文件和 Excel 文件的选择（路径、大小），便于问题排查 / Log firmware and Excel file selections (path, size) for easier troubleshooting
+- `log`：记录下载授权固件的失败原因及耗时，记录每个来源（URL）的失败详情 / Log auth-firmware download failure reason and elapsed time; record per-source (URL) failure details
+- `log`：记录 Excel 文件基本信息（行数、列等）和批量烧录启动参数 / Log Excel file metadata (row count, columns, etc.) and batch-flash job parameters on start
+- `log`：`auth-write` 全部重试失败后，自动追加诊断性 `auth-read`，记录设备实际状态 / Append a diagnostic `auth-read` after all `auth-write` retries are exhausted to capture the device's actual state
+
+### 问题修复 / Bug Fixes
+
+- `log`：将 HTTP/网络错误从 error 降级为 warn（请求可重试，非终态错误） / Downgrade HTTP/network fetch errors from error to warn (retriable, not terminal)
+- `log`：将 firstByte RTT 日志从 info 降级为 debug（非用户可操作信息） / Downgrade firstByte RTT log from info to debug (not user-actionable)
+
+### 工程改进 / Engineering
+
+- `ci`：前端仅构建一次，产物在所有 GUI 平台任务间复用，缩短 CI 时间 / Build frontend once and share the dist artifact across all GUI platform jobs to cut CI time
+- `ci`：增强 macOS 代码签名流程 / Enhance macOS code-signing process in release workflow
+
 ## [3.1.3] - 2026-06-30
 
 ### 问题修复 / Bug Fixes
