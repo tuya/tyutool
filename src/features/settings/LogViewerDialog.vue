@@ -301,7 +301,7 @@ watch(
                   {{ fileStem(file.name) }}
                   <span
                     v-if="idx === 0"
-                    class="ml-1.5 rounded bg-blue-600/40 px-1 py-0.5 text-[10px] text-blue-300"
+                    class="log-current-session-badge ml-1.5 rounded px-1 py-0.5 text-[10px]"
                   >
                     {{ t("settings.logViewer.currentSession") }}
                   </span>
@@ -477,3 +477,16 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+.log-current-session-badge {
+  background-color: color-mix(
+    in srgb,
+    var(--ty-primary) 12%,
+    var(--ty-surface)
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ty-primary) 34%, transparent);
+  color: var(--ty-primary);
+  font-weight: 600;
+}
+</style>
