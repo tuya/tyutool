@@ -640,7 +640,6 @@ pub fn erase<T: IoTransport>(
 
         if use_block_erase {
             // 64K block erase
-            log::debug!("Erasing 64K block at {:#010x}", addr);
             let erase_cmd = if chip.use_extended_erase() {
                 command::ERASE_CMD_64K_EXT
             } else {
@@ -704,7 +703,6 @@ pub fn erase<T: IoTransport>(
             erased += block_size;
         } else {
             // 4K sector erase
-            log::debug!("Erasing 4K sector at {:#010x}", addr);
             let erase_cmd = if chip.use_extended_erase() {
                 command::ERASE_CMD_4K_EXT
             } else {
@@ -767,8 +765,6 @@ pub fn write<T: IoTransport>(
 
         let addr = base_addr + written;
         let extended = chip.use_extended_frame(addr);
-
-        log::debug!("Writing sector at {:#010x} ({} bytes)", addr, chunk.len());
 
         // Pad chunk to 4K if it's the last (short) chunk
         let mut sector = [0xFFu8; SECTOR_SIZE as usize];
