@@ -248,18 +248,9 @@ impl<'a, T: IoTransport> Transport<'a, T> {
         payload: &[u8],
         timeout_ms: u64,
     ) -> Result<RxFrame, ProtocolError> {
-        log::debug!(
-            "TX standard frame: cmd=0x{:02x}, payload={} bytes",
-            cmd,
-            payload.len()
-        );
         let tx = frame::encode_standard(cmd, payload);
         self.send_raw(&tx)?;
-        let result = self.recv_frame(timeout_ms);
-        if result.is_ok() {
-            log::debug!("RX standard frame: response received");
-        }
-        result
+        self.recv_frame(timeout_ms)
     }
 
     /// Send an extended-frame command and receive the response.
@@ -269,18 +260,9 @@ impl<'a, T: IoTransport> Transport<'a, T> {
         payload: &[u8],
         timeout_ms: u64,
     ) -> Result<RxFrame, ProtocolError> {
-        log::debug!(
-            "TX extended frame: cmd=0x{:02x}, payload={} bytes",
-            cmd,
-            payload.len()
-        );
         let tx = frame::encode_extended(cmd, payload);
         self.send_raw(&tx)?;
-        let result = self.recv_frame(timeout_ms);
-        if result.is_ok() {
-            log::debug!("RX extended frame: response received");
-        }
-        result
+        self.recv_frame(timeout_ms)
     }
 
     /// Send a command (standard or extended) and receive with retry.
