@@ -41,9 +41,10 @@ async function onRead(port: string) {
     <!-- Slot rows -->
     <div v-if="store.slots.length > 0" aria-live="polite" aria-relevant="text">
       <BatchFlashAuthSlotRow
-        v-for="s in store.slots"
+        v-for="(s, index) in store.slots"
         :key="s.port"
         :portSlot="s"
+        :rowIndex="index"
         class="border-b border-[var(--ty-border)] last:border-b-0"
         @cancel="onCancel"
         @retry="onRetry"

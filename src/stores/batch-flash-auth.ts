@@ -64,6 +64,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const authBaudRate = ref<number>(115200);
   const firmwarePath = ref<string>("");
   const localFirmwarePath = ref<string>("");
+  const flashFirmware = ref<boolean>(true);
   const firmwareSource = ref<BatchFirmwareSource>("local");
   const selectedDefaultVersion = ref<string>("");
   const defaultFirmwareEntries = ref<AuthFirmwareEntry[]>([]);
@@ -97,7 +98,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   );
 
   const opMode = computed<BatchOpMode>(() =>
-    canFlash.value && !!firmwarePath.value ? "flash-then-auth" : "auth-only",
+    canFlash.value && flashFirmware.value && !!firmwarePath.value
+      ? "flash-then-auth"
+      : "auth-only",
   );
 
   const currentStats = computed(() => ({
@@ -337,7 +340,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     }
 
     const { invoke } = await import("@tauri-apps/api/core");
-    const fw = firmwarePath.value || undefined;
+    const fw =
+      canFlash.value && flashFirmware.value
+        ? firmwarePath.value || undefined
+        : undefined;
     let flashStartHex: string | undefined;
     let flashEndHex: string | undefined;
     if (fw) {
@@ -399,7 +405,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     });
     batchEndTime.value = null;
     const { invoke } = await import("@tauri-apps/api/core");
-    const fw = firmwarePath.value || undefined;
+    const fw =
+      canFlash.value && flashFirmware.value
+        ? firmwarePath.value || undefined
+        : undefined;
     let flashStartHex: string | undefined;
     let flashEndHex: string | undefined;
     if (fw) {
@@ -765,6 +774,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       chipId.value = sharedConfig.chipId;
       baudRate.value = sharedConfig.baudRate;
       authBaudRate.value = sharedConfig.authBaudRate;
+      flashFirmware.value = sharedConfig.flashFirmware ?? true;
     } else {
       // First run: apply manifest defaults for the initial chip.
       const m = chipManifest(chipId.value);
@@ -802,6 +812,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       chipId: chipId.value,
       baudRate: baudRate.value,
       authBaudRate: authBaudRate.value,
+      flashFirmware: flashFirmware.value,
     });
   }
 
@@ -871,7 +882,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   });
 
   watch(authConfig, () => void saveAuthConfig(), { deep: true });
-  watch([chipId, baudRate, authBaudRate], () => void saveSharedConfig());
+  watch(
+    [chipId, baudRate, authBaudRate, flashFirmware],
+    () => void saveSharedConfig(),
+  );
 
   return {
     // State
@@ -880,6 +894,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     baudRate,
     authBaudRate,
     firmwarePath,
+    flashFirmware,
     authConfig,
     filterConfig,
     cumulativeStats,

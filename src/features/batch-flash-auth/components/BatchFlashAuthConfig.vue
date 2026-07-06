@@ -39,7 +39,12 @@ const authBaudRateStr = computed({
   },
 });
 
+const firmwareControlsDisabled = computed(
+  () => store.isBusy || !store.flashFirmware,
+);
+
 async function browseFirmware() {
+  if (firmwareControlsDisabled.value) return;
   if (!isTauriRuntime()) return;
   const { open } = await import("@tauri-apps/plugin-dialog");
   const file = await open({
@@ -64,10 +69,16 @@ const selectedVersion = computed({
 });
 
 async function onSelectSource(source: "local" | "default") {
+  if (firmwareControlsDisabled.value) return;
   store.setFirmwareSource(source);
   if (source === "default" && store.defaultFirmwareEntries.length === 0) {
     await store.loadDefaultFirmwareList();
   }
+}
+
+function toggleFlashFirmware() {
+  if (store.isBusy) return;
+  store.flashFirmware = !store.flashFirmware;
 }
 </script>
 
@@ -78,106 +89,166 @@ async function onSelectSource(source: "local" | "default") {
     <h3 class="mb-3 text-sm font-semibold text-[var(--ty-text)]">
       {{ t("batchFlashAuth.config.sharedConfig") }}
     </h3>
-    <div class="flex flex-wrap gap-3">
-      <!-- Chip selector -->
-      <div class="flex min-w-[9rem] flex-col gap-1">
-        <label class="text-xs text-[var(--ty-text-muted)]">{{
-          t("batchFlashAuth.config.chip")
-        }}</label>
-        <TySelect
-          v-model="store.chipId"
-          :options="chipOptions"
-          :disabled="store.isBusy"
-        />
-      </div>
+    <div class="space-y-3">
+      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <!-- Chip selector -->
+        <div class="flex min-w-0 flex-col gap-1">
+          <label class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.chip")
+          }}</label>
+          <TySelect
+            v-model="store.chipId"
+            :options="chipOptions"
+            :disabled="store.isBusy"
+          />
+        </div>
 
-      <!-- Flash baud rate -->
-      <div class="flex min-w-[8rem] flex-col gap-1">
-        <label class="text-xs text-[var(--ty-text-muted)]">{{
-          t("batchFlashAuth.config.flashBaud")
-        }}</label>
-        <TySelect
-          v-model="baudRateStr"
-          :options="baudOptions"
-          :disabled="store.isBusy"
-        />
-      </div>
+        <!-- Flash baud rate -->
+        <div class="flex min-w-0 flex-col gap-1">
+          <label class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.flashBaud")
+          }}</label>
+          <TySelect
+            v-model="baudRateStr"
+            :options="baudOptions"
+            :disabled="store.isBusy"
+          />
+        </div>
 
-      <!-- Auth baud rate -->
-      <div class="flex min-w-[8rem] flex-col gap-1">
-        <label class="text-xs text-[var(--ty-text-muted)]">{{
-          t("batchFlashAuth.config.authBaud")
-        }}</label>
-        <TySelect
-          v-model="authBaudRateStr"
-          :options="baudOptions"
-          :disabled="store.isBusy"
-        />
+        <!-- Auth baud rate -->
+        <div class="flex min-w-0 flex-col gap-1">
+          <label class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.authBaud")
+          }}</label>
+          <TySelect
+            v-model="authBaudRateStr"
+            :options="baudOptions"
+            :disabled="store.isBusy"
+          />
+        </div>
+
+        <!-- Firmware enable switch -->
+        <div v-if="store.canFlash" class="flex min-w-0 flex-col gap-1">
+          <span class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.flashFirmware")
+          }}</span>
+          <button
+            type="button"
+            class="inline-flex h-[2.125rem] w-fit cursor-pointer items-center gap-2 rounded-lg px-0 text-xs font-medium text-[var(--ty-text)] transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ty-primary)]"
+            :class="store.isBusy ? 'cursor-not-allowed opacity-60' : undefined"
+            :style="{
+              color: store.flashFirmware
+                ? 'var(--ty-primary, #2563eb)'
+                : 'var(--ty-text)',
+            }"
+            role="switch"
+            :aria-checked="store.flashFirmware"
+            :disabled="store.isBusy"
+            @click="toggleFlashFirmware"
+          >
+            <span
+              class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200"
+              :style="{
+                backgroundColor: store.flashFirmware
+                  ? 'var(--ty-primary, #2563eb)'
+                  : 'color-mix(in srgb, var(--ty-text-muted) 28%, var(--ty-surface-muted))',
+              }"
+              aria-hidden="true"
+            >
+              <span
+                class="absolute left-0.5 size-4 rounded-full shadow-sm transition-transform duration-200"
+                :class="store.flashFirmware ? 'translate-x-4' : ''"
+                :style="{
+                  backgroundColor: '#fff',
+                }"
+              />
+            </span>
+            <span class="leading-none">{{
+              store.flashFirmware
+                ? t("batchFlashAuth.config.flashFirmwareOn")
+                : t("batchFlashAuth.config.flashFirmwareOff")
+            }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- Firmware — only for flash-capable chips (not "other") -->
       <div
-        v-if="store.canFlash"
-        class="flex min-w-[16rem] flex-1 flex-col gap-1"
+        v-if="store.canFlash && store.flashFirmware"
+        class="grid gap-3 border-t border-[var(--ty-border)] pt-3 lg:grid-cols-[12rem_minmax(0,1fr)]"
       >
-        <label class="text-xs text-[var(--ty-text-muted)]">{{
-          t("batchFlashAuth.config.firmware")
-        }}</label>
-
         <!-- Source toggle -->
-        <div class="mb-1 flex gap-3 text-xs text-[var(--ty-text)]">
-          <label class="inline-flex items-center gap-1.5">
-            <input
-              type="radio"
-              :checked="store.firmwareSource === 'local'"
-              :disabled="store.isBusy"
-              @change="onSelectSource('local')"
-            />
-            {{ t("batchFlashAuth.config.sourceLocal") }}
-          </label>
-          <label class="inline-flex items-center gap-1.5">
-            <input
-              type="radio"
-              :checked="store.firmwareSource === 'default'"
-              :disabled="store.isBusy"
-              @change="onSelectSource('default')"
-            />
-            {{ t("batchFlashAuth.config.sourceDefault") }}
-          </label>
+        <div class="flex min-w-0 flex-col gap-1">
+          <span class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.firmware")
+          }}</span>
+          <div
+            class="flex min-h-[2.125rem] flex-col justify-center gap-1 text-xs text-[var(--ty-text)]"
+          >
+            <label class="inline-flex items-center gap-1.5">
+              <input
+                type="radio"
+                :checked="store.firmwareSource === 'local'"
+                :disabled="firmwareControlsDisabled"
+                @change="onSelectSource('local')"
+              />
+              {{ t("batchFlashAuth.config.sourceLocal") }}
+            </label>
+            <label class="inline-flex items-center gap-1.5">
+              <input
+                type="radio"
+                :checked="store.firmwareSource === 'default'"
+                :disabled="firmwareControlsDisabled"
+                @change="onSelectSource('default')"
+              />
+              {{ t("batchFlashAuth.config.sourceDefault") }}
+            </label>
+          </div>
         </div>
 
         <!-- Local file picker -->
-        <div v-if="store.firmwareSource === 'local'" class="flex gap-2">
-          <input
-            type="text"
-            :value="store.firmwarePath"
-            readonly
-            :disabled="store.isBusy"
-            :placeholder="t('batchFlashAuth.config.noFile')"
-            class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 h-[2.125rem] text-xs text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
-          />
-          <button
-            type="button"
-            class="ops-browse-btn inline-flex h-[2.125rem] shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-medium whitespace-nowrap"
-            :disabled="store.isBusy"
-            @click="browseFirmware"
-          >
-            <FontAwesomeIcon
-              :icon="['fas', 'folder-open']"
-              class="size-3.5"
-              aria-hidden="true"
-            />{{ t("batchFlashAuth.config.browse") }}
-          </button>
+        <div
+          v-if="store.firmwareSource === 'local'"
+          class="flex min-w-0 flex-col gap-1"
+        >
+          <span class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.sourceLocal")
+          }}</span>
+          <div class="flex min-w-0 gap-2">
+            <input
+              type="text"
+              :value="store.firmwarePath"
+              readonly
+              :disabled="firmwareControlsDisabled"
+              :placeholder="t('batchFlashAuth.config.noFile')"
+              class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 h-[2.125rem] text-xs text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
+            />
+            <button
+              type="button"
+              class="ops-browse-btn inline-flex h-[2.125rem] shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-medium whitespace-nowrap"
+              :disabled="firmwareControlsDisabled"
+              @click="browseFirmware"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', 'folder-open']"
+                class="size-3.5"
+                aria-hidden="true"
+              />{{ t("batchFlashAuth.config.browse") }}
+            </button>
+          </div>
         </div>
 
         <!-- Default firmware: version select + status -->
         <div v-else class="flex flex-col gap-1">
+          <span class="text-xs text-[var(--ty-text-muted)]">{{
+            t("batchFlashAuth.config.sourceDefault")
+          }}</span>
           <TySelect
             v-model="selectedVersion"
             :options="versionOptions"
             :placeholder="t('batchFlashAuth.config.selectVersion')"
             :disabled="
-              store.isBusy ||
+              firmwareControlsDisabled ||
               store.defaultFirmwareStatus === 'loading' ||
               (store.defaultFirmwareStatus === 'error' &&
                 store.defaultFirmwareEntries.length === 0)
