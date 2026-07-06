@@ -357,7 +357,7 @@ watch(
         <!-- Truncation notice -->
         <div
           v-if="isTruncated"
-          class="rounded bg-yellow-900/30 px-3 py-1.5 text-xs text-yellow-400"
+          class="log-truncated-notice rounded px-3 py-1.5 text-xs"
         >
           {{ t("settings.logViewer.truncated") }}
         </div>
@@ -487,6 +487,13 @@ watch(
   );
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ty-primary) 34%, transparent);
   color: var(--ty-primary);
+  font-weight: 600;
+}
+
+.log-truncated-notice {
+  background-color: color-mix(in srgb, var(--ty-accent) 10%, var(--ty-surface));
+  border: 1px solid color-mix(in srgb, var(--ty-accent) 34%, var(--ty-border));
+  color: var(--ty-accent-hover);
   font-weight: 600;
 }
 </style>
