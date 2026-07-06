@@ -12,4 +12,11 @@ describe("LogViewerDialog", () => {
     expect(source).not.toContain("bg-blue-600/40");
     expect(source).not.toContain("text-blue-300");
   });
+
+  it("uses light-mode readable styling for the truncated-log notice", () => {
+    expect(source).not.toContain(
+      "rounded bg-yellow-900/30 px-3 py-1.5 text-xs text-yellow-400",
+    );
+    expect(source).toContain("log-truncated-notice");
+  });
 });
