@@ -5,7 +5,7 @@ import { useI18n } from "vue-i18n";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import type { BatchSlotState } from "../types";
 
-const props = defineProps<{ portSlot: BatchSlotState }>();
+const props = defineProps<{ portSlot: BatchSlotState; rowIndex?: number }>();
 const emit = defineEmits<{
   cancel: [port: string];
   retry: [port: string];
@@ -101,13 +101,17 @@ const BORDER_COLORS: Record<string, string> = {
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
 const rowBg = computed(() => {
+  const base =
+    (props.rowIndex ?? 0) % 2 === 1
+      ? "var(--ty-surface-muted)"
+      : "var(--ty-surface)";
   if (isQuarantineRequired.value)
-    return "color-mix(in srgb, var(--ty-danger) 12%, transparent)";
+    return `color-mix(in srgb, var(--ty-danger) 14%, ${base})`;
   if (props.portSlot.status === "failed")
-    return "color-mix(in srgb, var(--ty-danger) 6%, transparent)";
+    return `color-mix(in srgb, var(--ty-danger) 8%, ${base})`;
   if (props.portSlot.status === "no_code")
-    return "color-mix(in srgb, var(--ty-warning, #f59e0b) 6%, transparent)";
-  return "transparent";
+    return `color-mix(in srgb, var(--ty-warning, #f59e0b) 10%, ${base})`;
+  return base;
 });
 
 const isActive = computed(() =>

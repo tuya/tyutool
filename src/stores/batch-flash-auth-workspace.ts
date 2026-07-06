@@ -16,6 +16,7 @@ export interface BatchSharedConfig {
   chipId: string;
   baudRate: number;
   authBaudRate: number;
+  flashFirmware?: boolean;
 }
 
 const FIRMWARE_KEY = "batch-flash-auth-firmware";

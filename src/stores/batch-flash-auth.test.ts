@@ -39,6 +39,15 @@ describe("opMode", () => {
     store.authConfig.excelPath = "/path/to/auth.xlsx";
     expect(store.opMode).toBe("flash-then-auth");
   });
+
+  it("is auth-only when firmware flashing is disabled even with a firmware selected", () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "esp32";
+    store.flashFirmware = false;
+    store.firmwarePath = "/path/to/fw.bin";
+    store.authConfig.excelPath = "/path/to/auth.xlsx";
+    expect(store.opMode).toBe("auth-only");
+  });
 });
 
 describe("canFlash", () => {
@@ -985,6 +994,48 @@ describe("startBatch / cancelAll / cancelPort — web mode no-ops", () => {
   it("cancelPort does not throw", async () => {
     const store = useBatchFlashAuthStore();
     await expect(store.cancelPort("COM3")).resolves.toBeUndefined();
+  });
+});
+
+describe("startBatch — firmware toggle in Tauri mode", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  it("omits firmware fields when firmware flashing is disabled", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const store = useStore();
+    store.addPorts(["COM3"]);
+    store.chipId = "esp32";
+    store.flashFirmware = false;
+    store.firmwarePath = "/path/to/fw.bin";
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = { total: 1, used: 0, inProgress: 0, remaining: 1 };
+
+    await store.startBatch();
+
+    expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
+      ports: ["COM3"],
+      config: expect.objectContaining({
+        firmwarePath: undefined,
+        flashStartHex: undefined,
+        flashEndHex: undefined,
+      }),
+    });
   });
 });
 
