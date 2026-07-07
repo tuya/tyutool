@@ -2,6 +2,24 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.1.5] - 2026-07-07
+
+### 新功能 / Features
+
+- `batch-auth`：新增“烧录固件”开关，可对支持烧录的芯片直接切换为“仅授权”批次，并持久化这项共享配置 / Add a Flash Firmware toggle so flash-capable chips can switch directly into auth-only batches, with the shared setting persisted
+- `serial-debug`：芯片过滤结果支持回看更早匹配并导出完整会话/过滤结果，避免长时间会话只导出当前可见窗口 / Let chip-filtered logs load older matches and export the full session or filter result instead of only the currently visible window
+
+### 问题修复 / Bug Fixes
+
+- `serial-debug`：限制实时日志窗口和自动保存批次大小，修复清空会话、关闭连接与 WebSocket 桥接之间的竞态，并避免会话文件 ID 冲突 / Bound live log memory and autosave batches, fix clear-session / shutdown / WebSocket bridge races, and avoid session file ID collisions
+- `authorize`：`auth-read` 现在会拒绝乱码的 UUID/AuthKey 响应，避免串口脏数据被误判为有效授权信息 / Reject garbled UUID/AuthKey payloads from `auth-read` so noisy serial data is not mistaken for valid credentials
+- `firmware-flash`：移除 Beken 传输层噪声日志，减少开发诊断时的无效刷屏 / Remove noisy Beken transport logs to reduce diagnostic spam during firmware flashing
+- `settings`：提升日志查看器“当前会话”徽标和截断提示的对比度 / Improve contrast for the log viewer's current-session badge and truncation notice
+
+### 工程改进 / Engineering
+
+- `serial-debug`：补充串口调试压力测试脚本与说明文档，便于验证长时间会话和筛选分页行为 / Add a serial-debug stress script and documentation to validate long-running sessions and filter pagination
+
 ## [3.1.4] - 2026-07-01
 
 ### 新功能 / Features
