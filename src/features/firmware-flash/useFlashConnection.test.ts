@@ -227,6 +227,33 @@ describe("useFlashConnection", () => {
     expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
   });
 
+  it("connect can preempt an in-app serial-debug owner before running the Tauri availability check", async () => {
+    invoke.mockResolvedValue({
+      available: false,
+      errorMessage: "still closing",
+    });
+    const { deps, connected, selectedSerialPort } = makeDeps();
+    selectedSerialPort.value = "/dev/ttyUSB0";
+    const onReleased = vi.fn();
+    const pm = usePortManagerStore();
+    await pm.acquire({
+      id: "serial-debug",
+      port: "/dev/ttyUSB0",
+      onReleaseRequest: async () => true,
+      onReleased,
+    });
+
+    const c = useFlashConnection(deps);
+    await c.connect();
+
+    expect(connected.value).toBe(true);
+    expect(onReleased).toHaveBeenCalledWith("requested");
+    expect(pm.currentOwner("/dev/ttyUSB0")).toBe("flash");
+    expect(invoke).not.toHaveBeenCalledWith("check_port_available_cmd", {
+      port: "/dev/ttyUSB0",
+    });
+  });
+
   it("connect (web) skips the availability invoke and claims the port", async () => {
     vi.mocked(isTauriRuntime).mockReturnValue(false);
     const { deps, connected, selectedSerialPort } = makeDeps();
