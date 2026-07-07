@@ -157,11 +157,17 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
   }
 
   async function connect(): Promise<void> {
-    if (!deps.selectedSerialPort.value) {
+    const port = deps.selectedSerialPort.value;
+    if (!port) {
       deps.appendLog(t("flash.log.noPortsFound"));
       return;
     }
-    if (isTauriRuntime()) {
+    const pm = usePortManagerStore();
+    const currentOwner = pm.currentOwner(port);
+    const preemptingInAppOwner =
+      currentOwner !== null && currentOwner !== "flash";
+
+    if (isTauriRuntime() && !preemptingInAppOwner) {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
         const result = await invoke<{
@@ -169,12 +175,10 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
           errorMessage?: string | null;
           processInfo?: string | null;
           killHint?: string | null;
-        }>("check_port_available_cmd", { port: deps.selectedSerialPort.value });
+        }>("check_port_available_cmd", { port });
 
         if (!result.available) {
-          deps.appendLog(
-            t("flash.log.portBusy", { port: deps.selectedSerialPort.value }),
-          );
+          deps.appendLog(t("flash.log.portBusy", { port }));
           if (result.errorMessage)
             deps.appendLog(
               t("flash.log.portBusyDetail", { msg: result.errorMessage }),
@@ -195,15 +199,9 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
         // Continue — let the real operation fail if there's really a problem
       }
     }
-    deps.connected.value = true;
-    deps.autoConnected.value = false;
-    deps.appendLog(t("flash.log.connected"));
-    rLog.info(`[Flash] Connected to port: ${deps.selectedSerialPort.value}`);
-
-    const pm = usePortManagerStore();
     const outcome = await pm.acquire({
       id: "flash",
-      port: deps.selectedSerialPort.value,
+      port,
       onReleaseRequest: async () => false, // flash never yields mid-operation
       onReleased: () => {
         deps.connected.value = false;
@@ -211,12 +209,13 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
       },
     });
     if (outcome === "denied") {
-      deps.connected.value = false;
-      deps.appendLog(
-        t("flash.log.portBusy", { port: deps.selectedSerialPort.value }),
-      );
+      deps.appendLog(t("flash.log.portBusy", { port }));
       return;
     }
+    deps.connected.value = true;
+    deps.autoConnected.value = false;
+    deps.appendLog(t("flash.log.connected"));
+    rLog.info(`[Flash] Connected to port: ${port}`);
   }
 
   function disconnect(): void {
