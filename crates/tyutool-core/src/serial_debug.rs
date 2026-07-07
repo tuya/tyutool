@@ -70,6 +70,7 @@ const ARCHIVE_INDEX_ENTRY_BYTES: u64 = 16;
 const FILTER_MATCH_INDEX_ENTRY_BYTES: u64 = 8;
 const MAX_PENDING_SERIAL_DEBUG_LINE_BYTES: usize = 4096;
 const FILTER_BACKFILL_READ_BATCH_LINES: u64 = 512;
+static SERIAL_DEBUG_SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -518,7 +519,7 @@ impl SerialDebugArchive {
     fn create_session_files(
         root_dir: &std::path::Path,
     ) -> std::io::Result<SerialDebugSessionFiles> {
-        let session_id = format!("{}-{}", now_ms(), std::process::id());
+        let session_id = next_serial_debug_session_id(now_ms(), std::process::id());
         let log_path = root_dir.join(format!("serial-debug-session-{session_id}.ndjson"));
         let idx_path = root_dir.join(format!("serial-debug-session-{session_id}.idx"));
         let log_writer = std::io::BufWriter::new(
@@ -1117,6 +1118,16 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn next_serial_debug_session_id(now_ms: u64, pid: u32) -> String {
+    let seq = SERIAL_DEBUG_SESSION_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{now_ms}-{pid}-{seq}")
+}
+
+#[cfg(test)]
+fn next_serial_debug_session_id_for_tests(now_ms: u64, pid: u32) -> String {
+    next_serial_debug_session_id(now_ms, pid)
 }
 
 fn map_data_bits(v: DataBits) -> serialport::DataBits {
@@ -1864,6 +1875,13 @@ mod tests {
         assert_eq!(lines[0].line_no, 1);
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn session_file_ids_are_unique_within_same_millisecond() {
+        let first = next_serial_debug_session_id_for_tests(1234, 42);
+        let second = next_serial_debug_session_id_for_tests(1234, 42);
+        assert_ne!(first, second);
     }
 
     #[test]
