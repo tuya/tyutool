@@ -155,6 +155,9 @@ enum SerialDebugChunkBridgeMessage {
         generation: u64,
         ack: std::sync::mpsc::SyncSender<()>,
     },
+    Shutdown {
+        ack: std::sync::mpsc::SyncSender<()>,
+    },
 }
 
 #[derive(Clone)]
@@ -188,6 +191,16 @@ impl SerialDebugChunkBridgeHandle {
             .map_err(|e| e.to_string())?;
         ack_rx.recv().map_err(|e| e.to_string())?;
         Ok(generation)
+    }
+
+    fn shutdown(self) -> Result<(), String> {
+        let _guard = self.send_lock.lock().unwrap();
+        let (ack_tx, ack_rx) = std::sync::mpsc::sync_channel(0);
+        self.tx
+            .send(SerialDebugChunkBridgeMessage::Shutdown { ack: ack_tx })
+            .map_err(|e| e.to_string())?;
+        ack_rx.recv().map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 
@@ -388,7 +401,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 if let Some(s) = guard.take() {
                     s.close();
                 }
-                debug_chunk_bridge.lock().unwrap().take();
+                if let Some(bridge) = debug_chunk_bridge.lock().unwrap().take() {
+                    let _ = bridge.shutdown();
+                }
                 let _ = sink_tx.send(ServerMessage::SerialDebugClosed);
             }
             ClientMessage::SerialDebugSend { bytes } => {
@@ -678,7 +693,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         }
     }
     if let Ok(mut guard) = debug_chunk_bridge.lock() {
-        guard.take();
+        if let Some(bridge) = guard.take() {
+            let _ = bridge.shutdown();
+        }
     }
 
     drop(sink_tx);
@@ -748,6 +765,11 @@ fn spawn_serial_debug_chunk_bridge_ws(
                     let _ = pending.take();
                     active_generation = generation;
                     let _ = ack.send(());
+                }
+                Ok(SerialDebugChunkBridgeMessage::Shutdown { ack }) => {
+                    flush_serial_debug_chunk_ws(&sink_tx, &archive, &filters, pending.take());
+                    let _ = ack.send(());
+                    return;
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     if pending
@@ -1295,8 +1317,7 @@ mod tests {
                 bytes: b"post\nnew\n".to_vec(),
             })
             .unwrap();
-        drop(bridge);
-        std::thread::sleep(Duration::from_millis(50));
+        bridge.shutdown().unwrap();
 
         let page = archive.lock().unwrap().read_page(0, 10).unwrap();
         assert_eq!(page.total_lines, 2);
