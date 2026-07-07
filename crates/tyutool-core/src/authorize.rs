@@ -263,6 +263,25 @@ fn is_shell_prompt(s: &str) -> bool {
     t == "tuya>" || t.starts_with("tuya> ")
 }
 
+fn is_plausible_uuid_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && s.chars().any(|c| c.is_ascii_alphanumeric())
+}
+
+fn is_plausible_authkey_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_graphic())
+        && s.chars().any(|c| c.is_ascii_alphanumeric())
+}
+
+fn invalid_auth_read_response() -> FlashError {
+    FlashError::Plugin(
+        "auth-read returned invalid UUID/AuthKey characters (possible garbled serial data)".into(),
+    )
+}
+
 // ── Serial I/O abstraction ──────────────────────────────────────────────────
 
 /// Byte-level serial I/O the [`AuthSession`] needs. Mirrors the proven
@@ -729,13 +748,15 @@ impl<T: AuthIo> AuthSession<T> {
     }
 
     /// Send `auth-read` (or `auth-read <n>` for non-KV storage) and return `(uuid, authkey)` or `None`.
-    fn auth_read(&mut self, storage: AuthStorage) -> Option<(String, String)> {
+    fn auth_read(&mut self, storage: AuthStorage) -> Result<Option<(String, String)>, FlashError> {
         let cmd = if storage == AuthStorage::Kv {
             "auth-read".to_string()
         } else {
             format!("auth-read {}", storage.as_u8())
         };
-        self.send_cmd(&cmd).ok()?;
+        if self.send_cmd(&cmd).is_err() {
+            return Ok(None);
+        }
         let idle = if storage == AuthStorage::Otp {
             AUTH_READ_OTP_IDLE
         } else {
@@ -751,14 +772,22 @@ impl<T: AuthIo> AuthSession<T> {
             .map(String::as_str)
             .collect();
         log::debug!("[serial] auth-read raw={:?} relevant={:?}", lines, relevant);
-        if relevant.len() >= 2 {
-            let uuid = relevant[0].trim().to_string();
-            let authkey = relevant[1].trim().to_string();
-            if !uuid.is_empty() && !authkey.is_empty() {
-                return Some((uuid, authkey));
+        for pair in relevant.windows(2) {
+            let uuid = pair[0].trim();
+            let authkey = pair[1].trim();
+            if is_plausible_uuid_token(uuid) && is_plausible_authkey_token(authkey) {
+                return Ok(Some((uuid.to_string(), authkey.to_string())));
             }
         }
-        None
+        if relevant.iter().any(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty()
+                && !is_plausible_uuid_token(trimmed)
+                && !is_plausible_authkey_token(trimmed)
+        }) {
+            return Err(invalid_auth_read_response());
+        }
+        Ok(None)
     }
 
     /// Send `auth <uuid> <authkey>` and return the response lines.
@@ -1135,7 +1164,7 @@ where
                         if cancel.load(Ordering::Relaxed) {
                             return Err(FlashError::Cancelled);
                         }
-                        auth = sess.auth_read(storage);
+                        auth = sess.auth_read(storage)?;
                         if auth.is_some() {
                             break;
                         }
@@ -1214,7 +1243,7 @@ where
                         if cancel.load(Ordering::Relaxed) {
                             return Err(FlashError::Cancelled);
                         }
-                        result = sess.auth_read(storage);
+                        result = sess.auth_read(storage)?;
                         if result.is_some() {
                             break;
                         }
@@ -1254,7 +1283,7 @@ where
                     if cancel.load(Ordering::Relaxed) {
                         return Err(FlashError::Cancelled);
                     }
-                    existing_auth = sess.auth_read(storage);
+                    existing_auth = sess.auth_read(storage)?;
                     if existing_auth.is_some() {
                         break;
                     }
@@ -1328,7 +1357,7 @@ where
                 }
 
                 log::info!("flash.log.auth.verify");
-                match sess.auth_read(storage) {
+                match sess.auth_read(storage)? {
                     Some((rb_uuid, rb_key)) if rb_uuid == uuid && rb_key == authkey => {
                         log::info!("flash.log.auth.verifyOk");
                         Ok(())
@@ -1351,7 +1380,7 @@ where
     } else {
         // ── Read-only flow ────────────────────────────────────────────────────
         log::info!("flash.log.auth.readCurrent");
-        match sess.auth_read(AuthStorage::default()) {
+        match sess.auth_read(AuthStorage::default())? {
             Some((existing_uuid, existing_key)) => {
                 if existing_uuid == PLACEHOLDER_UUID {
                     progress(FlashEvent::Milestone {
@@ -1487,7 +1516,7 @@ where
                         log::debug!("[batch-auth] auth-read retry {i}  port={port}");
                     }
                     check_cancel!();
-                    auth = sess.auth_read(config.auth_storage);
+                    auth = sess.auth_read(config.auth_storage)?;
                     if auth.is_some() {
                         break;
                     }
@@ -1534,7 +1563,7 @@ where
                             );
                             sess.soft_reboot_and_detect(cancel)?;
                             check_cancel!();
-                            let post_lock_auth = sess.auth_read(config.auth_storage);
+                            let post_lock_auth = sess.auth_read(config.auth_storage)?;
                             match post_lock_auth {
                                 Some((rb_u, rb_k)) if rb_u == *found_uuid && rb_k == *found_key => {
                                     log::info!(
@@ -1649,19 +1678,24 @@ where
                     // 诊断性 auth-read：确认 OTP 当前状态，帮助区分硬件故障和写入状态
                     let diag = sess.auth_read(config.auth_storage);
                     match &diag {
-                        Some((u, _k)) if u == &uuid => {
+                        Ok(Some((u, _k))) if u == &uuid => {
                             log::warn!(
                                 "[batch-auth] auth-write failed but OTP already contains target credentials  port={port} mac={mac}"
                             );
                         }
-                        Some((u, _k)) => {
+                        Ok(Some((u, _k))) => {
                             log::warn!(
                                 "[batch-auth] auth-write failed, OTP has different content  port={port} mac={mac} otp_uuid={u}"
                             );
                         }
-                        None => {
+                        Ok(None) => {
                             log::warn!(
                                 "[batch-auth] auth-write failed, post-fail auth-read: no response  port={port} mac={mac}"
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed, post-fail auth-read invalid  port={port} mac={mac} err={err}"
                             );
                         }
                     }
@@ -1708,7 +1742,7 @@ where
                             uuid: uuid.clone(),
                         });
                     }
-                    result = sess.auth_read(config.auth_storage);
+                    result = sess.auth_read(config.auth_storage)?;
                     if result.is_some() {
                         break;
                     }
@@ -1784,7 +1818,7 @@ where
                 );
                 sess.soft_reboot_and_detect(cancel)?;
                 check_cancel!();
-                let post_lock_auth = sess.auth_read(config.auth_storage);
+                let post_lock_auth = sess.auth_read(config.auth_storage)?;
                 match post_lock_auth {
                     Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
                         log::info!(
@@ -1877,7 +1911,7 @@ where
                         log::debug!("[batch-auth] auth-read retry {i} (old fw)  port={port}");
                     }
                     check_cancel!();
-                    auth = sess.auth_read(config.auth_storage);
+                    auth = sess.auth_read(config.auth_storage)?;
                     if auth.is_some() {
                         break;
                     }
@@ -1924,7 +1958,7 @@ where
                             );
                             sess.soft_reboot_and_detect(cancel)?;
                             check_cancel!();
-                            let post_lock_auth = sess.auth_read(config.auth_storage);
+                            let post_lock_auth = sess.auth_read(config.auth_storage)?;
                             match post_lock_auth {
                                 Some((rb_u, rb_k)) if rb_u == *found_uuid && rb_k == *found_key => {
                                     log::info!(
@@ -2040,19 +2074,24 @@ where
                 if let Some(e) = last_err {
                     let diag = sess.auth_read(config.auth_storage);
                     match &diag {
-                        Some((u, _k)) if u == &uuid => {
+                        Ok(Some((u, _k))) if u == &uuid => {
                             log::warn!(
                                 "[batch-auth] auth-write failed but OTP already contains target credentials (old fw)  port={port} mac={mac}"
                             );
                         }
-                        Some((u, _k)) => {
+                        Ok(Some((u, _k))) => {
                             log::warn!(
                                 "[batch-auth] auth-write failed, OTP has different content (old fw)  port={port} mac={mac} otp_uuid={u}"
                             );
                         }
-                        None => {
+                        Ok(None) => {
                             log::warn!(
                                 "[batch-auth] auth-write failed, post-fail auth-read: no response (old fw)  port={port} mac={mac}"
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "[batch-auth] auth-write failed, post-fail auth-read invalid (old fw)  port={port} mac={mac} err={err}"
                             );
                         }
                     }
@@ -2112,7 +2151,7 @@ where
                             uuid: uuid.clone(),
                         });
                     }
-                    result = sess.auth_read(config.auth_storage);
+                    result = sess.auth_read(config.auth_storage)?;
                     if result.is_some() {
                         break;
                     }
@@ -2192,7 +2231,7 @@ where
                 );
                 sess.soft_reboot_and_detect(cancel)?;
                 check_cancel!();
-                let post_lock_auth = sess.auth_read(config.auth_storage);
+                let post_lock_auth = sess.auth_read(config.auth_storage)?;
                 match post_lock_auth {
                     Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
                         log::info!(
@@ -2318,7 +2357,7 @@ pub fn read_auth_probe(
     let mut auth: Option<(String, String)> = None;
     for _ in 0..retries {
         check_cancel!();
-        auth = sess.auth_read(storage);
+        auth = sess.auth_read(storage)?;
         if auth.is_some() {
             break;
         }
@@ -2431,7 +2470,7 @@ mod tests {
         );
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(AuthStorage::Kv),
+            sess.auth_read(AuthStorage::Kv).unwrap(),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -2449,7 +2488,7 @@ mod tests {
         );
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(AuthStorage::Kv),
+            sess.auth_read(AuthStorage::Kv).unwrap(),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -2463,7 +2502,7 @@ mod tests {
         mock.add_response("auth-read\r\n\x1b[32muuid12345678901234\x1b[0m\r\nkeyabcdefghijklmnopqrstuvwxyz012\r\n");
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(AuthStorage::Kv),
+            sess.auth_read(AuthStorage::Kv).unwrap(),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
@@ -2477,7 +2516,7 @@ mod tests {
         // Only one relevant line after filtering — not enough for a pair.
         mock.add_response("auth-read\r\nuuid12345678901234\r\ntuya>\r\n");
         let mut sess = session(mock);
-        assert_eq!(sess.auth_read(AuthStorage::Kv), None);
+        assert_eq!(sess.auth_read(AuthStorage::Kv).unwrap(), None);
     }
 
     #[test]
@@ -2485,7 +2524,7 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response("");
         let mut sess = session(mock);
-        assert_eq!(sess.auth_read(AuthStorage::Kv), None);
+        assert_eq!(sess.auth_read(AuthStorage::Kv).unwrap(), None);
     }
 
     #[test]
@@ -2493,7 +2532,7 @@ mod tests {
         let mut mock = MockAuthIo::new();
         mock.add_response("auth-read\r\n[04-24 10:30:00] [INFO] only logs\r\ntuya>\r\n");
         let mut sess = session(mock);
-        assert_eq!(sess.auth_read(AuthStorage::Kv), None);
+        assert_eq!(sess.auth_read(AuthStorage::Kv).unwrap(), None);
     }
 
     #[test]
@@ -2507,10 +2546,38 @@ mod tests {
         ));
         let mut sess = session(mock);
         assert_eq!(
-            sess.auth_read(AuthStorage::Kv),
+            sess.auth_read(AuthStorage::Kv).unwrap(),
             Some((
                 PLACEHOLDER_UUID.to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn auth_read_errors_for_garbled_credentials() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-read\r\nï¿½5ï¿½ï¿½5ï¿½)\u{15}ï¿½ï¿½\u{8}Z)\u{14})ï¿½\r\nï¿½%ï¿½\u{14}ï¿½\u{10}ï¿½\r\n");
+        let mut sess = session(mock);
+        assert!(matches!(
+            sess.auth_read(AuthStorage::Kv),
+            Err(FlashError::Plugin(message))
+                if message.contains("auth-read returned invalid UUID/AuthKey characters")
+        ));
+    }
+
+    #[test]
+    fn auth_read_skips_invalid_pair_before_valid_credentials() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-read\r\nï¿½bad\r\nï¿½key\r\nuuid-1234_abcd\r\nkey.abcdefghijklmnopqrstuvwxyz012\r\n",
+        );
+        let mut sess = session(mock);
+        assert_eq!(
+            sess.auth_read(AuthStorage::Kv).unwrap(),
+            Some((
+                "uuid-1234_abcd".to_string(),
+                "key.abcdefghijklmnopqrstuvwxyz012".to_string()
             ))
         );
     }
@@ -2781,7 +2848,7 @@ mod tests {
         let firmware = sess.detect_firmware(&cancel2).unwrap();
         assert_eq!(firmware, FirmwareKind::New(CliVersion(1, 0, 0)));
         // auth_read → None (fresh device)
-        let existing = sess.auth_read(AuthStorage::Kv);
+        let existing = sess.auth_read(AuthStorage::Kv).unwrap();
         assert!(existing.is_none());
         // auth_write
         let _ = sess.auth_write(
@@ -2793,7 +2860,7 @@ mod tests {
         sess.drain_boot_output();
         sess.wake_shell(); // no timing arg — uses self.timing
                            // verify
-        let verified = sess.auth_read(AuthStorage::Kv);
+        let verified = sess.auth_read(AuthStorage::Kv).unwrap();
         assert_eq!(
             verified,
             Some((
@@ -2827,7 +2894,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let firmware = sess.detect_firmware(&cancel).unwrap();
         assert!(matches!(firmware, FirmwareKind::New(_)));
-        let existing = sess.auth_read(AuthStorage::Kv);
+        let existing = sess.auth_read(AuthStorage::Kv).unwrap();
         assert!(existing.is_some());
         let (ex_u, _ex_k) = existing.unwrap();
         assert_eq!(ex_u, "existinguuid1234567");
@@ -2888,7 +2955,7 @@ mod tests {
         let result = sess.auth_read(AuthStorage::Otp);
         assert!(sess.port.sent_str().contains("auth-read 1\r\n"));
         assert_eq!(
-            result,
+            result.unwrap(),
             Some((
                 "uuid12345678901234".to_string(),
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
