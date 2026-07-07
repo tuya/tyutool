@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -197,6 +197,33 @@ pub struct SerialDebugFilterBackfillSnapshot {
     pub keyword: String,
     pub use_regex: bool,
     pub snapshot_total_lines: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct SerialDebugGeneration {
+    current: AtomicU64,
+}
+
+type SerialDebugSessionFiles = (
+    String,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::io::BufWriter<File>,
+    std::io::BufWriter<File>,
+);
+
+impl SerialDebugGeneration {
+    pub fn current(&self) -> u64 {
+        self.current.load(Ordering::SeqCst)
+    }
+
+    pub fn advance(&self) -> u64 {
+        self.current.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn is_current(&self, generation: u64) -> bool {
+        self.current() == generation
+    }
 }
 
 impl Default for SerialDebugFilterIndex {
@@ -490,13 +517,7 @@ impl SerialDebugArchive {
 
     fn create_session_files(
         root_dir: &std::path::Path,
-    ) -> std::io::Result<(
-        String,
-        std::path::PathBuf,
-        std::path::PathBuf,
-        std::io::BufWriter<File>,
-        std::io::BufWriter<File>,
-    )> {
+    ) -> std::io::Result<SerialDebugSessionFiles> {
         let session_id = format!("{}-{}", now_ms(), std::process::id());
         let log_path = root_dir.join(format!("serial-debug-session-{session_id}.ndjson"));
         let idx_path = root_dir.join(format!("serial-debug-session-{session_id}.idx"));
@@ -953,6 +974,41 @@ pub fn serial_debug_scan_filter_matches(
     }
     historical_writer.flush()?;
     Ok((historical_match_count, scanned_until_line_no))
+}
+
+pub fn serial_debug_finish_backfill_if_current(
+    generation: &SerialDebugGeneration,
+    expected_generation: u64,
+    filters: &mut SerialDebugFilterIndex,
+    filter_id: &str,
+    historical_idx_path: &std::path::Path,
+    historical_match_count: u64,
+    historical_scanned_until_line_no: u64,
+) -> std::io::Result<Option<SerialDebugFilterStats>> {
+    if !generation.is_current(expected_generation) {
+        return Ok(None);
+    }
+    filters
+        .finish_backfill_from_file(
+            filter_id,
+            historical_idx_path,
+            historical_match_count,
+            historical_scanned_until_line_no,
+        )
+        .map(Some)
+}
+
+pub fn serial_debug_fail_backfill_if_current(
+    generation: &SerialDebugGeneration,
+    expected_generation: u64,
+    filters: &mut SerialDebugFilterIndex,
+    filter_id: &str,
+    error: String,
+) -> std::io::Result<Option<SerialDebugFilterStats>> {
+    if !generation.is_current(expected_generation) {
+        return Ok(None);
+    }
+    filters.fail_backfill(filter_id, error).map(Some)
 }
 
 impl SerialDebugFilterEntry {
@@ -1731,6 +1787,52 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["ERR old", "ERR live"]
         );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stale_generation_ignores_backfill_completion_after_session_reset() {
+        let dir = temp_serial_debug_dir("stale-backfill-generation");
+        let generation = SerialDebugGeneration::default();
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let mut filters = SerialDebugFilterIndex::create(&dir).unwrap();
+
+        let completed = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"ERR one\n".to_vec(),
+            })
+            .unwrap();
+        filters.ingest_completed_lines(&completed).unwrap();
+        let filter = filters
+            .add_filter("ERR".into(), false, "#f00".into(), archive.total_lines())
+            .unwrap();
+        let captured_generation = generation.current();
+        filters.start_backfill(&filter.id).unwrap();
+
+        generation.advance();
+        let _ = filters.reset_for_new_session();
+        let historical_idx_path = dir.join("historical.idx");
+        std::fs::write(&historical_idx_path, 1u64.to_le_bytes()).unwrap();
+
+        let result = serial_debug_finish_backfill_if_current(
+            &generation,
+            captured_generation,
+            &mut filters,
+            &filter.id,
+            &historical_idx_path,
+            1,
+            1,
+        )
+        .unwrap();
+        assert!(result.is_none());
+
+        let stats = filters.stats(&filter.id).unwrap();
+        assert_eq!(stats.total_matches, 0);
+        assert_eq!(stats.total_lines_snapshot, 0);
+        assert_eq!(stats.status, SerialDebugFilterStatus::Complete);
 
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -342,6 +342,7 @@ describe("useSerialDebugStore port-manager integration", () => {
   it("openPort stays compatible with transports that do not implement onChunkBatch", async () => {
     const legacyTransport = fakeTransport();
     const { onChunkBatch, ...legacy } = legacyTransport;
+    expect(typeof onChunkBatch).toBe("function");
     __setSerialDebugTransportForTest(legacy as unknown as SerialDebugTransport);
 
     const s = useSerialDebugStore();

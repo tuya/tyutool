@@ -670,14 +670,17 @@ describe("serialDebugSessionReadPage", () => {
     ws.open();
     await flush();
 
-    expect(ws.lastSent).toEqual({
+    expect(ws.lastSent).toMatchObject({
       type: "serial_debug_session_read_page",
       start: 100,
       limit: 50,
     });
+    const request = ws.lastSent as { request_id?: string };
+    expect(request.request_id).toBeTruthy();
 
     ws.recv({
       type: "serial_debug_session_page",
+      request_id: request.request_id,
       page: {
         totalLines: 123,
         start: 100,
@@ -689,6 +692,131 @@ describe("serialDebugSessionReadPage", () => {
       totalLines: 123,
       start: 100,
       items: [{ id: 1, tsMs: 1, direction: "rx", text: "line" }],
+    });
+  });
+
+  it("correlates concurrent session page responses by request_id", async () => {
+    const t = new WsTransport();
+    const first = t.serialDebugSessionReadPage(0, 10);
+    const second = t.serialDebugSessionReadPage(10, 10);
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+
+    const firstRequest = ws.sent[ws.sent.length - 2] as {
+      request_id?: string;
+      start: number;
+      limit: number;
+    };
+    const secondRequest = ws.sent[ws.sent.length - 1] as {
+      request_id?: string;
+      start: number;
+      limit: number;
+    };
+
+    expect(firstRequest.request_id).toBeTruthy();
+    expect(secondRequest.request_id).toBeTruthy();
+    expect(firstRequest.request_id).not.toBe(secondRequest.request_id);
+
+    ws.recv({
+      type: "serial_debug_session_page",
+      request_id: secondRequest.request_id,
+      page: {
+        totalLines: 20,
+        start: 10,
+        items: [{ id: 2, tsMs: 2, direction: "rx", text: "second" }],
+      },
+    });
+    ws.recv({
+      type: "serial_debug_session_page",
+      request_id: firstRequest.request_id,
+      page: {
+        totalLines: 20,
+        start: 0,
+        items: [{ id: 1, tsMs: 1, direction: "rx", text: "first" }],
+      },
+    });
+
+    await expect(first).resolves.toEqual({
+      totalLines: 20,
+      start: 0,
+      items: [{ id: 1, tsMs: 1, direction: "rx", text: "first" }],
+    });
+    await expect(second).resolves.toEqual({
+      totalLines: 20,
+      start: 10,
+      items: [{ id: 2, tsMs: 2, direction: "rx", text: "second" }],
+    });
+  });
+});
+
+describe("serialDebugFilterAdd", () => {
+  it("waits for the matching request_id and ignores unrelated filter updates", async () => {
+    const t = new WsTransport();
+    const pending = t.serialDebugFilterAdd("ERR", false, "#f00");
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+
+    const request = ws.lastSent as {
+      request_id?: string;
+      keyword: string;
+      use_regex: boolean;
+      color: string;
+    };
+    expect(request.request_id).toBeTruthy();
+
+    ws.recv({
+      type: "serial_debug_filter_updated",
+      request_id: "different-request",
+      def: {
+        id: "filter-other",
+        keyword: "OTHER",
+        useRegex: false,
+        color: "#0f0",
+      },
+      stats: {
+        filterId: "filter-other",
+        status: "pending",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: 0,
+        totalMatches: 0,
+      },
+    });
+    ws.recv({
+      type: "serial_debug_filter_updated",
+      request_id: request.request_id,
+      def: {
+        id: "filter-1",
+        keyword: "ERR",
+        useRegex: false,
+        color: "#f00",
+      },
+      stats: {
+        filterId: "filter-1",
+        status: "pending",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: 0,
+        totalMatches: 0,
+      },
+    });
+
+    await expect(pending).resolves.toEqual({
+      def: {
+        id: "filter-1",
+        keyword: "ERR",
+        useRegex: false,
+        color: "#f00",
+      },
+      stats: {
+        filterId: "filter-1",
+        status: "pending",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: 0,
+        totalMatches: 0,
+      },
     });
   });
 });
