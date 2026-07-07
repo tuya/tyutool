@@ -29,11 +29,12 @@ pub use serial::{
     check_port_available, device_reset_dtr_rts, list_serial_ports, PortCheckResult, SerialPortEntry,
 };
 pub use serial_debug::{
+    serial_debug_fail_backfill_if_current, serial_debug_finish_backfill_if_current,
     serial_debug_scan_filter_matches, ChunkCallback, DataBits, DebugChunk, DebugConfig, Direction,
     DisconnectCallback, LogDirection, Parity, SerialDebugArchive, SerialDebugArchiveMeta,
     SerialDebugArchiveReader, SerialDebugChunkBatchBuffer, SerialDebugFilterBackfillSnapshot,
     SerialDebugFilterDefinition, SerialDebugFilterIndex, SerialDebugFilterPage,
-    SerialDebugFilterStats, SerialDebugFilterStatus, SerialDebugLine, SerialDebugSession,
-    SerialDebugSessionPage, StopBits,
+    SerialDebugFilterStats, SerialDebugFilterStatus, SerialDebugGeneration, SerialDebugLine,
+    SerialDebugSession, SerialDebugSessionPage, StopBits,
 };
 pub use usb_port_survey::{usb_port_survey, UsbPortSurveyEntry, UsbPortSurveyUsb};

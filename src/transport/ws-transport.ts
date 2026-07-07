@@ -39,6 +39,13 @@ export class WsTransport {
   private connectPromise: Promise<WebSocket> | null = null;
   private activeSerialDebugChunkHandler: ((ev: MessageEvent) => void) | null =
     null;
+  private nextSerialDebugRequestId = 1;
+
+  private newSerialDebugRequestId(prefix: string): string {
+    const id = `${prefix}-${this.nextSerialDebugRequestId}`;
+    this.nextSerialDebugRequestId += 1;
+    return id;
+  }
 
   private closeCurrentConnection(): void {
     const ws = this.ws;
@@ -393,6 +400,7 @@ export class WsTransport {
     color: string,
   ): Promise<SerialDebugFilterUpdatePayload> {
     const ws = await this.connect();
+    const requestId = this.newSerialDebugRequestId("serial-debug-filter-add");
     return new Promise((resolve, reject) => {
       const handler = (ev: MessageEvent) => {
         let msg: {
@@ -400,10 +408,14 @@ export class WsTransport {
           def?: SerialDebugFilterUpdatePayload["def"];
           stats?: SerialDebugFilterUpdatePayload["stats"];
           message?: string;
+          request_id?: string;
         };
         try {
           msg = JSON.parse(ev.data as string);
         } catch {
+          return;
+        }
+        if (msg.request_id !== requestId) {
           return;
         }
         if (msg.type === "error") {
@@ -427,6 +439,7 @@ export class WsTransport {
           keyword,
           use_regex: useRegex,
           color,
+          request_id: requestId,
         }),
       );
     });
@@ -448,16 +461,21 @@ export class WsTransport {
     limit: number,
   ): Promise<SerialDebugFilterPage> {
     const ws = await this.connect();
+    const requestId = this.newSerialDebugRequestId("serial-debug-filter-page");
     return new Promise((resolve, reject) => {
       const handler = (ev: MessageEvent) => {
         let msg: {
           type: string;
           page?: SerialDebugFilterPage;
           message?: string;
+          request_id?: string;
         };
         try {
           msg = JSON.parse(ev.data as string);
         } catch {
+          return;
+        }
+        if (msg.request_id !== requestId) {
           return;
         }
         if (msg.type === "error") {
@@ -477,6 +495,7 @@ export class WsTransport {
           filter_id: filterId,
           start,
           limit,
+          request_id: requestId,
         }),
       );
     });
@@ -487,16 +506,21 @@ export class WsTransport {
     limit: number,
   ): Promise<SerialDebugSessionPage> {
     const ws = await this.connect();
+    const requestId = this.newSerialDebugRequestId("serial-debug-session-page");
     return new Promise((resolve, reject) => {
       const handler = (ev: MessageEvent) => {
         let msg: {
           type: string;
           page?: SerialDebugSessionPage;
           message?: string;
+          request_id?: string;
         };
         try {
           msg = JSON.parse(ev.data as string);
         } catch {
+          return;
+        }
+        if (msg.request_id !== requestId) {
           return;
         }
         if (msg.type === "error") {
@@ -515,6 +539,7 @@ export class WsTransport {
           type: "serial_debug_session_read_page",
           start,
           limit,
+          request_id: requestId,
         }),
       );
     });
