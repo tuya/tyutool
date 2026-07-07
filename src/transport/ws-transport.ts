@@ -9,6 +9,11 @@ import type {
   FlashJobPayload,
   FlashProgressPayload,
 } from "@/features/firmware-flash/flash-ipc-types";
+import type {
+  SerialDebugFilterPage,
+  SerialDebugSessionPage,
+  SerialDebugFilterUpdatePayload,
+} from "@/features/serial-debug/types";
 import type { TauriSerialPortRow } from "@/utils/serial-port-label";
 import { platform } from "@/platform";
 
@@ -287,7 +292,11 @@ export class WsTransport {
     onChunk: (
       chunk: import("@/features/serial-debug/types").DebugChunk,
     ) => void,
+    onChunkBatch: (
+      chunks: import("@/features/serial-debug/types").DebugChunk[],
+    ) => void,
     onDisconnect: (reason: string) => void,
+    onFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void,
   ): Promise<void> {
     const ws = await this.connect();
     return new Promise((resolve, reject) => {
@@ -320,11 +329,18 @@ export class WsTransport {
           const m = JSON.parse(ev.data as string) as {
             type: string;
             chunk?: import("@/features/serial-debug/types").DebugChunk;
+            chunks?: import("@/features/serial-debug/types").DebugChunk[];
             reason?: string;
+            def?: SerialDebugFilterUpdatePayload["def"];
+            stats?: SerialDebugFilterUpdatePayload["stats"];
           };
           if (m.type === "serial_debug_chunk" && m.chunk) onChunk(m.chunk);
+          else if (m.type === "serial_debug_chunk_batch" && m.chunks)
+            onChunkBatch(m.chunks);
           else if (m.type === "serial_debug_disconnected")
             onDisconnect(m.reason ?? "");
+          else if (m.type === "serial_debug_filter_updated" && m.def && m.stats)
+            onFilterUpdated({ def: m.def, stats: m.stats });
         } catch {
           /* ignore */
         }
@@ -353,6 +369,155 @@ export class WsTransport {
     ws.send(
       JSON.stringify({ type: "serial_debug_send", bytes: Array.from(bytes) }),
     );
+  }
+
+  async serialDebugSessionClear(): Promise<void> {
+    const ws = await this.connect();
+    ws.send(JSON.stringify({ type: "serial_debug_session_clear" }));
+  }
+
+  async serialDebugAppendSysLine(tsMs: number, text: string): Promise<void> {
+    const ws = await this.connect();
+    ws.send(
+      JSON.stringify({
+        type: "serial_debug_append_sys_line",
+        ts_ms: tsMs,
+        text,
+      }),
+    );
+  }
+
+  async serialDebugFilterAdd(
+    keyword: string,
+    useRegex: boolean,
+    color: string,
+  ): Promise<SerialDebugFilterUpdatePayload> {
+    const ws = await this.connect();
+    return new Promise((resolve, reject) => {
+      const handler = (ev: MessageEvent) => {
+        let msg: {
+          type: string;
+          def?: SerialDebugFilterUpdatePayload["def"];
+          stats?: SerialDebugFilterUpdatePayload["stats"];
+          message?: string;
+        };
+        try {
+          msg = JSON.parse(ev.data as string);
+        } catch {
+          return;
+        }
+        if (msg.type === "error") {
+          ws.removeEventListener("message", handler);
+          reject(new Error(msg.message ?? "ws error"));
+          return;
+        }
+        if (
+          msg.type === "serial_debug_filter_updated" &&
+          msg.def &&
+          msg.stats
+        ) {
+          ws.removeEventListener("message", handler);
+          resolve({ def: msg.def, stats: msg.stats });
+        }
+      };
+      ws.addEventListener("message", handler);
+      ws.send(
+        JSON.stringify({
+          type: "serial_debug_filter_add",
+          keyword,
+          use_regex: useRegex,
+          color,
+        }),
+      );
+    });
+  }
+
+  async serialDebugFilterRemove(filterId: string): Promise<void> {
+    const ws = await this.connect();
+    ws.send(
+      JSON.stringify({
+        type: "serial_debug_filter_remove",
+        filter_id: filterId,
+      }),
+    );
+  }
+
+  async serialDebugFilterReadMatches(
+    filterId: string,
+    start: number,
+    limit: number,
+  ): Promise<SerialDebugFilterPage> {
+    const ws = await this.connect();
+    return new Promise((resolve, reject) => {
+      const handler = (ev: MessageEvent) => {
+        let msg: {
+          type: string;
+          page?: SerialDebugFilterPage;
+          message?: string;
+        };
+        try {
+          msg = JSON.parse(ev.data as string);
+        } catch {
+          return;
+        }
+        if (msg.type === "error") {
+          ws.removeEventListener("message", handler);
+          reject(new Error(msg.message ?? "ws error"));
+          return;
+        }
+        if (msg.type === "serial_debug_filter_page" && msg.page) {
+          ws.removeEventListener("message", handler);
+          resolve(msg.page);
+        }
+      };
+      ws.addEventListener("message", handler);
+      ws.send(
+        JSON.stringify({
+          type: "serial_debug_filter_read_matches",
+          filter_id: filterId,
+          start,
+          limit,
+        }),
+      );
+    });
+  }
+
+  async serialDebugSessionReadPage(
+    start: number,
+    limit: number,
+  ): Promise<SerialDebugSessionPage> {
+    const ws = await this.connect();
+    return new Promise((resolve, reject) => {
+      const handler = (ev: MessageEvent) => {
+        let msg: {
+          type: string;
+          page?: SerialDebugSessionPage;
+          message?: string;
+        };
+        try {
+          msg = JSON.parse(ev.data as string);
+        } catch {
+          return;
+        }
+        if (msg.type === "error") {
+          ws.removeEventListener("message", handler);
+          reject(new Error(msg.message ?? "ws error"));
+          return;
+        }
+        if (msg.type === "serial_debug_session_page" && msg.page) {
+          ws.removeEventListener("message", handler);
+          resolve(msg.page);
+        }
+      };
+      ws.addEventListener("message", handler);
+      ws.send(
+        JSON.stringify({
+          type: "serial_debug_session_read_page",
+          start,
+          limit,
+        }),
+      );
+    });
   }
 }
 

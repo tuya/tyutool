@@ -11,14 +11,16 @@ import {
 import { useI18n } from "vue-i18n";
 import { faCircleNotch, faFloppyDisk } from "@fortawesome/free-solid-svg-icons";
 import { useSerialDebugStore } from "@/stores/serial-debug";
-import { formatHexDump } from "@/features/serial-debug/hex-format";
+import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { isTauriRuntime } from "@/runtime";
+import { stripAnsi, type AnsiStyle } from "@/features/serial-debug/ansi-parse";
 import {
-  parseAnsi,
-  stripAnsi,
-  type AnsiStyle,
-} from "@/features/serial-debug/ansi-parse";
+  SerialDebugLogLineRenderer,
+  type RenderedLogLine,
+} from "@/features/serial-debug/log-line-renderer";
+import { SerialDebugHexViewRenderer } from "@/features/serial-debug/hex-view-renderer";
 import { makeStamp, formatTs } from "@/features/serial-debug/utils";
+import { EXPORT_PAGE_SIZE } from "@/features/serial-debug/constants";
 import type {
   DebugLogLine,
   HexBytesPerRow,
@@ -43,7 +45,10 @@ const emit = defineEmits<{
 }>();
 
 const s = useSerialDebugStore();
+const transport = serialDebugTransport();
 const { t } = useI18n();
+const lineRenderer = new SerialDebugLogLineRenderer();
+const hexViewRenderer = new SerialDebugHexViewRenderer();
 
 const activeChip = computed(() =>
   s.activeChipId
@@ -51,10 +56,7 @@ const activeChip = computed(() =>
     : null,
 );
 
-const displayLines = computed(() => {
-  if (!activeChip.value) return props.lines;
-  return props.lines.filter((l) => s.matchChipKeyword(l, activeChip.value!));
-});
+const displayLines = computed(() => s.activeDisplayLines);
 
 const scrollRef = ref<HTMLDivElement | null>(null);
 
@@ -134,39 +136,8 @@ async function resumeScroll(): Promise<void> {
 
 const hexRendered = computed(() => {
   if (!props.hexView) return null;
-  const joined: number[] = [];
-  for (const l of props.lines) {
-    if (l.rawBytes) joined.push(...l.rawBytes);
-    joined.push(0x0a);
-  }
-  return formatHexDump(new Uint8Array(joined), props.hexBytesPerRow);
+  return hexViewRenderer.render(displayLines.value, props.hexBytesPerRow);
 });
-
-function renderSpans(text: string): Array<{ text: string; style: AnsiStyle }> {
-  return props.ansiEnabled
-    ? parseAnsi(text)
-    : [{ text: stripAnsi(text), style: {} }];
-}
-
-function splitByKeyword(
-  text: string,
-  q: string,
-): Array<{ text: string; isMatch: boolean }> {
-  const parts: Array<{ text: string; isMatch: boolean }> = [];
-  const lower = text.toLowerCase();
-  let pos = 0;
-  while (pos < text.length) {
-    const idx = lower.indexOf(q, pos);
-    if (idx === -1) {
-      parts.push({ text: text.slice(pos), isMatch: false });
-      break;
-    }
-    if (idx > pos) parts.push({ text: text.slice(pos, idx), isMatch: false });
-    parts.push({ text: text.slice(idx, idx + q.length), isMatch: true });
-    pos = idx + q.length;
-  }
-  return parts;
-}
 
 function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
   return {
@@ -234,14 +205,16 @@ const searchIndex = ref(0);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
 const searchQuery = computed(() => searchText.value.trim().toLowerCase());
+const displayLineViews = computed<RenderedLogLine[]>(() =>
+  lineRenderer.render(displayLines.value, props.ansiEnabled, searchQuery.value),
+);
 
 // Single pass: ordered list of matching IDs; Set derived from it for O(1) template lookup.
 const matchingLineIdList = computed<number[]>(() => {
-  const q = searchQuery.value;
-  if (!q) return [];
-  return props.lines
-    .filter((l) => stripAnsi(l.text).toLowerCase().includes(q))
-    .map((l) => l.id);
+  if (!searchQuery.value) return [];
+  return displayLineViews.value
+    .filter((view) => view.hasMatch)
+    .map((view) => view.line.id);
 });
 
 const matchingLineIds = computed<Set<number>>(
@@ -253,6 +226,14 @@ const currentMatchLineId = computed<number | null>(() => {
   const list = matchingLineIdList.value;
   if (!list.length) return null;
   return list[searchIndex.value % list.length];
+});
+
+const canSaveLog = computed(() => {
+  if (!activeChip.value) {
+    return linesAvailableForSession();
+  }
+  const stats = s.filterStatsById[activeChip.value.id];
+  return stats?.status === "complete" && stats.totalMatches > 0;
 });
 
 watch(searchText, () => {
@@ -310,43 +291,90 @@ function onSearchKeydown(ev: KeyboardEvent): void {
 
 async function writeFile(
   defaultName: string,
-  content: string,
-  ext: string,
+  chunks: string[],
+  _ext: string,
   mimeType: string,
 ): Promise<void> {
+  const content = chunks.join("");
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function formatExportLine(line: DebugLogLine): string {
+  const dir =
+    line.direction === "tx" ? "TX " : line.direction === "rx" ? "RX " : "SYS";
+  return `[${formatTs(line.tsMs)}] [${dir}] ${stripAnsi(line.text)}`;
+}
+
+function linesAvailableForSession(): boolean {
+  return s.lines.length > 0;
+}
+
+async function streamExportChunks(
+  onChunk: (chunk: string, isFirstChunk: boolean) => Promise<void>,
+): Promise<void> {
+  let start = 0;
+  let wroteAny = false;
+  if (activeChip.value) {
+    while (true) {
+      const page = await transport.readFilterMatches(
+        activeChip.value.id,
+        start,
+        EXPORT_PAGE_SIZE,
+      );
+      if (page.items.length === 0) break;
+      const chunk =
+        (wroteAny ? "\n" : "") + page.items.map(formatExportLine).join("\n");
+      await onChunk(chunk, !wroteAny);
+      wroteAny = true;
+      start += page.items.length;
+      if (start >= page.totalMatches) break;
+    }
+    return;
+  }
+
+  while (true) {
+    const page = await transport.readSessionPage(start, EXPORT_PAGE_SIZE);
+    if (page.items.length === 0) break;
+    const chunk =
+      (wroteAny ? "\n" : "") + page.items.map(formatExportLine).join("\n");
+    await onChunk(chunk, !wroteAny);
+    wroteAny = true;
+    start += page.items.length;
+    if (start >= page.totalLines) break;
+  }
+}
+
+async function saveLog(): Promise<void> {
+  const defaultName = `${props.exportTitle}-${makeStamp()}.txt`;
   if (isTauriRuntime()) {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { invoke } = await import("@tauri-apps/api/core");
     const path = await save({
       defaultPath: defaultName,
-      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+      filters: [{ name: "TXT", extensions: ["txt"] }],
     });
-    if (path) await invoke("write_text_file", { path, content });
-  } else {
-    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = defaultName;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!path) return;
+    await streamExportChunks(async (chunk, isFirstChunk) => {
+      if (isFirstChunk) {
+        await invoke("write_text_file", { path, content: chunk });
+      } else {
+        await invoke("append_text_file", { path, content: chunk });
+      }
+    });
+    return;
   }
-}
 
-async function saveLog(): Promise<void> {
-  const content = props.lines
-    .map((l) => {
-      const dir =
-        l.direction === "tx" ? "TX " : l.direction === "rx" ? "RX " : "SYS";
-      return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
-    })
-    .join("\n");
-  await writeFile(
-    `${props.exportTitle}-${makeStamp()}.txt`,
-    content,
-    "txt",
-    "text/plain",
-  );
+  const chunks: string[] = [];
+  await streamExportChunks(async (chunk) => {
+    chunks.push(chunk);
+  });
+  await writeFile(defaultName, chunks, "txt", "text/plain");
 }
 </script>
 
@@ -474,7 +502,7 @@ async function saveLog(): Promise<void> {
           type="button"
           class="btn-tool"
           :aria-label="t('serialDebug.log.saveLog')"
-          :disabled="lines.length === 0"
+          :disabled="!canSaveLog"
           @click="saveLog"
         >
           <FontAwesomeIcon
@@ -500,6 +528,25 @@ async function saveLog(): Promise<void> {
 
     <!-- chip bar -->
     <SerialDebugChipBar />
+
+    <div
+      v-if="activeChip && !s.activeFilterFullyLoaded"
+      class="border-b border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-1"
+    >
+      <button
+        type="button"
+        class="btn-tool"
+        :disabled="s.activeFilterLoading"
+        @click="s.loadOlderActiveFilterMatches"
+      >
+        <FontAwesomeIcon :icon="['fas', 'arrow-up']" class="size-3 shrink-0" />
+        {{
+          s.activeFilterLoading
+            ? t("serialDebug.log.loadingOlderMatches")
+            : t("serialDebug.log.loadOlderMatches")
+        }}
+      </button>
+    </div>
 
     <!-- Ctrl+F search bar -->
     <div
@@ -585,40 +632,40 @@ async function saveLog(): Promise<void> {
       @contextmenu="onContextMenu"
     >
       <div
-        v-for="line in displayLines"
-        :key="line.id"
-        :data-line-id="line.id"
+        v-for="lineView in displayLineViews"
+        :key="lineView.line.id"
+        :data-line-id="lineView.line.id"
         class="line"
-        :data-dir="line.direction"
+        :data-dir="lineView.line.direction"
         :class="{
           'line-search-match':
-            matchingLineIds.has(line.id) && line.id !== currentMatchLineId,
-          'line-search-current': line.id === currentMatchLineId,
+            matchingLineIds.has(lineView.line.id) &&
+            lineView.line.id !== currentMatchLineId,
+          'line-search-current': lineView.line.id === currentMatchLineId,
         }"
       >
         <span v-if="s.showTimestamp || s.showDirBadge" class="prefix">
           <span v-if="s.showTimestamp" class="ts">{{
-            formatTs(line.tsMs)
+            formatTs(lineView.line.tsMs)
           }}</span>
           <span v-if="s.showDirBadge" class="dir-badge">{{
-            line.direction === "tx"
+            lineView.line.direction === "tx"
               ? "TX"
-              : line.direction === "rx"
+              : lineView.line.direction === "rx"
                 ? "RX"
                 : "SYS"
           }}</span>
         </span>
         <span class="text">
           <span
-            v-for="(span, si) in renderSpans(line.text)"
+            v-for="(span, si) in lineView.spans"
             :key="si"
             :style="spanStyle(span.style)"
           >
-            <template v-if="searchQuery && matchingLineIds.has(line.id)">
-              <template
-                v-for="(seg, sj) in splitByKeyword(span.text, searchQuery)"
-                :key="sj"
-              >
+            <template
+              v-if="searchQuery && matchingLineIds.has(lineView.line.id)"
+            >
+              <template v-for="(seg, sj) in span.segments" :key="sj">
                 <mark v-if="seg.isMatch" class="search-keyword-mark">{{
                   seg.text
                 }}</mark

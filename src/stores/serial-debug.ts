@@ -7,8 +7,12 @@ import {
   DEFAULT_HEX_BYTES_PER_ROW,
   DEFAULT_PARITY,
   DEFAULT_STOP_BITS,
-  MAX_LOG_LINES,
+  AUTO_SAVE_FLUSH_MAX_CHARS,
+  FILTER_LIVE_REFRESH_MS,
+  FILTER_PAGE_SIZE,
+  MAX_PENDING_LINE_BYTES,
   MAX_SEND_HISTORY,
+  VISIBLE_LOG_WINDOW_LINES,
 } from "@/features/serial-debug/constants";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
 import { useFlashStore } from "@/stores/flash";
@@ -21,6 +25,9 @@ import type {
   DebugLogLine,
   HexBytesPerRow,
   SendMode,
+  SerialDebugFilterPage,
+  SerialDebugFilterStats,
+  SerialDebugFilterUpdatePayload,
   WatchChip,
 } from "@/features/serial-debug/types";
 import { usePortManagerStore } from "@/stores/port-manager";
@@ -31,6 +38,102 @@ import { rLog } from "@/utils/log";
 
 export const useSerialDebugStore = defineStore("serial-debug", () => {
   const t = i18n.global.t;
+  const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+
+  type PendingByteBuffer = {
+    chunks: Uint8Array[];
+    headChunkIndex: number;
+    headOffset: number;
+    totalBytes: number;
+  };
+
+  function createPendingBuffer(): PendingByteBuffer {
+    return {
+      chunks: [],
+      headChunkIndex: 0,
+      headOffset: 0,
+      totalBytes: 0,
+    };
+  }
+
+  function resetPendingBuffer(buffer: PendingByteBuffer): void {
+    buffer.chunks.length = 0;
+    buffer.headChunkIndex = 0;
+    buffer.headOffset = 0;
+    buffer.totalBytes = 0;
+  }
+
+  function compactPendingBuffer(buffer: PendingByteBuffer): void {
+    if (buffer.headChunkIndex === 0) return;
+    buffer.chunks.splice(0, buffer.headChunkIndex);
+    buffer.headChunkIndex = 0;
+  }
+
+  function appendPendingBytes(
+    buffer: PendingByteBuffer,
+    bytes: readonly number[],
+  ): void {
+    if (bytes.length === 0) return;
+    buffer.chunks.push(Uint8Array.from(bytes));
+    buffer.totalBytes += bytes.length;
+  }
+
+  function findPendingByte(buffer: PendingByteBuffer, needle: number): number {
+    let pos = 0;
+    for (let i = buffer.headChunkIndex; i < buffer.chunks.length; i += 1) {
+      const chunk = buffer.chunks[i];
+      const start = i === buffer.headChunkIndex ? buffer.headOffset : 0;
+      for (let j = start; j < chunk.length; j += 1) {
+        if (chunk[j] === needle) {
+          return pos + (j - start);
+        }
+      }
+      pos += chunk.length - start;
+    }
+    return -1;
+  }
+
+  function takePendingBytes(
+    buffer: PendingByteBuffer,
+    count: number,
+  ): Uint8Array {
+    const clampedCount = Math.min(count, buffer.totalBytes);
+    const out = new Uint8Array(clampedCount);
+    let written = 0;
+
+    while (written < clampedCount) {
+      const chunk = buffer.chunks[buffer.headChunkIndex];
+      const available = chunk.length - buffer.headOffset;
+      const take = Math.min(available, clampedCount - written);
+      out.set(
+        chunk.subarray(buffer.headOffset, buffer.headOffset + take),
+        written,
+      );
+      written += take;
+      buffer.headOffset += take;
+      buffer.totalBytes -= take;
+      if (buffer.headOffset >= chunk.length) {
+        buffer.headChunkIndex += 1;
+        buffer.headOffset = 0;
+      }
+    }
+
+    if (buffer.headChunkIndex >= buffer.chunks.length) {
+      resetPendingBuffer(buffer);
+    } else {
+      compactPendingBuffer(buffer);
+    }
+
+    return out;
+  }
+
+  function trimTrailingLineEnding(bytes: Uint8Array): Uint8Array {
+    let end = bytes.length;
+    while (end > 0 && (bytes[end - 1] === 0x0a || bytes[end - 1] === 0x0d)) {
+      end -= 1;
+    }
+    return end === bytes.length ? bytes : bytes.subarray(0, end);
+  }
 
   // ── runtime ──────────────────────────────────────────────────────────
   const open = ref(false);
@@ -64,18 +167,33 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const logFontSize = ref(12);
   const showTimestamp = ref(true);
   const showDirBadge = ref(true);
+  const filterStatsById = ref<Record<string, SerialDebugFilterStats>>({});
+  const filterPagesById = ref<Record<string, SerialDebugFilterPage>>({});
+  const activeFilterLoading = ref(false);
+  const activeFilterFullyLoaded = ref(false);
 
   // ── auto-save ─────────────────────────────────────────────────────────
   const autoSave = ref(false);
   const autoSaveDir = ref("");
   const autoSaveTimestamp = ref(true);
   const sessionAutoSavePath = ref<string | null>(null);
+  type PendingAutoSaveLine = Pick<
+    DebugLogLine,
+    "direction" | "tsMs" | "text"
+  > & {
+    estimatedChars: number;
+  };
+  const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
 
   let nextLineId = 1;
   const pending = {
-    tx: { text: "", bytes: [] as number[] },
-    rx: { text: "", bytes: [] as number[] },
+    tx: createPendingBuffer(),
+    rx: createPendingBuffer(),
   };
+  const queuedChunks: DebugChunk[] = [];
+  let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeFilterRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeFilterRefreshPending = false;
 
   // ── send ─────────────────────────────────────────────────────────────
   const sendMode = ref<SendMode>("ascii");
@@ -97,11 +215,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // ── watch chips ──────────────────────────────────────────────────────
   const watchChips = ref<WatchChip[]>([]);
   const activeChipId = ref<string | null>(null);
-  const chipRegexCache = new Map<string, RegExp>();
 
   const transport = serialDebugTransport();
   let unsubscribeChunk: (() => void) | null = null;
   let unsubscribeDisconnect: (() => void) | null = null;
+  let unsubscribeFilterUpdated: (() => void) | null = null;
 
   const resumePortManager = usePortManagerStore();
   watch(
@@ -157,51 +275,210 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       rawBytes,
     };
     lines.value.push(line);
-    if (lines.value.length > MAX_LOG_LINES) {
-      lines.value.splice(0, lines.value.length - MAX_LOG_LINES);
+    pendingAutoSaveLines.push({
+      direction: line.direction,
+      tsMs: line.tsMs,
+      text: line.text,
+      estimatedChars: line.text.length + 48,
+    });
+    if (lines.value.length > VISIBLE_LOG_WINDOW_LINES) {
+      lines.value.splice(0, lines.value.length - VISIBLE_LOG_WINDOW_LINES);
     }
   }
 
-  function appendSysLine(text: string): void {
-    pushLine("sys", Date.now(), text);
+  function pushPreparedLines(batch: DebugLogLine[]): void {
+    if (batch.length === 0) return;
+    lines.value.push(...batch);
+    pendingAutoSaveLines.push(
+      ...batch.map((line) => ({
+        direction: line.direction,
+        tsMs: line.tsMs,
+        text: line.text,
+        estimatedChars: line.text.length + 48,
+      })),
+    );
+    if (lines.value.length > VISIBLE_LOG_WINDOW_LINES) {
+      lines.value.splice(0, lines.value.length - VISIBLE_LOG_WINDOW_LINES);
+    }
+  }
+
+  async function appendSysLine(text: string): Promise<void> {
+    const tsMs = Date.now();
+    pushLine("sys", tsMs, text);
+    try {
+      await transport.appendSysLine(tsMs, text);
+    } catch (e) {
+      rLog.warn(
+        `[SerialDebug] append sys line failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   function decodeLossy(bytes: Uint8Array): string {
-    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    return utf8Decoder.decode(bytes);
+  }
+
+  function prepareLinesFromChunks(
+    chunks: readonly DebugChunk[],
+  ): DebugLogLine[] {
+    const completedLines: DebugLogLine[] = [];
+    for (const chunk of chunks) {
+      const dir = chunk.direction as "tx" | "rx";
+      const p = pending[dir];
+      appendPendingBytes(p, chunk.bytes);
+      while (true) {
+        let lineBytes: Uint8Array | null = null;
+        const newlineIdx = findPendingByte(p, 0x0a);
+        if (newlineIdx !== -1) {
+          lineBytes = takePendingBytes(p, newlineIdx + 1);
+        } else if (p.totalBytes >= MAX_PENDING_LINE_BYTES) {
+          lineBytes = takePendingBytes(p, MAX_PENDING_LINE_BYTES);
+        }
+        if (!lineBytes) break;
+        const text = decodeLossy(trimTrailingLineEnding(lineBytes));
+        completedLines.push({
+          id: nextLineId++,
+          direction: dir,
+          tsMs: chunk.tsMs,
+          text,
+          rawBytes: lineBytes,
+        });
+      }
+    }
+    return completedLines;
   }
 
   function appendChunk(chunk: DebugChunk): void {
-    const dir = chunk.direction as "tx" | "rx";
-    const p = pending[dir];
-    for (const b of chunk.bytes) p.bytes.push(b);
-    const merged = p.text + decodeLossy(Uint8Array.from(chunk.bytes));
-    const parts = merged.split("\n");
-    const tail = parts.pop() ?? "";
-    let byteOffset = 0;
-    for (const part of parts) {
-      const text = part.endsWith("\r") ? part.slice(0, -1) : part;
-      const lineByteCount = new TextEncoder().encode(part + "\n").length;
-      const lineBytes = Uint8Array.from(
-        p.bytes.slice(byteOffset, byteOffset + lineByteCount),
-      );
-      byteOffset += lineByteCount;
-      pushLine(dir, chunk.tsMs, text, lineBytes);
-    }
-    p.text = tail;
-    p.bytes = p.bytes.slice(byteOffset);
+    const completedLines = prepareLinesFromChunks([chunk]);
+    pushPreparedLines(completedLines);
   }
 
-  function clear(): void {
+  async function clear(): Promise<void> {
     lines.value = [];
-    pending.tx = { text: "", bytes: [] };
-    pending.rx = { text: "", bytes: [] };
+    resetPendingBuffer(pending.tx);
+    resetPendingBuffer(pending.rx);
+    queuedChunks.length = 0;
+    if (chunkFlushTimer !== null) {
+      clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = null;
+    }
+    pendingAutoSaveLines.length = 0;
+    cancelActiveFilterRefresh();
+    filterStatsById.value = Object.fromEntries(
+      Object.entries(filterStatsById.value).map(([id, stats]) => [
+        id,
+        {
+          ...stats,
+          status: "complete",
+          scannedUntilLineNo: 0,
+          totalLinesSnapshot: 0,
+          totalMatches: 0,
+          error: null,
+        },
+      ]),
+    );
+    filterPagesById.value = {};
+    activeFilterLoading.value = false;
+    activeFilterFullyLoaded.value = true;
+    try {
+      await transport.clearSession();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
+    }
+  }
+
+  function drainPendingAutoSaveLines(
+    maxChars = AUTO_SAVE_FLUSH_MAX_CHARS,
+  ): Array<Pick<DebugLogLine, "direction" | "tsMs" | "text">> {
+    if (pendingAutoSaveLines.length === 0) {
+      return [];
+    }
+    if (maxChars <= 0) {
+      return pendingAutoSaveLines.splice(0, 1);
+    }
+    if (!Number.isFinite(maxChars)) {
+      return pendingAutoSaveLines.splice(0, pendingAutoSaveLines.length);
+    }
+
+    let count = 0;
+    let totalChars = 0;
+    while (count < pendingAutoSaveLines.length) {
+      const next = pendingAutoSaveLines[count];
+      if (count > 0 && totalChars + next.estimatedChars > maxChars) {
+        break;
+      }
+      totalChars += next.estimatedChars;
+      count += 1;
+    }
+    return pendingAutoSaveLines.splice(0, count);
+  }
+
+  const activeDisplayLines = computed<DebugLogLine[]>(() => {
+    if (activeChipId.value === null) return lines.value;
+    return filterPagesById.value[activeChipId.value]?.items ?? [];
+  });
+
+  function flushQueuedChunks(): void {
+    chunkFlushTimer = null;
+    const chunks = queuedChunks.splice(0, queuedChunks.length);
+    pushPreparedLines(prepareLinesFromChunks(chunks));
+  }
+
+  function queueChunk(chunk: DebugChunk): void {
+    queuedChunks.push(chunk);
+    if (chunkFlushTimer !== null) return;
+    chunkFlushTimer = setTimeout(flushQueuedChunks, 16);
+  }
+
+  function queueChunkBatch(chunks: DebugChunk[]): void {
+    if (chunks.length === 0) return;
+    queuedChunks.push(...chunks);
+    if (chunkFlushTimer !== null) return;
+    chunkFlushTimer = setTimeout(flushQueuedChunks, 16);
+  }
+
+  function cancelActiveFilterRefresh(): void {
+    if (activeFilterRefreshTimer !== null) {
+      clearTimeout(activeFilterRefreshTimer);
+      activeFilterRefreshTimer = null;
+    }
+    activeFilterRefreshPending = false;
+  }
+
+  function scheduleActiveFilterRefresh(): void {
+    activeFilterRefreshPending = true;
+    if (activeFilterRefreshTimer !== null) return;
+    activeFilterRefreshTimer = setTimeout(() => {
+      activeFilterRefreshTimer = null;
+      const shouldRefresh = activeFilterRefreshPending;
+      activeFilterRefreshPending = false;
+      if (!shouldRefresh || activeChipId.value === null) return;
+      if (activeFilterLoading.value) {
+        scheduleActiveFilterRefresh();
+        return;
+      }
+      void loadActiveFilterTail().finally(() => {
+        if (activeFilterRefreshPending) {
+          scheduleActiveFilterRefresh();
+        }
+      });
+    }, FILTER_LIVE_REFRESH_MS);
   }
 
   async function stopBackendSession(): Promise<void> {
     unsubscribeChunk?.();
     unsubscribeDisconnect?.();
+    unsubscribeFilterUpdated?.();
     unsubscribeChunk = null;
     unsubscribeDisconnect = null;
+    unsubscribeFilterUpdated = null;
+    queuedChunks.length = 0;
+    if (chunkFlushTimer !== null) {
+      clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = null;
+    }
+    cancelActiveFilterRefresh();
     try {
       await transport.close();
     } catch (e) {
@@ -214,7 +491,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   async function openPort(): Promise<void> {
     if (open.value || opening.value) return;
     if (!port.value.trim() || currentBaud() <= 0) {
-      appendSysLine(t("serialDebug.err.invalidConfig"));
+      void appendSysLine(t("serialDebug.err.invalidConfig"));
       return;
     }
     opening.value = true;
@@ -243,27 +520,46 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
           pm.registerResume(port.value, "serial-debug");
         }
         if (reason === "unplugged") {
-          appendSysLine(t("serialDebug.log.disconnected"));
+          void appendSysLine(t("serialDebug.log.disconnected"));
         }
       },
     });
     if (outcome === "denied") {
       opening.value = false;
-      appendSysLine(t("serialDebug.err.portDenied"));
+      void appendSysLine(t("serialDebug.err.portDenied"));
       return;
     }
-    unsubscribeChunk = transport.onChunk(appendChunk);
+    const unsubscribeSingleChunk = transport.onChunk(queueChunk);
+    const unsubscribeChunkBatch =
+      "onChunkBatch" in transport &&
+      typeof transport.onChunkBatch === "function"
+        ? transport.onChunkBatch(queueChunkBatch)
+        : () => {};
+    unsubscribeChunk = () => {
+      unsubscribeSingleChunk();
+      unsubscribeChunkBatch();
+    };
     unsubscribeDisconnect = transport.onDisconnect((p) => {
-      appendSysLine(
+      void appendSysLine(
         t("serialDebug.log.disconnectedWith", { reason: p.reason }),
       );
       pm.notifyUnplugged(port.value);
+    });
+    unsubscribeFilterUpdated = transport.onFilterUpdated((payload) => {
+      filterStatsById.value = {
+        ...filterStatsById.value,
+        [payload.def.id]: payload.stats,
+      };
+      const isActive = activeChipId.value === payload.def.id;
+      if (isActive && payload.stats.status === "complete") {
+        scheduleActiveFilterRefresh();
+      }
     });
     const cfg = buildConfig();
     try {
       await transport.open(cfg);
       open.value = true;
-      appendSysLine(
+      await appendSysLine(
         t("serialDebug.log.connected", {
           port: port.value,
           baud: currentBaud(),
@@ -272,12 +568,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       rLog.info(`[SerialDebug] opened ${port.value} @ ${currentBaud()}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      appendSysLine(t("serialDebug.err.openFailedWith", { msg }));
+      await appendSysLine(t("serialDebug.err.openFailedWith", { msg }));
       pm.release(port.value, "serial-debug");
       unsubscribeChunk?.();
       unsubscribeDisconnect?.();
+      unsubscribeFilterUpdated?.();
       unsubscribeChunk = null;
       unsubscribeDisconnect = null;
+      unsubscribeFilterUpdated = null;
     } finally {
       opening.value = false;
     }
@@ -306,16 +604,18 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       } else {
         await wsTransport.deviceReset(effectivePort, chipId);
       }
-      appendSysLine(
+      await appendSysLine(
         t("serialDebug.log.deviceResetOk", { port: effectivePort }),
       );
       rLog.info(`[SerialDebug] Device reset (DTR/RTS) on ${effectivePort}`);
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       if (raw.includes("unknown variant") && raw.includes("device_reset")) {
-        appendSysLine(t("serialDebug.log.deviceResetServeOutdated"));
+        await appendSysLine(t("serialDebug.log.deviceResetServeOutdated"));
       } else {
-        appendSysLine(t("serialDebug.log.deviceResetFailed", { msg: raw }));
+        await appendSysLine(
+          t("serialDebug.log.deviceResetFailed", { msg: raw }),
+        );
       }
     }
   }
@@ -329,7 +629,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       const r = parseHexInput(raw);
       bytes = r.bytes;
       if (r.ignoredCount > 0) {
-        appendSysLine(
+        await appendSysLine(
           t("serialDebug.send.hexParseIgnored", { n: r.ignoredCount }),
         );
       }
@@ -348,58 +648,128 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      appendSysLine(t("serialDebug.err.sendFailed", { msg }));
+      await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
     }
   }
 
   // ── chip actions ──────────────────────────────────────────────────────
 
-  function addChip(
+  async function addChip(
     keyword: string,
     useRegex: boolean,
-  ): "ok" | "duplicate" | "invalid-regex" {
+  ): Promise<"ok" | "duplicate" | "invalid-regex"> {
     const trimmed = keyword.trim();
     if (!trimmed) return "invalid-regex";
-    if (watchChips.value.some((c) => c.keyword === trimmed)) return "duplicate";
-    let compiled: RegExp | undefined;
+    if (
+      watchChips.value.some(
+        (c) => c.keyword === trimmed && c.useRegex === useRegex,
+      )
+    ) {
+      return "duplicate";
+    }
     if (useRegex) {
       try {
-        compiled = new RegExp(trimmed);
+        new RegExp(trimmed);
       } catch {
         return "invalid-regex";
       }
     }
-    const id = crypto.randomUUID();
     const color = CHIP_COLORS[watchChips.value.length % CHIP_COLORS.length];
-    if (compiled) chipRegexCache.set(id, compiled);
-    watchChips.value.push({ id, keyword: trimmed, useRegex, color });
-    activeChipId.value = id;
+    let payload: SerialDebugFilterUpdatePayload;
+    try {
+      payload = await transport.addFilter(trimmed, useRegex, color);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("duplicate")) return "duplicate";
+      if (msg.includes("regex")) return "invalid-regex";
+      throw e;
+    }
+    watchChips.value.push(payload.def);
+    filterStatsById.value = {
+      ...filterStatsById.value,
+      [payload.def.id]: payload.stats,
+    };
+    activeChipId.value = payload.def.id;
+    activeFilterFullyLoaded.value = false;
+    await loadActiveFilterTail();
     return "ok";
   }
 
-  function removeChip(id: string): void {
+  async function removeChip(id: string): Promise<void> {
     const idx = watchChips.value.findIndex((c) => c.id === id);
     if (idx !== -1) {
       watchChips.value.splice(idx, 1);
-      chipRegexCache.delete(id);
     }
+    delete filterStatsById.value[id];
+    delete filterPagesById.value[id];
+    await transport.removeFilter(id);
     if (activeChipId.value === id) {
       activeChipId.value =
         watchChips.value.length > 0
           ? watchChips.value[Math.max(0, idx - 1)].id
           : null;
+      if (activeChipId.value !== null) {
+        await loadActiveFilterTail();
+      }
     }
   }
 
-  function setActiveChip(id: string | null): void {
+  async function setActiveChip(id: string | null): Promise<void> {
     activeChipId.value = id;
+    if (id !== null) {
+      await loadActiveFilterTail();
+    }
   }
 
-  function matchChipKeyword(line: DebugLogLine, chip: WatchChip): boolean {
-    if (chip.useRegex) {
-      return chipRegexCache.get(chip.id)?.test(line.text) ?? false;
+  async function loadFilterPage(
+    filterId: string,
+    start: number,
+    limit: number,
+  ): Promise<SerialDebugFilterPage> {
+    return await transport.readFilterMatches(filterId, start, limit);
+  }
+
+  async function loadActiveFilterTail(): Promise<void> {
+    const id = activeChipId.value;
+    if (!id) return;
+    const stats = filterStatsById.value[id];
+    if (!stats) return;
+    activeFilterLoading.value = true;
+    try {
+      const start = Math.max(0, stats.totalMatches - FILTER_PAGE_SIZE);
+      const page = await loadFilterPage(id, start, FILTER_PAGE_SIZE);
+      filterPagesById.value = { ...filterPagesById.value, [id]: page };
+      activeFilterFullyLoaded.value = page.start === 0;
+    } finally {
+      activeFilterLoading.value = false;
     }
-    return line.text.includes(chip.keyword);
+  }
+
+  async function loadOlderActiveFilterMatches(): Promise<void> {
+    const id = activeChipId.value;
+    if (!id) return;
+    const existing = filterPagesById.value[id];
+    if (!existing || existing.start === 0) {
+      activeFilterFullyLoaded.value = true;
+      return;
+    }
+    activeFilterLoading.value = true;
+    try {
+      const start = Math.max(0, existing.start - FILTER_PAGE_SIZE);
+      const page = await loadFilterPage(id, start, existing.start - start);
+      filterPagesById.value = {
+        ...filterPagesById.value,
+        [id]: {
+          ...existing,
+          start: page.start,
+          totalMatches: page.totalMatches,
+          items: [...page.items, ...existing.items],
+        },
+      };
+      activeFilterFullyLoaded.value = start === 0;
+    } finally {
+      activeFilterLoading.value = false;
+    }
   }
 
   function increaseFontSize(): void {
@@ -550,12 +920,17 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     autoRelease,
     pendingResume,
     lines,
+    activeDisplayLines,
     hexView,
     hexBytesPerRow,
     ansiEnabled,
     logFontSize,
     showTimestamp,
     showDirBadge,
+    filterStatsById,
+    filterPagesById,
+    activeFilterLoading,
+    activeFilterFullyLoaded,
     sendMode,
     sendAppendCrlf,
     sendInput,
@@ -574,13 +949,15 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     send,
     clear,
     appendChunk,
+    drainPendingAutoSaveLines,
     showHexPopup,
     closeHexPopup,
     appendSysLine,
     addChip,
     removeChip,
     setActiveChip,
-    matchChipKeyword,
+    loadActiveFilterTail,
+    loadOlderActiveFilterMatches,
     increaseFontSize,
     decreaseFontSize,
     loadWorkspace,

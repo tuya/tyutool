@@ -13,7 +13,9 @@ libudev = ["serialport/libudev"]
 serde_json = "1"
 
 [dependencies]
+regex = "1"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "1"
 serialport = { version = "4", default-features = false, features = ["usbportinfo-interface"] }
 crc32fast = "1"

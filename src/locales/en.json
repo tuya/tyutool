@@ -463,7 +463,8 @@
       "dupWarning": "A chip with this keyword already exists",
       "invalidRegex": "Invalid regular expression",
       "tabAll": "All",
-      "removeTab": "Remove filter"
+      "removeTab": "Remove filter",
+      "scanWholeSession": "Scans the whole session"
     },
     "search": {
       "placeholder": "Search in this pane…",
@@ -484,6 +485,8 @@
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
       "saveLog": "Save log",
+      "loadOlderMatches": "Load older matches",
+      "loadingOlderMatches": "Loading…",
       "fontDecrease": "Smaller",
       "fontIncrease": "Larger",
       "fontSize": "Font",

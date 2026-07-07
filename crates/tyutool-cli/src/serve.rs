@@ -6,6 +6,7 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -17,9 +18,16 @@ use tokio::net::TcpListener;
 use tokio::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 use tyutool_core::{
-    device_reset_dtr_rts, list_serial_ports, run_job, DebugChunk, DebugConfig, FlashJob,
-    SerialDebugSession, SerialPortEntry,
+    device_reset_dtr_rts, list_serial_ports, run_job, serial_debug_scan_filter_matches, DebugChunk,
+    DebugConfig, FlashJob, SerialDebugArchive, SerialDebugArchiveReader,
+    SerialDebugChunkBatchBuffer, SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition,
+    SerialDebugFilterIndex, SerialDebugFilterPage, SerialDebugFilterStats, SerialDebugLine,
+    SerialDebugSession, SerialDebugSessionPage, SerialPortEntry,
 };
+
+const SERIAL_DEBUG_CHUNK_FLUSH_MS: u64 = 12;
+const SERIAL_DEBUG_CHUNK_FLUSH_BYTES: usize = 32 * 1024;
+const SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY: usize = 256;
 
 // ── Client → Server ──────────────────────────────────────────────────────────
 
@@ -48,6 +56,28 @@ pub enum ClientMessage {
         bytes: Vec<u8>,
     },
     SerialDebugState,
+    SerialDebugSessionClear,
+    SerialDebugAppendSysLine {
+        ts_ms: u64,
+        text: String,
+    },
+    SerialDebugFilterAdd {
+        keyword: String,
+        use_regex: bool,
+        color: String,
+    },
+    SerialDebugFilterRemove {
+        filter_id: String,
+    },
+    SerialDebugFilterReadMatches {
+        filter_id: String,
+        start: u64,
+        limit: u64,
+    },
+    SerialDebugSessionReadPage {
+        start: u64,
+        limit: u64,
+    },
     /// Frontend response to `flash_progress` `auth_conflict` milestone.
     AuthorizeConfirm {
         confirmed: bool,
@@ -76,6 +106,9 @@ pub enum ServerMessage {
     SerialDebugChunk {
         chunk: DebugChunk,
     },
+    SerialDebugChunkBatch {
+        chunks: Vec<DebugChunk>,
+    },
     SerialDebugOpened,
     SerialDebugClosed,
     SerialDebugStateInfo {
@@ -85,6 +118,16 @@ pub enum ServerMessage {
     },
     SerialDebugDisconnected {
         reason: String,
+    },
+    SerialDebugFilterUpdated {
+        def: SerialDebugFilterDefinition,
+        stats: SerialDebugFilterStats,
+    },
+    SerialDebugFilterPage {
+        page: SerialDebugFilterPage,
+    },
+    SerialDebugSessionPage {
+        page: SerialDebugSessionPage,
     },
 }
 
@@ -150,6 +193,13 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
 
     // Per-connection serial-debug session state.
     let debug_session: Arc<Mutex<Option<SerialDebugSession>>> = Arc::new(Mutex::new(None));
+    let serial_debug_dir = std::env::temp_dir().join("tyutool").join("serial-debug");
+    let debug_archive = Arc::new(Mutex::new(
+        SerialDebugArchive::create(&serial_debug_dir).expect("create serial-debug archive"),
+    ));
+    let debug_filters = Arc::new(Mutex::new(
+        SerialDebugFilterIndex::create(&serial_debug_dir).expect("create serial-debug filters"),
+    ));
 
     while let Some(Ok(msg)) = stream.next().await {
         let text = match msg {
@@ -234,10 +284,17 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 }
                 let sink_for_chunk = sink_tx.clone();
                 let sink_for_disc = sink_tx.clone();
+                let archive_for_chunk = Arc::clone(&debug_archive);
+                let filters_for_chunk = Arc::clone(&debug_filters);
+                let chunk_tx = spawn_serial_debug_chunk_bridge_ws(
+                    sink_for_chunk.clone(),
+                    Arc::clone(&archive_for_chunk),
+                    Arc::clone(&filters_for_chunk),
+                );
                 let result = SerialDebugSession::open(
                     cfg,
                     Box::new(move |chunk| {
-                        let _ = sink_for_chunk.send(ServerMessage::SerialDebugChunk { chunk });
+                        let _ = chunk_tx.send(chunk);
                     }),
                     Box::new(move |reason| {
                         let _ =
@@ -276,13 +333,17 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
-                    let _ = sink_tx.send(ServerMessage::SerialDebugChunk {
-                        chunk: DebugChunk {
-                            direction: tyutool_core::Direction::Tx,
-                            ts_ms,
-                            bytes,
-                        },
-                    });
+                    let chunk = DebugChunk {
+                        direction: tyutool_core::Direction::Tx,
+                        ts_ms,
+                        bytes,
+                    };
+                    let completed = {
+                        let mut archive = debug_archive.lock().unwrap();
+                        archive.append_chunk(&chunk).unwrap_or_default()
+                    };
+                    ingest_serial_debug_lines_ws(&sink_tx, &debug_filters, &completed);
+                    let _ = sink_tx.send(ServerMessage::SerialDebugChunk { chunk });
                 } else {
                     let _ = sink_tx.send(ServerMessage::Error {
                         message: "serial debug not open".into(),
@@ -296,6 +357,168 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                     None => (false, None),
                 };
                 let _ = sink_tx.send(ServerMessage::SerialDebugStateInfo { open, cfg });
+            }
+            ClientMessage::SerialDebugSessionClear => {
+                {
+                    let mut archive = debug_archive.lock().unwrap();
+                    let _ = archive.clear();
+                }
+                let updates = debug_filters.lock().unwrap().reset_for_new_session();
+                let filters = debug_filters.lock().unwrap();
+                for stats in updates {
+                    if let Some(def) = filters.definition(&stats.filter_id) {
+                        let _ =
+                            sink_tx.send(ServerMessage::SerialDebugFilterUpdated { def, stats });
+                    }
+                }
+            }
+            ClientMessage::SerialDebugAppendSysLine { ts_ms, text } => {
+                let line = {
+                    let mut archive = debug_archive.lock().unwrap();
+                    match archive.append_sys_line(ts_ms, text) {
+                        Ok(line) => line,
+                        Err(e) => {
+                            let _ = sink_tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
+                            continue;
+                        }
+                    }
+                };
+                ingest_serial_debug_lines_ws(&sink_tx, &debug_filters, &[line]);
+            }
+            ClientMessage::SerialDebugFilterAdd {
+                keyword,
+                use_regex,
+                color,
+            } => {
+                let snapshot_total_lines = debug_archive.lock().unwrap().total_lines();
+                let def = match debug_filters.lock().unwrap().add_filter(
+                    keyword,
+                    use_regex,
+                    color,
+                    snapshot_total_lines,
+                ) {
+                    Ok(def) => def,
+                    Err(message) => {
+                        let _ = sink_tx.send(ServerMessage::Error { message });
+                        continue;
+                    }
+                };
+                let initial = debug_filters.lock().unwrap().stats(&def.id).unwrap();
+                let _ = sink_tx.send(ServerMessage::SerialDebugFilterUpdated {
+                    def: def.clone(),
+                    stats: initial,
+                });
+                let (backfill_stats, backfill_snapshot, archive_reader): (
+                    SerialDebugFilterStats,
+                    SerialDebugFilterBackfillSnapshot,
+                    SerialDebugArchiveReader,
+                ) = {
+                    let mut filters = debug_filters.lock().unwrap();
+                    let stats = match filters.start_backfill(&def.id) {
+                        Ok(stats) => stats,
+                        Err(e) => {
+                            let _ = sink_tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
+                            continue;
+                        }
+                    };
+                    let snapshot = match filters.backfill_snapshot(&def.id) {
+                        Some(snapshot) => snapshot,
+                        None => {
+                            let _ = sink_tx.send(ServerMessage::Error {
+                                message: "new filter backfill snapshot missing".into(),
+                            });
+                            continue;
+                        }
+                    };
+                    drop(filters);
+                    let archive = debug_archive.lock().unwrap();
+                    (stats, snapshot, archive.snapshot_reader())
+                };
+                let _ = sink_tx.send(ServerMessage::SerialDebugFilterUpdated {
+                    def: def.clone(),
+                    stats: backfill_stats,
+                });
+
+                let sink_for_backfill = sink_tx.clone();
+                let filters_for_backfill = Arc::clone(&debug_filters);
+                let filter_id = def.id.clone();
+                let historical_idx_path = serial_debug_dir
+                    .join(format!("serial-debug-filter-{filter_id}.historical.idx"));
+                tokio::task::spawn_blocking(move || {
+                    let result = serial_debug_scan_filter_matches(
+                        &backfill_snapshot,
+                        &archive_reader,
+                        &historical_idx_path,
+                    );
+                    let mut filters = match filters_for_backfill.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => return,
+                    };
+                    let stats = match result {
+                        Ok((historical_match_count, historical_scanned_until_line_no)) => {
+                            match filters.finish_backfill_from_file(
+                                &filter_id,
+                                &historical_idx_path,
+                                historical_match_count,
+                                historical_scanned_until_line_no,
+                            ) {
+                                Ok(stats) => Some(stats),
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                                Err(e) => filters.fail_backfill(&filter_id, e.to_string()).ok(),
+                            }
+                        }
+                        Err(e) => filters.fail_backfill(&filter_id, e.to_string()).ok(),
+                    };
+                    let _ = std::fs::remove_file(&historical_idx_path);
+                    if let Some(stats) = stats {
+                        if let Some(def) = filters.definition(&filter_id) {
+                            let _ = sink_for_backfill
+                                .send(ServerMessage::SerialDebugFilterUpdated { def, stats });
+                        }
+                    }
+                });
+            }
+            ClientMessage::SerialDebugFilterRemove { filter_id } => {
+                if !debug_filters.lock().unwrap().remove_filter(&filter_id) {
+                    let _ = sink_tx.send(ServerMessage::Error {
+                        message: "filter not found".into(),
+                    });
+                }
+            }
+            ClientMessage::SerialDebugFilterReadMatches {
+                filter_id,
+                start,
+                limit,
+            } => {
+                let archive = debug_archive.lock().unwrap();
+                let filters = debug_filters.lock().unwrap();
+                match filters.read_match_page(&filter_id, start, limit, &archive) {
+                    Ok(page) => {
+                        let _ = sink_tx.send(ServerMessage::SerialDebugFilterPage { page });
+                    }
+                    Err(e) => {
+                        let _ = sink_tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
+            }
+            ClientMessage::SerialDebugSessionReadPage { start, limit } => {
+                let archive = debug_archive.lock().unwrap();
+                match archive.read_page(start, limit) {
+                    Ok(page) => {
+                        let _ = sink_tx.send(ServerMessage::SerialDebugSessionPage { page });
+                    }
+                    Err(e) => {
+                        let _ = sink_tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
             }
             ClientMessage::AuthorizeConfirm { confirmed } => {
                 let mut guard = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
@@ -328,6 +551,94 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
     let _ = pump.await;
 
     log::info!("WS connection closed");
+}
+
+fn flush_serial_debug_chunk_ws(
+    sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    archive: &Arc<Mutex<SerialDebugArchive>>,
+    filters: &Arc<Mutex<SerialDebugFilterIndex>>,
+    chunks: Vec<DebugChunk>,
+) {
+    if chunks.is_empty() {
+        return;
+    }
+    let completed = {
+        let mut archive = match archive.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let mut completed = Vec::new();
+        for chunk in &chunks {
+            completed.extend(archive.append_chunk(chunk).unwrap_or_default());
+        }
+        completed
+    };
+    ingest_serial_debug_lines_ws(sink_tx, filters, &completed);
+    let _ = sink_tx.send(ServerMessage::SerialDebugChunkBatch { chunks });
+}
+
+fn spawn_serial_debug_chunk_bridge_ws(
+    sink_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    archive: Arc<Mutex<SerialDebugArchive>>,
+    filters: Arc<Mutex<SerialDebugFilterIndex>>,
+) -> SyncSender<DebugChunk> {
+    // Bound the bridge queue so sustained ingress can't grow process memory without limit
+    // when archive/filter/UI consumption temporarily lags behind the serial reader.
+    let (tx, rx) = mpsc::sync_channel::<DebugChunk>(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY);
+    std::thread::spawn(move || {
+        let mut pending = SerialDebugChunkBatchBuffer::new();
+        loop {
+            match rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)) {
+                Ok(chunk) => {
+                    pending.push(chunk);
+                    if pending.should_flush_bytes(SERIAL_DEBUG_CHUNK_FLUSH_BYTES) {
+                        flush_serial_debug_chunk_ws(&sink_tx, &archive, &filters, pending.take());
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if pending
+                        .should_flush_elapsed(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS))
+                    {
+                        flush_serial_debug_chunk_ws(&sink_tx, &archive, &filters, pending.take());
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    flush_serial_debug_chunk_ws(&sink_tx, &archive, &filters, pending.take());
+                    return;
+                }
+            }
+        }
+    });
+    tx
+}
+
+fn ingest_serial_debug_lines_ws(
+    sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    filters: &Arc<Mutex<SerialDebugFilterIndex>>,
+    lines: &[SerialDebugLine],
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let updates = {
+        let mut guard = match filters.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        guard.ingest_completed_lines(lines).unwrap_or_default()
+    };
+    if updates.is_empty() {
+        return;
+    }
+    let guard = match filters.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    for stats in updates {
+        if let Some(def) = guard.definition(&stats.filter_id) {
+            let _ = sink_tx.send(ServerMessage::SerialDebugFilterUpdated { def, stats });
+        }
+    }
 }
 
 // ── Run job handler ──────────────────────────────────────────────────────────
@@ -762,5 +1073,23 @@ mod tests {
         .unwrap();
         assert!(chunk.contains(r#""type":"serial_debug_chunk""#));
         assert!(chunk.contains(r#""direction":"tx""#));
+
+        let batch = serde_json::to_string(&ServerMessage::SerialDebugChunkBatch {
+            chunks: vec![
+                DebugChunk {
+                    direction: tyutool_core::Direction::Rx,
+                    ts_ms: 1,
+                    bytes: vec![1],
+                },
+                DebugChunk {
+                    direction: tyutool_core::Direction::Rx,
+                    ts_ms: 2,
+                    bytes: vec![2, 3],
+                },
+            ],
+        })
+        .unwrap();
+        assert!(batch.contains(r#""type":"serial_debug_chunk_batch""#));
+        assert!(batch.contains(r#""tsMs":2"#));
     }
 }

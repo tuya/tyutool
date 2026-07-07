@@ -542,12 +542,15 @@ describe("serialDebugOpen / send / close", () => {
   it("resolves on serial_debug_opened and routes chunks to onChunk", async () => {
     const t = new WsTransport();
     const chunks: unknown[] = [];
+    const chunkBatches: unknown[] = [];
     const disconnects: string[] = [];
     const cfg = { port: "/dev/ttyUSB0", baudRate: 115200 } as never;
     const p = t.serialDebugOpen(
       cfg,
       (c) => chunks.push(c),
+      (batch) => chunkBatches.push(batch),
       (r) => disconnects.push(r),
+      () => {},
     );
     await flush();
     const ws = latest();
@@ -561,15 +564,53 @@ describe("serialDebugOpen / send / close", () => {
     const chunk = { direction: "rx", tsMs: 1, bytes: [1, 2, 3] };
     ws.recv({ type: "serial_debug_chunk", chunk });
     expect(chunks).toEqual([chunk]);
+    expect(chunkBatches).toEqual([]);
 
     ws.recv({ type: "serial_debug_disconnected", reason: "unplugged" });
     expect(disconnects).toEqual(["unplugged"]);
+  });
+
+  it("routes serial_debug_chunk_batch frames to onChunkBatch in order", async () => {
+    const t = new WsTransport();
+    const chunks: unknown[] = [];
+    const chunkBatches: unknown[] = [];
+    const p = t.serialDebugOpen(
+      { port: "x" } as never,
+      (c) => chunks.push(c),
+      (batch) => chunkBatches.push(batch),
+      () => {},
+      () => {},
+    );
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    ws.recv({ type: "serial_debug_opened" });
+    await p;
+
+    ws.recv({
+      type: "serial_debug_chunk_batch",
+      chunks: [
+        { direction: "rx", tsMs: 1, bytes: [1] },
+        { direction: "rx", tsMs: 2, bytes: [2, 3] },
+      ],
+    });
+
+    expect(chunks).toEqual([]);
+    expect(chunkBatches).toEqual([
+      [
+        { direction: "rx", tsMs: 1, bytes: [1] },
+        { direction: "rx", tsMs: 2, bytes: [2, 3] },
+      ],
+    ]);
   });
 
   it("rejects serialDebugOpen on an error frame", async () => {
     const t = new WsTransport();
     const p = t.serialDebugOpen(
       { port: "x" } as never,
+      () => {},
+      () => {},
       () => {},
       () => {},
     );
@@ -601,6 +642,8 @@ describe("serialDebugOpen / send / close", () => {
       { port: "x" } as never,
       (c) => chunks.push(c),
       () => {},
+      () => {},
+      () => {},
     );
     await flush();
     const ws = latest();
@@ -615,6 +658,38 @@ describe("serialDebugOpen / send / close", () => {
     // After close, chunk frames are no longer routed.
     ws.recv({ type: "serial_debug_chunk", chunk: { direction: "rx" } });
     expect(chunks).toEqual([]);
+  });
+});
+
+describe("serialDebugSessionReadPage", () => {
+  it("requests a session page and resolves on serial_debug_session_page", async () => {
+    const t = new WsTransport();
+    const p = t.serialDebugSessionReadPage(100, 50);
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+
+    expect(ws.lastSent).toEqual({
+      type: "serial_debug_session_read_page",
+      start: 100,
+      limit: 50,
+    });
+
+    ws.recv({
+      type: "serial_debug_session_page",
+      page: {
+        totalLines: 123,
+        start: 100,
+        items: [{ id: 1, tsMs: 1, direction: "rx", text: "line" }],
+      },
+    });
+
+    await expect(p).resolves.toEqual({
+      totalLines: 123,
+      start: 100,
+      items: [{ id: 1, tsMs: 1, direction: "rx", text: "line" }],
+    });
   });
 });
 
