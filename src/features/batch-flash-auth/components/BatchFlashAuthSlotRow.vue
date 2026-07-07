@@ -101,10 +101,10 @@ const BORDER_COLORS: Record<string, string> = {
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
 const rowBg = computed(() => {
+  const stripedRowBg =
+    "color-mix(in srgb, var(--ty-primary) 10%, var(--ty-surface-muted))";
   const base =
-    (props.rowIndex ?? 0) % 2 === 1
-      ? "var(--ty-surface-muted)"
-      : "var(--ty-surface)";
+    (props.rowIndex ?? 0) % 2 === 1 ? stripedRowBg : "var(--ty-surface)";
   if (isQuarantineRequired.value)
     return `color-mix(in srgb, var(--ty-danger) 14%, ${base})`;
   if (props.portSlot.status === "failed")
