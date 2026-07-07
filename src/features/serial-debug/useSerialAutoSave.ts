@@ -1,6 +1,7 @@
 import { onActivated, onDeactivated, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { useSerialDebugStore } from "@/stores/serial-debug";
+import { AUTO_SAVE_FLUSH_MAX_CHARS } from "./constants";
 import { sanitizePortName, makeStamp, formatTs } from "./utils";
 import { stripAnsi } from "./ansi-parse";
 
@@ -23,8 +24,10 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
   const { t } = useI18n();
 
   let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
-  let lastFlushedLineId = 0;
   let flushInFlight = false;
+  let currentFlushPromise: Promise<void> | null = null;
+  let replayFlushRequested = false;
+  let replayFlushDrainAll = false;
 
   function stopInterval(): void {
     if (autoSaveInterval !== null) {
@@ -33,42 +36,73 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     }
   }
 
-  async function flush(): Promise<void> {
-    if (flushInFlight) return;
-    const path = s.sessionAutoSavePath;
-    if (!path) return;
-
-    const newLines = s.lines.filter((l) => l.id > lastFlushedLineId);
-    if (newLines.length === 0) return;
-
-    flushInFlight = true;
-    const content =
-      newLines
-        .map((l) => {
-          const dir =
-            l.direction === "tx" ? "TX " : l.direction === "rx" ? "RX " : "SYS";
-          if (s.autoSaveTimestamp) {
-            return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
-          }
-          return stripAnsi(l.text);
-        })
-        .join("\n") + "\n";
-
-    const flushedUpToId = newLines[newLines.length - 1].id;
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("append_text_file", { path, content });
-      // Only advance the watermark — never roll it back if onActivated
-      // already moved it forward.
-      if (flushedUpToId > lastFlushedLineId) lastFlushedLineId = flushedUpToId;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      s.appendSysLine(t("serialDebug.autoSave.errWrite", { msg }));
-      stopInterval();
-      s.sessionAutoSavePath = null;
-    } finally {
-      flushInFlight = false;
+  async function flush(drainAll = false): Promise<void> {
+    if (flushInFlight) {
+      replayFlushRequested = true;
+      replayFlushDrainAll ||= drainAll;
+      await currentFlushPromise;
+      return;
     }
+
+    currentFlushPromise = (async () => {
+      flushInFlight = true;
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        let keepDraining = drainAll;
+        while (true) {
+          const path = s.sessionAutoSavePath;
+          if (!path) break;
+
+          const newLines = s.drainPendingAutoSaveLines(
+            AUTO_SAVE_FLUSH_MAX_CHARS,
+          );
+          if (newLines.length === 0) break;
+
+          const content =
+            newLines
+              .map((l) => {
+                const dir =
+                  l.direction === "tx"
+                    ? "TX "
+                    : l.direction === "rx"
+                      ? "RX "
+                      : "SYS";
+                if (s.autoSaveTimestamp) {
+                  return `[${formatTs(l.tsMs)}] [${dir}] ${stripAnsi(l.text)}`;
+                }
+                return stripAnsi(l.text);
+              })
+              .join("\n") + "\n";
+
+          await invoke("append_text_file", { path, content });
+
+          if (keepDraining) continue;
+          if (!replayFlushRequested) break;
+          keepDraining = replayFlushDrainAll;
+          replayFlushRequested = false;
+          replayFlushDrainAll = false;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        s.appendSysLine(t("serialDebug.autoSave.errWrite", { msg }));
+        stopInterval();
+        s.sessionAutoSavePath = null;
+      } finally {
+        flushInFlight = false;
+        currentFlushPromise = null;
+        if (replayFlushRequested && s.sessionAutoSavePath) {
+          const rerunDrainAll = replayFlushDrainAll;
+          replayFlushRequested = false;
+          replayFlushDrainAll = false;
+          await flush(rerunDrainAll);
+        } else {
+          replayFlushRequested = false;
+          replayFlushDrainAll = false;
+        }
+      }
+    })();
+
+    await currentFlushPromise;
   }
 
   function startAutoSave(): void {
@@ -78,7 +112,6 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     const filename = `serial-debug-${makeStamp()}.txt`;
     // path separator: Tauri on all platforms accepts forward slash
     s.sessionAutoSavePath = `${s.autoSaveDir}/${portDir}/${filename}`;
-    lastFlushedLineId = 0;
     autoSaveInterval = setInterval(() => {
       void flush();
     }, 5000);
@@ -86,7 +119,7 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
 
   async function finalFlushAndStop(keepSession = false): Promise<void> {
     stopInterval();
-    await flush();
+    await flush(true);
     if (!keepSession) {
       s.sessionAutoSavePath = null;
     }
@@ -94,10 +127,6 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
 
   onActivated(() => {
     if (s.open && s.sessionAutoSavePath) {
-      // Resuming after navigation: all existing lines were already flushed on deactivate.
-      // Restore the watermark so the next flush only picks up lines that arrived while away.
-      lastFlushedLineId =
-        s.lines.length > 0 ? s.lines[s.lines.length - 1].id : 0;
       stopInterval();
       autoSaveInterval = setInterval(() => {
         void flush();

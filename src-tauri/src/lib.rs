@@ -2,15 +2,21 @@ mod batch_auth;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, RunEvent, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
-use tyutool_core::{DebugChunk, DebugConfig, SerialDebugSession};
+use tyutool_core::{
+    serial_debug_scan_filter_matches, DebugChunk, DebugConfig, SerialDebugArchive,
+    SerialDebugArchiveReader, SerialDebugChunkBatchBuffer, SerialDebugFilterBackfillSnapshot,
+    SerialDebugFilterDefinition, SerialDebugFilterIndex, SerialDebugFilterPage,
+    SerialDebugFilterStats, SerialDebugLine, SerialDebugSession, SerialDebugSessionPage,
+};
 
 /// Set once at startup; included in exported issue-report metadata.
 static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -28,7 +34,9 @@ struct FlashState {
 }
 
 struct DebugState {
-    session: StdMutex<Option<SerialDebugSession>>,
+    session: Arc<StdMutex<Option<SerialDebugSession>>>,
+    archive: Arc<StdMutex<SerialDebugArchive>>,
+    filters: Arc<StdMutex<SerialDebugFilterIndex>>,
 }
 
 struct BatchSlot {
@@ -58,10 +66,135 @@ struct DisconnectPayload {
     reason: String,
 }
 
+#[derive(Clone, Serialize)]
+struct SerialDebugFilterUpdatePayload {
+    def: SerialDebugFilterDefinition,
+    stats: SerialDebugFilterStats,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SerialDebugFilterAddArgs {
+    keyword: String,
+    use_regex: bool,
+    color: String,
+}
+
 const DEFAULT_MAIN_WINDOW_WIDTH: f64 = 1280.0;
 const DEFAULT_MAIN_WINDOW_HEIGHT: f64 = 800.0;
 const MIN_MAIN_WINDOW_WIDTH: f64 = 1024.0;
 const MIN_MAIN_WINDOW_HEIGHT: f64 = 680.0;
+const SERIAL_DEBUG_CHUNK_FLUSH_MS: u64 = 12;
+const SERIAL_DEBUG_CHUNK_FLUSH_BYTES: usize = 32 * 1024;
+const SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY: usize = 256;
+
+fn serial_debug_archive_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("tyutool").join("serial-debug")
+}
+
+fn emit_filter_update(
+    app: &AppHandle,
+    def: &SerialDebugFilterDefinition,
+    stats: &SerialDebugFilterStats,
+) {
+    let _ = app.emit(
+        "serial-debug-filter-updated",
+        &SerialDebugFilterUpdatePayload {
+            def: def.clone(),
+            stats: stats.clone(),
+        },
+    );
+}
+
+fn ingest_serial_debug_lines(
+    app: &AppHandle,
+    archive: &Arc<StdMutex<SerialDebugArchive>>,
+    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
+    lines: &[SerialDebugLine],
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let updates = {
+        let mut guard = match filters.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        guard.ingest_completed_lines(lines).unwrap_or_default()
+    };
+    if updates.is_empty() {
+        return;
+    }
+    let guard = match filters.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    for stats in updates {
+        if let Some(def) = guard.definition(&stats.filter_id) {
+            emit_filter_update(app, &def, &stats);
+        }
+    }
+    let _ = archive; // keeps the signature symmetric with other bridge helpers
+}
+
+fn flush_serial_debug_chunk(
+    app: &AppHandle,
+    archive: &Arc<StdMutex<SerialDebugArchive>>,
+    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
+    chunks: Vec<DebugChunk>,
+) {
+    if chunks.is_empty() {
+        return;
+    }
+    let completed = {
+        let mut archive = match archive.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let mut completed = Vec::new();
+        for chunk in &chunks {
+            completed.extend(archive.append_chunk(chunk).unwrap_or_default());
+        }
+        completed
+    };
+    ingest_serial_debug_lines(app, archive, filters, &completed);
+    let _ = app.emit("serial-debug-chunk-batch", &chunks);
+}
+
+fn spawn_serial_debug_chunk_bridge(
+    app: AppHandle,
+    archive: Arc<StdMutex<SerialDebugArchive>>,
+    filters: Arc<StdMutex<SerialDebugFilterIndex>>,
+) -> SyncSender<DebugChunk> {
+    // Bound the bridge queue so sustained ingress can't grow process memory without limit
+    // when archive/filter/UI consumption temporarily lags behind the serial reader.
+    let (tx, rx) = mpsc::sync_channel::<DebugChunk>(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY);
+    std::thread::spawn(move || {
+        let mut pending = SerialDebugChunkBatchBuffer::new();
+        loop {
+            match rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)) {
+                Ok(chunk) => {
+                    pending.push(chunk);
+                    if pending.should_flush_bytes(SERIAL_DEBUG_CHUNK_FLUSH_BYTES) {
+                        flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if pending
+                        .should_flush_elapsed(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS))
+                    {
+                        flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
+                    return;
+                }
+            }
+        }
+    });
+    tx
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PhysicalRect {
@@ -929,14 +1062,21 @@ async fn serial_debug_open(
             return Err("already open".into());
         }
     }
+    let archive_for_chunk = Arc::clone(&state.archive);
+    let filters_for_chunk = Arc::clone(&state.filters);
     let app_for_chunk = app.clone();
     let app_for_disc = app.clone();
+    let chunk_tx = spawn_serial_debug_chunk_bridge(
+        app_for_chunk.clone(),
+        Arc::clone(&archive_for_chunk),
+        Arc::clone(&filters_for_chunk),
+    );
     // Run the blocking serialport::open() off the main thread.
     let session = tauri::async_runtime::spawn_blocking(move || {
         SerialDebugSession::open(
             cfg,
             Box::new(move |chunk: DebugChunk| {
-                let _ = app_for_chunk.emit("serial-debug-chunk", &chunk);
+                let _ = chunk_tx.send(chunk);
             }),
             Box::new(move |reason: String| {
                 let _ =
@@ -1002,8 +1142,18 @@ fn serial_debug_send(
     let chunk = tyutool_core::DebugChunk {
         direction: tyutool_core::Direction::Tx,
         ts_ms,
-        bytes,
+        bytes: bytes.clone(),
     };
+    let completed = {
+        let mut archive = state
+            .archive
+            .lock()
+            .map_err(|_| "debug archive poisoned".to_string())?;
+        archive
+            .append_chunk(&chunk)
+            .map_err(|e| format!("append serial debug tx chunk failed: {e}"))?
+    };
+    ingest_serial_debug_lines(&app, &state.archive, &state.filters, &completed);
     let _ = app.emit("serial-debug-chunk", &chunk);
     Ok(())
 }
@@ -1015,6 +1165,205 @@ fn serial_debug_state(state: State<'_, DebugState>) -> Result<Option<DebugConfig
         .lock()
         .map_err(|_| "debug state poisoned".to_string())?;
     Ok(guard.as_ref().map(|s| s.config().clone()))
+}
+
+#[tauri::command]
+fn serial_debug_session_clear(app: AppHandle, state: State<'_, DebugState>) -> Result<(), String> {
+    {
+        let mut archive = state
+            .archive
+            .lock()
+            .map_err(|_| "debug archive poisoned".to_string())?;
+        archive.clear().map_err(|e| e.to_string())?;
+    }
+    let updates = {
+        let mut filters = state
+            .filters
+            .lock()
+            .map_err(|_| "debug filters poisoned".to_string())?;
+        filters.reset_for_new_session()
+    };
+    let filters = state
+        .filters
+        .lock()
+        .map_err(|_| "debug filters poisoned".to_string())?;
+    for stats in updates {
+        if let Some(def) = filters.definition(&stats.filter_id) {
+            emit_filter_update(&app, &def, &stats);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_append_sys_line(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+    ts_ms: u64,
+    text: String,
+) -> Result<(), String> {
+    let line = {
+        let mut archive = state
+            .archive
+            .lock()
+            .map_err(|_| "debug archive poisoned".to_string())?;
+        archive
+            .append_sys_line(ts_ms, text)
+            .map_err(|e| format!("append sys line failed: {e}"))?
+    };
+    ingest_serial_debug_lines(&app, &state.archive, &state.filters, &[line]);
+    Ok(())
+}
+
+#[tauri::command]
+fn serial_debug_filter_add(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+    args: SerialDebugFilterAddArgs,
+) -> Result<SerialDebugFilterUpdatePayload, String> {
+    let snapshot_total_lines = {
+        let archive = state
+            .archive
+            .lock()
+            .map_err(|_| "debug archive poisoned".to_string())?;
+        archive.total_lines()
+    };
+    let def = {
+        let mut filters = state
+            .filters
+            .lock()
+            .map_err(|_| "debug filters poisoned".to_string())?;
+        filters.add_filter(
+            args.keyword,
+            args.use_regex,
+            args.color,
+            snapshot_total_lines,
+        )?
+    };
+    let initial = {
+        let filters = state
+            .filters
+            .lock()
+            .map_err(|_| "debug filters poisoned".to_string())?;
+        filters
+            .stats(&def.id)
+            .ok_or_else(|| "new filter stats missing".to_string())?
+    };
+    let (backfill_stats, backfill_snapshot, archive_reader): (
+        SerialDebugFilterStats,
+        SerialDebugFilterBackfillSnapshot,
+        SerialDebugArchiveReader,
+    ) = {
+        let mut filters = state
+            .filters
+            .lock()
+            .map_err(|_| "debug filters poisoned".to_string())?;
+        let stats = filters.start_backfill(&def.id).map_err(|e| e.to_string())?;
+        let snapshot = filters
+            .backfill_snapshot(&def.id)
+            .ok_or_else(|| "new filter backfill snapshot missing".to_string())?;
+        drop(filters);
+        let archive = state
+            .archive
+            .lock()
+            .map_err(|_| "debug archive poisoned".to_string())?;
+        (stats, snapshot, archive.snapshot_reader())
+    };
+    emit_filter_update(&app, &def, &backfill_stats);
+
+    let app_for_backfill = app.clone();
+    let filters_for_backfill = Arc::clone(&state.filters);
+    let filter_id = def.id.clone();
+    let historical_idx_path =
+        serial_debug_archive_dir().join(format!("serial-debug-filter-{filter_id}.historical.idx"));
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = serial_debug_scan_filter_matches(
+            &backfill_snapshot,
+            &archive_reader,
+            &historical_idx_path,
+        );
+        let mut filters = match filters_for_backfill.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let stats = match result {
+            Ok((historical_match_count, historical_scanned_until_line_no)) => {
+                match filters.finish_backfill_from_file(
+                    &filter_id,
+                    &historical_idx_path,
+                    historical_match_count,
+                    historical_scanned_until_line_no,
+                ) {
+                    Ok(stats) => Some(stats),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => filters.fail_backfill(&filter_id, e.to_string()).ok(),
+                }
+            }
+            Err(e) => filters.fail_backfill(&filter_id, e.to_string()).ok(),
+        };
+        let _ = std::fs::remove_file(&historical_idx_path);
+        if let Some(stats) = stats {
+            if let Some(def) = filters.definition(&filter_id) {
+                emit_filter_update(&app_for_backfill, &def, &stats);
+            }
+        }
+    });
+
+    Ok(SerialDebugFilterUpdatePayload {
+        def,
+        stats: initial,
+    })
+}
+
+#[tauri::command]
+fn serial_debug_filter_remove(
+    state: State<'_, DebugState>,
+    filter_id: String,
+) -> Result<(), String> {
+    let removed = state
+        .filters
+        .lock()
+        .map_err(|_| "debug filters poisoned".to_string())?
+        .remove_filter(&filter_id);
+    if removed {
+        Ok(())
+    } else {
+        Err("filter not found".into())
+    }
+}
+
+#[tauri::command]
+fn serial_debug_filter_read_matches(
+    state: State<'_, DebugState>,
+    filter_id: String,
+    start: u64,
+    limit: u64,
+) -> Result<SerialDebugFilterPage, String> {
+    let archive = state
+        .archive
+        .lock()
+        .map_err(|_| "debug archive poisoned".to_string())?;
+    let filters = state
+        .filters
+        .lock()
+        .map_err(|_| "debug filters poisoned".to_string())?;
+    filters
+        .read_match_page(&filter_id, start, limit, &archive)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn serial_debug_session_read_page(
+    state: State<'_, DebugState>,
+    start: u64,
+    limit: u64,
+) -> Result<SerialDebugSessionPage, String> {
+    state
+        .archive
+        .lock()
+        .map_err(|_| "debug archive poisoned".to_string())?
+        .read_page(start, limit)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1790,7 +2139,15 @@ pub fn run() {
             thread: StdMutex::new(None),
         })
         .manage(DebugState {
-            session: StdMutex::new(None),
+            session: Arc::new(StdMutex::new(None)),
+            archive: Arc::new(StdMutex::new(
+                SerialDebugArchive::create(&serial_debug_archive_dir())
+                    .expect("create serial-debug archive"),
+            )),
+            filters: Arc::new(StdMutex::new(
+                SerialDebugFilterIndex::create(&serial_debug_archive_dir())
+                    .expect("create serial-debug filters"),
+            )),
         })
         .manage(BatchFlashState {
             slots: StdMutex::new(HashMap::new()),
@@ -1843,6 +2200,12 @@ pub fn run() {
             serial_debug_close,
             serial_debug_send,
             serial_debug_state,
+            serial_debug_session_clear,
+            serial_debug_append_sys_line,
+            serial_debug_filter_add,
+            serial_debug_filter_remove,
+            serial_debug_filter_read_matches,
+            serial_debug_session_read_page,
             write_text_file,
             append_text_file,
             list_log_files,

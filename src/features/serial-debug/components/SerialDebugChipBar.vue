@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { useSerialDebugStore } from '@/stores/serial-debug';
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { useSerialDebugStore } from "@/stores/serial-debug";
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
 
 // ── add-popover state ─────────────────────────────────────────────────
 const showPopover = ref(false);
-const addKeyword = ref('');
+const addKeyword = ref("");
 const addUseRegex = ref(false);
-const addError = ref('');
+const addError = ref("");
 const btnRef = ref<HTMLButtonElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
-const popoverPos = ref({ top: '0px', left: '0px' });
+const popoverPos = ref({ top: "0px", left: "0px" });
 
 async function openPopover(): Promise<void> {
-  addKeyword.value = '';
+  addKeyword.value = "";
   addUseRegex.value = false;
-  addError.value = '';
+  addError.value = "";
   showPopover.value = true;
   await nextTick();
   if (btnRef.value) {
@@ -37,56 +37,57 @@ function onDocMousedown(e: MouseEvent): void {
   if (
     !popoverRef.value?.contains(e.target as Node) &&
     !btnRef.value?.contains(e.target as Node)
-  ) closePopover();
+  )
+    closePopover();
 }
 
 watch(showPopover, (open) => {
-  if (open) document.addEventListener('mousedown', onDocMousedown);
-  else document.removeEventListener('mousedown', onDocMousedown);
+  if (open) document.addEventListener("mousedown", onDocMousedown);
+  else document.removeEventListener("mousedown", onDocMousedown);
 });
 
-onUnmounted(() => { document.removeEventListener('mousedown', onDocMousedown); });
+onUnmounted(() => {
+  document.removeEventListener("mousedown", onDocMousedown);
+});
 
 function submitAdd(): void {
-  addError.value = '';
-  const result = s.addChip(addKeyword.value, addUseRegex.value);
-  if (result === 'ok') {
-    closePopover();
-  } else if (result === 'duplicate') {
-    addError.value = t('serialDebug.chip.dupWarning');
-  } else {
-    addError.value = t('serialDebug.chip.invalidRegex');
-  }
+  addError.value = "";
+  void s.addChip(addKeyword.value, addUseRegex.value).then((result) => {
+    if (result === "ok") {
+      closePopover();
+    } else if (result === "duplicate") {
+      addError.value = t("serialDebug.chip.dupWarning");
+    } else {
+      addError.value = t("serialDebug.chip.invalidRegex");
+    }
+  });
 }
 
 function onInputKey(ev: KeyboardEvent): void {
-  if (ev.key === 'Enter') { ev.preventDefault(); submitAdd(); }
-  else if (ev.key === 'Escape') closePopover();
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    submitAdd();
+  } else if (ev.key === "Escape") closePopover();
 }
 
 // ── tab match counts ──────────────────────────────────────────────────
 const chipMatchCounts = computed<Map<string, number>>(() => {
   const map = new Map<string, number>();
   for (const chip of s.watchChips) {
-    map.set(chip.id, s.lines.filter((l) => s.matchChipKeyword(l, chip)).length);
+    map.set(chip.id, s.filterStatsById[chip.id]?.totalMatches ?? 0);
   }
   return map;
 });
 
-const previewCount = computed<number | null>(() => {
-  const kw = addKeyword.value.trim();
-  if (!kw) return null;
-  if (addUseRegex.value) {
-    let re: RegExp;
-    try { re = new RegExp(kw); } catch { return null; }
-    return s.lines.filter((l) => re.test(l.text)).length;
-  }
-  return s.lines.filter((l) => l.text.includes(kw)).length;
-});
+const previewCount = computed<number | null>(() =>
+  addKeyword.value.trim() ? 0 : null,
+);
 </script>
 
 <template>
-  <div class="tab-bar flex items-center gap-0.5 px-2 border-b border-[var(--ty-border)] bg-[var(--ty-surface)] overflow-x-auto">
+  <div
+    class="tab-bar flex items-center gap-0.5 px-2 border-b border-[var(--ty-border)] bg-[var(--ty-surface)] overflow-x-auto"
+  >
     <!-- "全部" tab -->
     <button
       type="button"
@@ -94,7 +95,7 @@ const previewCount = computed<number | null>(() => {
       :class="{ 'tab-active': s.activeChipId === null }"
       @click="s.setActiveChip(null)"
     >
-      {{ t('serialDebug.chip.tabAll') }}
+      {{ t("serialDebug.chip.tabAll") }}
     </button>
 
     <!-- filter tabs -->
@@ -108,13 +109,17 @@ const previewCount = computed<number | null>(() => {
       <span class="tab-dot" :style="{ background: chip.color }" />
       <span class="tab-keyword" :title="chip.keyword">{{ chip.keyword }}</span>
       <span v-if="chip.useRegex" class="tab-regex">.*</span>
-      <span class="tab-count" :style="{ color: chip.color }">{{ chipMatchCounts.get(chip.id) ?? 0 }}</span>
+      <span class="tab-count" :style="{ color: chip.color }">{{
+        chipMatchCounts.get(chip.id) ?? 0
+      }}</span>
       <button
         type="button"
         class="tab-close"
         @click.stop="s.removeChip(chip.id)"
         :aria-label="t('serialDebug.chip.removeTab')"
-      >×</button>
+      >
+        ×
+      </button>
     </div>
 
     <!-- add button -->
@@ -155,15 +160,24 @@ const previewCount = computed<number | null>(() => {
           :class="{ active: addUseRegex }"
           @click="addUseRegex = !addUseRegex"
           :title="t('serialDebug.chip.regexLabel')"
-        >.*</button>
+        >
+          .*
+        </button>
       </div>
       <div v-if="addError" class="pop-error">{{ addError }}</div>
       <div class="flex items-center justify-between gap-2 mt-1.5">
         <span class="pop-preview">
-          {{ previewCount !== null ? `${previewCount} match${previewCount === 1 ? '' : 'es'}` : '' }}
+          {{
+            previewCount !== null ? t("serialDebug.chip.scanWholeSession") : ""
+          }}
         </span>
-        <button type="button" class="pop-add-btn" :disabled="!addKeyword.trim()" @click="submitAdd">
-          {{ t('serialDebug.chip.addBtn') }}
+        <button
+          type="button"
+          class="pop-add-btn"
+          :disabled="!addKeyword.trim()"
+          @click="submitAdd"
+        >
+          {{ t("serialDebug.chip.addBtn") }}
         </button>
       </div>
     </div>
@@ -176,7 +190,9 @@ const previewCount = computed<number | null>(() => {
   min-height: 2rem;
   scrollbar-width: none;
 }
-.tab-bar::-webkit-scrollbar { display: none; }
+.tab-bar::-webkit-scrollbar {
+  display: none;
+}
 
 .tab-item {
   display: inline-flex;
@@ -191,10 +207,18 @@ const previewCount = computed<number | null>(() => {
   white-space: nowrap;
   color: var(--ty-text-muted);
   background: transparent;
-  transition: color 0.15s, background-color 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
   flex-shrink: 0;
 }
-.tab-item:hover { color: var(--ty-text); background: var(--ty-surface-muted, color-mix(in srgb, var(--ty-text) 6%, transparent)); }
+.tab-item:hover {
+  color: var(--ty-text);
+  background: var(
+    --ty-surface-muted,
+    color-mix(in srgb, var(--ty-text) 6%, transparent)
+  );
+}
 .tab-active {
   color: var(--ty-text);
   background: var(--ty-canvas);
@@ -203,7 +227,7 @@ const previewCount = computed<number | null>(() => {
 }
 /* cover bottom border so active tab merges with log area */
 .tab-active::after {
-  content: '';
+  content: "";
   position: absolute;
   bottom: -1px;
   left: 0;
@@ -247,12 +271,21 @@ const previewCount = computed<number | null>(() => {
   cursor: pointer;
   color: var(--ty-text-muted);
   opacity: 0.6;
-  transition: opacity 0.15s, background-color 0.15s;
+  transition:
+    opacity 0.15s,
+    background-color 0.15s;
 }
-.tab-close:hover { opacity: 1; background: color-mix(in srgb, var(--ty-danger) 15%, transparent); color: var(--ty-danger); }
+.tab-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ty-danger) 15%, transparent);
+  color: var(--ty-danger);
+}
 
 /* ── add button ──────────────────────────────────────────────────────── */
-.add-wrap { display: inline-flex; align-items: center; }
+.add-wrap {
+  display: inline-flex;
+  align-items: center;
+}
 .tab-add {
   display: flex;
   align-items: center;
@@ -264,9 +297,13 @@ const previewCount = computed<number | null>(() => {
   background: transparent;
   color: var(--ty-text-muted);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background-color 0.15s;
 }
-.tab-add:hover, .tab-add-active {
+.tab-add:hover,
+.tab-add-active {
   border-color: var(--ty-primary);
   color: var(--ty-primary);
   background: color-mix(in srgb, var(--ty-primary) 8%, transparent);
@@ -297,7 +334,9 @@ const previewCount = computed<number | null>(() => {
   font-family: monospace;
   outline: none;
 }
-.pop-input:focus { border-color: var(--ty-primary); }
+.pop-input:focus {
+  border-color: var(--ty-primary);
+}
 .pop-toggle {
   padding: 0.25rem 0.5rem;
   border-radius: 0.375rem;
@@ -307,14 +346,21 @@ const previewCount = computed<number | null>(() => {
   cursor: pointer;
   color: var(--ty-text-muted);
   white-space: nowrap;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 .pop-toggle.active {
   background: color-mix(in srgb, var(--ty-primary) 15%, transparent);
   border-color: var(--ty-primary);
   color: var(--ty-primary);
 }
-.pop-preview { font-size: 0.7rem; color: var(--ty-text-muted); min-height: 1em; }
+.pop-preview {
+  font-size: 0.7rem;
+  color: var(--ty-text-muted);
+  min-height: 1em;
+}
 .pop-add-btn {
   padding: 0.2rem 0.625rem;
   border-radius: 0.375rem;
@@ -326,7 +372,15 @@ const previewCount = computed<number | null>(() => {
   cursor: pointer;
   transition: background-color 0.15s;
 }
-.pop-add-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ty-primary) 25%, transparent); }
-.pop-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.pop-error { font-size: 0.75rem; color: var(--ty-danger); }
+.pop-add-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ty-primary) 25%, transparent);
+}
+.pop-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pop-error {
+  font-size: 0.75rem;
+  color: var(--ty-danger);
+}
 </style>

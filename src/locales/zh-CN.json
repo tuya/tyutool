@@ -463,7 +463,8 @@
       "dupWarning": "该关键词已存在",
       "invalidRegex": "无效的正则表达式",
       "tabAll": "全部",
-      "removeTab": "移除过滤"
+      "removeTab": "移除过滤",
+      "scanWholeSession": "将扫描整个会话"
     },
     "search": {
       "placeholder": "在此窗口内搜索…",
@@ -484,6 +485,8 @@
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
       "saveLog": "保存日志",
+      "loadOlderMatches": "加载更早匹配",
+      "loadingOlderMatches": "加载中…",
       "fontDecrease": "缩小字体",
       "fontIncrease": "放大字体",
       "fontSize": "字体",

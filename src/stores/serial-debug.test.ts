@@ -6,23 +6,59 @@ import {
   __setSerialDebugTransportForTest,
   type SerialDebugTransport,
 } from "@/features/serial-debug/transport";
-import type { DebugChunk } from "@/features/serial-debug/types";
+import type {
+  DebugChunk,
+  SerialDebugFilterPage,
+  SerialDebugFilterUpdatePayload,
+} from "@/features/serial-debug/types";
 import { useSerialDebugStore } from "./serial-debug";
 import { useFlashStore } from "./flash";
 import { nextTick } from "vue";
+import { MAX_PENDING_LINE_BYTES } from "@/features/serial-debug/constants";
+
+async function waitForChunkFrame(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 20));
+  await nextTick();
+}
 
 function fakeTransport(): SerialDebugTransport & {
   emitChunk: (c: DebugChunk) => void;
+  emitChunkBatch: (chunks: DebugChunk[]) => void;
   emitDisconnect: (reason: string) => void;
+  emitFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void;
+  readFilterMatchesCalls: Array<{
+    filterId: string;
+    start?: number;
+    limit?: number;
+  }>;
   sent: Uint8Array[];
   opened: boolean;
 } {
   const chunkListeners = new Set<(c: DebugChunk) => void>();
+  const chunkBatchListeners = new Set<(chunks: DebugChunk[]) => void>();
   const discListeners = new Set<(p: { reason: string }) => void>();
+  const filterListeners = new Set<
+    (p: SerialDebugFilterUpdatePayload) => void
+  >();
   const sent: Uint8Array[] = [];
+  const readFilterMatchesCalls: Array<{
+    filterId: string;
+    start?: number;
+    limit?: number;
+  }> = [];
   let opened = false;
+  let nextFilterId = 1;
+  const filters = new Map<
+    string,
+    {
+      def: SerialDebugFilterUpdatePayload["def"];
+      stats: SerialDebugFilterUpdatePayload["stats"];
+      page: SerialDebugFilterPage;
+    }
+  >();
   return {
     sent,
+    readFilterMatchesCalls,
     get opened() {
       return opened;
     },
@@ -35,19 +71,76 @@ function fakeTransport(): SerialDebugTransport & {
     async send(b) {
       sent.push(b);
     },
+    async clearSession() {},
+    async appendSysLine() {},
+    async addFilter(keyword, useRegex, color) {
+      const id = `filter-${nextFilterId++}`;
+      const payload: SerialDebugFilterUpdatePayload = {
+        def: { id, keyword, useRegex, color },
+        stats: {
+          filterId: id,
+          status: "complete",
+          scannedUntilLineNo: 0,
+          totalLinesSnapshot: 0,
+          totalMatches: 0,
+          error: null,
+        },
+      };
+      filters.set(id, {
+        def: payload.def,
+        stats: payload.stats,
+        page: { filterId: id, totalMatches: 0, start: 0, items: [] },
+      });
+      return payload;
+    },
+    async removeFilter(filterId) {
+      filters.delete(filterId);
+    },
+    async readFilterMatches(filterId, start, limit) {
+      readFilterMatchesCalls.push({ filterId, start, limit });
+      return (
+        filters.get(filterId)?.page ?? {
+          filterId,
+          totalMatches: 0,
+          start: 0,
+          items: [],
+        }
+      );
+    },
+    async readSessionPage() {
+      return {
+        totalLines: 0,
+        start: 0,
+        items: [],
+      };
+    },
     onChunk(cb) {
       chunkListeners.add(cb);
       return () => chunkListeners.delete(cb);
+    },
+    onChunkBatch(cb) {
+      chunkBatchListeners.add(cb);
+      return () => chunkBatchListeners.delete(cb);
     },
     onDisconnect(cb) {
       discListeners.add(cb);
       return () => discListeners.delete(cb);
     },
+    onFilterUpdated(cb) {
+      filterListeners.add(cb);
+      return () => filterListeners.delete(cb);
+    },
     emitChunk(c) {
       chunkListeners.forEach((l) => l(c));
     },
+    emitChunkBatch(chunks) {
+      chunkBatchListeners.forEach((l) => l(chunks));
+    },
     emitDisconnect(reason) {
       discListeners.forEach((l) => l({ reason }));
+    },
+    emitFilterUpdated(payload) {
+      filterListeners.forEach((l) => l(payload));
     },
   };
 }
@@ -94,13 +187,32 @@ describe("useSerialDebugStore.appendChunk", () => {
     expect(s.lines[0].text).toBe("hello");
   });
 
-  it("drops oldest entries past MAX_LOG_LINES", () => {
+  it("forces very long pending data into a bounded line even without newline", () => {
     const s = useSerialDebugStore();
-    // Simulate 20005 lines arriving in one batch (each terminated by \n).
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: new Array(MAX_PENDING_LINE_BYTES + 5).fill("a".charCodeAt(0)),
+    });
+    expect(s.lines.length).toBe(1);
+    expect(s.lines[0].text.length).toBe(MAX_PENDING_LINE_BYTES);
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1001,
+      bytes: [0x0a],
+    });
+    expect(s.lines.length).toBe(2);
+    expect(s.lines[1].text).toBe("aaaaa");
+  });
+
+  it("drops oldest entries past the visible live window limit", () => {
+    const s = useSerialDebugStore();
+    // Simulate slightly more than the visible window arriving in one batch.
     const oneLine = "x\n";
-    const bytes = [...Buffer.from(oneLine.repeat(20005))];
+    const bytes = [...Buffer.from(oneLine.repeat(3505))];
     s.appendChunk({ direction: "rx", tsMs: 1000, bytes });
-    expect(s.lines.length).toBe(20000);
+    expect(s.lines.length).toBe(3000);
   });
 
   it("each line owns an independent rawBytes copy", () => {
@@ -112,6 +224,55 @@ describe("useSerialDebugStore.appendChunk", () => {
     });
     expect(s.lines.length).toBe(2);
     expect(s.lines[0].rawBytes).not.toBe(s.lines[1].rawBytes);
+  });
+
+  it("reuses one TextDecoder while processing a chunk batch", () => {
+    const OriginalTextDecoder = globalThis.TextDecoder;
+    let decoderConstructCount = 0;
+    class CountingTextDecoder extends OriginalTextDecoder {
+      constructor(label?: string, options?: TextDecoderOptions) {
+        super(label, options);
+        decoderConstructCount += 1;
+      }
+    }
+    vi.stubGlobal("TextDecoder", CountingTextDecoder);
+
+    try {
+      const s = useSerialDebugStore();
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("one\ntwo\nthree\n")],
+      });
+      expect(s.lines.map((line) => line.text)).toEqual(["one", "two", "three"]);
+      expect(decoderConstructCount).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      globalThis.TextDecoder = OriginalTextDecoder;
+    }
+  });
+
+  it("drains auto-save lines in bounded lightweight batches", () => {
+    const s = useSerialDebugStore();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("first\nsecond\n")],
+    });
+
+    const firstBatch = s.drainPendingAutoSaveLines(1);
+
+    expect(firstBatch).toHaveLength(1);
+    expect(firstBatch[0]).toMatchObject({
+      direction: "rx",
+      tsMs: 1000,
+      text: "first",
+    });
+    expect(firstBatch[0]).not.toHaveProperty("rawBytes");
+
+    const secondBatch = s.drainPendingAutoSaveLines(1);
+    expect(secondBatch).toHaveLength(1);
+    expect(secondBatch[0].text).toBe("second");
   });
 });
 
@@ -178,6 +339,143 @@ describe("useSerialDebugStore port-manager integration", () => {
     expect(s.open).toBe(true);
   });
 
+  it("openPort stays compatible with transports that do not implement onChunkBatch", async () => {
+    const legacyTransport = fakeTransport();
+    const { onChunkBatch, ...legacy } = legacyTransport;
+    __setSerialDebugTransportForTest(legacy as unknown as SerialDebugTransport);
+
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+
+    await expect(s.openPort()).resolves.toBeUndefined();
+    expect(s.open).toBe(true);
+  });
+
+  it("batches transport chunks until the next frame", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+    const before = s.lines.length;
+
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("hel")],
+    });
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1001,
+      bytes: [...Buffer.from("lo\nworld\n")],
+    });
+
+    expect(s.lines.length).toBe(before);
+
+    await waitForChunkFrame();
+
+    expect(s.lines.slice(before).map((line) => line.text)).toEqual([
+      "hello",
+      "world",
+    ]);
+  });
+
+  it("queues transport chunk batches with one frame flush", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+    const before = s.lines.length;
+
+    fake.emitChunkBatch([
+      {
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("hel")],
+      },
+      {
+        direction: "rx",
+        tsMs: 1001,
+        bytes: [...Buffer.from("lo\nworld\n")],
+      },
+    ]);
+
+    expect(s.lines.length).toBe(before);
+
+    await waitForChunkFrame();
+
+    expect(s.lines.slice(before).map((line) => line.text)).toEqual([
+      "hello",
+      "world",
+    ]);
+  });
+
+  it("reuses one TextDecoder across queued chunks flushed in the same frame", async () => {
+    const OriginalTextDecoder = globalThis.TextDecoder;
+    let decoderConstructCount = 0;
+    class CountingTextDecoder extends OriginalTextDecoder {
+      constructor(label?: string, options?: TextDecoderOptions) {
+        super(label, options);
+        decoderConstructCount += 1;
+      }
+    }
+    vi.stubGlobal("TextDecoder", CountingTextDecoder);
+
+    try {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      s.baudRate = 115200;
+      await s.openPort();
+
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("hel")],
+      });
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1001,
+        bytes: [...Buffer.from("lo\nworld\n")],
+      });
+
+      await waitForChunkFrame();
+
+      expect(s.lines.slice(-2).map((line) => line.text)).toEqual([
+        "hello",
+        "world",
+      ]);
+      expect(decoderConstructCount).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      globalThis.TextDecoder = OriginalTextDecoder;
+    }
+  });
+
+  it("pushes queued frame chunks into the reactive lines array once", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+
+    const pushSpy = vi.spyOn(s.lines, "push");
+
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("one\n")],
+    });
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1001,
+      bytes: [...Buffer.from("two\n")],
+    });
+
+    await waitForChunkFrame();
+
+    expect(s.lines.slice(-2).map((line) => line.text)).toEqual(["one", "two"]);
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("when port-manager denies, openPort does not call transport.open", async () => {
     const { usePortManagerStore } = await import("@/stores/port-manager");
     const pm = usePortManagerStore();
@@ -195,16 +493,18 @@ describe("useSerialDebugStore port-manager integration", () => {
     expect(s.open).toBe(false);
   });
 
-  it("clear() empties lines and pending buffer", () => {
+  it("clear() empties lines and pending buffer", async () => {
     const s = useSerialDebugStore();
     s.appendChunk({
       direction: "rx",
       tsMs: 1000,
       bytes: [...Buffer.from("ab\ncd")],
     });
+    expect(s.drainPendingAutoSaveLines()).toHaveLength(1);
     expect(s.lines.length).toBe(1);
-    s.clear();
+    await s.clear();
     expect(s.lines.length).toBe(0);
+    expect(s.drainPendingAutoSaveLines()).toEqual([]);
     // new input after clear should start a fresh line
     s.appendChunk({
       direction: "rx",
@@ -212,6 +512,24 @@ describe("useSerialDebugStore port-manager integration", () => {
       bytes: [...Buffer.from("xy\n")],
     });
     expect(s.lines[0].text).toBe("xy");
+  });
+
+  it("clear() drops queued transport chunks before they flush", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("stale\n")],
+    });
+    s.clear();
+
+    await waitForChunkFrame();
+
+    expect(s.lines).toEqual([]);
   });
 
   it("auto-resumes when the released port becomes free again", async () => {
@@ -254,9 +572,9 @@ describe("useSerialDebugStore watch chip management", () => {
   });
   afterEach(() => __setSerialDebugTransportForTest(null));
 
-  it("addChip returns ok, adds chip, and sets it as active tab", () => {
+  it("addChip returns ok, adds chip, and sets it as active tab", async () => {
     const s = useSerialDebugStore();
-    const result = s.addChip("ERROR", false);
+    const result = await s.addChip("ERROR", false);
     expect(result).toBe("ok");
     expect(s.watchChips.length).toBe(1);
     expect(s.watchChips[0]).toMatchObject({
@@ -266,106 +584,150 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(s.activeChipId).toBe(s.watchChips[0].id);
   });
 
-  it("addChip returns duplicate when same keyword added twice", () => {
+  it("addChip returns duplicate when same keyword added twice", async () => {
     const s = useSerialDebugStore();
-    expect(s.addChip("WIFI", false)).toBe("ok");
-    expect(s.addChip("WIFI", false)).toBe("duplicate");
+    expect(await s.addChip("WIFI", false)).toBe("ok");
+    expect(await s.addChip("WIFI", false)).toBe("duplicate");
     expect(s.watchChips.length).toBe(1);
   });
 
-  it("addChip returns invalid-regex for bad pattern", () => {
+  it("addChip returns invalid-regex for bad pattern", async () => {
     const s = useSerialDebugStore();
-    expect(s.addChip("[invalid", true)).toBe("invalid-regex");
+    expect(await s.addChip("[invalid", true)).toBe("invalid-regex");
     expect(s.watchChips.length).toBe(0);
   });
 
-  it("removeChip removes by id and falls back activeChipId", () => {
+  it("removeChip removes by id and falls back activeChipId", async () => {
     const s = useSerialDebugStore();
-    s.addChip("FIRST", false);
-    s.addChip("SECOND", false);
+    await s.addChip("FIRST", false);
+    await s.addChip("SECOND", false);
     const firstId = s.watchChips[0].id;
     const secondId = s.watchChips[1].id;
-    s.setActiveChip(secondId);
-    s.removeChip(secondId);
+    await s.setActiveChip(secondId);
+    await s.removeChip(secondId);
     expect(s.watchChips.length).toBe(1);
     expect(s.watchChips[0].keyword).toBe("FIRST");
     expect(s.activeChipId).toBe(firstId);
   });
 
-  it("setActiveChip switches active tab (null = All)", () => {
+  it("setActiveChip switches active tab (null = All)", async () => {
     const s = useSerialDebugStore();
-    s.addChip("LOG", false);
+    await s.addChip("LOG", false);
     const id = s.watchChips[0].id;
     expect(s.activeChipId).toBe(id);
-    s.setActiveChip(null);
+    await s.setActiveChip(null);
     expect(s.activeChipId).toBeNull();
-    s.setActiveChip(id);
+    await s.setActiveChip(id);
     expect(s.activeChipId).toBe(id);
   });
 
-  it("matchChipKeyword matches plain text substring (case-sensitive)", () => {
+  it("clear does not affect watchChips", async () => {
     const s = useSerialDebugStore();
-    s.addChip("ERROR", false);
-    const chip = s.watchChips[0];
-    expect(
-      s.matchChipKeyword(
-        { id: 1, tsMs: 0, direction: "rx", text: "ERROR: timeout" },
-        chip,
-      ),
-    ).toBe(true);
-    expect(
-      s.matchChipKeyword(
-        { id: 2, tsMs: 0, direction: "rx", text: "error: timeout" },
-        chip,
-      ),
-    ).toBe(false);
-    expect(
-      s.matchChipKeyword(
-        { id: 3, tsMs: 0, direction: "rx", text: "no match" },
-        chip,
-      ),
-    ).toBe(false);
-  });
-
-  it("matchChipKeyword matches regex pattern", () => {
-    const s = useSerialDebugStore();
-    s.addChip("err(or)?", true);
-    const chip = s.watchChips[0];
-    expect(
-      s.matchChipKeyword(
-        { id: 1, tsMs: 0, direction: "rx", text: "err: foo" },
-        chip,
-      ),
-    ).toBe(true);
-    expect(
-      s.matchChipKeyword(
-        { id: 2, tsMs: 0, direction: "rx", text: "error: bar" },
-        chip,
-      ),
-    ).toBe(true);
-    expect(
-      s.matchChipKeyword({ id: 3, tsMs: 0, direction: "rx", text: "ok" }, chip),
-    ).toBe(false);
-  });
-
-  it("clear does not affect watchChips", () => {
-    const s = useSerialDebugStore();
-    s.addChip("LOG", false);
+    await s.addChip("LOG", false);
     s.appendChunk({
       direction: "rx",
       tsMs: 1000,
       bytes: [...Buffer.from("LOG line\n")],
     });
-    s.clear();
+    await s.clear();
     expect(s.watchChips.length).toBe(1);
     expect(s.lines.length).toBe(0);
+  });
+
+  it("clear resets filter stats and loaded filter pages for a new session", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("LOG", false);
+    const id = s.watchChips[0].id;
+    s.filterStatsById = {
+      [id]: {
+        filterId: id,
+        status: "complete",
+        scannedUntilLineNo: 42,
+        totalLinesSnapshot: 42,
+        totalMatches: 7,
+        error: "old",
+      },
+    };
+    s.filterPagesById = {
+      [id]: {
+        filterId: id,
+        totalMatches: 7,
+        start: 3,
+        items: [
+          {
+            id: 1,
+            direction: "rx",
+            tsMs: 1000,
+            text: "LOG line",
+          },
+        ],
+      },
+    };
+    s.activeFilterLoading = true;
+    s.activeFilterFullyLoaded = false;
+
+    await s.clear();
+
+    expect(s.filterStatsById[id]).toEqual({
+      filterId: id,
+      status: "complete",
+      scannedUntilLineNo: 0,
+      totalLinesSnapshot: 0,
+      totalMatches: 0,
+      error: null,
+    });
+    expect(s.filterPagesById).toEqual({});
+    expect(s.activeFilterLoading).toBe(false);
+    expect(s.activeFilterFullyLoaded).toBe(true);
+  });
+
+  it("throttles active filter tail reloads for repeated live updates", async () => {
+    vi.useFakeTimers();
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.addChip("LOG", false);
+    const filterId = s.watchChips[0].id;
+    fake.readFilterMatchesCalls.length = 0;
+
+    await s.openPort();
+    fake.readFilterMatchesCalls.length = 0;
+
+    fake.emitFilterUpdated({
+      def: s.watchChips[0],
+      stats: {
+        filterId,
+        status: "complete",
+        scannedUntilLineNo: 10,
+        totalLinesSnapshot: 10,
+        totalMatches: 1,
+        error: null,
+      },
+    });
+    fake.emitFilterUpdated({
+      def: s.watchChips[0],
+      stats: {
+        filterId,
+        status: "complete",
+        scannedUntilLineNo: 11,
+        totalLinesSnapshot: 11,
+        totalMatches: 2,
+        error: null,
+      },
+    });
+
+    expect(fake.readFilterMatchesCalls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(fake.readFilterMatchesCalls).toHaveLength(1);
+    expect(fake.readFilterMatchesCalls[0]?.filterId).toBe(filterId);
   });
 
   it("chips cycle colors from CHIP_COLORS when added", async () => {
     const { CHIP_COLORS } = await import("@/features/serial-debug/constants");
     const s = useSerialDebugStore();
     for (let i = 0; i < CHIP_COLORS.length + 1; i++) {
-      s.addChip(`kw${i}`, false);
+      await s.addChip(`kw${i}`, false);
     }
     expect(s.watchChips[0].color).toBe(CHIP_COLORS[0]);
     expect(s.watchChips[CHIP_COLORS.length].color).toBe(CHIP_COLORS[0]);
@@ -466,7 +828,11 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
   // the error/disconnect branches the happy-path fake never reaches.
   function configurableTransport() {
     const chunkListeners = new Set<(c: DebugChunk) => void>();
+    const chunkBatchListeners = new Set<(chunks: DebugChunk[]) => void>();
     const discListeners = new Set<(p: { reason: string }) => void>();
+    const filterListeners = new Set<
+      (p: SerialDebugFilterUpdatePayload) => void
+    >();
     const state = {
       openError: null as Error | null,
       sendError: null as Error | null,
@@ -489,13 +855,43 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
         if (state.sendError) throw state.sendError;
         state.sent.push(b);
       },
+      async clearSession() {},
+      async appendSysLine() {},
+      async addFilter(keyword, useRegex, color) {
+        return {
+          def: { id: "filter-1", keyword, useRegex, color },
+          stats: {
+            filterId: "filter-1",
+            status: "complete",
+            scannedUntilLineNo: 0,
+            totalLinesSnapshot: 0,
+            totalMatches: 0,
+            error: null,
+          },
+        };
+      },
+      async removeFilter() {},
+      async readFilterMatches(filterId) {
+        return { filterId, totalMatches: 0, start: 0, items: [] };
+      },
+      async readSessionPage() {
+        return { totalLines: 0, start: 0, items: [] };
+      },
       onChunk(cb) {
         chunkListeners.add(cb);
         return () => chunkListeners.delete(cb);
       },
+      onChunkBatch(cb) {
+        chunkBatchListeners.add(cb);
+        return () => chunkBatchListeners.delete(cb);
+      },
       onDisconnect(cb) {
         discListeners.add(cb);
         return () => discListeners.delete(cb);
+      },
+      onFilterUpdated(cb) {
+        filterListeners.add(cb);
+        return () => filterListeners.delete(cb);
       },
     };
     return {
