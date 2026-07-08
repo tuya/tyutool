@@ -790,6 +790,49 @@ impl<T: AuthIo> AuthSession<T> {
         Ok(None)
     }
 
+    /// Best-effort `auth-read` used only for the pre-write probe.
+    ///
+    /// Some fresh devices reply with garbled or otherwise invalid auth-read
+    /// content before they have ever been authorized. That should not block the
+    /// subsequent write flow, so pre-check callers downgrade those parse errors
+    /// to `None` after bounded retries. Write-after-read verification remains
+    /// strict and still uses [`Self::auth_read`] directly.
+    fn auth_read_precheck(
+        &mut self,
+        storage: AuthStorage,
+        attempts: u32,
+        retry_ms: Duration,
+        cancel: &AtomicBool,
+        log_context: &str,
+    ) -> Result<Option<(String, String)>, FlashError> {
+        let attempts = attempts.max(1);
+        let mut last_err: Option<FlashError> = None;
+        for attempt in 0..attempts {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            match self.auth_read(storage) {
+                Ok(auth) => {
+                    if auth.is_some() {
+                        return Ok(auth);
+                    }
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                }
+            }
+            if attempt + 1 < attempts {
+                std::thread::sleep(retry_ms);
+            }
+        }
+        if let Some(err) = last_err {
+            log::warn!(
+                "[auth] precheck auth-read failed ({log_context}); continuing as empty: {err}"
+            );
+        }
+        Ok(None)
+    }
+
     /// Send `auth <uuid> <authkey>` and return the response lines.
     ///
     /// `idle` controls how long to wait after the last byte before declaring
@@ -1158,20 +1201,13 @@ where
                 // ── New firmware: 2 retries / 200ms to absorb single-frame noise ──
                 log::info!("flash.log.auth.readDeviceAuth");
                 let storage = job.authorize_storage.unwrap_or_default();
-                let existing_auth = {
-                    let mut auth = None;
-                    for _ in 0..2u32 {
-                        if cancel.load(Ordering::Relaxed) {
-                            return Err(FlashError::Cancelled);
-                        }
-                        auth = sess.auth_read(storage)?;
-                        if auth.is_some() {
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(200));
-                    }
-                    auth
-                };
+                let existing_auth = sess.auth_read_precheck(
+                    storage,
+                    2,
+                    Duration::from_millis(200),
+                    cancel,
+                    "single-device new firmware",
+                )?;
 
                 // Skip write if already identical (checked before conflict to avoid
                 // prompting the user when the credentials are already correct)
@@ -1278,17 +1314,13 @@ where
                 // Optional read: skip write if device already matches
                 log::info!("flash.log.auth.readDeviceAuth");
                 let storage = job.authorize_storage.unwrap_or_default();
-                let mut existing_auth: Option<(String, String)> = None;
-                for _attempt in 1..=5u32 {
-                    if cancel.load(Ordering::Relaxed) {
-                        return Err(FlashError::Cancelled);
-                    }
-                    existing_auth = sess.auth_read(storage)?;
-                    if existing_auth.is_some() {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(800));
-                }
+                let existing_auth = sess.auth_read_precheck(
+                    storage,
+                    5,
+                    Duration::from_millis(800),
+                    cancel,
+                    "single-device old firmware",
+                )?;
 
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     // Skip write if already identical
@@ -1509,21 +1541,13 @@ where
 
             // ── 4. Read existing auth ────────────────────────────────────
             progress(BatchAuthStep::ReadingAuth);
-            let existing_auth = {
-                let mut auth = None;
-                for i in 0..sess.timing.auth_read_retries {
-                    if i > 0 {
-                        log::debug!("[batch-auth] auth-read retry {i}  port={port}");
-                    }
-                    check_cancel!();
-                    auth = sess.auth_read(config.auth_storage)?;
-                    if auth.is_some() {
-                        break;
-                    }
-                    std::thread::sleep(sess.timing.auth_read_retry_ms);
-                }
-                auth
-            };
+            let existing_auth = sess.auth_read_precheck(
+                config.auth_storage,
+                sess.timing.auth_read_retries,
+                sess.timing.auth_read_retry_ms,
+                cancel,
+                "batch-auth new firmware",
+            )?;
 
             // ── 5. AlreadyDone check (MAC found + credentials match) ─────
             if let Some((found_idx, ref found_uuid, ref found_key, already_locked)) = found_row {
@@ -1904,21 +1928,13 @@ where
             progress(BatchAuthStep::ReadingAuth);
             let old_retry_ms = sess.timing.auth_read_retry_ms * 4;
             let auth_retries = sess.timing.auth_read_retries + 1;
-            let existing_auth = {
-                let mut auth = None;
-                for i in 0..auth_retries {
-                    if i > 0 {
-                        log::debug!("[batch-auth] auth-read retry {i} (old fw)  port={port}");
-                    }
-                    check_cancel!();
-                    auth = sess.auth_read(config.auth_storage)?;
-                    if auth.is_some() {
-                        break;
-                    }
-                    std::thread::sleep(old_retry_ms);
-                }
-                auth
-            };
+            let existing_auth = sess.auth_read_precheck(
+                config.auth_storage,
+                auth_retries,
+                old_retry_ms,
+                cancel,
+                "batch-auth old firmware",
+            )?;
 
             // ── 5. AlreadyDone check ─────────────────────────────────────
             if let Some((found_idx, ref found_uuid, ref found_key, already_locked)) = found_row {
@@ -2578,6 +2594,74 @@ mod tests {
             Some((
                 "uuid-1234_abcd".to_string(),
                 "key.abcdefghijklmnopqrstuvwxyz012".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn auth_read_precheck_treats_invalid_response_as_empty() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response("auth-read\r\nï¿½bad\r\nï¿½key\r\n");
+        let mut sess = session(mock);
+        let cancel = AtomicBool::new(false);
+        let result = sess.auth_read_precheck(
+            AuthStorage::Kv,
+            1,
+            Duration::from_millis(0),
+            &cancel,
+            "test",
+        );
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn auth_read_precheck_allows_followup_write_after_invalid_first_read() {
+        let mut io = MockAuthIo::new();
+        io.add_response("OK: log disabled\r\n"); // detect_firmware: sys_log_enable off
+        io.add_response(""); // wake_shell clear_input
+        io.add_response("CLI version: 1.0.0\r\n"); // version
+        io.add_response("auth-read\r\nï¿½bad\r\nï¿½key\r\n"); // precheck auth-read
+        io.add_response(""); // precheck retry: still no valid auth
+        io.add_response("Authorization write succeeds.\r\n"); // auth_write
+        io.add_response(""); // drain + wake_shell after write
+        io.add_response("testuuid12345678901\r\ntestkey1234567890123456789012\r\n"); // verify
+
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+            port_name: String::new(),
+        };
+        let cancel = AtomicBool::new(false);
+        let firmware = sess.detect_firmware(&cancel).unwrap();
+        assert_eq!(firmware, FirmwareKind::New(CliVersion(1, 0, 0)));
+
+        let existing = sess
+            .auth_read_precheck(
+                AuthStorage::Kv,
+                2,
+                Duration::from_millis(0),
+                &cancel,
+                "test flow",
+            )
+            .unwrap();
+        assert!(existing.is_none());
+
+        sess.auth_write(
+            "testuuid12345678901",
+            "testkey1234567890123456789012",
+            AuthStorage::Kv,
+            Duration::from_millis(200),
+        )
+        .unwrap();
+        sess.drain_boot_output();
+        sess.wake_shell();
+
+        let verified = sess.auth_read(AuthStorage::Kv).unwrap();
+        assert_eq!(
+            verified,
+            Some((
+                "testuuid12345678901".to_string(),
+                "testkey1234567890123456789012".to_string()
             ))
         );
     }
