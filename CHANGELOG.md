@@ -2,6 +2,18 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.0] - 2026-07-08
+
+### 新功能 / Features
+
+- `serial-port-indicators`：新增串口活动指示器，并支持在设置中开关；侧边栏、工具箱入口和批量授权页现在都能直观看到各功能的串口占用状态 / Add serial port activity indicators with a settings toggle so the sidebar, toolbox entry, and batch auth page can show per-feature port activity at a glance
+
+### 问题修复 / Bug Fixes
+
+- `firmware-flash`：烧录任务现在可以抢占串口调试占用的端口，减少必须手动先断开调试连接的情况 / Let flash jobs preempt ports held by serial debug so users no longer need to manually disconnect first in common cases
+- `serial-debug`：等待异步串口交接完成后再开始烧录，修复功能切换时端口所有权竞争导致的连接失败 / Wait for async port handoff to finish before flashing to fix connection failures caused by port-ownership races during feature handoff
+- `authorize`：授权预检阶段的 `auth-read` 现在会容忍无效响应并继续流程，提升脏串口环境下的兼容性 / Tolerate invalid `auth-read` responses during authorize precheck so noisy serial lines no longer fail the flow prematurely
+
 ## [3.1.5] - 2026-07-07
 
 ### 新功能 / Features
