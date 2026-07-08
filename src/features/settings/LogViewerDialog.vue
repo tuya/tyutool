@@ -3,6 +3,11 @@ import { ref, watch, computed, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { exportLogsAndReport } from "./report-issue";
+import {
+  listLogFileOpeners,
+  openLogFileInEditor,
+  type LogFileOpener,
+} from "./log-openers";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -198,6 +203,50 @@ async function copy(): Promise<void> {
   }
 }
 
+// ── Open with ─────────────────────────────────────────────────────────────────
+
+const openerDialogOpen = ref(false);
+const openersLoading = ref(false);
+const openers = ref<LogFileOpener[]>([]);
+const openersError = ref("");
+const openingEditorId = ref("");
+
+function displayOpenerLabel(opener: LogFileOpener): string {
+  if (opener.id === "default") {
+    return t("settings.logViewer.systemDefault");
+  }
+  return opener.label;
+}
+
+async function showOpenWithDialog(): Promise<void> {
+  if (!selectedFile.value) return;
+  openerDialogOpen.value = true;
+  openersLoading.value = true;
+  openersError.value = "";
+  try {
+    openers.value = await listLogFileOpeners();
+  } catch (e) {
+    openers.value = [];
+    openersError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    openersLoading.value = false;
+  }
+}
+
+async function openWith(openerId: string): Promise<void> {
+  if (!selectedFile.value) return;
+  openingEditorId.value = openerId;
+  openersError.value = "";
+  try {
+    await openLogFileInEditor(selectedFile.value.name, openerId);
+    openerDialogOpen.value = false;
+  } catch (e) {
+    openersError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    openingEditorId.value = "";
+  }
+}
+
 // ── Utils ──────────────────────────────────────────────────────────────────────
 
 function formatSize(bytes: number): string {
@@ -221,6 +270,8 @@ watch(
   (open) => {
     if (open) {
       view.value = "list";
+      openerDialogOpen.value = false;
+      openersError.value = "";
       void loadFileList();
     }
   },
@@ -467,6 +518,14 @@ watch(
           </button>
           <button
             type="button"
+            class="ty-btn-sm ty-btn-secondary"
+            :disabled="contentLoading"
+            @click="showOpenWithDialog"
+          >
+            {{ t("settings.logViewer.openWith") }}
+          </button>
+          <button
+            type="button"
             class="ty-btn-sm ty-btn-primary-solid"
             @click="exportLogsAndReport(t)"
           >
@@ -476,9 +535,108 @@ watch(
       </template>
     </div>
   </div>
+
+  <div
+    v-if="props.open && openerDialogOpen"
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+    @click.self="openerDialogOpen = false"
+  >
+    <div
+      class="ty-card flex w-full max-w-md flex-col gap-3 rounded-xl p-4 sm:p-5"
+    >
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="ty-section-title text-base">
+          {{ t("settings.logViewer.openWithTitle") }}
+        </h3>
+        <button
+          type="button"
+          class="ty-btn-sm ty-btn-secondary"
+          @click="openerDialogOpen = false"
+        >
+          {{ t("settings.logViewer.close") }}
+        </button>
+      </div>
+
+      <div v-if="openersLoading" class="flex items-center justify-center py-6">
+        <span class="loading loading-spinner loading-md opacity-60" />
+      </div>
+
+      <div
+        v-else-if="openersError"
+        class="rounded-lg bg-red-950/40 p-3 text-sm text-red-400"
+      >
+        {{ openersError }}
+      </div>
+
+      <div
+        v-else-if="openers.length === 0"
+        class="rounded-lg bg-black/60 p-3 text-sm opacity-70"
+      >
+        {{ t("settings.logViewer.noOpeners") }}
+      </div>
+
+      <div v-else class="flex flex-col gap-2">
+        <button
+          v-for="opener in openers"
+          :key="opener.id"
+          type="button"
+          class="log-opener-option"
+          :disabled="openingEditorId !== ''"
+          @click="openWith(opener.id)"
+        >
+          <div class="min-w-0">
+            <strong class="log-opener-option__title">
+              {{ displayOpenerLabel(opener) }}
+            </strong>
+          </div>
+          <span
+            v-if="openingEditorId === opener.id"
+            class="loading loading-spinner loading-sm opacity-70"
+          />
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.log-opener-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--ty-border);
+  background-color: color-mix(in srgb, var(--ty-surface) 88%, white 12%);
+  padding: 0.85rem 0.95rem;
+  text-align: left;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.log-opener-option:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ty-primary) 24%, var(--ty-border));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.log-opener-option:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.log-opener-option__title {
+  display: block;
+  color: var(--ty-text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .log-current-session-badge {
   background-color: color-mix(
     in srgb,

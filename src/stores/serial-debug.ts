@@ -14,7 +14,14 @@ import {
   MAX_SEND_HISTORY,
   VISIBLE_LOG_WINDOW_LINES,
 } from "@/features/serial-debug/constants";
-import { chipManifest } from "@/features/firmware-flash/chip-manifests";
+import {
+  chipManifest,
+  rustPluginIdForChip,
+} from "@/features/firmware-flash/chip-manifests";
+import {
+  AUTH_ONLY_CHIP_ID,
+  normalizeChipId,
+} from "@/features/firmware-flash/constants";
 import { useFlashStore } from "@/stores/flash";
 import { parseHexInput } from "@/features/serial-debug/hex-format";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
@@ -158,6 +165,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const stopBits = ref(DEFAULT_STOP_BITS);
   const autoRelease = ref(false);
   const pendingResume = ref(false);
+  const rebootControlPort = ref("");
+  const rebootChipId = ref("");
 
   // ── display ──────────────────────────────────────────────────────────
   const lines = ref<DebugLogLine[]>([]);
@@ -259,6 +268,63 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       dataBits: dataBits.value,
       parity: parity.value,
       stopBits: stopBits.value,
+    };
+  }
+
+  function normalizeRebootChipId(
+    chipId: string | null | undefined,
+  ): string | null {
+    const trimmed = chipId?.trim() ?? "";
+    if (!trimmed) return null;
+    const normalized = normalizeChipId(trimmed);
+    return normalized === AUTH_ONLY_CHIP_ID ? null : normalized;
+  }
+
+  function rememberRebootTarget(controlPort: string, chipId: string): void {
+    rebootControlPort.value = controlPort.trim();
+    rebootChipId.value = normalizeChipId(chipId.trim());
+  }
+
+  function clearRebootTarget(): void {
+    rebootControlPort.value = "";
+    rebootChipId.value = "";
+  }
+
+  function resolveRebootTarget(availablePorts: readonly string[]): {
+    controlPort: string | null;
+    chipId: string | null;
+    needsSelection: boolean;
+  } {
+    const knownPorts = new Set(
+      availablePorts.map((candidate) => candidate.trim()).filter(Boolean),
+    );
+    const sessionControlPort = rebootControlPort.value.trim();
+    const sessionChipId = normalizeRebootChipId(rebootChipId.value);
+    if (sessionControlPort || rebootChipId.value.trim()) {
+      if (
+        sessionControlPort &&
+        sessionChipId &&
+        knownPorts.has(sessionControlPort)
+      ) {
+        return {
+          controlPort: sessionControlPort,
+          chipId: sessionChipId,
+          needsSelection: false,
+        };
+      }
+      return { controlPort: null, chipId: null, needsSelection: true };
+    }
+
+    const flashControlPort = flashStore.selectedSerialPort.trim();
+    const flashChipId = normalizeRebootChipId(flashStore.selectedChipId);
+    const resolvedPort =
+      flashControlPort && knownPorts.has(flashControlPort)
+        ? flashControlPort
+        : null;
+    return {
+      controlPort: resolvedPort,
+      chipId: flashChipId,
+      needsSelection: !(resolvedPort && flashChipId),
     };
   }
 
@@ -602,16 +668,32 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     chipId: string,
     resetPort?: string,
   ): Promise<void> {
+    const normalizedChipId = normalizeRebootChipId(chipId);
     const effectivePort = resetPort?.trim() || port.value;
-    if (!effectivePort) return;
+    if (!effectivePort || !normalizedChipId) return;
+    const runtimeChipId = rustPluginIdForChip(normalizedChipId);
+    const useInSessionReset = effectivePort === port.value;
+    if (useInSessionReset && !open.value) {
+      await appendSysLine(t("serialDebug.log.deviceResetCurrentPortClosed"));
+      return;
+    }
     try {
-      if (isTauriRuntime()) {
+      if (useInSessionReset) {
+        if (isTauriRuntime()) {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("serial_debug_device_reset_cmd", {
+            chipId: runtimeChipId,
+          });
+        } else {
+          await wsTransport.serialDebugDeviceReset(runtimeChipId);
+        }
+      } else if (isTauriRuntime()) {
         const { invoke } = await import("@tauri-apps/api/core");
         await invoke("device_reset_cmd", {
-          args: { port: effectivePort, chipId },
+          args: { port: effectivePort, chipId: runtimeChipId },
         });
       } else {
-        await wsTransport.deviceReset(effectivePort, chipId);
+        await wsTransport.deviceReset(effectivePort, runtimeChipId);
       }
       await appendSysLine(
         t("serialDebug.log.deviceResetOk", { port: effectivePort }),
@@ -619,7 +701,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       rLog.info(`[SerialDebug] Device reset (DTR/RTS) on ${effectivePort}`);
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
-      if (raw.includes("unknown variant") && raw.includes("device_reset")) {
+      if (
+        raw.includes("unknown variant") &&
+        (raw.includes("device_reset") ||
+          raw.includes("serial_debug_device_reset"))
+      ) {
         await appendSysLine(t("serialDebug.log.deviceResetServeOutdated"));
       } else {
         await appendSysLine(
@@ -928,6 +1014,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     stopBits,
     autoRelease,
     pendingResume,
+    rebootControlPort,
+    rebootChipId,
     lines,
     activeDisplayLines,
     hexView,
@@ -955,6 +1043,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     openPort,
     closePort,
     deviceReset,
+    rememberRebootTarget,
+    clearRebootTarget,
+    resolveRebootTarget,
     send,
     clear,
     appendChunk,
