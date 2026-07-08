@@ -149,7 +149,11 @@
       "searchPlaceholder": "Search logs…",
       "matchCount": "{current} of {total}",
       "noMatches": "No matches",
-      "truncated": "Showing last 256 KB only"
+      "truncated": "Showing last 256 KB only",
+      "openWith": "Open With...",
+      "openWithTitle": "Choose a text editor",
+      "systemDefault": "System Default",
+      "noOpeners": "No supported text editor was detected on this machine."
     },
     "reportIssue": {
       "title": "Report an Issue",
@@ -489,8 +493,14 @@
       "connecting": "Connecting…",
       "statusConnected": "Connected",
       "statusDisconnected": "Disconnected",
-      "deviceReset": "Reset device",
-      "deviceResetHint": "Sends DTR/RTS reset. Sequence depends on chip — select the correct chip platform in Firmware Tools first."
+      "deviceReset": "Reboot device",
+      "deviceResetHint": "Reboots the device via DTR/RTS. The sequence depends on the chip, so select the correct chip platform in Firmware Tools first.",
+      "rebootControlPort": "Control port",
+      "rebootControlPortUnset": "Not selected",
+      "changeRebootTarget": "Change",
+      "rebootTargetDialogTitle": "Choose reboot control port and chip",
+      "rebootTargetChip": "Chip",
+      "rebootTargetConfirm": "Confirm"
     },
     "send": {
       "placeholder": "Type to send…",
@@ -532,9 +542,10 @@
       "fontDecrease": "Smaller",
       "fontIncrease": "Larger",
       "fontSize": "Font",
+      "deviceResetCurrentPortClosed": "The current log port is not open. Re-select the control port or open Serial Debug first.",
       "deviceResetOk": "Device reset (DTR/RTS) sent on {port}",
       "deviceResetFailed": "Device reset failed: {msg}",
-      "deviceResetServeOutdated": "Device reset failed: browser is still connected to an old tyutool-cli serve (no device_reset support). Close the process holding port 9527 and restart serve."
+      "deviceResetServeOutdated": "Device reset failed: the browser is still connected to an old tyutool-cli serve that lacks the required reset messages. Close the process holding port 9527 and restart serve."
     },
     "autoSave": {
       "label": "Auto-save logs",

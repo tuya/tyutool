@@ -149,7 +149,11 @@
       "searchPlaceholder": "搜索日志…",
       "matchCount": "第 {current} / 共 {total} 条",
       "noMatches": "无匹配",
-      "truncated": "仅显示最后 256 KB"
+      "truncated": "仅显示最后 256 KB",
+      "openWith": "打开方式...",
+      "openWithTitle": "选择文本阅读器",
+      "systemDefault": "系统默认程序",
+      "noOpeners": "当前未检测到可用的文本阅读器。"
     },
     "reportIssue": {
       "title": "报告问题",
@@ -489,8 +493,14 @@
       "connecting": "连接中…",
       "statusConnected": "已连接",
       "statusDisconnected": "已断开",
-      "deviceReset": "设备复位",
-      "deviceResetHint": "通过 DTR/RTS 对设备复位。复位时序取决于芯片平台，请先在「固件工具」中选择正确的芯片。"
+      "deviceReset": "重启设备",
+      "deviceResetHint": "通过 DTR/RTS 重启设备。重启时序取决于芯片平台，请先在「固件工具」中选择正确的芯片。",
+      "rebootControlPort": "控制口",
+      "rebootControlPortUnset": "未选择",
+      "changeRebootTarget": "更改",
+      "rebootTargetDialogTitle": "选择重启控制口和芯片",
+      "rebootTargetChip": "芯片类型",
+      "rebootTargetConfirm": "确认"
     },
     "send": {
       "placeholder": "输入内容…",
@@ -532,9 +542,10 @@
       "fontDecrease": "缩小字体",
       "fontIncrease": "放大字体",
       "fontSize": "字体",
+      "deviceResetCurrentPortClosed": "当前日志口未打开，请重新选择控制口或先打开串口调试",
       "deviceResetOk": "设备复位（DTR/RTS）已发送：{port}",
       "deviceResetFailed": "设备复位失败：{msg}",
-      "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（无 device_reset），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。"
+      "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（缺少重启相关消息支持），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。"
     },
     "autoSave": {
       "label": "自动保存日志",

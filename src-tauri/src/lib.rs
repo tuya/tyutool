@@ -1494,6 +1494,14 @@ struct DeviceResetArgs {
     chip_id: String,
 }
 
+fn serial_debug_device_reset_session(
+    session: Option<&SerialDebugSession>,
+    chip_id: &str,
+) -> Result<(), String> {
+    let active = session.ok_or_else(|| "serial debug not open".to_string())?;
+    active.device_reset(chip_id).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn device_reset_cmd(args: DeviceResetArgs) -> Result<(), String> {
     log::info!(
@@ -1502,6 +1510,27 @@ fn device_reset_cmd(args: DeviceResetArgs) -> Result<(), String> {
         args.chip_id
     );
     tyutool_core::device_reset_dtr_rts(&args.port, &args.chip_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn serial_debug_device_reset_cmd(
+    state: State<'_, DebugState>,
+    chip_id: String,
+) -> Result<(), String> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?;
+    let port = guard
+        .as_ref()
+        .map(|session| session.config().port.clone())
+        .unwrap_or_else(|| "<closed>".to_string());
+    log::info!(
+        "[SerialDebug] Device reset (DTR/RTS): port={}, chip_id={}",
+        port,
+        chip_id
+    );
+    serial_debug_device_reset_session(guard.as_ref(), &chip_id)
 }
 
 #[tauri::command]
@@ -1935,6 +1964,442 @@ fn read_named_log_impl(
     tail_bytes(&dir.join(filename), max_bytes)
 }
 
+fn resolve_log_open_path(
+    dir: &std::path::Path,
+    filename: &str,
+) -> std::io::Result<std::path::PathBuf> {
+    if filename.contains('/') || filename.contains('\\') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "filename must not contain path separators",
+        ));
+    }
+    if !filename.ends_with(".log") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "only .log files can be opened",
+        ));
+    }
+    if !filename.starts_with("tyutool") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "only tyutool log files can be opened",
+        ));
+    }
+    let path = dir.join(filename);
+    if !path.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "log file not found",
+        ));
+    }
+    Ok(path)
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LogFileOpener {
+    id: &'static str,
+    label: &'static str,
+}
+
+enum LogFileOpenerLaunch {
+    SystemDefault,
+    Direct(std::path::PathBuf),
+    #[cfg(target_os = "macos")]
+    MacApplication(std::path::PathBuf),
+}
+
+struct DetectedLogFileOpener {
+    launch: LogFileOpenerLaunch,
+}
+
+fn supported_log_editor_catalog() -> Vec<LogFileOpener> {
+    vec![
+        LogFileOpener {
+            id: "default",
+            label: "System Default",
+        },
+        LogFileOpener {
+            id: "vscode",
+            label: "VS Code",
+        },
+        LogFileOpener {
+            id: "sublime_text",
+            label: "Sublime Text",
+        },
+        LogFileOpener {
+            id: "notepad_minus_minus",
+            label: "Notepad--",
+        },
+        LogFileOpener {
+            id: "windows_notepad",
+            label: "Windows Notepad",
+        },
+        LogFileOpener {
+            id: "notepad_plus_plus",
+            label: "Notepad++",
+        },
+    ]
+}
+
+fn existing_path(path: impl Into<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let path = path.into();
+    path.is_file().then_some(path)
+}
+
+#[cfg(target_os = "macos")]
+fn existing_app_bundle(path: impl Into<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let path = path.into();
+    path.is_dir().then_some(path)
+}
+
+fn first_existing_path(
+    paths: impl IntoIterator<Item = std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    paths.into_iter().find_map(existing_path)
+}
+
+#[cfg(target_os = "macos")]
+fn first_existing_app_bundle(
+    paths: impl IntoIterator<Item = std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    paths.into_iter().find_map(existing_app_bundle)
+}
+
+fn find_command_in_path(names: &[&str]) -> Option<std::path::PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let path_exts: Vec<String> = if cfg!(windows) {
+        std::env::var_os("PATHEXT")
+            .map(|exts| {
+                exts.to_string_lossy()
+                    .split(';')
+                    .filter(|ext| !ext.is_empty())
+                    .map(|ext| ext.to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![".exe".into(), ".cmd".into(), ".bat".into()])
+    } else {
+        vec![String::new()]
+    };
+
+    for dir in std::env::split_paths(&path_var) {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+            if cfg!(windows) && std::path::Path::new(name).extension().is_none() {
+                for ext in &path_exts {
+                    let candidate = dir.join(format!("{name}{ext}"));
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn detect_vscode() -> Option<DetectedLogFileOpener> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates = Vec::new();
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            candidates.push(
+                std::path::PathBuf::from(&local_app_data)
+                    .join("Programs")
+                    .join("Microsoft VS Code")
+                    .join("Code.exe"),
+            );
+        }
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files)
+                    .join("Microsoft VS Code")
+                    .join("Code.exe"),
+            );
+        }
+        if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files_x86)
+                    .join("Microsoft VS Code")
+                    .join("Code.exe"),
+            );
+        }
+        let program =
+            first_existing_path(candidates).or_else(|| find_command_in_path(&["Code.exe"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut candidates = vec![std::path::PathBuf::from(
+            "/Applications/Visual Studio Code.app",
+        )];
+        if let Some(home) = std::env::var_os("HOME") {
+            candidates.push(
+                std::path::PathBuf::from(home)
+                    .join("Applications")
+                    .join("Visual Studio Code.app"),
+            );
+        }
+        if let Some(app_path) = first_existing_app_bundle(candidates) {
+            return Some(DetectedLogFileOpener {
+                launch: LogFileOpenerLaunch::MacApplication(app_path),
+            });
+        }
+        let program = find_command_in_path(&["code"])?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let program = first_existing_path([
+            std::path::PathBuf::from("/usr/bin/code"),
+            std::path::PathBuf::from("/usr/local/bin/code"),
+            std::path::PathBuf::from("/snap/bin/code"),
+        ])
+        .or_else(|| find_command_in_path(&["code"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn detect_sublime_text() -> Option<DetectedLogFileOpener> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates = Vec::new();
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files)
+                    .join("Sublime Text")
+                    .join("sublime_text.exe"),
+            );
+            candidates.push(
+                std::path::PathBuf::from(&program_files)
+                    .join("Sublime Text 3")
+                    .join("sublime_text.exe"),
+            );
+        }
+        if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files_x86)
+                    .join("Sublime Text")
+                    .join("sublime_text.exe"),
+            );
+            candidates.push(
+                std::path::PathBuf::from(&program_files_x86)
+                    .join("Sublime Text 3")
+                    .join("sublime_text.exe"),
+            );
+        }
+        let program = first_existing_path(candidates)
+            .or_else(|| find_command_in_path(&["subl.exe", "sublime_text.exe"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut candidates = vec![std::path::PathBuf::from("/Applications/Sublime Text.app")];
+        if let Some(home) = std::env::var_os("HOME") {
+            candidates.push(
+                std::path::PathBuf::from(home)
+                    .join("Applications")
+                    .join("Sublime Text.app"),
+            );
+        }
+        if let Some(app_path) = first_existing_app_bundle(candidates) {
+            return Some(DetectedLogFileOpener {
+                launch: LogFileOpenerLaunch::MacApplication(app_path),
+            });
+        }
+        let program = find_command_in_path(&["subl"])?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let program = first_existing_path([
+            std::path::PathBuf::from("/opt/sublime_text/sublime_text"),
+            std::path::PathBuf::from("/usr/bin/subl"),
+            std::path::PathBuf::from("/usr/local/bin/subl"),
+            std::path::PathBuf::from("/usr/bin/sublime_text"),
+        ])
+        .or_else(|| find_command_in_path(&["subl", "sublime_text"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn detect_notepad_minus_minus() -> Option<DetectedLogFileOpener> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates = Vec::new();
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files)
+                    .join("Notepad--")
+                    .join("Notepad--.exe"),
+            );
+            candidates.push(
+                std::path::PathBuf::from(&program_files)
+                    .join("Notepad--")
+                    .join("ndd.exe"),
+            );
+        }
+        if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files_x86)
+                    .join("Notepad--")
+                    .join("Notepad--.exe"),
+            );
+            candidates.push(
+                std::path::PathBuf::from(&program_files_x86)
+                    .join("Notepad--")
+                    .join("ndd.exe"),
+            );
+        }
+        let program = first_existing_path(candidates)
+            .or_else(|| find_command_in_path(&["ndd.exe", "Notepad--.exe"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut candidates = vec![std::path::PathBuf::from("/Applications/Notepad--.app")];
+        if let Some(home) = std::env::var_os("HOME") {
+            candidates.push(
+                std::path::PathBuf::from(home)
+                    .join("Applications")
+                    .join("Notepad--.app"),
+            );
+        }
+        if let Some(app_path) = first_existing_app_bundle(candidates) {
+            return Some(DetectedLogFileOpener {
+                launch: LogFileOpenerLaunch::MacApplication(app_path),
+            });
+        }
+        let program = find_command_in_path(&["ndd"])?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let program = first_existing_path([
+            std::path::PathBuf::from("/usr/bin/ndd"),
+            std::path::PathBuf::from("/usr/local/bin/ndd"),
+            std::path::PathBuf::from("/opt/ndd/ndd"),
+        ])
+        .or_else(|| find_command_in_path(&["ndd"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn detect_windows_notepad() -> Option<DetectedLogFileOpener> {
+    #[cfg(target_os = "windows")]
+    {
+        let system_root = std::env::var_os("SystemRoot")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"));
+        let program = existing_path(system_root.join("System32").join("notepad.exe"))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn detect_notepad_plus_plus() -> Option<DetectedLogFileOpener> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates = Vec::new();
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files)
+                    .join("Notepad++")
+                    .join("notepad++.exe"),
+            );
+        }
+        if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+            candidates.push(
+                std::path::PathBuf::from(&program_files_x86)
+                    .join("Notepad++")
+                    .join("notepad++.exe"),
+            );
+        }
+        let program =
+            first_existing_path(candidates).or_else(|| find_command_in_path(&["notepad++.exe"]))?;
+        return Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::Direct(program),
+        });
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn detect_log_file_opener(editor_id: &str) -> Option<DetectedLogFileOpener> {
+    match editor_id {
+        "default" => Some(DetectedLogFileOpener {
+            launch: LogFileOpenerLaunch::SystemDefault,
+        }),
+        "vscode" => detect_vscode(),
+        "sublime_text" => detect_sublime_text(),
+        "notepad_minus_minus" => detect_notepad_minus_minus(),
+        "windows_notepad" => detect_windows_notepad(),
+        "notepad_plus_plus" => detect_notepad_plus_plus(),
+        _ => None,
+    }
+}
+
+fn open_log_path_with_opener(
+    path: &std::path::Path,
+    opener: DetectedLogFileOpener,
+) -> Result<(), String> {
+    match opener.launch {
+        LogFileOpenerLaunch::SystemDefault => {
+            tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
+        }
+        LogFileOpenerLaunch::Direct(program) => std::process::Command::new(&program)
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        #[cfg(target_os = "macos")]
+        LogFileOpenerLaunch::MacApplication(app_path) => std::process::Command::new("open")
+            .arg("-a")
+            .arg(app_path)
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+    }
+}
+
 #[tauri::command]
 fn read_log_tail(
     app: AppHandle,
@@ -2008,6 +2473,27 @@ fn list_log_files_impl(dir: &std::path::Path) -> Vec<LogFileInfo> {
 fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     Ok(list_log_files_impl(&dir))
+}
+
+#[tauri::command]
+fn list_log_file_openers() -> Vec<LogFileOpener> {
+    supported_log_editor_catalog()
+        .into_iter()
+        .filter(|opener| opener.id == "default" || detect_log_file_opener(opener.id).is_some())
+        .collect()
+}
+
+#[tauri::command]
+fn open_log_file_in_editor(
+    app: AppHandle,
+    filename: String,
+    editor_id: String,
+) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let path = resolve_log_open_path(&dir, &filename).map_err(|e| e.to_string())?;
+    let opener = detect_log_file_opener(&editor_id)
+        .ok_or_else(|| format!("unsupported or unavailable editor: {editor_id}"))?;
+    open_log_path_with_opener(&path, opener)
 }
 
 fn build_report_info(name: &str, version: &str, install: &str, session_id: &str) -> String {
@@ -2302,6 +2788,7 @@ pub fn run() {
             batch_auth_cancel_all,
             batch_auth_read_ports,
             device_reset_cmd,
+            serial_debug_device_reset_cmd,
             get_file_size,
             check_port_available_cmd,
             check_file_exists,
@@ -2323,7 +2810,9 @@ pub fn run() {
             write_text_file,
             append_text_file,
             list_log_files,
+            list_log_file_openers,
             read_log_tail,
+            open_log_file_in_editor,
             export_logs_zip,
             open_external_url,
         ])
@@ -2399,6 +2888,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serial_debug_device_reset_session_requires_open_session() {
+        let err = serial_debug_device_reset_session(None, "T5AI").unwrap_err();
+        assert_eq!(err, "serial debug not open");
+    }
 
     #[test]
     fn default_layout_shrinks_to_fit_high_dpi_work_area() {
@@ -2658,6 +3153,38 @@ mod log_tools_tests {
         let dir = tempfile::tempdir().unwrap();
         let err = read_named_log_impl(dir.path(), "tyutool-ghost.log", 100).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn resolve_log_open_path_accepts_tyutool_log_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool-20260708.log"), b"hello").unwrap();
+
+        let path = resolve_log_open_path(dir.path(), "tyutool-20260708.log").unwrap();
+
+        assert_eq!(path.file_name().unwrap(), "tyutool-20260708.log");
+    }
+
+    #[test]
+    fn resolve_log_open_path_rejects_non_log_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = resolve_log_open_path(dir.path(), "tyutool-20260708.txt").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn resolve_log_open_path_rejects_non_tyutool_log_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = resolve_log_open_path(dir.path(), "notes.log").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn supported_log_editor_catalog_starts_with_system_default() {
+        let editors = supported_log_editor_catalog();
+
+        assert!(!editors.is_empty());
+        assert_eq!(editors[0].id, "default");
     }
 }
 

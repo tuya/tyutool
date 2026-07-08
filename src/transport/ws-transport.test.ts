@@ -243,6 +243,40 @@ describe("deviceReset", () => {
   });
 });
 
+describe("serialDebugDeviceReset", () => {
+  it("sends serial_debug_device_reset and resolves on success", async () => {
+    const t = new WsTransport();
+    const p = t.serialDebugDeviceReset("T5AI");
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+
+    expect(ws.lastSent).toEqual({
+      type: "serial_debug_device_reset",
+      chip_id: "T5AI",
+    });
+
+    ws.recv({ type: "serial_debug_device_reset_result", ok: true });
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("rejects with the backend error when serial_debug_device_reset fails", async () => {
+    const t = new WsTransport();
+    const p = t.serialDebugDeviceReset("T5AI");
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    ws.recv({
+      type: "serial_debug_device_reset_result",
+      ok: false,
+      error: "serial debug not open",
+    });
+    await expect(p).rejects.toThrow("serial debug not open");
+  });
+});
+
 describe("listPorts", () => {
   it("sends list_ports and normalizes string entries to {path}", async () => {
     const t = new WsTransport();

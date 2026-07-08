@@ -1236,6 +1236,14 @@ impl SerialDebugSession {
         Ok(())
     }
 
+    pub fn device_reset(&self, chip_id: &str) -> Result<(), FlashError> {
+        let mut guard = self
+            .write_port
+            .lock()
+            .map_err(|_| FlashError::Io(std::io::Error::other("serial debug mutex poisoned")))?;
+        crate::serial::device_reset_serial_port(&self.cfg.port, &mut **guard, chip_id)
+    }
+
     pub fn close(mut self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(h) = self.reader.take() {

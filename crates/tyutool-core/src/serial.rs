@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::thread::sleep;
+use std::time::Duration;
 
 use serde::Serialize;
 
 use crate::error::FlashError;
-use crate::plugins::beken::frame::ProtocolError;
-use crate::plugins::beken::transport::{SerialIo, Transport};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -343,29 +342,99 @@ fn detect_port_usage(port: &str) -> (Option<String>, Option<String>) {
 // Hardware reset — aligned with flash auto-reset per platform
 // ─────────────────────────────────────────────────────────────────────────
 
-fn protocol_err_to_flash(e: ProtocolError) -> FlashError {
-    match e {
-        ProtocolError::Cancelled => FlashError::Cancelled,
-        ProtocolError::Io(err) => FlashError::Io(err),
-        _ => FlashError::Plugin(e.to_string()),
+const ESP_USB_SERIAL_JTAG_PID: u16 = 0x1001;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceResetStrategy {
+    Esp32HardReset { usb_pid: u16 },
+    BekenBk,
+    BekenT5Ai,
+}
+
+fn device_reset_strategy_for_chip(chip_id: &str, usb_pid: u16) -> DeviceResetStrategy {
+    let key = crate::registry::normalize_chip_id(chip_id);
+    if key.starts_with("ESP32") {
+        return DeviceResetStrategy::Esp32HardReset { usb_pid };
+    }
+    if matches!(key.as_str(), "T5AI" | "T3" | "T1") {
+        return DeviceResetStrategy::BekenT5Ai;
+    }
+    DeviceResetStrategy::BekenBk
+}
+
+fn usb_pid_for_port(port_name: &str) -> u16 {
+    serialport::available_ports()
+        .ok()
+        .and_then(|ports| {
+            ports.into_iter().find_map(|port| {
+                if port.port_name != port_name {
+                    return None;
+                }
+                match port.port_type {
+                    serialport::SerialPortType::UsbPort(info) => Some(info.pid),
+                    _ => None,
+                }
+            })
+        })
+        .unwrap_or(0)
+}
+
+fn write_dtr(port: &mut dyn serialport::SerialPort, level: bool) -> Result<(), FlashError> {
+    port.write_data_terminal_ready(level)
+        .map_err(|e| FlashError::Plugin(e.to_string()))
+}
+
+fn write_rts(port: &mut dyn serialport::SerialPort, level: bool) -> Result<(), FlashError> {
+    port.write_request_to_send(level)
+        .map_err(|e| FlashError::Plugin(e.to_string()))
+}
+
+fn device_reset_with_strategy(
+    port: &mut dyn serialport::SerialPort,
+    strategy: DeviceResetStrategy,
+) -> Result<(), FlashError> {
+    match strategy {
+        DeviceResetStrategy::BekenBk => {
+            write_dtr(port, false)?;
+            write_rts(port, true)?;
+            sleep(Duration::from_millis(200));
+            write_rts(port, false)?;
+            Ok(())
+        }
+        DeviceResetStrategy::BekenT5Ai => {
+            write_dtr(port, false)?;
+            write_rts(port, true)?;
+            sleep(Duration::from_millis(300));
+            write_rts(port, false)?;
+            Ok(())
+        }
+        DeviceResetStrategy::Esp32HardReset { usb_pid } => {
+            sleep(Duration::from_millis(100));
+            if usb_pid == ESP_USB_SERIAL_JTAG_PID {
+                write_dtr(port, false)?;
+                sleep(Duration::from_millis(100));
+                write_rts(port, true)?;
+                write_dtr(port, false)?;
+                write_rts(port, true)?;
+                sleep(Duration::from_millis(100));
+                write_rts(port, false)?;
+            } else {
+                write_rts(port, true)?;
+                sleep(Duration::from_millis(100));
+                write_rts(port, false)?;
+            }
+            Ok(())
+        }
     }
 }
 
-/// Same Beken DTR/RTS pulse as [`crate::plugins::beken::ops::shake`] uses to enter download mode:
-/// `Transport::reset_into_download_mode_bk` (BK7231N, T2) vs `reset_into_download_mode_t5ai` (T5AI, T3, T1).
-fn device_reset_beken_match_flash_shake(port: &str, chip_upper: &str) -> Result<(), FlashError> {
-    let io = SerialIo::open(port, 115_200).map_err(protocol_err_to_flash)?;
-    let cancel = AtomicBool::new(false);
-    let noop: &dyn Fn(&str) = &|_| {};
-    let mut transport = Transport::new(io, port, 115_200, &cancel, noop);
-
-    let t5ai_style = matches!(chip_upper, "T5AI" | "T3" | "T1");
-    let r = if t5ai_style {
-        transport.reset_into_download_mode_t5ai()
-    } else {
-        transport.reset_into_download_mode_bk()
-    };
-    r.map_err(protocol_err_to_flash)
+pub(crate) fn device_reset_serial_port(
+    port_name: &str,
+    port: &mut dyn serialport::SerialPort,
+    chip_id: &str,
+) -> Result<(), FlashError> {
+    let strategy = device_reset_strategy_for_chip(chip_id, usb_pid_for_port(port_name));
+    device_reset_with_strategy(port, strategy)
 }
 
 /// Pulse UART control lines to reset the device — **same strategies as automatic reset during flash**:
@@ -375,23 +444,51 @@ fn device_reset_beken_match_flash_shake(port: &str, chip_upper: &str) -> Result<
 /// - **ESP32 (all variants)**: espflash `hard_reset` / `reset_after_flash` (USB PID–aware), matching
 ///   post-flash reset in `plugins::esp::common::run_esp`.
 pub fn device_reset_dtr_rts(port: &str, chip_id: &str) -> Result<(), FlashError> {
-    let key = crate::registry::normalize_chip_id(chip_id);
-    if key.starts_with("ESP32") {
-        return crate::plugins::esp::common::esp_uart_hard_reset(port);
-    }
-    device_reset_beken_match_flash_shake(port, &key)
+    let mut handle = serialport::new(port, 115_200)
+        .timeout(Duration::from_millis(500))
+        .open()
+        .map_err(|e| FlashError::Plugin(format!("cannot open port {port}: {e}")))?;
+    device_reset_serial_port(port, &mut *handle, chip_id)
 }
 
 #[cfg(test)]
 mod hw_reset_tests {
+    use super::{device_reset_strategy_for_chip, DeviceResetStrategy};
+
     #[test]
     fn beken_pulse_variant_matches_shake_routing() {
-        let t5ai_style = |chip: &str| matches!(chip, "T5AI" | "T3" | "T1");
-        assert!(t5ai_style("T5AI"));
-        assert!(t5ai_style("T3"));
-        assert!(t5ai_style("T1"));
-        assert!(!t5ai_style("T2"));
-        assert!(!t5ai_style("BK7231N"));
+        assert_eq!(
+            device_reset_strategy_for_chip("T5AI", 0),
+            DeviceResetStrategy::BekenT5Ai
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("T3", 0),
+            DeviceResetStrategy::BekenT5Ai
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("T1", 0),
+            DeviceResetStrategy::BekenT5Ai
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("T2", 0),
+            DeviceResetStrategy::BekenBk
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("BK7231N", 0),
+            DeviceResetStrategy::BekenBk
+        );
+    }
+
+    #[test]
+    fn esp32_variants_route_to_hard_reset_strategy() {
+        assert_eq!(
+            device_reset_strategy_for_chip("ESP32", 0x1001),
+            DeviceResetStrategy::Esp32HardReset { usb_pid: 0x1001 }
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("ESP32C3", 0),
+            DeviceResetStrategy::Esp32HardReset { usb_pid: 0 }
+        );
     }
 }
 
