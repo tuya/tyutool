@@ -7,11 +7,13 @@ import {
   loadStoredLocale,
   loadStoredLogEnabled,
   loadStoredLogLevel,
+  loadStoredSerialPortIndicatorsEnabled,
   loadStoredTheme,
   // loadStoredThemeStyle,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
   LOCALE_KEY,
+  SERIAL_PORT_INDICATORS_ENABLED_KEY,
   THEME_KEY,
   // THEME_STYLE_KEY,
 } from "./settings-utils";
@@ -50,6 +52,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const locale = ref<LocalePreference>(loadStoredLocale());
   const logEnabled = ref<boolean>(loadStoredLogEnabled());
   const logLevel = ref<LogLevelId>(loadStoredLogLevel());
+  const serialPortIndicatorsEnabled = ref<boolean>(
+    loadStoredSerialPortIndicatorsEnabled(),
+  );
 
   function setTheme(value: ThemePreference): void {
     theme.value = value;
@@ -69,6 +74,10 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function setLogLevel(value: LogLevelId): void {
     logLevel.value = value;
+  }
+
+  function setSerialPortIndicatorsEnabled(value: boolean): void {
+    serialPortIndicatorsEnabled.value = value;
   }
 
   async function applyLogLevel(): Promise<void> {
@@ -115,6 +124,16 @@ export const useSettingsStore = defineStore("settings", () => {
       ["error", "warn", "info", "debug", "trace"].includes(storedLogLevel)
     ) {
       logLevel.value = storedLogLevel as LogLevelId;
+    }
+    const storedSerialPortIndicatorsEnabled = await store.get<string>(
+      SERIAL_PORT_INDICATORS_ENABLED_KEY,
+    );
+    if (
+      storedSerialPortIndicatorsEnabled !== null &&
+      storedSerialPortIndicatorsEnabled !== undefined
+    ) {
+      serialPortIndicatorsEnabled.value =
+        storedSerialPortIndicatorsEnabled === "true";
     }
   }
 
@@ -167,6 +186,11 @@ export const useSettingsStore = defineStore("settings", () => {
       rLog.info(`[Settings] Log level changed to: ${v}`);
     });
 
+    watch(serialPortIndicatorsEnabled, (v) => {
+      void persistSetting(SERIAL_PORT_INDICATORS_ENABLED_KEY, String(v));
+      rLog.info(`[Settings] Serial port indicators enabled: ${v}`);
+    });
+
     // Apply log level once on startup (non-Tauri or before Tauri store loads)
     if (!isTauriRuntime()) {
       void applyLogLevel();
@@ -188,11 +212,13 @@ export const useSettingsStore = defineStore("settings", () => {
     locale,
     logEnabled,
     logLevel,
+    serialPortIndicatorsEnabled,
     setTheme,
     // setThemeStyle,
     setLocale,
     setLogEnabled,
     setLogLevel,
+    setSerialPortIndicatorsEnabled,
     init,
     ready: () => _ready,
   };

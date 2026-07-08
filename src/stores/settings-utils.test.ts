@@ -7,11 +7,13 @@ import {
   loadStoredLocale,
   loadStoredLogEnabled,
   loadStoredLogLevel,
+  loadStoredSerialPortIndicatorsEnabled,
   loadStoredTheme,
   // loadStoredThemeStyle,
   LOCALE_KEY,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
+  SERIAL_PORT_INDICATORS_ENABLED_KEY,
   THEME_KEY,
   // THEME_STYLE_KEY,
 } from "./settings-utils";
@@ -117,6 +119,27 @@ describe("loadStoredLogLevel", () => {
   it('returns "info" for invalid level', () => {
     localStorage.setItem(LOG_LEVEL_KEY, "verbose");
     expect(loadStoredLogLevel()).toBe("info");
+  });
+});
+
+describe("loadStoredSerialPortIndicatorsEnabled", () => {
+  it("returns true when no stored value (first use default)", () => {
+    expect(loadStoredSerialPortIndicatorsEnabled()).toBe(true);
+  });
+
+  it('returns true when stored "true"', () => {
+    localStorage.setItem(SERIAL_PORT_INDICATORS_ENABLED_KEY, "true");
+    expect(loadStoredSerialPortIndicatorsEnabled()).toBe(true);
+  });
+
+  it('returns false when stored "false"', () => {
+    localStorage.setItem(SERIAL_PORT_INDICATORS_ENABLED_KEY, "false");
+    expect(loadStoredSerialPortIndicatorsEnabled()).toBe(false);
+  });
+
+  it('returns false for any non-"true" string', () => {
+    localStorage.setItem(SERIAL_PORT_INDICATORS_ENABLED_KEY, "disabled");
+    expect(loadStoredSerialPortIndicatorsEnabled()).toBe(false);
   });
 });
 

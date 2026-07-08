@@ -1,11 +1,16 @@
 <!-- src/features/toolbox/ToolboxPage.vue -->
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, unref } from "vue";
 import { useI18n } from "vue-i18n";
+import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
 import TyBatchFlashAuthIcon from "@/components/icons/TyBatchFlashAuthIcon.vue";
+import { useFeaturePortIndicators } from "@/features/serial-port-indicators/useFeaturePortIndicators";
 import { TOOLBOX_TOOLS } from "./tools";
 
 const { t } = useI18n();
+const portIndicators = useFeaturePortIndicators();
+const indicatorPaletteMode = computed(() => unref(portIndicators.paletteMode));
+const indicatorActivePorts = computed(() => unref(portIndicators.activePorts));
 
 const tools = computed(() =>
   TOOLBOX_TOOLS.map((tool) => ({
@@ -56,6 +61,7 @@ const tools = computed(() =>
         v-for="tool in tools"
         :key="tool.to"
         :to="tool.to"
+        :data-tool-id="tool.id"
         class="ty-card group flex cursor-pointer items-center gap-4 rounded-xl p-4 transition-colors hover:bg-[var(--ty-surface-muted)]"
       >
         <div
@@ -67,9 +73,21 @@ const tools = computed(() =>
           />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-sm font-semibold text-[var(--ty-text)]">
-            {{ tool.name }}
-          </p>
+          <div class="flex min-w-0 items-center gap-2">
+            <p
+              class="min-w-0 flex-1 text-sm font-semibold text-[var(--ty-text)]"
+            >
+              {{ tool.name }}
+            </p>
+            <TyPortActivityIndicator
+              v-if="tool.id === 'batch-flash-auth'"
+              :indicator="portIndicators.indicatorForFeature('toolbox')"
+              :active-ports="indicatorActivePorts"
+              :palette-mode="indicatorPaletteMode"
+              feature="toolbox"
+              surface="toolbox-card"
+            />
+          </div>
           <p class="mt-0.5 text-xs leading-snug text-[var(--ty-text-muted)]">
             {{ tool.desc }}
           </p>

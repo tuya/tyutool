@@ -46,6 +46,8 @@
     "themeStyleTuyaopenIde": "TuyaOpen IDE",
     "language": "Language",
     "languageHint": "UI language; saved on this device.",
+    "serialPortIndicators": "Serial port indicators",
+    "serialPortIndicatorsHint": "Show colored serial activity dots in the sidebar and toolbox entries.",
     "langZh": "简体中文",
     "langEn": "English",
     "langAuto": "Auto",

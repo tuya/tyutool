@@ -1,8 +1,10 @@
 <!-- src/features/batch-flash-auth/BatchFlashAuthPage.vue -->
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, unref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
+import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
+import { useFeaturePortIndicators } from "@/features/serial-port-indicators/useFeaturePortIndicators";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 import BatchFlashAuthDashboard from "./components/BatchFlashAuthDashboard.vue";
 import BatchFlashAuthConfig from "./components/BatchFlashAuthConfig.vue";
@@ -14,6 +16,9 @@ import DisclaimerModal from "./components/DisclaimerModal.vue";
 
 const { t } = useI18n();
 const store = useBatchFlashAuthStore();
+const portIndicators = useFeaturePortIndicators();
+const indicatorPaletteMode = computed(() => unref(portIndicators.paletteMode));
+const indicatorActivePorts = computed(() => unref(portIndicators.activePorts));
 
 const router = useRouter();
 
@@ -66,9 +71,18 @@ onUnmounted(() => {
     />
     <div>
       <ToolboxBreadcrumb :toolName="t('toolbox.batchFlashAuth.name')" />
-      <h1 class="text-lg font-semibold text-[var(--ty-text)]">
-        {{ t("batchFlashAuth.title") }}
-      </h1>
+      <div class="flex items-center gap-2">
+        <h1 class="text-lg font-semibold text-[var(--ty-text)]">
+          {{ t("batchFlashAuth.title") }}
+        </h1>
+        <TyPortActivityIndicator
+          :indicator="portIndicators.indicatorForFeature('toolbox')"
+          :active-ports="indicatorActivePorts"
+          :palette-mode="indicatorPaletteMode"
+          feature="toolbox"
+          surface="batch-flash-auth-header"
+        />
+      </div>
       <p class="text-xs text-[var(--ty-text-muted)]">
         {{ t("batchFlashAuth.subtitle") }}
       </p>
