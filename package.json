@@ -19,6 +19,7 @@
     "tauri:build": "tauri build",
     "prepare:icons": "pnpm exec tsx scripts/generate-icon-source.ts && pnpm exec tauri icon scripts/icon-source.png -o src-tauri/icons",
     "build:gui": "pnpm run build && tauri build",
+    "build:gui:debug-version": "pnpm exec tsx scripts/build-gui-debug-version.ts",
     "release:cli": "pnpm exec tsx scripts/release-cli.ts",
     "release:gui": "pnpm exec tsx scripts/release-gui.ts",
     "version:set": "pnpm exec tsx scripts/bump-version.ts",
