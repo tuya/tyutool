@@ -11,7 +11,7 @@ pnpm run build:gui:debug-version 0.0.1
 - 该命令只临时覆盖 `src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 的版本号
 - 前端显示版本通过 `APP_VERSION` 注入为指定值
 - 构建结束后会自动恢复仓库文件
-- 调试产物输出到 `.tmp/debug-builds/<version>-<timestamp>/`
+- 调试产物输出到 `.tmp/debug-builds/<version>-<timestamp>/`，其中包含可验证的安装包产物；Windows 下当前会生成 setup `.exe` 和 `.msi`，MSI 可进一步提取出可运行的 GUI 程序
 - 该命令只用于本地调试，不会修改 `CHANGELOG.md` 或执行正式发布流程
 
 ## 前置一次性准备
