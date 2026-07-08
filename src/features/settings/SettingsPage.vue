@@ -5,6 +5,7 @@ import { APP_VERSION } from "@/config/app";
 import { useSettingsStore, resolveLocale } from "@/stores/settings";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import type {
+  AutoUpdateIntervalId,
   LogLevelId,
   LocalePreference,
   // ThemeStyle,
@@ -42,12 +43,26 @@ const localeOptions = computed<TySelectOption[]>(() => [
   { value: "en", label: t("settings.langEn") },
 ]);
 
+const autoUpdateIntervalOptions = computed<TySelectOption[]>(() => [
+  { value: "off", label: t("settings.autoUpdateOff") },
+  { value: "1h", label: t("settings.autoUpdate1h") },
+  { value: "6h", label: t("settings.autoUpdate6h") },
+  { value: "12h", label: t("settings.autoUpdate12h") },
+  { value: "24h", label: t("settings.autoUpdate24h") },
+]);
+
 const localeValue = computed({
   get: () => settings.locale,
   set: (val: string) => {
     settings.setLocale(val as LocalePreference);
     locale.value = resolveLocale(val as LocalePreference);
   },
+});
+
+const autoUpdateIntervalValue = computed({
+  get: () => settings.autoUpdateInterval,
+  set: (val: string) =>
+    settings.setAutoUpdateInterval(val as AutoUpdateIntervalId),
 });
 
 // const themeStyleOptions = computed<TySelectOption[]>(() => [
@@ -230,6 +245,25 @@ async function openOpensourceLicenses(): Promise<void> {
           {{ t("settings.appSection") }}
         </h2>
         <div class="mt-4 space-y-4">
+          <div class="space-y-2">
+            <label
+              for="settings-auto-update-interval"
+              class="block text-sm font-medium text-[var(--ty-text)]"
+            >
+              {{ t("settings.autoUpdate") }}
+            </label>
+            <TySelect
+              id="settings-auto-update-interval"
+              v-model="autoUpdateIntervalValue"
+              :options="autoUpdateIntervalOptions"
+              class="w-full max-w-md"
+              style="height: 2.5rem"
+            />
+            <p class="text-xs text-[var(--ty-text-muted)]">
+              {{ t("settings.autoUpdateHint") }}
+            </p>
+          </div>
+
           <!-- Debug Log toggle -->
           <div class="flex items-center justify-between">
             <label class="ty-label">{{ t("settings.logEnabled") }}</label>

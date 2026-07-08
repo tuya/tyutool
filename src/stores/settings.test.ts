@@ -71,6 +71,7 @@ describe("useSettingsStore setters", () => {
     expect(s.logEnabled).toBe(true);
     expect(s.logLevel).toBe("info");
     expect(s.serialPortIndicatorsEnabled).toBe(true);
+    expect(s.autoUpdateInterval).toBe("6h");
   });
 
   it("setTheme mutates the theme ref", () => {
@@ -119,5 +120,13 @@ describe("useSettingsStore setters", () => {
     expect(s.serialPortIndicatorsEnabled).toBe(false);
     s.setSerialPortIndicatorsEnabled(true);
     expect(s.serialPortIndicatorsEnabled).toBe(true);
+  });
+
+  it("setAutoUpdateInterval mutates the interval", () => {
+    const s = useSettingsStore();
+    s.setAutoUpdateInterval("off");
+    expect(s.autoUpdateInterval).toBe("off");
+    s.setAutoUpdateInterval("24h");
+    expect(s.autoUpdateInterval).toBe("24h");
   });
 });

@@ -4,6 +4,7 @@
  */
 
 import type {
+  AutoUpdateIntervalId,
   LocalePreference,
   LogLevelId,
   ThemePreference /*, ThemeStyle*/,
@@ -18,6 +19,8 @@ const LOG_ENABLED_KEY = "tyutool-log-enabled";
 const LOG_LEVEL_KEY = "tyutool-log-level";
 const SERIAL_PORT_INDICATORS_ENABLED_KEY =
   "tyutool-serial-port-indicators-enabled";
+const AUTO_UPDATE_INTERVAL_KEY = "tyutool-auto-update-interval";
+const AUTO_UPDATE_LAST_CHECK_AT_KEY = "tyutool-auto-update-last-check-at";
 
 export {
   THEME_KEY,
@@ -28,6 +31,8 @@ export {
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
   SERIAL_PORT_INDICATORS_ENABLED_KEY,
+  AUTO_UPDATE_INTERVAL_KEY,
+  AUTO_UPDATE_LAST_CHECK_AT_KEY,
 };
 
 export function loadStoredTheme(): ThemePreference {
@@ -88,6 +93,35 @@ export function loadStoredSerialPortIndicatorsEnabled(): boolean {
   const val = localStorage.getItem(SERIAL_PORT_INDICATORS_ENABLED_KEY);
   if (val === null) return true;
   return val === "true";
+}
+
+export function loadStoredAutoUpdateInterval(): AutoUpdateIntervalId {
+  const val = localStorage.getItem(AUTO_UPDATE_INTERVAL_KEY);
+  if (
+    val === "off" ||
+    val === "1h" ||
+    val === "6h" ||
+    val === "12h" ||
+    val === "24h"
+  ) {
+    return val;
+  }
+  return "6h";
+}
+
+export function parseStoredAutoUpdateLastCheckAt(
+  value: string | number | null | undefined,
+): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed =
+    typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function loadStoredAutoUpdateLastCheckAt(): number | null {
+  return parseStoredAutoUpdateLastCheckAt(
+    localStorage.getItem(AUTO_UPDATE_LAST_CHECK_AT_KEY),
+  );
 }
 
 export function applyThemeToDom(

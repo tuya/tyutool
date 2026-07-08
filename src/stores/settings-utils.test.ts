@@ -1,9 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AUTO_UPDATE_INTERVAL_KEY,
+  AUTO_UPDATE_LAST_CHECK_AT_KEY,
   applyThemeToDom,
   LEGACY_LOCALE_KEY,
   LEGACY_THEME_KEY,
+  loadStoredAutoUpdateInterval,
+  loadStoredAutoUpdateLastCheckAt,
   loadStoredLocale,
   loadStoredLogEnabled,
   loadStoredLogLevel,
@@ -140,6 +144,40 @@ describe("loadStoredSerialPortIndicatorsEnabled", () => {
   it('returns false for any non-"true" string', () => {
     localStorage.setItem(SERIAL_PORT_INDICATORS_ENABLED_KEY, "disabled");
     expect(loadStoredSerialPortIndicatorsEnabled()).toBe(false);
+  });
+});
+
+describe("loadStoredAutoUpdateInterval", () => {
+  it('returns "6h" when no stored value', () => {
+    expect(loadStoredAutoUpdateInterval()).toBe("6h");
+  });
+
+  it("returns stored valid interval", () => {
+    for (const interval of ["off", "1h", "6h", "12h", "24h"] as const) {
+      localStorage.setItem(AUTO_UPDATE_INTERVAL_KEY, interval);
+      expect(loadStoredAutoUpdateInterval()).toBe(interval);
+    }
+  });
+
+  it('returns "6h" for invalid stored value', () => {
+    localStorage.setItem(AUTO_UPDATE_INTERVAL_KEY, "2h");
+    expect(loadStoredAutoUpdateInterval()).toBe("6h");
+  });
+});
+
+describe("loadStoredAutoUpdateLastCheckAt", () => {
+  it("returns null when no stored value", () => {
+    expect(loadStoredAutoUpdateLastCheckAt()).toBeNull();
+  });
+
+  it("returns the stored timestamp when valid", () => {
+    localStorage.setItem(AUTO_UPDATE_LAST_CHECK_AT_KEY, "1720400000000");
+    expect(loadStoredAutoUpdateLastCheckAt()).toBe(1720400000000);
+  });
+
+  it("returns null for invalid stored timestamp", () => {
+    localStorage.setItem(AUTO_UPDATE_LAST_CHECK_AT_KEY, "not-a-number");
+    expect(loadStoredAutoUpdateLastCheckAt()).toBeNull();
   });
 });
 

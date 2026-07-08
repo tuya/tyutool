@@ -18,6 +18,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeSpy }));
 
 import { useSettingsStore } from "./settings";
 import {
+  AUTO_UPDATE_INTERVAL_KEY,
+  AUTO_UPDATE_LAST_CHECK_AT_KEY,
   THEME_KEY,
   // THEME_STYLE_KEY,
   LOCALE_KEY,
@@ -141,6 +143,26 @@ describe("useSettingsStore init() + web persistence", () => {
     expect(localStorage.getItem(SERIAL_PORT_INDICATORS_ENABLED_KEY)).toBe(
       "true",
     );
+  });
+
+  it("changing autoUpdateInterval persists the selected interval", async () => {
+    const s = useSettingsStore();
+    s.init();
+
+    s.setAutoUpdateInterval("12h");
+    await nextTick();
+    expect(localStorage.getItem(AUTO_UPDATE_INTERVAL_KEY)).toBe("12h");
+  });
+
+  it("persists and reloads the last successful auto-update check timestamp", async () => {
+    const s = useSettingsStore();
+    s.init();
+
+    await s.setAutoUpdateLastCheckAt(1720400000000);
+    expect(localStorage.getItem(AUTO_UPDATE_LAST_CHECK_AT_KEY)).toBe(
+      "1720400000000",
+    );
+    await expect(s.getAutoUpdateLastCheckAt()).resolves.toBe(1720400000000);
   });
 
   it("applyLogLevel is a no-op in web mode (never invokes set_log_level)", async () => {
