@@ -13,6 +13,8 @@ import { getRepoRoot } from './lib/repo-root.js';
 import { run } from './lib/run.js';
 
 const STRICT_SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const SETUP_ARTIFACT_RE = /^tyutool_[^/\\]+_[^/\\]+-setup\.exe$/i;
+const MSI_ARTIFACT_RE = /^tyutool_[^/\\]+_[^/\\]+_[a-z]{2}-[A-Z]{2}\.msi$/i;
 export const debugBuildRepoRoot = getRepoRoot(import.meta.url);
 const ROOT = debugBuildRepoRoot;
 const TAURI_CARGO = resolve(ROOT, 'src-tauri', 'Cargo.toml');
@@ -55,13 +57,9 @@ export function makeDebugBuildStamp(now: Date): string {
 }
 
 export function isRunnableBundleArtifact(fileName: string): boolean {
-  const lower = fileName.toLowerCase();
+  const baseName = fileName.replace(/\\/g, '/').split('/').at(-1) ?? fileName;
 
-  if (lower.endsWith('.msi')) {
-    return true;
-  }
-
-  return lower.endsWith('.exe') && !lower.includes('tyutool_gui');
+  return SETUP_ARTIFACT_RE.test(baseName) || MSI_ARTIFACT_RE.test(baseName);
 }
 
 export function getDebugBuildPaths(

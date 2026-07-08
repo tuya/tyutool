@@ -79,7 +79,7 @@ describe('copyRunnableArtifacts', () => {
 
     writeFileSync(join(bundleRoot, 'nsis', 'tyutool_0.0.1_x64-setup.exe'), 'ok');
     writeFileSync(join(bundleRoot, 'msi', 'tyutool_0.0.1_x64_en-US.msi'), 'ok');
-    writeFileSync(join(bundleRoot, 'nsis', 'tyutool_gui.exe'), 'skip');
+    writeFileSync(join(bundleRoot, 'nsis', 'tyutool_0.0.1_x64-helper.exe'), 'skip');
     writeFileSync(join(bundleRoot, 'nsis', 'tyutool_gui.pdb'), 'skip');
 
     expect(copyRunnableArtifacts(bundleRoot, outputDir)).toEqual([
