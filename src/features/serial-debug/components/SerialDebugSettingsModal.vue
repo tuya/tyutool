@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import TySelect from "@/components/TySelect.vue";
+import TySwitch from "@/components/TySwitch.vue";
 
 const emit = defineEmits<{ close: [] }>();
 const s = useSerialDebugStore();
@@ -90,36 +91,52 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
           </label>
         </div>
 
-        <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
-          <input type="checkbox" v-model="s.autoRelease" class="shrink-0" />
-          <span class="text-[var(--ty-text)]">{{
-            t("serialDebug.conn.autoRelease")
-          }}</span>
-          <FontAwesomeIcon
-            :icon="['fas', 'circle-info']"
-            class="size-3.5 cursor-help text-[var(--ty-text-muted)]"
-            :title="t('serialDebug.conn.autoReleaseTip')"
+        <div class="check-row">
+          <div class="check-row__copy">
+            <span class="text-[var(--ty-text)]">{{
+              t("serialDebug.conn.autoRelease")
+            }}</span>
+            <FontAwesomeIcon
+              :icon="['fas', 'circle-info']"
+              class="size-3.5 cursor-help text-[var(--ty-text-muted)]"
+              :title="t('serialDebug.conn.autoReleaseTip')"
+            />
+          </div>
+          <TySwitch
+            v-model="s.autoRelease"
+            size="sm"
+            :aria-label="t('serialDebug.conn.autoRelease')"
           />
-        </label>
+        </div>
 
-        <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
-          <input type="checkbox" v-model="s.hexView" class="shrink-0" />
+        <div class="check-row">
           <span class="text-[var(--ty-text)]">{{
             t("serialDebug.conn.hexView")
           }}</span>
-        </label>
-
-        <label class="check-row flex cursor-pointer items-center gap-2 text-sm">
-          <input type="checkbox" v-model="s.ansiEnabled" class="shrink-0" />
-          <span class="text-[var(--ty-text)]">{{
-            t("serialDebug.conn.ansiParse")
-          }}</span>
-          <FontAwesomeIcon
-            :icon="['fas', 'circle-info']"
-            class="size-3.5 cursor-help text-[var(--ty-text-muted)]"
-            :title="t('serialDebug.conn.ansiParseTip')"
+          <TySwitch
+            v-model="s.hexView"
+            size="sm"
+            :aria-label="t('serialDebug.conn.hexView')"
           />
-        </label>
+        </div>
+
+        <div class="check-row">
+          <div class="check-row__copy">
+            <span class="text-[var(--ty-text)]">{{
+              t("serialDebug.conn.ansiParse")
+            }}</span>
+            <FontAwesomeIcon
+              :icon="['fas', 'circle-info']"
+              class="size-3.5 cursor-help text-[var(--ty-text-muted)]"
+              :title="t('serialDebug.conn.ansiParseTip')"
+            />
+          </div>
+          <TySwitch
+            v-model="s.ansiEnabled"
+            size="sm"
+            :aria-label="t('serialDebug.conn.ansiParse')"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -129,5 +146,20 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .field {
   display: flex;
   flex-direction: column;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.check-row__copy {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
 }
 </style>

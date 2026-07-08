@@ -6,6 +6,7 @@ import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 import { BAUD_RATE_OPTIONS } from "@/features/firmware-flash/constants";
 import { BATCH_AUTH_TOOL_CHIP_OPTIONS } from "../types";
 import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
+import TySwitch from "@/components/TySwitch.vue";
 import { useI18n } from "vue-i18n";
 
 const store = useBatchFlashAuthStore();
@@ -132,43 +133,20 @@ function toggleFlashFirmware() {
           <span class="text-xs text-[var(--ty-text-muted)]">{{
             t("batchFlashAuth.config.flashFirmware")
           }}</span>
-          <button
-            type="button"
-            class="inline-flex h-[2.125rem] w-fit cursor-pointer items-center gap-2 rounded-lg px-0 text-xs font-medium text-[var(--ty-text)] transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ty-primary)]"
-            :class="store.isBusy ? 'cursor-not-allowed opacity-60' : undefined"
-            :style="{
-              color: store.flashFirmware
-                ? 'var(--ty-primary, #2563eb)'
-                : 'var(--ty-text)',
-            }"
-            role="switch"
-            :aria-checked="store.flashFirmware"
-            :disabled="store.isBusy"
-            @click="toggleFlashFirmware"
-          >
-            <span
-              class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200"
-              :style="{
-                backgroundColor: store.flashFirmware
-                  ? 'var(--ty-primary, #2563eb)'
-                  : 'color-mix(in srgb, var(--ty-text-muted) 28%, var(--ty-surface-muted))',
-              }"
-              aria-hidden="true"
-            >
-              <span
-                class="absolute left-0.5 size-4 rounded-full shadow-sm transition-transform duration-200"
-                :class="store.flashFirmware ? 'translate-x-4' : ''"
-                :style="{
-                  backgroundColor: '#fff',
-                }"
-              />
-            </span>
+          <div class="inline-flex min-h-[2.125rem] w-fit items-center gap-2">
+            <TySwitch
+              :model-value="store.flashFirmware"
+              :disabled="store.isBusy"
+              size="sm"
+              :aria-label="t('batchFlashAuth.config.flashFirmware')"
+              @update:model-value="toggleFlashFirmware"
+            />
             <span class="leading-none">{{
               store.flashFirmware
                 ? t("batchFlashAuth.config.flashFirmwareOn")
                 : t("batchFlashAuth.config.flashFirmwareOff")
             }}</span>
-          </button>
+          </div>
         </div>
       </div>
 

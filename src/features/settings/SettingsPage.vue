@@ -14,7 +14,9 @@ import { isTauriRuntime } from "@/runtime";
 import { openLogsFolder as openLogsFolderAction } from "./open-logs-folder";
 import UpdateDialog from "./UpdateDialog.vue";
 import LogViewerDialog from "./LogViewerDialog.vue";
+import { buildUpdateEntryModel } from "./update-entry-model";
 import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
+import TySwitch from "@/components/TySwitch.vue";
 
 const { locale, t } = useI18n();
 const settings = useSettingsStore();
@@ -23,11 +25,7 @@ const sd = useSerialDebugStore();
 const appVersion = APP_VERSION;
 const showUpdateDialog = ref(false);
 const showLogViewer = ref(false);
-
-const logToggleOptions = computed(() => [
-  { value: true, label: t("settings.logOn") },
-  { value: false, label: t("settings.logOff") },
-]);
+const updateEntryModel = buildUpdateEntryModel(appVersion);
 
 const logLevelOptions = computed(() => [
   { value: "error", label: "Error" },
@@ -86,12 +84,13 @@ function openLogsFolder(): Promise<void> {
   return openLogsFolderAction(t);
 }
 
-async function toggleAutoSave(): Promise<void> {
-  if (!sd.autoSave && !sd.autoSaveDir) {
+async function setAutoSaveEnabled(nextValue: boolean): Promise<void> {
+  if (nextValue === sd.autoSave) return;
+  if (nextValue && !sd.autoSaveDir) {
     sd.autoSave = true;
     await sd.pickAutoSaveDir();
   } else {
-    sd.autoSave = !sd.autoSave;
+    sd.autoSave = nextValue;
   }
 }
 
@@ -138,16 +137,111 @@ async function openOpensourceLicenses(): Promise<void> {
       </div>
     </header>
 
+    <section
+      class="settings-update-center relative overflow-hidden rounded-2xl p-4 sm:p-5"
+      aria-labelledby="update-center-heading"
+    >
+      <div class="settings-update-center__bg" aria-hidden="true" />
+      <div class="settings-update-center__layout">
+        <div class="settings-update-center__intro">
+          <p class="settings-update-center__eyebrow">
+            {{ t(updateEntryModel.metaLabelKey) }}
+          </p>
+          <div class="settings-update-center__headline-row">
+            <div class="min-w-0">
+              <h2
+                id="update-center-heading"
+                class="settings-update-center__title"
+              >
+                {{ t(updateEntryModel.panelTitleKey) }}
+              </h2>
+              <p class="settings-update-center__body">
+                {{ t(updateEntryModel.panelBodyKey) }}
+              </p>
+            </div>
+            <div class="settings-update-center__version">
+              <span class="settings-update-center__version-label">
+                {{ t(updateEntryModel.versionLabelKey) }}
+              </span>
+              <strong class="settings-update-center__version-value">
+                {{ updateEntryModel.badge }}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        <button
+          v-if="isTauriRuntime()"
+          type="button"
+          class="update-entry-card update-entry-card--hero"
+          @click="showUpdateDialog = true"
+        >
+          <div class="update-entry-card__glow" aria-hidden="true" />
+          <div class="update-entry-card__icon" aria-hidden="true">
+            <FontAwesomeIcon
+              :icon="['fas', 'arrows-rotate']"
+              class="size-4.5"
+            />
+          </div>
+          <div class="update-entry-card__body">
+            <div class="update-entry-card__meta">
+              <span class="update-entry-card__meta-label">
+                {{ t(updateEntryModel.metaLabelKey) }}
+              </span>
+              <span class="update-entry-card__badge">
+                {{ updateEntryModel.badge }}
+              </span>
+            </div>
+            <strong class="update-entry-card__title">
+              {{ t(updateEntryModel.titleKey) }}
+            </strong>
+            <p class="update-entry-card__subtitle">
+              {{ t(updateEntryModel.subtitleKey) }}
+            </p>
+          </div>
+          <div class="update-entry-card__arrow" aria-hidden="true">
+            <FontAwesomeIcon :icon="['fas', 'angle-right']" class="size-4" />
+          </div>
+        </button>
+
+        <div class="settings-update-center__control">
+          <div class="settings-update-center__control-copy">
+            <label
+              for="settings-auto-update-interval"
+              class="block text-sm font-medium text-[var(--ty-text)]"
+            >
+              {{ t("settings.autoUpdate") }}
+            </label>
+            <p class="settings-update-center__control-hint">
+              {{ t("settings.autoUpdateHint") }}
+            </p>
+          </div>
+          <TySelect
+            id="settings-auto-update-interval"
+            v-model="autoUpdateIntervalValue"
+            :options="autoUpdateIntervalOptions"
+            class="settings-update-center__control-select"
+            style="height: 2.75rem"
+          />
+        </div>
+      </div>
+    </section>
+
     <div
-      class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 md:items-stretch md:gap-4"
+      class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 md:items-start md:gap-4"
     >
       <section
         class="ty-card min-w-0 rounded-xl p-4 sm:p-5"
         aria-labelledby="appearance-heading"
       >
-        <h2 id="appearance-heading" class="ty-section-title">
-          {{ t("settings.appearance") }}
-        </h2>
+        <div class="settings-card-head">
+          <h2 id="appearance-heading" class="ty-section-title">
+            {{ t("settings.appearance") }}
+          </h2>
+          <p class="settings-card-subtitle">
+            {{ t("settings.appearanceHint") }}
+          </p>
+        </div>
         <!-- Theme style: temporarily hidden -->
         <!-- <fieldset class="mt-4 space-y-2"> ... </fieldset> -->
         <!-- Theme mode: segmented icons -->
@@ -191,109 +285,78 @@ async function openOpensourceLicenses(): Promise<void> {
             </button>
           </div>
         </fieldset>
-        <div class="mt-6 space-y-2">
-          <label
-            for="settings-locale"
-            class="block text-sm font-medium text-[var(--ty-text)]"
-            >{{ t("settings.language") }}</label
-          >
-          <TySelect
-            id="settings-locale"
-            v-model="localeValue"
-            :options="localeOptions"
-            class="w-full max-w-md"
-            style="height: 2.5rem"
-          />
-          <p class="text-xs text-[var(--ty-text-muted)]">
-            {{ t("settings.languageHint") }}
-          </p>
-        </div>
-        <div class="mt-6 flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="ty-label">{{
-              t("settings.serialPortIndicators")
-            }}</label>
-            <p class="mt-0.5 text-xs text-[var(--ty-text-muted)]">
-              {{ t("settings.serialPortIndicatorsHint") }}
-            </p>
+        <div class="settings-row-group mt-6">
+          <div class="settings-row">
+            <div class="settings-row__copy">
+              <label for="settings-locale" class="settings-row__title">{{
+                t("settings.language")
+              }}</label>
+              <p class="settings-row__hint">
+                {{ t("settings.languageHint") }}
+              </p>
+            </div>
+            <TySelect
+              id="settings-locale"
+              v-model="localeValue"
+              :options="localeOptions"
+              class="settings-row__control settings-row__control--select"
+              style="height: 2.5rem"
+            />
           </div>
-          <div class="flex gap-2">
-            <button
-              v-for="opt in logToggleOptions"
-              :key="`serial-port-indicators-${String(opt.value)}`"
-              class="ty-btn-sm"
-              :class="
-                settings.serialPortIndicatorsEnabled === opt.value
-                  ? opt.value
-                    ? 'ty-btn-toggle-active'
-                    : 'ty-btn-toggle-active-off'
-                  : 'ty-btn-secondary'
-              "
-              @click="settings.setSerialPortIndicatorsEnabled(opt.value)"
-            >
-              {{ opt.label }}
-            </button>
+
+          <div class="settings-row">
+            <div class="settings-row__copy">
+              <span class="settings-row__title">{{
+                t("settings.serialPortIndicators")
+              }}</span>
+              <p class="settings-row__hint">
+                {{ t("settings.serialPortIndicatorsHint") }}
+              </p>
+            </div>
+            <TySwitch
+              :model-value="settings.serialPortIndicatorsEnabled"
+              :aria-label="t('settings.serialPortIndicators')"
+              @update:model-value="settings.setSerialPortIndicatorsEnabled"
+            />
           </div>
         </div>
       </section>
 
       <section
         class="ty-card min-w-0 rounded-xl p-4 sm:p-5"
-        aria-labelledby="app-heading"
+        aria-labelledby="diagnostics-heading"
       >
-        <h2 id="app-heading" class="ty-section-title">
-          {{ t("settings.appSection") }}
-        </h2>
-        <div class="mt-4 space-y-4">
-          <div class="space-y-2">
-            <label
-              for="settings-auto-update-interval"
-              class="block text-sm font-medium text-[var(--ty-text)]"
-            >
-              {{ t("settings.autoUpdate") }}
-            </label>
-            <TySelect
-              id="settings-auto-update-interval"
-              v-model="autoUpdateIntervalValue"
-              :options="autoUpdateIntervalOptions"
-              class="w-full max-w-md"
-              style="height: 2.5rem"
-            />
-            <p class="text-xs text-[var(--ty-text-muted)]">
-              {{ t("settings.autoUpdateHint") }}
-            </p>
-          </div>
-
-          <!-- Debug Log toggle -->
-          <div class="flex items-center justify-between">
-            <label class="ty-label">{{ t("settings.logEnabled") }}</label>
-            <div class="flex gap-2">
-              <button
-                v-for="opt in logToggleOptions"
-                :key="String(opt.value)"
-                class="ty-btn-sm"
-                :class="
-                  settings.logEnabled === opt.value
-                    ? opt.value
-                      ? 'ty-btn-toggle-active'
-                      : 'ty-btn-toggle-active-off'
-                    : 'ty-btn-secondary'
-                "
-                @click="settings.setLogEnabled(opt.value)"
-              >
-                {{ opt.label }}
-              </button>
+        <div class="settings-card-head">
+          <h2 id="diagnostics-heading" class="ty-section-title">
+            {{ t("settings.diagnosticsTitle") }}
+          </h2>
+          <p class="settings-card-subtitle">
+            {{ t("settings.diagnosticsHint") }}
+          </p>
+        </div>
+        <div class="settings-row-group mt-4">
+          <div class="settings-row">
+            <div class="settings-row__copy">
+              <span class="settings-row__title">{{
+                t("settings.logEnabled")
+              }}</span>
+              <p class="settings-row__hint">
+                {{ t("settings.diagnosticsHint") }}
+              </p>
             </div>
+            <TySwitch
+              :model-value="settings.logEnabled"
+              :aria-label="t('settings.logEnabled')"
+              @update:model-value="settings.setLogEnabled"
+            />
           </div>
 
-          <!-- Log Level select -->
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="ty-label">{{ t("settings.logLevel") }}</label>
-              <p
-                v-if="!settings.logEnabled"
-                class="text-xs text-base-content/50 mt-0.5"
-              >
+          <div class="settings-row">
+            <div class="settings-row__copy">
+              <span class="settings-row__title">{{
+                t("settings.logLevel")
+              }}</span>
+              <p class="settings-row__hint">
                 {{ t("settings.logLevelHint") }}
               </p>
             </div>
@@ -301,42 +364,49 @@ async function openOpensourceLicenses(): Promise<void> {
               :model-value="settings.logLevel"
               :options="logLevelOptions"
               :disabled="!settings.logEnabled"
-              class="w-auto min-w-[8.5rem]"
+              class="settings-row__control settings-row__control--select"
               @update:model-value="settings.setLogLevel($event as LogLevelId)"
             />
           </div>
 
-          <!-- Open log folder -->
-          <div class="flex items-center justify-between">
-            <label class="ty-label">{{ t("settings.logsFolder") }}</label>
+          <div class="diagnostics-actions">
             <button
               type="button"
-              class="ty-btn-sm ty-btn-secondary"
+              class="diagnostics-action-card"
               @click="openLogsFolder"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'folder-open']"
-                class="mr-1.5 size-3.5"
-                aria-hidden="true"
-              />
-              {{ t("settings.logsFolder") }}
+              <div class="diagnostics-action-card__icon" aria-hidden="true">
+                <FontAwesomeIcon
+                  :icon="['fas', 'folder-open']"
+                  class="size-4"
+                />
+              </div>
+              <div class="min-w-0">
+                <strong class="diagnostics-action-card__title">
+                  {{ t("settings.logsFolder") }}
+                </strong>
+                <p class="diagnostics-action-card__copy">
+                  {{ t("settings.logsFolderHint") }}
+                </p>
+              </div>
             </button>
-          </div>
 
-          <!-- View logs in-app -->
-          <div class="flex items-center justify-between">
-            <label class="ty-label">{{ t("settings.viewLogs") }}</label>
             <button
               type="button"
-              class="ty-btn-sm ty-btn-secondary"
+              class="diagnostics-action-card"
               @click="showLogViewer = true"
             >
-              <FontAwesomeIcon
-                :icon="['fas', 'file-lines']"
-                class="mr-1.5 size-3.5"
-                aria-hidden="true"
-              />
-              {{ t("settings.viewLogs") }}
+              <div class="diagnostics-action-card__icon" aria-hidden="true">
+                <FontAwesomeIcon :icon="['fas', 'file-lines']" class="size-4" />
+              </div>
+              <div class="min-w-0">
+                <strong class="diagnostics-action-card__title">
+                  {{ t("settings.viewLogs") }}
+                </strong>
+                <p class="diagnostics-action-card__copy">
+                  {{ t("settings.viewLogsHint") }}
+                </p>
+              </div>
             </button>
           </div>
         </div>
@@ -347,64 +417,65 @@ async function openOpensourceLicenses(): Promise<void> {
       class="ty-card min-w-0 rounded-xl p-4 sm:p-5"
       aria-labelledby="serial-debug-heading"
     >
-      <h2 id="serial-debug-heading" class="ty-section-title">
-        {{ t("settings.serialLogsSection") }}
-      </h2>
-      <div class="mt-4 space-y-4">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="ty-label">{{
+      <div class="settings-card-head">
+        <h2 id="serial-debug-heading" class="ty-section-title">
+          {{ t("settings.serialLogsSection") }}
+        </h2>
+        <p class="settings-card-subtitle">
+          {{ t("settings.serialLogsHint") }}
+        </p>
+      </div>
+      <div class="settings-row-group mt-4">
+        <div class="settings-row">
+          <div class="settings-row__copy">
+            <span class="settings-row__title">{{
               t("serialDebug.autoSave.label")
-            }}</label>
-            <p class="mt-0.5 text-xs text-[var(--ty-text-muted)]">
+            }}</span>
+            <p class="settings-row__hint">
               {{ t("serialDebug.autoSave.description") }}
             </p>
           </div>
-          <input
-            type="checkbox"
-            :checked="sd.autoSave"
-            class="size-4 shrink-0 cursor-pointer"
-            @change="toggleAutoSave"
+          <TySwitch
+            :model-value="sd.autoSave"
+            :aria-label="t('serialDebug.autoSave.label')"
+            @update:model-value="setAutoSaveEnabled"
           />
         </div>
-        <div class="flex items-center justify-between gap-4">
-          <div class="flex min-w-0 flex-1 items-center gap-2">
-            <label class="ty-label shrink-0">{{
+        <div class="settings-row settings-row--path">
+          <div class="settings-row__copy">
+            <span class="settings-row__title">{{
               t("serialDebug.autoSave.dirLabel")
-            }}</label>
-            <div class="path-scroll min-w-0 flex-1 overflow-x-auto">
-              <span
-                v-if="sd.autoSaveDir"
-                class="whitespace-nowrap text-xs text-[var(--ty-text-muted)]"
-                >{{ sd.autoSaveDir }}</span
-              >
+            }}</span>
+            <div class="path-scroll min-w-0 max-w-full overflow-x-auto">
+              <span class="settings-row__value">{{
+                sd.autoSaveDir || "—"
+              }}</span>
             </div>
           </div>
           <button
             type="button"
-            class="ty-btn-sm ty-btn-secondary shrink-0"
+            class="ty-btn-secondary settings-inline-action"
             @click="sd.pickAutoSaveDir()"
           >
             {{ t("serialDebug.autoSave.pickDir") }}
           </button>
         </div>
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <label class="ty-label">{{
+        <div class="settings-row">
+          <div class="settings-row__copy">
+            <span class="settings-row__title">{{
               t("serialDebug.autoSave.timestamp")
-            }}</label>
-            <span class="font-mono text-xs text-[var(--ty-text-muted)]">
+            }}</span>
+            <p class="settings-row__hint">
               {{
                 sd.autoSaveTimestamp
                   ? t("serialDebug.autoSave.timestampFmtOn")
                   : t("serialDebug.autoSave.timestampFmtOff")
               }}
-            </span>
+            </p>
           </div>
-          <input
-            type="checkbox"
+          <TySwitch
             v-model="sd.autoSaveTimestamp"
-            class="size-4 cursor-pointer"
+            :aria-label="t('serialDebug.autoSave.timestamp')"
           />
         </div>
       </div>
@@ -414,32 +485,21 @@ async function openOpensourceLicenses(): Promise<void> {
       class="ty-card min-w-0 rounded-xl p-4 sm:p-5"
       aria-labelledby="about-heading"
     >
-      <h2 id="about-heading" class="ty-section-title">
-        {{ t("settings.about") }}
-      </h2>
-      <p class="mt-3 text-sm text-[var(--ty-text)]">
-        {{ t("settings.version", { version: appVersion }) }}
-      </p>
-      <div class="mt-4 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
+      <div class="settings-card-head">
+        <h2 id="about-heading" class="ty-section-title">
+          {{ t("settings.about") }}
+        </h2>
+        <p class="settings-card-subtitle">
+          {{ t("settings.aboutHint") }}
+        </p>
+      </div>
+      <div class="about-footer">
         <button
           type="button"
-          class="ty-btn-secondary inline-flex min-h-11 w-full justify-center rounded-xl px-4 sm:w-auto"
+          class="ty-btn-secondary settings-inline-action w-full justify-center sm:w-auto"
           @click="openOpensourceLicenses"
         >
           {{ t("settings.opensource") }}
-        </button>
-        <button
-          v-if="isTauriRuntime()"
-          type="button"
-          class="ty-btn-secondary inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 sm:w-auto"
-          @click="showUpdateDialog = true"
-        >
-          <FontAwesomeIcon
-            :icon="['fas', 'arrows-rotate']"
-            class="size-4"
-            aria-hidden="true"
-          />
-          {{ t("settings.checkUpdate") }}
         </button>
       </div>
     </section>
@@ -458,31 +518,481 @@ async function openOpensourceLicenses(): Promise<void> {
   scrollbar-width: none;
 }
 
-/* "关闭" active state — danger red, distinct from primary "开启" */
-.ty-btn-toggle-active-off {
+.settings-update-center {
+  border: 1px solid color-mix(in srgb, var(--ty-primary) 24%, var(--ty-border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ty-primary) 8%, var(--ty-surface)) 0%,
+    color-mix(in srgb, var(--ty-surface) 94%, white 6%) 100%
+  );
+  box-shadow:
+    0 18px 36px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.settings-update-center__bg {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at top right,
+      color-mix(in srgb, var(--ty-primary) 16%, transparent) 0,
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at left bottom,
+      color-mix(in srgb, var(--ty-primary) 10%, transparent) 0,
+      transparent 28%
+    );
+}
+
+.settings-update-center__layout {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(18rem, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.settings-update-center__intro {
+  min-width: 0;
+}
+
+.settings-update-center__eyebrow {
+  margin: 0 0 0.45rem;
+  color: var(--ty-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-update-center__headline-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-update-center__title {
+  margin: 0;
+  color: var(--ty-text);
+  font-size: 1.28rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.settings-update-center__body {
+  margin: 0.55rem 0 0;
+  max-width: 34rem;
+  color: var(--ty-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.settings-update-center__version {
+  display: flex;
+  min-width: 8.5rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.18rem;
+  padding-top: 0.1rem;
+}
+
+.settings-update-center__version-label {
+  color: var(--ty-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-update-center__version-value {
+  color: var(--ty-text);
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.settings-update-center__control {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--ty-border);
+  background-color: color-mix(in srgb, var(--ty-surface) 86%, white 14%);
+  padding: 0.9rem 1rem;
+}
+
+.settings-update-center__control-copy {
+  min-width: 0;
+}
+
+.settings-update-center__control-hint {
+  margin: 0.28rem 0 0;
+  color: var(--ty-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.settings-update-center__control-select {
+  width: 100%;
+  max-width: 12rem;
+  flex-shrink: 0;
+}
+
+.settings-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.settings-card-subtitle {
+  margin: 0;
+  color: var(--ty-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.settings-row-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.settings-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--ty-border);
+  background-color: color-mix(in srgb, var(--ty-surface) 88%, white 12%);
+  padding: 0.9rem 1rem;
+}
+
+.settings-row--path {
+  align-items: flex-start;
+}
+
+.settings-row__copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-row__title {
+  display: block;
+  color: var(--ty-text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.settings-row__hint {
+  margin: 0.3rem 0 0;
+  color: var(--ty-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.settings-row__value {
+  display: block;
+  margin-top: 0.28rem;
+  color: var(--ty-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.settings-row__control {
+  flex-shrink: 0;
+}
+
+.settings-row__control--select {
+  width: 100%;
+  max-width: 12rem;
+}
+
+.settings-inline-action {
   display: inline-flex;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  border-radius: 0.75rem;
+  padding-inline: 1rem;
+}
+
+.update-entry-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--ty-primary) 28%, var(--ty-border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ty-primary) 10%, var(--ty-surface-muted)) 0%,
+    color-mix(in srgb, var(--ty-surface) 90%, white 10%) 100%
+  );
+  padding: 0.95rem 1rem;
+  text-align: left;
+  cursor: pointer;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.update-entry-card--hero {
+  min-height: 100%;
+  align-self: stretch;
+}
+
+.update-entry-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ty-primary) 42%, var(--ty-border));
+  box-shadow:
+    0 14px 30px rgba(15, 23, 42, 0.1),
+    0 4px 14px color-mix(in srgb, var(--ty-primary) 14%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.update-entry-card:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ty-primary) 18%, transparent),
+    0 14px 30px rgba(15, 23, 42, 0.1),
+    0 4px 14px color-mix(in srgb, var(--ty-primary) 14%, transparent);
+}
+
+.update-entry-card__glow {
+  pointer-events: none;
+  position: absolute;
+  inset: auto auto -2.25rem -1.5rem;
+  height: 5.5rem;
+  width: 5.5rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--ty-primary) 16%, transparent);
+  filter: blur(10px);
+  opacity: 0.8;
+}
+
+.update-entry-card__icon {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 2.75rem;
+  width: 2.75rem;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  min-height: 2.75rem;
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 600;
+  flex-shrink: 0;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--ty-primary) 22%, transparent);
+  background-color: color-mix(in srgb, var(--ty-primary) 12%, transparent);
+  color: var(--ty-primary);
+}
+
+.update-entry-card__body {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.update-entry-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-bottom: 0.35rem;
+}
+
+.update-entry-card__meta-label {
+  color: var(--ty-text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.update-entry-card__badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--ty-primary) 24%, transparent);
+  background-color: color-mix(in srgb, var(--ty-surface) 82%, white 18%);
+  padding: 0.25rem 0.55rem;
+  color: var(--ty-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.update-entry-card__title {
+  display: block;
+  color: var(--ty-text);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.update-entry-card__subtitle {
+  margin: 0.28rem 0 0;
+  color: var(--ty-text-muted);
+  font-size: 0.79rem;
+  line-height: 1.55;
+}
+
+.update-entry-card__arrow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--ty-primary) 76%, var(--ty-text-muted));
+}
+
+.diagnostics-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.diagnostics-action-card {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--ty-border);
+  background-color: color-mix(in srgb, var(--ty-surface) 88%, white 12%);
+  padding: 0.85rem 0.95rem;
+  text-align: left;
   cursor: pointer;
-  color: #fff;
-  border: 1px solid var(--ty-danger);
-  background-color: var(--ty-danger);
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.08),
-    0 2px 8px color-mix(in srgb, var(--ty-danger) 24%, transparent);
   transition:
-    background-color 0.18s ease,
     border-color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.18s ease,
     box-shadow 0.18s ease;
 }
-.ty-btn-toggle-active-off:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--ty-danger) 85%, #000);
-  border-color: color-mix(in srgb, var(--ty-danger) 85%, #000);
+
+.diagnostics-action-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ty-primary) 24%, var(--ty-border));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.diagnostics-action-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ty-primary) 14%, transparent);
+}
+
+.diagnostics-action-card__icon {
+  display: flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 0.8rem;
+  background-color: color-mix(in srgb, var(--ty-primary) 10%, transparent);
+  color: var(--ty-primary);
+}
+
+.diagnostics-action-card__title {
+  display: block;
+  color: var(--ty-text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.diagnostics-action-card__copy {
+  margin: 0.28rem 0 0;
+  color: var(--ty-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.about-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 0.95rem;
+  border-top: 1px solid color-mix(in srgb, var(--ty-border) 82%, transparent);
+  padding-top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .settings-update-center__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .update-entry-card--hero {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-update-center__headline-row {
+    flex-direction: column;
+  }
+
+  .settings-update-center__version {
+    min-width: 0;
+    align-items: flex-start;
+  }
+
+  .settings-update-center__control {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-update-center__control-select {
+    max-width: none;
+  }
+
+  .diagnostics-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-row__control--select {
+    max-width: none;
+  }
+
+  .settings-inline-action {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .about-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-entry-card,
+  .diagnostics-action-card {
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>
