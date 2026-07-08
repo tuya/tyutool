@@ -17,8 +17,15 @@ const SETUP_ARTIFACT_RE = /^tyutool_[^/\\]+_[^/\\]+-setup\.exe$/i;
 const MSI_ARTIFACT_RE = /^tyutool_[^/\\]+_[^/\\]+_[a-z]{2}-[A-Z]{2}\.msi$/i;
 export const debugBuildRepoRoot = getRepoRoot(import.meta.url);
 const ROOT = debugBuildRepoRoot;
+const ROOT_CARGO_LOCK = resolve(ROOT, 'Cargo.lock');
 const TAURI_CARGO = resolve(ROOT, 'src-tauri', 'Cargo.toml');
 const TAURI_CONF = resolve(ROOT, 'src-tauri', 'tauri.conf.json');
+
+type FileSnapshot = {
+  path: string;
+  contents: string;
+  encoding: BufferEncoding;
+};
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -73,6 +80,12 @@ export function getDebugBuildPaths(
     cargoTargetDir: `${baseRoot}/.tmp/debug-target/${version}-${stamp}`,
     outputDir: `${baseRoot}/.tmp/debug-builds/${version}-${stamp}`,
   };
+}
+
+export function assertSupportedDebugBuildPlatform(platform = process.platform): void {
+  if (platform !== 'win32') {
+    throw new Error('Error: build:gui:debug-version currently supports Windows packaging only.');
+  }
 }
 
 function collectFiles(dir: string): string[] {
@@ -139,13 +152,43 @@ export function copyRunnableArtifacts(bundleRoot: string, outputDir: string): st
   return copied;
 }
 
+export function restoreFileSnapshots(snapshots: FileSnapshot[]): void {
+  const failures: Error[] = [];
+
+  for (const snapshot of snapshots) {
+    try {
+      writeFileSync(snapshot.path, snapshot.contents, snapshot.encoding);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(new Error(`Failed to restore ${snapshot.path}: ${message}`));
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `Failed to restore ${failures.length} file(s) after debug build cleanup.`,
+    );
+  }
+}
+
 export function main(args = process.argv.slice(2)): void {
+  assertSupportedDebugBuildPlatform();
+
   const { version } = parseDebugVersionArgs(args);
   const stamp = makeDebugBuildStamp(new Date());
   const { cargoTargetDir, outputDir } = getDebugBuildPaths(ROOT, version, stamp);
+  const cargoLockBefore = readFileSync(ROOT_CARGO_LOCK, 'utf-8');
   const cargoTomlBefore = readFileSync(TAURI_CARGO, 'utf-8');
   const tauriConfBefore = readFileSync(TAURI_CONF, 'utf-8');
+  const snapshots: FileSnapshot[] = [
+    { path: TAURI_CARGO, contents: cargoTomlBefore, encoding: 'utf-8' },
+    { path: TAURI_CONF, contents: tauriConfBefore, encoding: 'utf-8' },
+    { path: ROOT_CARGO_LOCK, contents: cargoLockBefore, encoding: 'utf-8' },
+  ];
   const sharedEnv = { ...process.env, APP_VERSION: version };
+  let buildError: unknown;
+  let restoreError: unknown;
 
   console.log(`==> tyutool debug GUI build: version ${version}`);
   console.log(`==> target dir: ${relative(ROOT, cargoTargetDir)}`);
@@ -177,10 +220,30 @@ export function main(args = process.argv.slice(2)): void {
 
     const copied = copyRunnableArtifacts(join(cargoTargetDir, 'release', 'bundle'), outputDir);
     console.log(`==> copied artifacts: ${copied.join(', ')}`);
-  } finally {
-    writeFileSync(TAURI_CARGO, cargoTomlBefore, 'utf-8');
-    writeFileSync(TAURI_CONF, tauriConfBefore, 'utf-8');
+  } catch (error) {
+    buildError = error;
+  }
+
+  try {
+    restoreFileSnapshots(snapshots);
     console.log('==> restored temporary version overrides');
+  } catch (error) {
+    restoreError = error;
+  }
+
+  if (buildError && restoreError) {
+    throw new AggregateError(
+      [buildError, restoreError],
+      'Debug build failed and cleanup was incomplete.',
+    );
+  }
+
+  if (restoreError) {
+    throw restoreError;
+  }
+
+  if (buildError) {
+    throw buildError;
   }
 }
 
