@@ -1,6 +1,11 @@
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+  copyRunnableArtifacts,
   getDebugBuildPaths,
   isRunnableBundleArtifact,
   isStrictSemver,
@@ -60,5 +65,26 @@ describe('getDebugBuildPaths', () => {
       cargoTargetDir: 'D:/repo/.tmp/debug-target/0.0.1-20260708-091011',
       outputDir: 'D:/repo/.tmp/debug-builds/0.0.1-20260708-091011',
     });
+  });
+});
+
+describe('copyRunnableArtifacts', () => {
+  it('copies only runnable bundle outputs into the debug directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tyutool-debug-build-'));
+    const bundleRoot = join(root, 'bundle');
+    const outputDir = join(root, 'copied');
+
+    mkdirSync(join(bundleRoot, 'nsis'), { recursive: true });
+    mkdirSync(join(bundleRoot, 'msi'), { recursive: true });
+
+    writeFileSync(join(bundleRoot, 'nsis', 'tyutool_0.0.1_x64-setup.exe'), 'ok');
+    writeFileSync(join(bundleRoot, 'msi', 'tyutool_0.0.1_x64_en-US.msi'), 'ok');
+    writeFileSync(join(bundleRoot, 'nsis', 'tyutool_gui.exe'), 'skip');
+    writeFileSync(join(bundleRoot, 'nsis', 'tyutool_gui.pdb'), 'skip');
+
+    expect(copyRunnableArtifacts(bundleRoot, outputDir)).toEqual([
+      'tyutool_0.0.1_x64-setup.exe',
+      'tyutool_0.0.1_x64_en-US.msi',
+    ]);
   });
 });
