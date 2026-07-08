@@ -10,7 +10,17 @@ const t = i18n.global.t;
 
 /** Maps a backend error message to a user-facing string. */
 function mapBackendUserMessage(raw: string | undefined): string {
-  return raw?.trim() ?? "";
+  const msg = raw?.trim() ?? "";
+  const lower = msg.toLowerCase();
+  const serialAccessDenied =
+    lower.includes("serial i/o") &&
+    (lower.includes("access is denied") ||
+      lower.includes("permission denied") ||
+      msg.includes("拒绝访问"));
+  if (serialAccessDenied) {
+    return t("flash.err.portAccessDenied");
+  }
+  return msg;
 }
 
 export interface FlashProgressDeps {

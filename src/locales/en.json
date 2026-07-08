@@ -259,6 +259,7 @@
       "startAfterEnd": "Start address cannot be greater than end address.",
       "verifyFailed": "Verification failed: check connection, chip, and firmware match.",
       "checksumLog": "Error: checksum does not match device report.",
+      "portAccessDenied": "Could not open the serial port: access was denied. Usually another program is using the port (including tyutool Serial Debug), or the current process lacks permission. Close the program using the port and try again.",
       "portUnavailable": "Port unavailable. Check connection or release port."
     },
     "segment": "Segment",

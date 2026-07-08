@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { i18n } from "@/i18n";
 
 // Capture showConfirmDialog so auth_read milestone tests can assert on it
 // without the real dialog singleton mutating global reactive state.
@@ -83,6 +84,34 @@ describe("useFlashProgress reducer", () => {
     expect(p.flashPhase.value).toBe("error");
     expect(appendLog).toHaveBeenCalled();
     expect(onOperationSettled).toHaveBeenCalledOnce();
+  });
+
+  it("maps serial access denied into a clearer user-facing message", () => {
+    const { p, appendLog } = make();
+    p.runningOp.value = "flash";
+    p.handleFlashProgressPayload({
+      kind: "done",
+      result: { err: { message: "plugin error: serial I/O: 拒绝访问。" } },
+    } as never);
+    const expected = i18n.global.t("flash.err.portAccessDenied");
+    expect(p.flashMessage.value).toBe(expected);
+    expect(appendLog).toHaveBeenCalledWith(
+      i18n.global.t("flash.err.withMsg", { msg: expected }),
+    );
+  });
+
+  it("maps English serial access denied into the same clearer message", () => {
+    const { p } = make();
+    p.runningOp.value = "flash";
+    p.handleFlashProgressPayload({
+      kind: "done",
+      result: {
+        err: { message: "plugin error: serial I/O: Access is denied." },
+      },
+    } as never);
+    expect(p.flashMessage.value).toBe(
+      i18n.global.t("flash.err.portAccessDenied"),
+    );
   });
 
   it("on done/cancelled sets error and still runs teardown", () => {

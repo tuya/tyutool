@@ -220,6 +220,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   let unsubscribeChunk: (() => void) | null = null;
   let unsubscribeDisconnect: (() => void) | null = null;
   let unsubscribeFilterUpdated: (() => void) | null = null;
+  let resumeAfterFlashRelease = false;
 
   const resumePortManager = usePortManagerStore();
   watch(
@@ -495,30 +496,38 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       return;
     }
     opening.value = true;
+    resumeAfterFlashRelease = false;
     const pm = usePortManagerStore();
     const outcome = await pm.acquire({
       id: "serial-debug",
       port: port.value,
       onReleaseRequest: async (requester) => {
-        if (autoRelease.value) return true;
-        return await showConfirmDialog({
-          title: t("serialDebug.confirm.releaseForFlashTitle"),
-          message: t("serialDebug.confirm.releaseForFlashBody", { requester }),
-          okLabel: t("serialDebug.confirm.releaseOk"),
-          cancelLabel: t("serialDebug.confirm.releaseCancel"),
-          kind: "warning",
-        });
+        const approved = autoRelease.value
+          ? true
+          : await showConfirmDialog({
+              title: t("serialDebug.confirm.releaseForFlashTitle"),
+              message: t("serialDebug.confirm.releaseForFlashBody", {
+                requester,
+              }),
+              okLabel: t("serialDebug.confirm.releaseOk"),
+              cancelLabel: t("serialDebug.confirm.releaseCancel"),
+              kind: "warning",
+            });
+        resumeAfterFlashRelease = approved && requester === "flash";
+        return approved;
       },
-      onReleased: (reason) => {
+      onReleased: async (reason) => {
         opening.value = true;
         open.value = false;
-        void stopBackendSession().finally(() => {
-          opening.value = false;
-        });
-        if (reason === "requested" && autoRelease.value) {
+        const shouldResume = reason === "requested" && resumeAfterFlashRelease;
+        resumeAfterFlashRelease = false;
+        if (shouldResume) {
           pendingResume.value = true;
           pm.registerResume(port.value, "serial-debug");
         }
+        await stopBackendSession().finally(() => {
+          opening.value = false;
+        });
         if (reason === "unplugged") {
           void appendSysLine(t("serialDebug.log.disconnected"));
         }

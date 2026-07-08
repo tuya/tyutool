@@ -2,6 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
+import {
+  __setSerialDebugTransportForTest,
+  type SerialDebugTransport,
+} from "@/features/serial-debug/transport";
 
 // Mock isTauriRuntime before any store import
 vi.mock("@/runtime", async (importOriginal) => {
@@ -86,12 +90,58 @@ vi.mock("@/composables/confirmDialog", () => ({
 
 // Now import store (it will see the mocked isTauriRuntime)
 import { useFlashStore } from "./flash";
+import { useSerialDebugStore } from "./serial-debug";
 import { wsTransport } from "@/transport/ws-transport";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import {
   loadFlashWorkspaceFromStorage,
   saveFlashWorkspaceToStorage,
 } from "@/stores/flash-workspace";
+
+function makeSerialDebugTransportWithDeferredClose() {
+  let resolveClose: (() => void) | null = null;
+  const transport: SerialDebugTransport = {
+    async open() {},
+    async close() {
+      await new Promise<void>((resolve) => {
+        resolveClose = resolve;
+      });
+    },
+    async send() {},
+    async clearSession() {},
+    async appendSysLine() {},
+    async addFilter() {
+      throw new Error("not implemented");
+    },
+    async removeFilter() {},
+    async readFilterMatches() {
+      return { filterId: "unused", totalMatches: 0, start: 0, items: [] };
+    },
+    async readSessionPage() {
+      return { totalLines: 0, start: 0, items: [] };
+    },
+    onChunk() {
+      return () => {};
+    },
+    onChunkBatch() {
+      return () => {};
+    },
+    onDisconnect() {
+      return () => {};
+    },
+    onFilterUpdated() {
+      return () => {};
+    },
+  };
+
+  return {
+    transport,
+    finishClose() {
+      resolveClose?.();
+      resolveClose = null;
+    },
+  };
+}
 
 describe("flash store", () => {
   beforeEach(() => {
@@ -111,6 +161,7 @@ describe("flash store", () => {
     // fire its captured onProgress into the next test's disposed store.
     vi.clearAllTimers();
     vi.useRealTimers();
+    __setSerialDebugTransportForTest(null);
   });
 
   // validateOperation requires uuid length 20 and authkey length 32.
@@ -904,6 +955,71 @@ describe("flash store", () => {
       expect(store.flashPhase).toBe("error");
       expect(store.runningOp).toBeNull();
       expect(wsTransport.runJob).not.toHaveBeenCalled();
+    });
+
+    it("waits for serial-debug to finish closing after release confirmation before starting flash", async () => {
+      const { usePortManagerStore } = await import("@/stores/port-manager");
+      const pm = usePortManagerStore();
+      const serialTransport = makeSerialDebugTransportWithDeferredClose();
+      __setSerialDebugTransportForTest(serialTransport.transport);
+
+      const debugStore = useSerialDebugStore();
+      debugStore.port = "/dev/ttyUSB0";
+      debugStore.baudRate = 115200;
+      debugStore.autoRelease = false;
+      await debugStore.openPort();
+      expect(debugStore.open).toBe(true);
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
+
+      let emitDone: (elapsedSecs?: number) => void = () => {
+        throw new Error("emitDone not initialized");
+      };
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) =>
+          await new Promise<void>((resolve) => {
+            emitDone = (elapsedSecs = 1) => {
+              onProgress({
+                payload: {
+                  kind: "done",
+                  result: { ok: { elapsed_secs: elapsedSecs } },
+                },
+              } as never);
+              resolve();
+            };
+          }),
+      );
+
+      const flashStore = useFlashStore();
+      flashStore.selectedSerialPort = "/dev/ttyUSB0";
+      flashStore.flashSegments[0].firmwarePath = "/fw.bin";
+      flashStore.flashSegments[0].startAddr = "0x0";
+      flashStore.flashSegments[0].endAddr = "0x1000";
+
+      const opPromise = flashStore.startOperation("flash");
+      await Promise.resolve();
+      await nextTick();
+
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
+      expect(debugStore.open).toBe(false);
+      expect(debugStore.opening).toBe(true);
+      expect(wsTransport.runJob).not.toHaveBeenCalled();
+
+      serialTransport.finishClose();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await nextTick();
+
+      expect(wsTransport.runJob).toHaveBeenCalledTimes(1);
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("flash");
+
+      emitDone();
+      await opPromise;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(flashStore.flashPhase).toBe("success");
+      expect(debugStore.open).toBe(true);
+      expect(debugStore.pendingResume).toBe(false);
+      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
     });
   });
 
