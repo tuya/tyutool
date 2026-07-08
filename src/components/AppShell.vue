@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, unref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
 import { APP_NAV_ITEMS, isNavItemActive } from "@/config/app-nav";
 import TySerialPortIcon from "@/components/icons/TySerialPortIcon.vue";
+import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
+import { useFeaturePortIndicators } from "@/features/serial-port-indicators/useFeaturePortIndicators";
 import { useSettingsStore } from "@/stores/settings";
 import appLogo from "@/assets/logo.png";
 
@@ -23,6 +25,9 @@ const nav = computed(() =>
     label: t(item.labelKey),
   })),
 );
+const portIndicators = useFeaturePortIndicators();
+const indicatorPaletteMode = computed(() => unref(portIndicators.paletteMode));
+const indicatorActivePorts = computed(() => unref(portIndicators.activePorts));
 
 const settings = useSettingsStore();
 const { theme, locale } = storeToRefs(settings);
@@ -55,6 +60,13 @@ const langTitle = computed(() =>
 
 function toggleLang() {
   settings.setLocale(locale.value === "en" ? "zh-CN" : "en");
+}
+
+function navIndicator(name: string) {
+  if (name === "flash" || name === "serial-debug" || name === "toolbox") {
+    return portIndicators.indicatorForFeature(name);
+  }
+  return null;
 }
 </script>
 
@@ -106,10 +118,20 @@ function toggleLang() {
             class="size-5 shrink-0"
             aria-hidden="true"
           />
-          <span
-            class="min-w-0 truncate md:whitespace-normal md:overflow-visible md:leading-tight"
-            >{{ item.label }}</span
-          >
+          <div class="flex min-w-0 items-center gap-1.5">
+            <span
+              class="min-w-0 truncate md:whitespace-normal md:overflow-visible md:leading-tight"
+              >{{ item.label }}</span
+            >
+            <TyPortActivityIndicator
+              v-if="navIndicator(item.name)"
+              :indicator="navIndicator(item.name)!"
+              :active-ports="indicatorActivePorts"
+              :palette-mode="indicatorPaletteMode"
+              :feature="item.name"
+              surface="sidebar-nav"
+            />
+          </div>
         </RouterLink>
       </nav>
 

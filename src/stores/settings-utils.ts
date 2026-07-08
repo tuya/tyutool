@@ -16,6 +16,8 @@ const LEGACY_THEME_KEY = "tyutools-theme";
 const LEGACY_LOCALE_KEY = "tyutools-locale";
 const LOG_ENABLED_KEY = "tyutool-log-enabled";
 const LOG_LEVEL_KEY = "tyutool-log-level";
+const SERIAL_PORT_INDICATORS_ENABLED_KEY =
+  "tyutool-serial-port-indicators-enabled";
 
 export {
   THEME_KEY,
@@ -25,6 +27,7 @@ export {
   LEGACY_LOCALE_KEY,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
+  SERIAL_PORT_INDICATORS_ENABLED_KEY,
 };
 
 export function loadStoredTheme(): ThemePreference {
@@ -79,6 +82,12 @@ export function loadStoredLogLevel(): LogLevelId {
     return val as LogLevelId;
   }
   return "info";
+}
+
+export function loadStoredSerialPortIndicatorsEnabled(): boolean {
+  const val = localStorage.getItem(SERIAL_PORT_INDICATORS_ENABLED_KEY);
+  if (val === null) return true;
+  return val === "true";
 }
 
 export function applyThemeToDom(

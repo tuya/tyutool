@@ -193,6 +193,33 @@ async function openOpensourceLicenses(): Promise<void> {
             {{ t("settings.languageHint") }}
           </p>
         </div>
+        <div class="mt-6 flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="ty-label">{{
+              t("settings.serialPortIndicators")
+            }}</label>
+            <p class="mt-0.5 text-xs text-[var(--ty-text-muted)]">
+              {{ t("settings.serialPortIndicatorsHint") }}
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-for="opt in logToggleOptions"
+              :key="`serial-port-indicators-${String(opt.value)}`"
+              class="ty-btn-sm"
+              :class="
+                settings.serialPortIndicatorsEnabled === opt.value
+                  ? opt.value
+                    ? 'ty-btn-toggle-active'
+                    : 'ty-btn-toggle-active-off'
+                  : 'ty-btn-secondary'
+              "
+              @click="settings.setSerialPortIndicatorsEnabled(opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
       </section>
 
       <section

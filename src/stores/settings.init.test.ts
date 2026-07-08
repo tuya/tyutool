@@ -23,6 +23,7 @@ import {
   LOCALE_KEY,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
+  SERIAL_PORT_INDICATORS_ENABLED_KEY,
 } from "./settings-utils";
 
 describe("useSettingsStore init() + web persistence", () => {
@@ -123,6 +124,23 @@ describe("useSettingsStore init() + web persistence", () => {
     s.setLogLevel("trace");
     await nextTick();
     expect(localStorage.getItem(LOG_LEVEL_KEY)).toBe("trace");
+  });
+
+  it("changing serialPortIndicatorsEnabled persists the boolean as a string", async () => {
+    const s = useSettingsStore();
+    s.init();
+
+    s.setSerialPortIndicatorsEnabled(false);
+    await nextTick();
+    expect(localStorage.getItem(SERIAL_PORT_INDICATORS_ENABLED_KEY)).toBe(
+      "false",
+    );
+
+    s.setSerialPortIndicatorsEnabled(true);
+    await nextTick();
+    expect(localStorage.getItem(SERIAL_PORT_INDICATORS_ENABLED_KEY)).toBe(
+      "true",
+    );
   });
 
   it("applyLogLevel is a no-op in web mode (never invokes set_log_level)", async () => {

@@ -70,6 +70,7 @@ describe("useSettingsStore setters", () => {
     expect(s.locale).toBe("auto");
     expect(s.logEnabled).toBe(true);
     expect(s.logLevel).toBe("info");
+    expect(s.serialPortIndicatorsEnabled).toBe(true);
   });
 
   it("setTheme mutates the theme ref", () => {
@@ -110,5 +111,13 @@ describe("useSettingsStore setters", () => {
     expect(s.logLevel).toBe("debug");
     s.setLogLevel("trace");
     expect(s.logLevel).toBe("trace");
+  });
+
+  it("setSerialPortIndicatorsEnabled mutates the flag", () => {
+    const s = useSettingsStore();
+    s.setSerialPortIndicatorsEnabled(false);
+    expect(s.serialPortIndicatorsEnabled).toBe(false);
+    s.setSerialPortIndicatorsEnabled(true);
+    expect(s.serialPortIndicatorsEnabled).toBe(true);
   });
 });
