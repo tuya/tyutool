@@ -1,4 +1,7 @@
+import { getRepoRoot } from './lib/repo-root.js';
+
 const STRICT_SEMVER_RE = /^\d+\.\d+\.\d+$/;
+export const debugBuildRepoRoot = getRepoRoot(import.meta.url);
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
