@@ -1,5 +1,19 @@
 # 发布流程
 
+## 临时低版本 GUI 调试包
+
+当需要验证应用内更新展示时，可构建一个仅本次有效的低版本 GUI 包：
+
+```bash
+pnpm run build:gui:debug-version 0.0.1
+```
+
+- 该命令只临时覆盖 `src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 的版本号
+- 前端显示版本通过 `APP_VERSION` 注入为指定值
+- 构建结束后会自动恢复仓库文件
+- 调试产物输出到 `.tmp/debug-builds/<version>-<timestamp>/`
+- 该命令只用于本地调试，不会修改 `CHANGELOG.md` 或执行正式发布流程
+
 ## 前置一次性准备
 
 ```bash
