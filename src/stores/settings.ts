@@ -4,11 +4,16 @@ import { isTauriRuntime } from "@/runtime";
 import { rLog } from "@/utils/log";
 import {
   applyThemeToDom,
+  AUTO_UPDATE_INTERVAL_KEY,
+  AUTO_UPDATE_LAST_CHECK_AT_KEY,
+  loadStoredAutoUpdateInterval,
+  loadStoredAutoUpdateLastCheckAt,
   loadStoredLocale,
   loadStoredLogEnabled,
   loadStoredLogLevel,
   loadStoredSerialPortIndicatorsEnabled,
   loadStoredTheme,
+  parseStoredAutoUpdateLastCheckAt,
   // loadStoredThemeStyle,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
@@ -23,6 +28,7 @@ export type ThemePreference = "light" | "dark" | "system";
 export type LocaleId = "zh-CN" | "en";
 export type LocalePreference = LocaleId | "auto";
 export type LogLevelId = "error" | "warn" | "info" | "debug" | "trace";
+export type AutoUpdateIntervalId = "off" | "1h" | "6h" | "12h" | "24h";
 
 const STORE_FILE = "settings.json";
 
@@ -55,6 +61,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const serialPortIndicatorsEnabled = ref<boolean>(
     loadStoredSerialPortIndicatorsEnabled(),
   );
+  const autoUpdateInterval = ref<AutoUpdateIntervalId>(
+    loadStoredAutoUpdateInterval(),
+  );
 
   function setTheme(value: ThemePreference): void {
     theme.value = value;
@@ -78,6 +87,10 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function setSerialPortIndicatorsEnabled(value: boolean): void {
     serialPortIndicatorsEnabled.value = value;
+  }
+
+  function setAutoUpdateInterval(value: AutoUpdateIntervalId): void {
+    autoUpdateInterval.value = value;
   }
 
   async function applyLogLevel(): Promise<void> {
@@ -135,6 +148,48 @@ export const useSettingsStore = defineStore("settings", () => {
       serialPortIndicatorsEnabled.value =
         storedSerialPortIndicatorsEnabled === "true";
     }
+    const storedAutoUpdateInterval = await store.get<string>(
+      AUTO_UPDATE_INTERVAL_KEY,
+    );
+    if (
+      storedAutoUpdateInterval === "off" ||
+      storedAutoUpdateInterval === "1h" ||
+      storedAutoUpdateInterval === "6h" ||
+      storedAutoUpdateInterval === "12h" ||
+      storedAutoUpdateInterval === "24h"
+    ) {
+      autoUpdateInterval.value = storedAutoUpdateInterval;
+    }
+  }
+
+  async function getAutoUpdateLastCheckAt(): Promise<number | null> {
+    if (isTauriRuntime()) {
+      const { Store } = await import("@tauri-apps/plugin-store");
+      const store = await Store.load(STORE_FILE);
+      return parseStoredAutoUpdateLastCheckAt(
+        await store.get<string | number>(AUTO_UPDATE_LAST_CHECK_AT_KEY),
+      );
+    }
+    return loadStoredAutoUpdateLastCheckAt();
+  }
+
+  async function setAutoUpdateLastCheckAt(value: number | null): Promise<void> {
+    if (isTauriRuntime()) {
+      const { Store } = await import("@tauri-apps/plugin-store");
+      const store = await Store.load(STORE_FILE);
+      if (value === null) {
+        await store.delete(AUTO_UPDATE_LAST_CHECK_AT_KEY);
+      } else {
+        await store.set(AUTO_UPDATE_LAST_CHECK_AT_KEY, String(value));
+      }
+      await store.save();
+      return;
+    }
+    if (value === null) {
+      localStorage.removeItem(AUTO_UPDATE_LAST_CHECK_AT_KEY);
+    } else {
+      localStorage.setItem(AUTO_UPDATE_LAST_CHECK_AT_KEY, String(value));
+    }
   }
 
   /** Resolves when all persisted settings (including async Tauri store) are loaded. */
@@ -191,6 +246,11 @@ export const useSettingsStore = defineStore("settings", () => {
       rLog.info(`[Settings] Serial port indicators enabled: ${v}`);
     });
 
+    watch(autoUpdateInterval, (v) => {
+      void persistSetting(AUTO_UPDATE_INTERVAL_KEY, v);
+      rLog.info(`[Settings] Auto update interval: ${v}`);
+    });
+
     // Apply log level once on startup (non-Tauri or before Tauri store loads)
     if (!isTauriRuntime()) {
       void applyLogLevel();
@@ -213,12 +273,16 @@ export const useSettingsStore = defineStore("settings", () => {
     logEnabled,
     logLevel,
     serialPortIndicatorsEnabled,
+    autoUpdateInterval,
     setTheme,
     // setThemeStyle,
     setLocale,
     setLogEnabled,
     setLogLevel,
     setSerialPortIndicatorsEnabled,
+    setAutoUpdateInterval,
+    getAutoUpdateLastCheckAt,
+    setAutoUpdateLastCheckAt,
     init,
     ready: () => _ready,
   };

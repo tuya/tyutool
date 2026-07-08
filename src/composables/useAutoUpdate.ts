@@ -7,8 +7,19 @@ import {
 } from "@/features/settings/update-sources";
 import { toastState } from "@/composables/toastState";
 import { isTauriRuntime } from "@/runtime";
+import { type AutoUpdateIntervalId, useSettingsStore } from "@/stores/settings";
 import { getManualUpdateFlags } from "@/utils/install-type";
 import { rLog } from "@/utils/log";
+
+export const AUTO_UPDATE_STARTUP_DELAY_MS = 4000;
+
+const AUTO_UPDATE_INTERVAL_MS: Record<AutoUpdateIntervalId, number> = {
+  off: 0,
+  "1h": 60 * 60 * 1000,
+  "6h": 6 * 60 * 60 * 1000,
+  "12h": 12 * 60 * 60 * 1000,
+  "24h": 24 * 60 * 60 * 1000,
+};
 
 /** Detect current platform key for portable manifest lookup */
 function getPortablePlatformKey(): string {
@@ -24,17 +35,48 @@ function getPortablePlatformKey(): string {
   return "linux-x86_64";
 }
 
+export function shouldAutoCheckForUpdate({
+  isTauri,
+  interval,
+  lastCheckedAt,
+  now,
+}: {
+  isTauri: boolean;
+  interval: AutoUpdateIntervalId;
+  lastCheckedAt: number | null;
+  now: number;
+}): boolean {
+  if (!isTauri || interval === "off") return false;
+  if (lastCheckedAt === null) return true;
+  return now - lastCheckedAt >= AUTO_UPDATE_INTERVAL_MS[interval];
+}
+
 export function useAutoUpdate(): void {
+  const settings = useSettingsStore();
+
   onMounted(() => {
-    if (!isTauriRuntime()) return;
-    // Delay startup check by 4 seconds to not interfere with app startup
-    setTimeout(() => {
-      void checkForUpdate();
-    }, 4000);
+    void settings.ready().then(async () => {
+      const lastCheckedAt = await settings.getAutoUpdateLastCheckAt();
+      if (
+        !shouldAutoCheckForUpdate({
+          isTauri: isTauriRuntime(),
+          interval: settings.autoUpdateInterval,
+          lastCheckedAt,
+          now: Date.now(),
+        })
+      ) {
+        return;
+      }
+
+      // Delay startup check by 4 seconds to not interfere with app startup
+      setTimeout(() => {
+        void checkForUpdate(settings);
+      }, AUTO_UPDATE_STARTUP_DELAY_MS);
+    });
   });
 }
 
-async function checkForUpdate(): Promise<void> {
+async function checkForUpdate(settings = useSettingsStore()): Promise<void> {
   rLog.info(`[Update] Auto-check starting (current: v${APP_VERSION})`);
   const flags = await getManualUpdateFlags();
   if (flags.manualOnly) {
@@ -48,6 +90,7 @@ async function checkForUpdate(): Promise<void> {
   for (const source of UPDATE_SOURCES) {
     try {
       const manifest = await fetchLatestJson(source.url, 8000);
+      await settings.setAutoUpdateLastCheckAt(Date.now());
       if (isNewerVersion(manifest.version, APP_VERSION)) {
         rLog.info(
           `[Update] New version found: v${manifest.version} (source: ${source.id})`,
