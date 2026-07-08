@@ -53,6 +53,9 @@ pub enum ClientMessage {
         cfg: DebugConfig,
     },
     SerialDebugClose,
+    SerialDebugDeviceReset {
+        chip_id: String,
+    },
     SerialDebugSend {
         bytes: Vec<u8>,
     },
@@ -100,6 +103,11 @@ pub enum ServerMessage {
         ports: Vec<SerialPortEntry>,
     },
     DeviceResetResult {
+        ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    SerialDebugDeviceResetResult {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
@@ -405,6 +413,27 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                     let _ = bridge.shutdown();
                 }
                 let _ = sink_tx.send(ServerMessage::SerialDebugClosed);
+            }
+            ClientMessage::SerialDebugDeviceReset { chip_id } => {
+                let outcome = {
+                    let guard = debug_session.lock().unwrap();
+                    match guard.as_ref() {
+                        Some(session) => session.device_reset(&chip_id),
+                        None => Err(tyutool_core::FlashError::Plugin(
+                            "serial debug not open".into(),
+                        )),
+                    }
+                };
+                let _ = sink_tx.send(match outcome {
+                    Ok(()) => ServerMessage::SerialDebugDeviceResetResult {
+                        ok: true,
+                        error: None,
+                    },
+                    Err(err) => ServerMessage::SerialDebugDeviceResetResult {
+                        ok: false,
+                        error: Some(err.to_string()),
+                    },
+                });
             }
             ClientMessage::SerialDebugSend { bytes } => {
                 let guard = debug_session.lock().unwrap();
@@ -1033,6 +1062,14 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_serial_debug_device_reset() {
+        let msg: ClientMessage =
+            serde_json::from_str(r#"{"type":"serial_debug_device_reset","chip_id":"T5AI"}"#)
+                .unwrap();
+        assert!(matches!(msg, ClientMessage::SerialDebugDeviceReset { .. }));
+    }
+
+    #[test]
     fn device_reset_result_wire_type_is_snake_case() {
         let msg = ServerMessage::DeviceResetResult {
             ok: true,
@@ -1042,6 +1079,19 @@ mod tests {
         assert!(
             s.contains(r#""type":"device_reset_result""#),
             "unexpected JSON (client listens for type device_reset_result): {s}"
+        );
+    }
+
+    #[test]
+    fn serial_debug_device_reset_result_wire_type_is_snake_case() {
+        let msg = ServerMessage::SerialDebugDeviceResetResult {
+            ok: true,
+            error: None,
+        };
+        let s = serde_json::to_string(&msg).unwrap();
+        assert!(
+            s.contains(r#""type":"serial_debug_device_reset_result""#),
+            "unexpected JSON (client listens for type serial_debug_device_reset_result): {s}"
         );
     }
 

@@ -143,6 +143,62 @@ export class WsTransport {
     });
   }
 
+  async serialDebugDeviceReset(chipId: string): Promise<void> {
+    const ws = await this.connect();
+    return new Promise((resolve, reject) => {
+      const finish = (fn: () => void) => {
+        clearTimeout(timeout);
+        ws.removeEventListener("message", handler);
+        fn();
+      };
+
+      const timeout = setTimeout(() => {
+        ws.removeEventListener("message", handler);
+        reject(
+          new Error(
+            "serialDebugDeviceReset timeout — 请重新编译并启动 tyutool-cli serve（需支持 serial_debug_device_reset），并确认 ws://127.0.0.1:9527 可达",
+          ),
+        );
+      }, 15000);
+
+      const handler = (ev: MessageEvent) => {
+        let msg: {
+          type: string;
+          ok?: boolean;
+          error?: string;
+          message?: string;
+        };
+        try {
+          msg = JSON.parse(ev.data as string) as typeof msg;
+        } catch {
+          return;
+        }
+        if (msg.type === "error") {
+          finish(() => reject(new Error(msg.message ?? "server error")));
+          return;
+        }
+        if (msg.type === "serial_debug_device_reset_result") {
+          finish(() => {
+            if (msg.ok) {
+              resolve();
+            } else {
+              reject(
+                new Error(msg.error ?? "serial debug device reset failed"),
+              );
+            }
+          });
+        }
+      };
+      ws.addEventListener("message", handler);
+      ws.send(
+        JSON.stringify({
+          type: "serial_debug_device_reset",
+          chip_id: chipId,
+        }),
+      );
+    });
+  }
+
   async listPorts(): Promise<TauriSerialPortRow[]> {
     this.closeCurrentConnection();
     const ws = await this.connect();

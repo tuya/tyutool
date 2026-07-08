@@ -15,6 +15,7 @@ import { useSerialDebugStore } from "./serial-debug";
 import { useFlashStore } from "./flash";
 import { nextTick } from "vue";
 import { MAX_PENDING_LINE_BYTES } from "@/features/serial-debug/constants";
+import { AUTH_ONLY_CHIP_ID } from "@/features/firmware-flash/constants";
 
 async function waitForChunkFrame(): Promise<void> {
   await new Promise((r) => setTimeout(r, 20));
@@ -744,40 +745,83 @@ describe("useSerialDebugStore.deviceReset", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses provided resetPort when given", async () => {
-    const spy = vi
+  it("prefers in-session reset when the control port matches the current debug port", async () => {
+    const inSessionSpy = vi
+      .spyOn(wsTransport, "serialDebugDeviceReset")
+      .mockResolvedValue(undefined);
+    const externalSpy = vi
       .spyOn(wsTransport, "deviceReset")
       .mockResolvedValue(undefined);
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
+    s.open = true;
 
-    await s.deviceReset("T5AI", "/dev/ttyACM0");
+    await s.deviceReset("t5ai", "/dev/ttyACM1");
 
-    expect(spy).toHaveBeenCalledWith("/dev/ttyACM0", "T5AI");
+    expect(inSessionSpy).toHaveBeenCalledWith("T5AI");
+    expect(externalSpy).not.toHaveBeenCalled();
   });
 
-  it("falls back to port.value when resetPort is not provided", async () => {
+  it("keeps using the standalone reset path when the control port differs from the current debug port", async () => {
     const spy = vi
+      .spyOn(wsTransport, "deviceReset")
+      .mockResolvedValue(undefined);
+    const inSessionSpy = vi
+      .spyOn(wsTransport, "serialDebugDeviceReset")
+      .mockResolvedValue(undefined);
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyACM1";
+
+    await s.deviceReset("t5ai", "/dev/ttyACM0");
+
+    expect(spy).toHaveBeenCalledWith("/dev/ttyACM0", "T5AI");
+    expect(inSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it("logs a clear error when the control port matches the log port but the session is not open", async () => {
+    const inSessionSpy = vi
+      .spyOn(wsTransport, "serialDebugDeviceReset")
+      .mockResolvedValue(undefined);
+    const externalSpy = vi
       .spyOn(wsTransport, "deviceReset")
       .mockResolvedValue(undefined);
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
+    s.open = false;
+    const before = s.lines.length;
+
+    await s.deviceReset("t5ai", "/dev/ttyACM1");
+
+    expect(inSessionSpy).not.toHaveBeenCalled();
+    expect(externalSpy).not.toHaveBeenCalled();
+    expect(s.lines.length).toBe(before + 1);
+    expect(s.lines[s.lines.length - 1].direction).toBe("sys");
+  });
+
+  it("falls back to port.value and uses the in-session path when the current debug session is open", async () => {
+    const spy = vi
+      .spyOn(wsTransport, "serialDebugDeviceReset")
+      .mockResolvedValue(undefined);
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyACM1";
+    s.open = true;
 
     await s.deviceReset("T5AI");
 
-    expect(spy).toHaveBeenCalledWith("/dev/ttyACM1", "T5AI");
+    expect(spy).toHaveBeenCalledWith("T5AI");
   });
 
-  it("falls back to port.value when resetPort is empty string", async () => {
+  it("treats an empty resetPort like the current log port and still uses the in-session path", async () => {
     const spy = vi
-      .spyOn(wsTransport, "deviceReset")
+      .spyOn(wsTransport, "serialDebugDeviceReset")
       .mockResolvedValue(undefined);
     const s = useSerialDebugStore();
     s.port = "/dev/ttyACM1";
+    s.open = true;
 
     await s.deviceReset("T5AI", "");
 
-    expect(spy).toHaveBeenCalledWith("/dev/ttyACM1", "T5AI");
+    expect(spy).toHaveBeenCalledWith("T5AI");
   });
 
   it("does nothing when no effective port is available", async () => {
@@ -1035,6 +1079,74 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
     expect(s.lines[s.lines.length - 1].direction).toBe("sys");
     // history is only updated on a successful send
     expect(s.sendHistory).toEqual([]);
+  });
+});
+
+describe("useSerialDebugStore reboot target resolution", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it("prefers the remembered reboot control port and chip over flash page defaults", () => {
+    const s = useSerialDebugStore();
+    const flash = useFlashStore();
+    flash.selectedSerialPort = "/dev/ttyACM0";
+    flash.selectedChipId = "esp32";
+
+    s.rememberRebootTarget("/dev/ttyUSB0", "t5ai");
+
+    expect(s.resolveRebootTarget(["/dev/ttyUSB0", "/dev/ttyACM0"])).toEqual({
+      controlPort: "/dev/ttyUSB0",
+      chipId: "t5ai",
+      needsSelection: false,
+    });
+  });
+
+  it("falls back to the firmware tool selections when no remembered reboot target exists", () => {
+    const s = useSerialDebugStore();
+    const flash = useFlashStore();
+    flash.selectedSerialPort = "/dev/ttyACM0";
+    flash.selectedChipId = "esp32c3";
+
+    expect(s.resolveRebootTarget(["/dev/ttyACM0"])).toEqual({
+      controlPort: "/dev/ttyACM0",
+      chipId: "esp32c3",
+      needsSelection: false,
+    });
+  });
+
+  it("requires explicit selection when the flash page is on the auth-only pseudo chip", () => {
+    const s = useSerialDebugStore();
+    const flash = useFlashStore();
+    flash.selectedSerialPort = "/dev/ttyACM0";
+    flash.selectedChipId = AUTH_ONLY_CHIP_ID;
+
+    expect(s.resolveRebootTarget(["/dev/ttyACM0"])).toEqual({
+      controlPort: "/dev/ttyACM0",
+      chipId: null,
+      needsSelection: true,
+    });
+  });
+
+  it("marks the selection invalid when the remembered control port is missing from the current port list", () => {
+    const s = useSerialDebugStore();
+    s.rememberRebootTarget("/dev/ttyUSB0", "t5ai");
+
+    expect(s.resolveRebootTarget(["/dev/ttyACM0"])).toEqual({
+      controlPort: null,
+      chipId: null,
+      needsSelection: true,
+    });
+  });
+
+  it("immediately overwrites the remembered reboot target when the user reselects", () => {
+    const s = useSerialDebugStore();
+    s.rememberRebootTarget("/dev/ttyUSB0", "t5ai");
+
+    s.rememberRebootTarget("/dev/ttyACM0", "esp32");
+
+    expect(s.rebootControlPort).toBe("/dev/ttyACM0");
+    expect(s.rebootChipId).toBe("esp32");
   });
 });
 
