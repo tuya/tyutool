@@ -99,23 +99,35 @@ git push origin v3.1.4
 
 ## CHANGELOG Format
 
-Each release entry uses bilingual inline bullets:
+Each release entry uses a **two-block** bilingual layout: a full Chinese block, a `---` separator, then a full English block.
 
 ```markdown
-## [3.1.4] - 2026-07-01
+## [3.2.2] - 2026-07-09
 
-### 新功能 / Features
+### 新功能
 
-- `module`：中文描述 / English description
+- `module`：中文描述
 
-### 问题修复 / Bug Fixes
+### 问题修复
 
-- `module`：中文描述 / English description
+- `module`：中文描述
 
-### 工程改进 / Engineering
+---
 
-- `ci`：中文描述 / English description
+### Features
+
+- `module`: English description
+
+### Bug Fixes
+
+- `module`: English description
 ```
+
+Rules:
+- The `---` line separates the Chinese and English blocks within one version section — it is reserved for this purpose only.
+- The ` / ` character sequence is **not** a language boundary; it may appear inside either language (e.g. `关闭 / 1 小时`, `off / 1h`).
+- If a section has no English translation, omit the `---` and English block entirely; the Chinese block alone is fine.
+- The in-app updater splits on `---` and shows only the block matching the user's language.
 
 The `<!-- 润色后删除本行 / remove this line after editing -->` draft marker must be **removed** before the tag push — `pnpm run release` and `pnpm run release:gui` both enforce this.
 
