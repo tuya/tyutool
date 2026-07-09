@@ -33,6 +33,8 @@ export interface UpdateSummaryState {
   completedCount: number;
 }
 
+export type UpdateSourceActionKind = "none" | "download" | "manual";
+
 export function deriveUpdateSummaryState(input: {
   sourceStates: UpdateDialogSourceState[];
   downloading: boolean;
@@ -126,4 +128,43 @@ export function deriveUpdateSummaryState(input: {
     failedCount,
     completedCount,
   };
+}
+
+export function deriveUpdateSourceAction(input: {
+  source: UpdateDialogSourceState;
+  summaryKind: UpdateSummaryKind;
+  isTauri: boolean;
+  installTypeReady: boolean;
+  manualUpdateOnly: boolean;
+  inAppUpdateSupported: boolean;
+  primaryAvailableSourceId: UpdateDialogSourceState["id"] | null;
+}): UpdateSourceActionKind {
+  const {
+    source,
+    summaryKind,
+    isTauri,
+    installTypeReady,
+    manualUpdateOnly,
+    inAppUpdateSupported,
+    primaryAvailableSourceId,
+  } = input;
+
+  if (
+    summaryKind !== "available" ||
+    source.status !== "available" ||
+    !isTauri ||
+    !installTypeReady
+  ) {
+    return "none";
+  }
+
+  if (manualUpdateOnly) {
+    return "manual";
+  }
+
+  if (inAppUpdateSupported && primaryAvailableSourceId === source.id) {
+    return "download";
+  }
+
+  return "manual";
 }
