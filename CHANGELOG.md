@@ -2,6 +2,18 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.1] - 2026-07-09
+
+### 新功能 / Features
+
+- `settings`：自动检查更新现在可配置间隔（关闭 / 1 小时 / 6 小时 / 12 小时 / 24 小时），且仅在距上次成功检查超过所选间隔后才静默执行；手动「检查更新」始终立即触发 / Auto update checks are now interval-based (off / 1h / 6h / 12h / 24h) and run silently only after the selected interval has elapsed since the last successful check; manual “Check for updates” always runs immediately
+- `settings`：刷新更新中心，并为每个更新来源提供独立的操作入口，便于逐源检查与安装 / Refresh the update center and add per-source update actions so each update source can be checked and installed independently
+- `settings`：日志查看器新增「打开方式」，可在系统编辑器中打开当前日志文件 / Add an “Open with” action in the log viewer to open the current log file in a system editor
+
+### 问题修复 / Bug Fixes
+
+- `serial-debug`：重启目标对话框现在会规范并校验芯片 ID，排除非芯片 ID 的值，避免重启到无效目标 / Normalize and validate chip IDs in the reboot target dialog so non-chip values are excluded and the device no longer reboots to an invalid target
+
 ## [3.2.0] - 2026-07-08
 
 ### 新功能 / Features
