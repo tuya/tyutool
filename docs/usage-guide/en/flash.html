@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Firmware Flash · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · Usage Guide</span>
+      <span class="lang"><a href="flash.html" aria-current="true">English</a><a href="../zh/flash.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>Usage Guide</h2>
+      <ul>
+        <li><a href="getting-started.html">Getting Started</a></li>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="flash.html" aria-current="page">Firmware Flash</a></li>
+        <li><a href="serial-debug.html">Serial Debug</a></li>
+        <li><a href="settings.html">Settings</a></li>
+        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>Firmware Flash</h1>
+      <p class="lead">This page is the complete reference for the <code>/flash</code> page: the connection bar, the four tabs (Flash / Erase / Read / Authorize), the chip manifest table, multi-segment flashing, erase presets, and the progress &amp; log aside.</p>
+
+      <h2 id="overview">1. Page overview</h2>
+      <p>When you open <code>/flash</code>, the interface is built from three parts:</p>
+      <ul>
+        <li><strong>Top connection bar</strong>: pick the serial port, baud rate, and chip model, plus a status indicator.</li>
+        <li><strong>Left/center operations card</strong>: four tabs — Flash, Erase, Read, Authorize.</li>
+        <li><strong>Right-side progress &amp; log</strong>: live per-phase progress and a scrolling log.</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>Top connection bar: serial port, baud, chip selector, status dot</figcaption>
+        <!-- capture: flash-connection-bar.png -->
+      </figure>
+
+      <h2 id="connection">2. Connection bar</h2>
+      <p>The connection bar sits at the top of the page and gathers every device-link control:</p>
+      <ul>
+        <li><strong>Serial port</strong>: a dropdown of currently available ports; the list is <strong>rescanned each time</strong> you open it, so it never goes stale after plug/unplug.</li>
+        <li><strong>Baud</strong>: offers the common steps <code>115200</code> / <code>460800</code> / <code>921600</code> / <code>1000000</code> / <code>1500000</code> / <code>2000000</code>, plus a <strong>custom</strong> entry (range 300–4,000,000). On the Authorize tab this sets the <strong>auth baud rate</strong>, not the flash baud rate.</li>
+        <li><strong>Chip selector</strong>: choose the target chip model; on the Authorize tab an extra <code>other</code> (auth-only) option appears.</li>
+        <li><strong>Status dot</strong>: a colored indicator of the current serial connection state (connected / disconnected / in use).</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">Auto-connect / auto-release</span>
+        When you start an operation and the port is not yet connected, tyutool <strong>auto-connects</strong> the selected port; when the operation finishes it <strong>auto-releases</strong> the port, so other apps (or the Serial Debug page) can take it over.
+      </div>
+
+      <h2 id="chip">3. Select the chip</h2>
+      <p>The chip model determines three things: the <strong>protocol</strong>, the <strong>default baud rate</strong>, and the <strong>addressable flash capacity</strong>. The table below is the full list of chips tyutool supports (values come from <code>chip-manifests.ts</code> and are authoritative):</p>
+      <table>
+        <thead><tr><th>Chip (<code>-d</code>)</th><th>Flash baud</th><th>Auth baud</th><th>Flash size</th><th>Erase presets</th></tr></thead>
+        <tbody>
+          <tr><td><code>esp32</code></td><td><code>460800</code></td><td><code>115200</code></td><td>4 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32c3</code></td><td><code>460800</code></td><td><code>115200</code></td><td>4 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32c6</code></td><td><code>460800</code></td><td><code>115200</code></td><td>8 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32p4</code></td><td><code>460800</code></td><td><code>115200</code></td><td>16 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32s3</code></td><td><code>460800</code></td><td><code>115200</code></td><td>16 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>t5ai</code> (alias <code>t5</code>)</td><td><code>921600</code></td><td><code>115200</code></td><td>8 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>t1</code></td><td><code>921600</code></td><td><code>115200</code></td><td>8 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>t3</code></td><td><code>921600</code></td><td><code>115200</code></td><td>4 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>t2</code></td><td><code>921600</code></td><td><code>115200</code></td><td>2 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>bk7231n</code></td><td><code>921600</code></td><td><code>115200</code></td><td>2 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>ln882h</code></td><td><code>115200</code></td><td><code>115200</code></td><td>2 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>other</code> (auth-only)</td><td>—</td><td><code>115200</code></td><td>—</td><td>none (no flash plugin)</td></tr>
+        </tbody>
+      </table>
+      <div class="callout note">
+        <span class="title">Default chip &amp; aliases</span>
+        On first launch tyutool defaults to <code>t5ai</code>. The legacy <code>t5</code> / <code>T5</code> ids are aliases of <code>t5ai</code> and are normalized to <code>t5ai</code> automatically.
+      </div>
+      <div class="callout tip">
+        <span class="title">On erase alignment</span>
+        Every chip requires <strong>4 KiB erase alignment</strong> (start and end addresses must be multiples of <code>0x1000</code>); the auth-only <code>other</code> chip is exempt — it has no flash to erase. This comes up again in the <a href="#erase">Erase tab</a> below.
+      </div>
+
+      <h2 id="flash">4. Flash tab</h2>
+      <p>The Flash tab writes firmware into the flash. It supports <strong>multi-segment flashing</strong>: you can write several firmware images to different address ranges in one go — for example a <em>bootloader</em> followed by an <em>app</em>.</p>
+      <p>The segment table supports up to <strong>10 segments</strong>, each with:</p>
+      <ul>
+        <li><strong>Firmware path</strong>: supports <code>.bin</code> / <code>.hex</code> / <code>.elf</code> / <code>.img</code>, etc.</li>
+        <li><strong>Start</strong> and <strong>End</strong> addresses: hexadecimal.</li>
+      </ul>
+      <p>Segments chain together automatically:</p>
+      <ul>
+        <li>Clicking "add segment" sets the new segment's start to the <strong>previous segment's end</strong>, sparing you the typing.</li>
+        <li>When you pick a firmware file for a segment, its end is <strong>auto-computed</strong> as <code>start + file size</code>.</li>
+      </ul>
+      <p>The Flash button is only enabled when <strong>every segment has a firmware path</strong>; if any segment lacks a path, the button stays disabled.</p>
+      <figure class="shot todo">
+        <figcaption>Flash tab: multi-segment table, start/end addresses, Flash button</figcaption>
+        <!-- capture: flash-flash-tab.png -->
+      </figure>
+      <div class="callout tip">
+        <span class="title">Typical multi-segment use case</span>
+        The most common pattern is "bootloader + app": the first segment writes the bootloader (lower address), the second writes the main app. Doing it in one pass avoids splitting it into two operations and accidentally overwriting the wrong region when you forget to switch addresses in between.
+      </div>
+
+      <h2 id="erase">5. Erase tab</h2>
+      <p>The Erase tab clears flash regions. Two ways to erase:</p>
+      <ul>
+        <li><strong>By address</strong>: enter start and end addresses (hex); the UI <strong>validates alignment live</strong>.</li>
+        <li><strong>Advanced — erase presets</strong>: per-chip predefined ranges, as shown in the <a href="#chip">chip manifest table</a> above (<code>authInfo</code> / <code>fullChipNoRf</code> / <code>fullChip</code> — not every chip has all of them).</li>
+      </ul>
+      <p>Erase preset kinds:</p>
+      <table>
+        <thead><tr><th>Preset kind</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>authInfo</code></td><td>Erases only the authorization region (UUID/AuthKey), keeping firmware and other data intact.</td></tr>
+          <tr><td><code>fullChipNoRf</code></td><td>Full-chip erase but preserves the RF calibration region, so the device can still connect to the network.</td></tr>
+          <tr><td><code>fullChip</code></td><td>Full, complete erase — every region is cleared, including RF calibration.</td></tr>
+        </tbody>
+      </table>
+      <p>Before erasing, a <strong>confirmation dialog</strong> appears. If the chip requires 4 KiB alignment and your range is misaligned, the dialog explains why and offers an "align" action that <strong>rewrites</strong> the start/end addresses to the nearest legal aligned boundaries before executing.</p>
+      <div class="callout danger">
+        <span class="title">Danger: erasing destroys data</span>
+        Erasing clears the target region to <code>0xFF</code> and is <strong>irreversible</strong>. A full-chip erase in particular wipes RF calibration, which can leave the device <strong>unable to connect to the network</strong> afterwards. Back up anything important with the <a href="#read">Read tab</a> first.
+      </div>
+      <figure class="shot todo">
+        <figcaption>Erase tab: start/end addresses, alignment validation, advanced presets</figcaption>
+        <!-- capture: flash-erase-tab.png -->
+      </figure>
+
+      <h2 id="read">6. Read tab</h2>
+      <p>The Read tab reads flash contents out into a file — the primary tool for <strong>backup</strong>:</p>
+      <ul>
+        <li><strong>Save directory</strong>: on the Tauri desktop build you choose a save directory; on the web build it is a browser <strong>download</strong>.</li>
+        <li><strong>Filename</strong>: defaults to <code>tyutool_read_&lt;chip&gt;.bin</code> (e.g. <code>tyutool_read_t5ai.bin</code>).</li>
+        <li><strong>End address</strong>: defaults to the chip's <strong>full flash size</strong> (see the <a href="#chip">chip table</a>), i.e. a full-chip read by default.</li>
+      </ul>
+      <p>If the target file <strong>already exists</strong>, a dialog asks you to choose: <strong>Overwrite</strong> or <strong>Append-timestamp</strong> (appends a timestamp suffix to the filename so the old file is not clobbered).</p>
+      <figure class="shot todo">
+        <figcaption>Read tab: save directory, filename, start/end addresses</figcaption>
+        <!-- capture: flash-read-tab.png -->
+      </figure>
+
+      <h2 id="authorize">7. Authorize tab</h2>
+      <p>The Authorize tab performs TuyaOpen UART authorization, writing the device's cloud credentials (UUID + AuthKey):</p>
+      <ul>
+        <li><strong>UUID</strong> and <strong>AuthKey</strong> inputs: values are <strong>masked</strong> and <strong>cannot be copied</strong> from the field, to prevent leakage.</li>
+        <li><strong>Copy credentials</strong> button: copies the current credentials out in a controlled way.</li>
+        <li>Links to <strong>TuyaOpen auth purchase</strong> and <strong>localized auth docs</strong> are provided on the page.</li>
+      </ul>
+      <p>Two operations:</p>
+      <ul>
+        <li><strong>Read Auth</strong>: probes the device's current UUID/AuthKey only; it <strong>only occupies the port</strong> and writes nothing.</li>
+        <li><strong>Authorize</strong>: performs the write; it <strong>requires UUID and AuthKey to be filled in</strong> first. A confirmation prompt precedes execution.</li>
+      </ul>
+      <div class="callout danger">
+        <span class="title">Keep credentials private</span>
+        UUID and AuthKey are credentials <strong>purchased</strong> from Tuya; writing forged or duplicate values stops the device from going online and can pollute the device pool. Never leak credentials in screenshots, logs, or chats. Also note: the <code>other</code> chip is <strong>auth-only</strong> — it has no flash plugin and cannot be flashed.
+      </div>
+      <figure class="shot todo">
+        <figcaption>Authorize tab: masked UUID/AuthKey inputs, Read Auth and Authorize buttons</figcaption>
+        <!-- capture: flash-authorize-tab.png -->
+      </figure>
+
+      <h2 id="progress">8. Progress &amp; log</h2>
+      <p>The right side of the page is a persistent <strong>progress + log</strong> panel:</p>
+      <ul>
+        <li><strong>Per-phase progress bar</strong>: shows progress per operation phase (phase); each phase has its own <strong>theme color</strong> and current <strong>percentage</strong>; phases with no predictable progress show an <strong>indeterminate</strong> state.</li>
+        <li><strong>Log panel</strong>: a scrolling log with three controls — <strong>lock auto-scroll</strong>, <strong>clear</strong>, and <strong>copy</strong>.</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>Right-side progress bar and log panel (per-phase progress + log controls)</figcaption>
+        <!-- capture: flash-progress-log.png -->
+      </figure>
+
+      <h2 id="port-ownership">9. Port ownership</h2>
+      <p>The Firmware Flash page and <strong>Serial Debug</strong> <strong>share the same ports</strong>. They cannot hold the same port at the same time.</p>
+      <div class="callout warn">
+        <span class="title">When the port is held</span>
+        If Serial Debug is currently holding a port, operating on that port from the Flash page will prompt you to <strong>release it first</strong>; you can also enable <strong>auto-release</strong> in Serial Debug's settings so it yields the port automatically when another page needs it. See the <a href="serial-debug.html">Serial Debug</a> page.
+      </div>
+
+      <nav class="pager">
+        <a href="getting-started.html">← Getting Started</a>
+        <a href="serial-debug.html">Serial Debug →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
