@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>常见问题 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/faq.html">English</a><a href="faq.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html" aria-current="page">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>常见问题与故障排查</h1>
+      <p class="lead">本页以问题为先：先列出你看到的<strong>症状</strong>，再给最小步骤的排查与修复。命令行片段与 GUI 操作并存——按你的入口挑一种即可。找不到对应问题？看最后一节<a href="#report-bug">如何反馈 bug</a>。</p>
+
+      <h2 id="ports">1. 连接 / 端口</h2>
+
+      <h3 id="port-not-listed">设备 / 串口没出现在下拉框</h3>
+      <p><strong>症状：</strong>GUI 顶部端口选择器是空的，或 <code>tyutool list-ports</code> 没有任何输出。</p>
+      <ol class="steps">
+        <li>拔下 USB 重插，换一个 USB 口或线材（很多问题是供电 / 接触不良）。</li>
+        <li>确认 USB 转串口芯片的<strong>驱动已安装</strong>：CH340 / CP2102 / FT232 是最常见三类。Windows 设备管理器里不应有感叹号。</li>
+        <li>用 CLI 复核端口是否真的可见：<pre>tyutool list-ports
+tyutool usb-port-survey   # 输出原始 USB 元数据，便于跨系统排错</pre></li>
+        <li>macOS 用户：系统默认禁止普通用户访问串口设备，见 <a href="#macos-serial-perm">macOS 串口权限</a>。</li>
+        <li>Linux 用户：确认自己在 <code>dialout</code> / <code>tty</code> 组里，并已<strong>注销重新登录</strong>。</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">端口还没出现？</span>
+        在 GUI 顶部点<strong>刷新</strong>，或重开应用；CLI 每次执行都会重新枚举端口。
+      </div>
+
+      <h3 id="macos-serial-perm">macOS 串口权限</h3>
+      <p><strong>症状：</strong>端口看得见，但打开时报权限错误，或干脆不显示。</p>
+      <p>macOS 默认禁止普通用户访问串口设备。把当前用户加入 <code>dialout</code> 组，然后<strong>注销重新登录</strong>让权限生效：</p>
+      <pre>sudo dseditgroup -o edit -a $USER -t user dialout</pre>
+      <p>较新版本的 macOS 还会在<strong>系统设置 → 隐私与安全性 → 配件 / Accessories</strong>里弹窗询问，记得允许 tyutool 访问 USB 串口。详见 <a href="../../../README.md">README 的 Troubleshooting 表</a>。</p>
+
+      <h3 id="port-busy">端口被占用（in use / busy）</h3>
+      <p><strong>症状：</strong>打开端口时报 <code>Permission denied</code>、<code>Device or resource busy</code>、或“端口已被占用”。</p>
+      <ul>
+        <li>另一个程序正持有该端口：串口调试助手（<a href="serial-debug.html">Serial Debug</a>）、Arduino IDE、minicom、picocom 等。<strong>关闭它们</strong>再试。</li>
+        <li>tyutool 自身的另一个会话仍占着端口（例如 GUI 和 CLI 同时操作同一设备）。</li>
+        <li>若希望 tyutool 在你切走时自动放手，在<strong>设置</strong>里开启<strong>自动释放串口</strong>（auto-release）。</li>
+      </ul>
+
+      <h2 id="flashing">2. 烧录</h2>
+
+      <h3 id="flash-fails">烧录失败 / 握手失败（handshake error）</h3>
+      <p><strong>症状：</strong>日志里出现 <code>Handshake</code> 失败、<code>Failed to sync</code>、或烧录一开始就报错。</p>
+      <ul>
+        <li><strong>芯片型号选错</strong>：在 CLI 用 <code>-d &lt;芯片名&gt;</code> 明确指定（支持列表见 <a href="cli.html#supported-devices">CLI 参考</a>），例如 <code>-d bk7231n</code>、<code>-d esp32</code>、<code>-d t5ai</code>。芯片名大小写不敏感。</li>
+        <li><strong>波特率不对</strong>：先用保守的低波特（如 BK 系列降到 <code>115200</code>），稳定后再升。各芯片默认波特见 <a href="cli.html#supported-devices">支持芯片表</a>。</li>
+        <li><strong>设备没进入下载模式</strong>：按住芯片的下载/复位引脚上电，或用 <code>tyutool reset</code> 复位一次后再试。</li>
+        <li><strong>接线松动 / 供电不足</strong>：TX/RX 接反、GND 没共地、或 USB 口供电不足会让握手时序错乱。换一根带屏蔽的数据线、或换外接供电。</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">先做最小复现</span>
+        排查时回到 CLI：<code>tyutool read -d &lt;芯片&gt; -p &lt;端口&gt; -l 0x1000</code> 读一小段。能读到说明链路 OK，问题在固件/地址；读不到说明链路/权限/驱动有问题。
+      </div>
+
+      <h3 id="erase-alignment">擦除报“未对齐”（erase alignment error）</h3>
+      <p><strong>症状：</strong><code>erase</code> 报形如 <code>unaligned</code>、<code>address not aligned</code>、或 <code>sector boundary</code> 的错误。</p>
+      <p>Flash 擦除必须按扇区对齐——tyutool 的多数芯片扇区大小为 <strong>4 KiB</strong>。起始地址和长度都要对齐到 <code>0x1000</code>：</p>
+      <pre># 正确：起始与长度都对齐到 4 KiB
+tyutool erase -d bk7231n -s 0x0000 -l 0x200000
+tyutool erase -d bk7231n -s 0x8000 -l 0x4000
+
+# 错误：0x9000 不是 4 KiB 的整数倍
+tyutool erase -d bk7231n -s 0x9000 -l 0x1000   # ❌ 报未对齐</pre>
+      <div class="callout tip">
+        <span class="title">不想手算？</span>
+        用 GUI 的<strong>对齐（align）</strong>动作，或把任意地址<strong>向下取整</strong>到最近的 <code>0x1000</code>（如 <code>0x9xxx → 0x9000</code>，长度相应补足）。
+      </div>
+
+      <h3 id="progress-stalls">进度卡住 / 一直不动</h3>
+      <p><strong>症状：</strong>Erase / Write / Verify 某一阶段长时间 0% 或反复重试。</p>
+      <ul>
+        <li><strong>波特太高</strong>：在高波特下丢包会让重传雪崩。把波特降一档（如 <code>921600 → 460800 → 115200</code>）再试。</li>
+        <li><strong>线材 / 供电</strong>：劣质 USB 线、过长排针、或带负载的外设会拉垮信号。换短线、换供电。</li>
+        <li><strong>看更详细日志</strong>：在<strong>设置 → 诊断</strong>打开<strong>调试日志</strong>，或 CLI 加 <code>--verbose</code>，把日志级别调到 <code>debug</code>/<code>trace</code> 看到底卡在哪一步。日志位置见 <a href="cli.html#global-options">CLI 全局选项</a>。</li>
+        <li>按 <code>Ctrl+C</code> 可<strong>优雅取消</strong>（关闭串口并报告 <code>Cancelled</code>），不会把设备留在半烧录状态。</li>
+      </ul>
+
+      <h2 id="authorization">3. 授权</h2>
+
+      <h3 id="authorize-fails">授权失败（authorize fails）</h3>
+      <p><strong>症状：</strong><code>tyutool authorize</code> 或 GUI 授权时报写入失败、UUID/AuthKey 无效。</p>
+      <ul>
+        <li><strong>UUID / AuthKey 无效或已被使用</strong>：部分平台的凭证是<strong>一机一次</strong>（single-use per device），用过就作废。换一组新凭证再试。</li>
+        <li><strong>先读取当前状态</strong>：用 <code>tyutool authorize -p &lt;端口&gt;</code>（不带 <code>--uuid/--authkey</code>）执行只读的 auth-read，确认设备当前授权是否已存在或为空。</li>
+        <li><strong>必须成对传</strong>：写入授权时 <code>--uuid</code> 和 <code>--authkey</code> 必须<strong>同时</strong>给出，只传一个会被拒绝。</li>
+        <li><strong>芯片时序</strong>：部分芯片需指定 <code>-d</code> 选择正确的授权时序（如 <code>-d esp32</code>、<code>-d t5ai</code>），省略则用通用时序。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">凭证来源</span>
+        UUID/AuthKey 通常从涂鸦开发者平台获取，与具体芯片/产品绑定。请确认你拿到的凭证<strong>对应正确的芯片</strong>，并尚未在别的设备上用过。
+      </div>
+
+      <h3 id="credential-display">凭证显示问题（credential display）</h3>
+      <p><strong>症状：</strong>看不到完整的 UUID/AuthKey，或复制出来是 <code>****</code>。</p>
+      <ul>
+        <li>出于安全考虑，GUI 默认<strong>掩码显示</strong>（mask）凭证。点击“显示/Show”切换明文，或用<strong>复制</strong>按钮直接拷到剪贴板。</li>
+        <li>CLI 用 auth-read 读取：<pre>tyutool authorize -p &lt;端口&gt;
+tyutool authorize -p &lt;端口&gt; -d esp32   # 按芯片时序读取</pre></li>
+        <li>复制后建议<strong>及时清空剪贴板</strong>或关闭日志记录，避免明文凭证留在日志里。</li>
+      </ul>
+
+      <h2 id="platform">4. 平台</h2>
+
+      <h3 id="macos-gatekeeper">macOS 无法打开 / Gatekeeper 拦截</h3>
+      <p><strong>症状：</strong>双击 tyutool.app 提示“无法打开，因为无法验证开发者”或被 Gatekeeper 拦截。</p>
+      <p>tyutool 的 macOS 构建未做 Apple 公证签名（这是预期行为）。任选一种解除方式：</p>
+      <ol class="steps">
+        <li><strong>图形界面</strong>：在 Finder 里按住 Control 点击 <code>tyutool.app</code> → <strong>打开</strong>，在弹窗里再次点<strong>打开</strong>；或进入<strong>系统设置 → 隐私与安全性</strong>，找到关于 tyutool 的提示点<strong>仍要打开</strong>。</li>
+        <li><strong>命令行</strong>：移除扩展属性（quarantine 标记）：<pre>xattr -dr com.apple.quarantine /path/to/tyutool.app</pre> 之后即可正常双击打开。</li>
+      </ol>
+      <p>详见 <a href="../../../README.md">README 的 Troubleshooting 表</a>。</p>
+
+      <h3 id="linux-blank-window">Linux 窗口空白（WebKit 合成失败）</h3>
+      <p><strong>症状：</strong>Linux 下（尤其虚拟机 / 无独显环境）窗口打开后<strong>一片空白</strong>，或只有菜单没有内容。</p>
+      <p>WebKit2GTK 在某些 GPU 驱动下合成模式会失败。启动前设置环境变量禁用合成即可：</p>
+      <pre>export WEBKIT_DISABLE_COMPOSITING_MODE=1
+./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage</pre>
+      <p>可把这行 <code>export</code> 加到你的 <code>~/.bashrc</code> / <code>~/.zshrc</code> 里永久生效。详见 <a href="../../../README.md">README 的 Troubleshooting 表</a>。</p>
+
+      <h3 id="windows-webview2">Windows 缺少 WebView2</h3>
+      <p><strong>症状：</strong>Windows 上应用启动报错，提示找不到 WebView2，或窗口无法渲染。</p>
+      <p>tyutool 的 Windows GUI 依赖 <strong>Microsoft Edge WebView2 Runtime</strong>。Win11 通常已预装；缺失时安装 Evergreen Runtime 即可：</p>
+      <ol class="steps">
+        <li>打开 <a href="https://developer.microsoft.com/microsoft-edge/webview2/">WebView2 官方下载页</a>。</li>
+        <li>下载<strong>Evergreen Standalone Installer</strong>（引导程序）。</li>
+        <li>运行安装后重启 tyutool。</li>
+      </ol>
+      <div class="callout note">
+        <span class="title">企业 / 离线环境</span>
+        若机器无法联网，可下载 <strong>Evergreen Standalone Installer 的离线包</strong>（Fixed Version）放到固定路径，按微软文档配置 <code>WEBVIEW2_RELEASE_CHANNEL</code> 等环境变量。
+      </div>
+
+      <h2 id="logs-feedback">5. 日志与反馈</h2>
+
+      <h3 id="report-bug">如何反馈 bug（附日志）</h3>
+      <p>遇到本页没覆盖的问题，按下面流程反馈——<strong>附上日志能极大加速定位</strong>。</p>
+      <ol class="steps">
+        <li><strong>导出 / 打开日志</strong>：
+          <ul>
+            <li><strong>GUI</strong>：进入<strong>设置 → 诊断</strong>，点<strong>查看日志（View logs）</strong>打开应用内日志查看器；在其中点<strong>导出日志并报告问题（Export Logs &amp; Report Issue）</strong>，会把日志打包成 zip 并打开一个<strong>预填好版本号和操作系统字段</strong>的 GitHub issue 表单。也可直接点<strong>打开日志文件夹</strong>手动取文件。</li>
+            <li><strong>CLI</strong>：日志路径在启动横幅的 <code>log:</code> 行里，每次运行生成独立文件，如 <code>~/.local/share/tyutool/tyutool-&lt;时间戳&gt;.log</code>（macOS：<code>~/Library/Application Support/tyutool/</code>；Windows：<code>%APPDATA%\tyutool\</code>）。加 <code>--verbose</code> 可把诊断日志也打到 stderr。</li>
+          </ul>
+        </li>
+        <li><strong>使用 issue 模板</strong>：到仓库的 <a href="https://github.com/ZingerLight/tyutool/issues/new/choose">Issues → New issue</a>，选 <strong>🐞 Bug 报告 / Bug report</strong>（模板：<a href="https://github.com/ZingerLight/tyutool/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml"><code>.github/ISSUE_TEMPLATE/bug_report.yml</code></a>）。</li>
+        <li><strong>务必填全关键字段</strong>：
+          <ul>
+            <li><strong>版本 / Version</strong>（设置 → 关于）</li>
+            <li><strong>操作系统 / OS</strong>（如 Windows 11 / macOS 14 / Ubuntu 24.04）</li>
+            <li><strong>芯片型号 / Chip</strong>（如 BK7231N、T5AI）</li>
+            <li><strong>使用方式 / Platform</strong>：桌面 GUI 还是命令行 CLI</li>
+            <li><strong>波特率 / baud</strong>（烧录类问题）</li>
+            <li><strong>复现步骤 / Steps</strong>、<strong>期望与实际结果 / Expected vs. actual</strong></li>
+          </ul>
+        </li>
+        <li><strong>附上会话日志</strong>：把导出的日志 zip <strong>直接拖到 issue 输入框</strong>上传；CLI 则贴上对应那次运行的 <code>tyutool-&lt;时间戳&gt;.log</code>。</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">日志里有敏感信息？</span>
+        授权相关的日志可能含 UUID/AuthKey。提交前先在日志查看器里搜索并遮蔽，或用<strong>导出</strong>功能裁剪掉无关会话。
+      </div>
+
+      <nav class="pager">
+        <a href="cli.html">← 命令行</a>
+        <a href="index.html">返回首页 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
