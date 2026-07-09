@@ -16,6 +16,7 @@ import {
   CHIP_IDS,
   DEFAULT_CHIP_ID,
   normalizeChipId,
+  type ChipId,
 } from "@/features/firmware-flash/constants";
 import TySelect from "@/components/TySelect.vue";
 import TyConnectionBar from "@/components/TyConnectionBar.vue";
@@ -56,7 +57,7 @@ const showSettings = ref(false);
 const showRebootTargetDialog = ref(false);
 const rebootDialogMode = ref<RebootDialogMode>("change");
 const draftRebootControlPort = ref("");
-const draftRebootChipId = ref(DEFAULT_CHIP_ID);
+const draftRebootChipId = ref<ChipId>(DEFAULT_CHIP_ID);
 
 const rebootResolution = computed(() =>
   s.resolveRebootTarget(allKnownPortRows.value.map((row) => row.path)),
@@ -148,12 +149,27 @@ async function toggleOpen(): Promise<void> {
   }
 }
 
-function normalizedSelectedChipId(): string | null {
+function isChipId(chipId: string): chipId is ChipId {
+  return (CHIP_IDS as readonly string[]).includes(chipId);
+}
+
+function normalizedSelectedChipId(): ChipId | null {
   const normalized = normalizeChipId(flashStore.selectedChipId.trim());
-  if (!normalized || normalized === AUTH_ONLY_CHIP_ID) {
+  if (
+    !normalized ||
+    normalized === AUTH_ONLY_CHIP_ID ||
+    !isChipId(normalized)
+  ) {
     return null;
   }
   return normalized;
+}
+
+function normalizedRebootChipId(
+  chipId: string | null | undefined,
+): ChipId | null {
+  const normalized = chipId?.trim() ? normalizeChipId(chipId.trim()) : "";
+  return normalized && isChipId(normalized) ? normalized : null;
 }
 
 function isFlashAuthRole(role: string | null | undefined): boolean {
@@ -189,7 +205,7 @@ function openRebootTargetDialog(mode: RebootDialogMode): void {
   draftRebootControlPort.value =
     rebootResolution.value.controlPort ?? preferredRebootControlPort();
   draftRebootChipId.value =
-    rebootResolution.value.chipId ??
+    normalizedRebootChipId(rebootResolution.value.chipId) ??
     normalizedSelectedChipId() ??
     DEFAULT_CHIP_ID;
   showRebootTargetDialog.value = true;
