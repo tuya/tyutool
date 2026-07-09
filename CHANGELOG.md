@@ -133,10 +133,6 @@
 - `batch-auth`：简化 `canStart` 逻辑，改为检查「无活跃槽位」而非枚举合法状态，确保批次部分完成时（如 3 Done 1 Running）按钮维持禁用
 - `batch-auth`：修复 Start 按钮 tooltip 在可点击状态下仍显示、两个槽位同时完成时 `checkBatchCompletion` 双重触发的问题；批次进行中增加独立 tooltip 提示
 
----
-
-### Bug Fixes
-
 ## [3.1.2] - 2026-06-30
 
 ### 新功能
@@ -145,10 +141,6 @@
 - `authorize`：`auth-otp-lock` 超时从 30s 延长至 60s，适配更慢的 eFuse 烧写硬件
 - `authorize`：修复 OTP 锁失败时误触发硬件重置的问题
 
----
-
-### Features
-
 ## [3.1.1] - 2026-06-29
 
 ### 问题修复
@@ -156,10 +148,6 @@
 - `authorize`：将 `auth-otp-lock` idle 超时从 500ms 延长至 30s，修复慢速 eFuse 设备授权中途断开的问题
 - `authorize`：`auth-read` 在 OTP 存储模式下使用独立 30s idle 超时，避免慢速设备读取被提前终止
 - `ci`：auth-firmware 发布标记为预发布版本，防止意外抢占 Latest 标签
-
----
-
-### Bug Fixes
 
 ## [3.1.0] - 2026-06-29
 
@@ -191,9 +179,3 @@
 - `tauri`：Excel 校验使用稳定错误码，前端可靠判断
 - `log-viewer`：修复文件列表排序（按时间降序 + 名称次级排序）
 - 若干 clippy 警告修复
-
----
-
-### Features
-
-### Bug Fixes
