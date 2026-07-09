@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>批量烧录授权 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/batch-flash-auth.html">English</a><a href="batch-flash-auth.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html" aria-current="page">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>批量烧录授权</h1>
+      <p class="lead">本页是 <code>/batch</code> 页面的完整参考：在多个 USB-串口上<strong>并行烧录 + 授权</strong>，授权码由一份 <code>.xlsx</code> 表格驱动。这是 tyutool 里最复杂的功能，涉及不可逆的 eFuse 操作，请务必阅读第 9 节的<strong>安全提示</strong>。</p>
+
+      <h2 id="when-to-use">1. 适用场景</h2>
+      <p>当你需要<strong>一次性处理大量设备</strong>——把多块开发板插到多个 USB-串口上、并行烧录固件并写入授权码——批量烧录授权页就是为此设计的。授权码从一份 Excel 表格（<code>.xlsx</code>）逐行读取，每个空闲端口分配到一个待授权设备。</p>
+      <ul>
+        <li><strong>并行多端口</strong>：所有<strong>非屏蔽</strong>端口可同时作为插槽（slot）参与批量任务。</li>
+        <li><strong>表格驱动授权</strong>：授权码不靠手动输入，而是来自 <code>.xlsx</code>，启动前会先校验总数 / 已用 / 进行中 / 剩余。</li>
+        <li><strong>仅桌面端（Tauri）可用</strong>：Web 模式下页面会<strong>提前返回</strong>，不提供任何批量能力。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>批量烧录授权页总览：配置区、仪表盘、工具栏、插槽列表</figcaption>
+        <!-- capture: batch-overview.png -->
+      </figure>
+      <div class="callout note">
+        <span class="title">Web 端不可用</span>
+        串口扫描、并行烧录与 eFuse 操作都依赖 Tauri 的系统能力，<strong>仅在桌面应用里可用</strong>。Web 端进入本页会直接提前返回，不显示任何批量控件。
+      </div>
+
+      <h2 id="disclaimer">2. 免责声明</h2>
+      <p>由于批量授权可能触发<strong>不可逆</strong>的 eFuse 烧写，本页在<strong>首次访问</strong>时会弹出免责声明对话框：</p>
+      <ul>
+        <li><strong>首次访问弹窗</strong>：说明批量授权的风险（尤其是 OTP + eFuse 锁不可逆），需要你确认知晓后才继续。</li>
+        <li><strong>不再提示（don't show again）</strong>：勾选后该选择会写入 <code>localStorage</code>，之后不再弹出。</li>
+        <li><strong>取消即返回</strong>：在免责声明对话框上点取消会直接退回 <code>/toolbox</code>，不会进入批量页面。</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">请认真阅读免责声明</span>
+        免责声明不是走过场——一旦启用 OTP 存储模式并打开 eFuse 锁，<strong>烧写不可撤销</strong>。请确认你理解第 9 节的全部风险后再勾选“不再提示”。
+      </div>
+
+      <h2 id="shared-config">3. 配置 — 共享</h2>
+      <p>共享配置区对<strong>所有插槽</strong>统一生效，包括芯片型号、波特率与固件来源：</p>
+      <ul>
+        <li><strong>芯片（Chip）</strong>：选项仅限 <code>esp32</code>、<code>t5ai</code>、<code>other</code>。其中只有 <code>esp32</code> 与 <code>t5ai</code> 是<strong>可烧录</strong>芯片（带 flash 插件）；<code>other</code> 仅用于授权，不能烧录固件。</li>
+        <li><strong>烧录波特率（Flash baud）</strong> 与 <strong>授权波特率（Auth baud）</strong>：分别用于固件烧录阶段与授权阶段。</li>
+        <li><strong>烧录固件开关（Flash firmware）</strong>：仅在<strong>可烧录芯片</strong>（<code>esp32</code> / <code>t5ai</code>）下可用。打开后每个端口会先烧录固件再授权；关闭则只授权。固件来源有两种：
+          <ul>
+            <li><strong>本地（Local）</strong>：浏览选择本地 <code>.bin</code> 文件。</li>
+            <li><strong>默认（Default）</strong>：从线上 <code>auth-firmware.json</code> 清单下载——清单会按所选芯片过滤出可用固件，提供<strong>版本下拉</strong>选择，并显示<strong>下载进度</strong>。</li>
+          </ul>
+        </li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>共享配置：芯片选择、烧录/授权波特率、固件来源（本地/默认）</figcaption>
+        <!-- capture: batch-config.png -->
+      </figure>
+      <div class="callout tip">
+        <span class="title">芯片决定能做什么</span>
+        <code>esp32</code> 与 <code>t5ai</code> 可烧录 + 授权；<code>other</code> 只能授权。切换芯片时，烧录固件相关控件会按芯片能力自动启用或禁用。
+      </div>
+
+      <h2 id="auth-config">4. 配置 — 授权</h2>
+      <p>授权配置区围绕<strong>授权码表格</strong>与<strong>存储模式</strong>展开：</p>
+      <ul>
+        <li><strong>Excel 表格（<code>.xlsx</code>）</strong>：选择授权码表后立即触发校验，显示 <strong>总数 / 已用 / 进行中 / 剩余</strong>。若<strong>剩余 = 0</strong>或文件无效，<strong>启动按钮禁用</strong>。</li>
+        <li><strong>冲突策略（Conflict policy）</strong>：当目标设备已存在授权时如何处理 —— <code>Skip</code>（跳过）或 <code>Overwrite</code>（覆盖）。</li>
+        <li><strong>存储模式（Storage mode）</strong>：仅 <strong>T5AI</strong> 可选 —— <code>KV</code>（键值区，可重写）或 <code>OTP</code>（一次性存储区）。选择 <code>OTP</code> 会显示<strong>不可逆警告</strong>。</li>
+        <li><strong>OTP eFuse 锁开关（<code>lockOtpAfterAuth</code>）</strong>：仅在 <strong>T5AI + OTP</strong> 下出现。打开后，授权写入完成后会<strong>烧写 eFuse</strong>，永久锁定 OTP 区，<strong>不可逆</strong>。</li>
+      </ul>
+      <div class="callout danger">
+        <span class="title">危险：OTP + eFuse 锁不可逆</span>
+        当存储模式为 <code>OTP</code> 且打开 <code>lockOtpAfterAuth</code> 时，每个设备授权完成后会<strong>烧写 eFuse</strong>，把 OTP 区永久锁死——这一步<strong>不可撤销</strong>，无法通过任何手段恢复或重写。在批量场景下，一次错误配置会<strong>连锁毁掉整批设备</strong>。请仅在完全确认芯片型号、固件、授权码无误后再启用。
+        <br><br>
+        作为<strong>兜底保护</strong>，<code>lockOtpAfterAuth</code> 在<strong>每次应用启动时强制重置为 <code>false</code></strong>，并在<strong>离开 (t5ai, otp) 任一前置条件</strong>（即切到非 T5AI 芯片或切回 KV 存储模式）时同样<strong>强制重置为 <code>false</code></strong>。也就是说，你<strong>每次</strong>想启用 eFuse 锁都必须重新主动打开它，绝不会因为上次忘关而延续到下一次。
+      </div>
+
+      <h2 id="dashboard">5. 仪表盘</h2>
+      <p>仪表盘是一个<strong>置顶面板</strong>，实时汇总整批任务的状态：</p>
+      <ul>
+        <li><strong>烧录累计统计</strong>：环形图（donut）+ 总数 / 成功 / 失败计数，并提供<strong>重置</strong>按钮（重置累计计数，不影响当前批次）。</li>
+        <li><strong>授权累计统计</strong>：与烧录统计结构相同——环形图 + 总数 / 成功 / 失败 + 重置。</li>
+        <li><strong>当前批次统计</strong>：显示本批次的<strong>活动 / 完成 / 失败</strong>数量，并带<strong>实时计时器</strong>（自批次启动起计的已用时长）。</li>
+        <li><strong>完成横幅（Completion banner）</strong>：整批结束时显示，按结果分为 <code>all-skipped</code>（全部跳过）/ <code>all-success</code>（全部成功）/ <code>all-failed</code>（全部失败）/ <code>partial</code>（部分成功），可手动关闭。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>仪表盘：烧录/授权累计统计（环形图）、当前批次统计、完成横幅</figcaption>
+        <!-- capture: batch-dashboard.png -->
+      </figure>
+
+      <h2 id="toolbar">6. 工具栏</h2>
+      <p>工具栏提供对整批插槽的批量操作：</p>
+      <ul>
+        <li><strong>自动分配（Auto-assign）</strong>：把所有<strong>非屏蔽</strong>端口一键加为插槽。</li>
+        <li><strong>筛选（Filter）</strong>：打开端口筛选弹窗，选择哪些端口参与；按钮上的<strong>徽标</strong>显示当前<strong>被屏蔽的端口数</strong>。</li>
+        <li><strong>全部读取（Read All）</strong>：对<strong>非活动</strong>插槽执行只读的 MAC / 授权探测（不写入任何内容）。</li>
+        <li><strong>取消（Cancel）</strong>：取消当前进行中的操作。</li>
+        <li><strong>重试（Retry）</strong>：对状态为 <code>failed</code> 或 <code>no_code</code> 的插槽重试。</li>
+        <li><strong>启动（Start）</strong>：启动整批任务；当<strong>空闲端口 &gt; 8</strong>时会弹出<strong>确认对话框</strong>，避免误启动大量端口。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">启动前的硬性条件</span>
+        启动按钮在<strong>剩余授权码 = 0</strong>、授权表<strong>无效</strong>、或没有可分配端口时均会保持禁用。
+      </div>
+
+      <h2 id="slot-row">7. 每个端口 / 插槽</h2>
+      <p>每个参与批量任务的端口占一行插槽（slot row），显示该端口的完整状态：</p>
+      <ul>
+        <li><strong>端口名</strong> 与 <strong>状态徽标</strong>（带颜色），状态取值见下表。</li>
+        <li><strong>进度条</strong>：仅在烧录阶段显示，按分阶段进度推进。</li>
+        <li><strong>MAC</strong> 与 <strong>UUID</strong>：读取到后显示。</li>
+        <li><strong>错误信息</strong>：失败时显示；<strong>点击错误</strong>可打开详情对话框并支持<strong>复制</strong>。</li>
+        <li><strong>逐行操作</strong>：<strong>读取（Read）</strong>；活动中的行可<strong>取消（Cancel）</strong>；失败的行可<strong>重试（Retry）</strong>。</li>
+        <li><strong>右键</strong>：弹出菜单可<strong>屏蔽该端口（Block port）</strong>。</li>
+      </ul>
+      <p>插槽状态徽标取值如下：</p>
+      <table>
+        <thead><tr><th>状态</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>idle</code></td><td>空闲，尚未启动或已结束回到就绪。</td></tr>
+          <tr><td><code>reading</code></td><td>正在读取（MAC / 授权探测）。</td></tr>
+          <tr><td><code>flashing</code></td><td>正在烧录固件。</td></tr>
+          <tr><td><code>reading_mac</code></td><td>正在读取 MAC。</td></tr>
+          <tr><td><code>authorizing</code></td><td>正在写入 / 校验授权。</td></tr>
+          <tr><td><code>done</code></td><td>本插槽完成（烧录 + 授权均成功）。</td></tr>
+          <tr><td><code>failed</code></td><td>某一步失败。</td></tr>
+          <tr><td><code>skipped</code></td><td>因冲突策略被跳过。</td></tr>
+          <tr><td><code>no_code</code></td><td>没有可用授权码可分配。</td></tr>
+        </tbody>
+      </table>
+      <figure class="shot todo">
+        <figcaption>插槽行：状态徽标、进度条、MAC/UUID、逐行操作、右键菜单</figcaption>
+        <!-- capture: batch-slot-row.png -->
+      </figure>
+      <div class="callout danger">
+        <span class="title">危险：cancelledAfterWrite 设备必须物理隔离</span>
+        如果在<strong>授权写入可能已落地之后</strong>才取消该端口，该插槽会被打上 <code>cancelledAfterWrite</code> 标志并显示<strong>物理隔离危险徽标</strong>。这意味着授权写操作<strong>可能已经在取消前完成</strong>，设备状态无法确定。此类设备<strong>必须物理隔离</strong>，不得直接返回良品池或重新流入批量流程——请单独核实其授权状态后再决定处置。
+      </div>
+
+      <h2 id="operation-modes">8. 操作模式</h2>
+      <p>根据芯片能力与配置，每个端口会进入以下两种模式之一：</p>
+      <ul>
+        <li><strong><code>flash-then-auth</code></strong>：满足<strong>可烧录芯片</strong> + <strong>烧录固件开关打开</strong> + <strong>固件路径已设置</strong>时启用。每个端口的完整流程为：<strong>烧录固件 → 读取 MAC → 读取授权 → 写入授权 → 校验</strong>。</li>
+        <li><strong><code>auth-only</code></strong>：不满足上述条件时（例如芯片为 <code>other</code>，或固件开关关闭）。每个端口的流程为：<strong>读取 MAC → 读取授权 → 写入授权 → 校验</strong>。</li>
+      </ul>
+      <p>所有阶段的进度都通过事件通道实时推送到前端：</p>
+      <ul>
+        <li><code>batch-flash-progress</code> —— 批量烧录进度。</li>
+        <li><code>batch-auth-progress</code> —— 批量授权写入进度。</li>
+        <li><code>batch-auth-read-progress</code> —— 批量授权读取进度。</li>
+        <li><code>auth-firmware-download-progress</code> —— 默认固件下载进度。</li>
+      </ul>
+      <div class="callout tip">
+        <span class="title">模式是按端口自动判定的</span>
+        你不需要手动选择模式——tyutool 会根据共享配置里的芯片、固件开关与固件路径，自动为每个端口判定走 <code>flash-then-auth</code> 还是 <code>auth-only</code>。
+      </div>
+
+      <h2 id="safety">9. 安全提示</h2>
+      <p>批量烧录授权是 tyutool 里<strong>唯一会触发不可逆硬件操作</strong>的功能。请牢记以下两条铁律：</p>
+      <div class="callout danger">
+        <span class="title">铁律一：OTP + eFuse 锁不可逆</span>
+        存储模式选 <code>OTP</code> 并打开 <code>lockOtpAfterAuth</code> 后，每个设备授权完成都会<strong>烧写 eFuse</strong>，把 OTP 区<strong>永久锁死</strong>，任何手段都无法恢复或重写。批量场景下一次错配会毁掉整批设备。
+        <br><br>
+        <strong>兜底保证</strong>：<code>lockOtpAfterAuth</code> 在<strong>每次应用启动时强制重置为 <code>false</code></strong>，并在<strong>离开 (t5ai, otp) 任一前置条件</strong>（切到非 T5AI 芯片、或切回 KV 模式）时同样<strong>强制重置为 <code>false</code></strong>。你<strong>每次</strong>启用 eFuse 锁都必须重新主动打开，绝不会因上次忘关而延续。
+      </div>
+      <div class="callout danger">
+        <span class="title">铁律二：cancelledAfterWrite 设备必须物理隔离</span>
+        若在<strong>授权写入可能已落地之后</strong>才取消某端口，该插槽会被标记 <code>cancelledAfterWrite</code> 并显示<strong>物理隔离危险徽标</strong>——授权写可能已在取消前完成，设备状态无法确定。此类设备<strong>必须物理隔离</strong>，不得返回良品池或重新进入批量流程，需单独核实后再处置。
+      </div>
+      <div class="callout warn">
+        <span class="title">批量前的检查清单</span>
+        启动整批任务前，请逐项确认：芯片型号正确、固件来源与版本无误、授权表已校验且剩余充足、冲突策略符合预期；若启用 OTP + eFuse 锁，请先用<strong>单台设备</strong>验证完整流程，再投入批量。
+      </div>
+
+      <nav class="pager">
+        <a href="settings.html">← 设置</a>
+        <a href="cli.html">命令行 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
