@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设置 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/settings.html">English</a><a href="settings.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html" aria-current="page">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>设置</h1>
+      <p class="lead">本页是 <code>/settings</code> 页面的完整参考：把所有可配置项集中在一处，覆盖更新中心、外观与语言、诊断与日志、串口日志、关于，以及设置本身的持久化方式。</p>
+
+      <h2 id="update">1. 更新中心</h2>
+      <p>更新中心是设置页顶部最显眼的入口，集中管理版本检查与后台更新节奏：</p>
+      <ul>
+        <li><strong>当前版本（Installed build）</strong>：显示已安装构建的版本号与徽标，让你一眼判断当前处于哪个版本。</li>
+        <li><strong>检查更新（Check for updates）</strong>：<strong>仅桌面端（Tauri）可用</strong>。点击后会打开<strong>更新对话框（UpdateDialog）</strong>，立即检查是否有新版本并查看发布说明——这是手动触发，<strong>不受下方间隔限制，始终立即执行</strong>。</li>
+        <li><strong>自动检查间隔（Automatic update checks）</strong>：控制<strong>启动时</strong>是否静默检查。仅在距离上次成功检查的时间<strong>超过所选间隔</strong>时才触发，避免每次打开都打扰你。可选值：
+          <ul>
+            <li><code>Off</code>（关闭，仅手动检查）</li>
+            <li><code>1h</code>（每 1 小时）</li>
+            <li><code>6h</code>（每 6 小时）</li>
+            <li><code>12h</code>（每 12 小时）</li>
+            <li><code>24h</code>（每 24 小时）</li>
+          </ul>
+        </li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>更新中心：当前版本徽标、检查更新入口、自动检查间隔</figcaption>
+        <!-- capture: settings-update.png -->
+      </figure>
+      <div class="callout note">
+        <span class="title">Web 端无自动更新</span>
+        自动更新依赖 Tauri 的 <code>updater</code> 插件，<strong>仅在桌面应用里可用</strong>；Web 版不会出现“检查更新”按钮，自动检查间隔也不会生效。
+      </div>
+
+      <h2 id="appearance">2. 外观与语言</h2>
+      <p>外观区集中了最常调整的界面偏好：</p>
+      <ul>
+        <li><strong>主题（Theme）</strong>：三档分段选择 —— <code>Light</code>（浅色）/ <code>Dark</code>（深色）/ <code>System</code>（跟随系统）。
+          <ul>
+            <li>主题会立即应用到 DOM，无需重启。</li>
+            <li>选择 <code>System</code> 时，主题会<strong>跟随系统配色方案</strong>：系统在浅色 / 深色之间切换时，应用会实时跟随。</li>
+          </ul>
+        </li>
+        <li><strong>语言（Language）</strong>：UI 语言，三选 —— <code>Auto</code>（自动）/ <code>简体中文</code> / <code>English</code>。
+          <ul>
+            <li><code>Auto</code> 会根据浏览器 / 系统语言解析：以 <code>zh</code> 开头的用中文，否则用英文。</li>
+            <li>语言<strong>按设备保存</strong>，切换后立即生效。</li>
+          </ul>
+        </li>
+        <li><strong>串口指示器（Serial port indicators）</strong>：开关侧边栏与工具箱条目里的<strong>彩色串口活动小圆点</strong>，用于一眼看出某个端口是否在收发数据。</li>
+      </ul>
+      <div class="callout tip">
+        <span class="title">高级 UART 设置不在这里</span>
+        波特率等<strong>高级 UART 参数</strong>放在串口调试页的设置弹窗里，而非设置页；详见<a href="serial-debug.html#connect">串口调试 · 连接与串口配置</a>。
+      </div>
+
+      <h2 id="diagnostics">3. 诊断与日志</h2>
+      <p>诊断区把调试日志与排障工具集中在一起：</p>
+      <ul>
+        <li><strong>调试日志开关（Debug Log）</strong>：总开关。关闭后 Rust 后端的日志级别会被设为 <code>off</code>。</li>
+        <li><strong>日志级别（Log Level）</strong>：仅在调试日志打开时可用。级别会通过 <code>set_log_level</code> 命令应用到 Rust 后端的 <code>log::set_max_level</code>。可选值：
+          <ul>
+            <li><code>Error</code>（错误）</li>
+            <li><code>Warn</code>（警告）</li>
+            <li><code>Info</code>（信息）</li>
+            <li><code>Debug</code>（调试）</li>
+            <li><code>Trace</code>（跟踪，最详细）</li>
+          </ul>
+        </li>
+        <li><strong>打开日志文件夹（Open log folder）</strong>：在系统文件管理器里定位本地日志目录。</li>
+        <li><strong>查看日志（View logs）</strong>：打开<strong>应用内日志查看器（LogViewerDialog）</strong>，无需离开应用即可浏览、搜索日志。</li>
+        <li><strong>导出日志并报告问题（Export Logs &amp; Report Issue）</strong>：位于日志查看器内。会把日志打包成 zip，并打开一个<strong>预填好版本号和操作系统字段的 GitHub issue</strong> 表单（仅桌面端）。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>诊断与日志：调试日志开关、日志级别、打开日志文件夹、查看日志</figcaption>
+        <!-- capture: settings-diagnostics.png -->
+      </figure>
+      <h3>日志文件如何落地</h3>
+      <p>桌面端的日志由 <code>tauri-plugin-log</code> 写入<strong>日志目录</strong>，行为与命令行一致（见<a href="cli.html">命令行</a>）：</p>
+      <ul>
+        <li><strong>按会话命名</strong>：每次启动写一个独立文件，文件名为 <code>tyutool-&lt;时间戳&gt;.log</code>。</li>
+        <li><strong>10 MB 滚动</strong>：单个会话日志达到 10 MB 后滚动到 <code>tyutool-&lt;时间戳&gt;-1.log</code>、<code>-2.log</code> …… 以此类推。</li>
+        <li><strong>启动时清理</strong>：旧会话文件在启动时被修剪，避免无限堆积。</li>
+        <li>日志目录按平台：
+          <ul>
+            <li>Linux：<code>~/.local/share/tyutool/</code></li>
+            <li>macOS：<code>~/Library/Application Support/tyutool/</code></li>
+            <li>Windows：<code>%APPDATA%\tyutool\</code></li>
+          </ul>
+        </li>
+      </ul>
+      <div class="callout note">
+        <span class="title">级别对后端生效</span>
+        日志级别<strong>作用在 Rust 后端</strong>（通过 <code>log::set_max_level</code>），因此它影响的是被写入日志文件的那些日志，而不是前端界面的显示。
+      </div>
+
+      <h2 id="serial-logs">4. 串口日志</h2>
+      <p>串口日志区其实是<a href="serial-debug.html#auto">串口调试 · 自动保存</a>的<strong>镜像入口</strong>，让你不必切到串口调试页就能配置会话归档：</p>
+      <ul>
+        <li><strong>自动保存开关（Auto-save）</strong>：开启后串口调试会把整段会话流式写入磁盘。首次开启且尚未选择目录时，会自动弹出目录选择器。</li>
+        <li><strong>保存目录（Save directory）</strong>：目录选择器，显示当前所选目录（未选时为 <code>—</code>）。</li>
+        <li><strong>时间戳格式（Timestamp format）</strong>：开关是否在自动保存的文件名里加上时间戳，便于区分不同会话。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">配置同步</span>
+        这里的设置与串口调试页的自动保存<strong>是同一份</strong>（来自同一个 store），在任一处修改都会即时反映到另一处。
+      </div>
+
+      <h2 id="about">5. 关于</h2>
+      <p>关于区是较轻量的页脚式信息块：</p>
+      <ul>
+        <li><strong>应用版本</strong>：显示当前 tyutool 版本（与更新中心的“当前版本”一致）。</li>
+        <li><strong>开源许可（Open-source licenses）</strong>：打开项目的 LICENSE 页面。</li>
+      </ul>
+
+      <h2 id="persistence">6. 持久化</h2>
+      <p>设置按以下方式持久化，下次启动时自动恢复：</p>
+      <ul>
+        <li><strong>桌面端（Tauri）</strong>：写入 <code>settings.json</code>（由 <code>tauri-plugin-store</code> 管理）。启动时会异步从该文件加载，加载完成后再次把主题应用到 DOM。</li>
+        <li><strong>Web 端</strong>：写入浏览器 <code>localStorage</code>。</li>
+        <li><strong>主题</strong>：无论哪种运行时，主题都会应用到 DOM；在 <code>System</code> 模式下还会监听系统的配色方案变化并实时跟随。</li>
+      </ul>
+      <div class="callout tip">
+        <span class="title">键名一致</span>
+        桌面端 <code>settings.json</code> 里的键名与 Web 端 <code>localStorage</code> 的键名<strong>一一对应</strong>（如主题、语言、日志开关等），便于排查与迁移。
+      </div>
+
+      <nav class="pager">
+        <a href="serial-debug.html">← 串口调试</a>
+        <a href="batch-flash-auth.html">批量烧录授权 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
