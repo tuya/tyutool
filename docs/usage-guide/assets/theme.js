@@ -94,9 +94,9 @@
       if (e.key === 'Escape' && !nav.hasAttribute('hidden')) { close(); btn.focus(); }
     });
 
-    // scroll-spy (throttled via rAF)
+    // scroll-spy (throttled via rAF). anchor-jump smoothing respects
+    // prefers-reduced-motion via the html{scroll-behavior} rule in style.css.
     var ticking = false;
-    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     function spy() {
       var active = null;
       var top = 100;

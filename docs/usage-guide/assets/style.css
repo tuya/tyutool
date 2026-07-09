@@ -35,13 +35,6 @@
     --vp-brand-1:#a8b1ff; --vp-brand-2:#5c73e7; --vp-brand-3:#3e63dd;
     --vp-brand-soft:rgba(100,108,255,0.16);
     --vp-code-bg:rgba(101,117,133,0.16); --vp-code-block-bg:#161618;
-    --vp-green:#3dd68c; --vp-yellow:#f9b44e; --vp-red:#f66f81; --vp-purple:#c8abfa;
-    --vp-green-soft:rgba(61,214,140,0.16); --vp-yellow-soft:rgba(249,180,78,0.16);
-    --vp-red-soft:rgba(246,111,129,0.16); --vp-purple-soft:rgba(200,171,250,0.16);
-    --vp-shadow-1:0 1px 2px rgba(0,0,0,0.4);
-  }
-}
-
 /* explicit light override (data-theme="light") */
 [data-theme="light"]{
   --vp-bg:#ffffff; --vp-bg-alt:#f6f6f7; --vp-bg-soft:#f6f6f7;
@@ -54,6 +47,7 @@
   --vp-green-soft:rgba(24,121,78,0.14); --vp-yellow-soft:rgba(234,179,8,0.14);
   --vp-red-soft:rgba(244,63,94,0.14); --vp-purple-soft:rgba(159,122,234,0.14);
   --vp-shadow-1:0 1px 2px rgba(0,0,0,0.04),0 1px 2px rgba(0,0,0,0.06);
+  --vp-shadow-2:0 3px 12px rgba(0,0,0,0.07),0 1px 4px rgba(0,0,0,0.07);
 }
 
 /* explicit dark override (data-theme="dark") */
@@ -68,6 +62,7 @@
   --vp-green-soft:rgba(61,214,140,0.16); --vp-yellow-soft:rgba(249,180,78,0.16);
   --vp-red-soft:rgba(246,111,129,0.16); --vp-purple-soft:rgba(200,171,250,0.16);
   --vp-shadow-1:0 1px 2px rgba(0,0,0,0.4);
+  --vp-shadow-2:0 3px 12px rgba(0,0,0,0.5),0 1px 4px rgba(0,0,0,0.5);
 }
 
 /* ─── base ──────────────────────────────────────────────────── */
@@ -103,7 +98,7 @@ img{max-width:100%;height:auto}
 .icon-btn.theme-toggle[data-mode="system"] .icon-auto{display:inline}
 
 /* ─── TOC popover ───────────────────────────────────────────── */
-.toc-popover{position:absolute;top:calc(var(--header-h) + 8px);right:24px;width:264px;max-height:min(70vh,560px);overflow-y:auto;background:var(--vp-bg);border:1px solid var(--vp-border);border-radius:8px;box-shadow:var(--vp-shadow-2);padding:12px 8px;z-index:40;font-size:14px;line-height:24px}
+.toc-popover{position:fixed;top:calc(var(--header-h) + 8px);right:24px;width:264px;max-height:min(70vh,560px);overflow-y:auto;background:var(--vp-bg);border:1px solid var(--vp-border);border-radius:8px;box-shadow:var(--vp-shadow-2);padding:12px 8px;z-index:40;font-size:14px;line-height:24px}
 .toc-popover[hidden]{display:none}
 .toc-popover .toc-title{padding:0 8px 8px;font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--vp-text-3)}
 .toc-popover a{display:block;padding:4px 8px;color:var(--vp-text-2);text-decoration:none;border-left:2px solid transparent;transition:color .2s}
