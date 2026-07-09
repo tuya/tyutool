@@ -17,11 +17,12 @@ import {
   type UpdateDialogSourceStatus,
 } from "./update-dialog-state";
 import { renderMarkdown } from "./render-markdown";
+import { splitNotes, type SplitLocale } from "./split-notes";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 type SourceState = UpdateDialogSourceState;
 
@@ -154,11 +155,17 @@ const availableUpdate = computed(() => {
   };
 });
 
-const renderedNotes = computed(() =>
-  availableUpdate.value?.notes
-    ? renderMarkdown(availableUpdate.value.notes)
-    : "",
-);
+const renderedNotes = computed(() => {
+  const raw = availableUpdate.value?.notes;
+  if (!raw) return "";
+  // Collapse the two-block bilingual notes to the active locale before rendering.
+  // `locale` is already resolved; anything that isn't zh-CN uses the English block.
+  const scoped = splitNotes(
+    raw,
+    (locale.value === "zh-CN" ? "zh-CN" : "en") as SplitLocale,
+  );
+  return renderMarkdown(scoped);
+});
 
 const inAppUpdateSupported = computed(() =>
   canUseInAppUpdater(installTypeReady.value, {
