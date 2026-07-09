@@ -1147,8 +1147,10 @@ fn authorize_confirm_cmd(state: State<'_, ConfirmState>, confirmed: bool) -> Res
     let mut guard = state.sender.lock().map_err(|e| e.to_string())?;
     if let Some(tx) = guard.take() {
         let _ = tx.send(confirmed);
+        log::info!("[auth] confirm resolved: {}", confirmed);
         Ok(())
     } else {
+        log::warn!("[auth] confirm called with no pending authorization");
         Err("no pending authorization confirmation".into())
     }
 }
@@ -1159,12 +1161,18 @@ async fn serial_debug_open(
     state: State<'_, DebugState>,
     cfg: DebugConfig,
 ) -> Result<(), String> {
+    log::info!(
+        "[serial-debug] open port={} baud={}",
+        cfg.port,
+        cfg.baud_rate
+    );
     {
         let guard = state
             .session
             .lock()
             .map_err(|_| "debug state poisoned".to_string())?;
         if guard.is_some() {
+            log::warn!("[serial-debug] open rejected: already open");
             return Err("already open".into());
         }
     }
@@ -1210,6 +1218,7 @@ async fn serial_debug_open(
         .chunk_bridge
         .lock()
         .map_err(|_| "debug state poisoned".to_string())? = Some(chunk_tx);
+    log::info!("[serial-debug] open ok");
     Ok(())
 }
 
@@ -1223,6 +1232,7 @@ async fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> 
         guard.take()
     };
     if let Some(session) = session {
+        log::info!("[serial-debug] close");
         // h.join() blocks; run it off the async runtime thread.
         tauri::async_runtime::spawn_blocking(move || session.close())
             .await
@@ -1242,14 +1252,16 @@ fn serial_debug_send(
     state: State<'_, DebugState>,
     bytes: Vec<u8>,
 ) -> Result<(), String> {
+    log::debug!("[serial-debug] send {} bytes", bytes.len());
     {
         let guard = state
             .session
             .lock()
             .map_err(|_| "debug state poisoned".to_string())?;
-        let session = guard
-            .as_ref()
-            .ok_or_else(|| "serial debug not open".to_string())?;
+        let session = guard.as_ref().ok_or_else(|| {
+            log::warn!("[serial-debug] send rejected: not open");
+            "serial debug not open".to_string()
+        })?;
         session.write(&bytes).map_err(|e| e.to_string())?;
     } // DebugState lock dropped here — emit happens unlocked
     let ts_ms = std::time::SystemTime::now()
