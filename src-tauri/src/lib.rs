@@ -507,6 +507,12 @@ fn batch_flash_start(
     config: BatchFlashStartConfig,
     ports: Vec<String>,
 ) -> Result<(), String> {
+    log::info!(
+        "[batch-flash] start chip={} ports_count={} ports={:?}",
+        config.chip_id,
+        ports.len(),
+        ports
+    );
     for port in ports {
         // Step 1: Remove old slot under lock (brief)
         let old_slot = {
@@ -538,6 +544,7 @@ fn batch_flash_start(
         let config_clone = config.clone();
 
         let handle = std::thread::spawn(move || {
+            log::info!("[batch-flash] slot begin  port={}", port_clone);
             if !std::path::Path::new(&config_clone.firmware_path).exists() {
                 let _ = app_clone.emit(
                     "batch-flash-progress",
@@ -545,6 +552,11 @@ fn batch_flash_start(
                         "port": port_clone,
                         "event": { "kind": "done", "result": { "err": { "message": "firmware file not found", "elapsed_secs": 0 } } }
                     }),
+                );
+                log::warn!(
+                    "[batch-flash] slot failed  port={} reason=firmware_not_found path={}",
+                    port_clone,
+                    config_clone.firmware_path
                 );
                 return;
             }
@@ -569,12 +581,23 @@ fn batch_flash_start(
                 confirm_overwrite: None,
             };
 
-            let _ = tyutool_core::run_job(&job, &cancel_clone, |p| {
+            let result = tyutool_core::run_job(&job, &cancel_clone, |p| {
                 let _ = app_clone.emit(
                     "batch-flash-progress",
                     serde_json::json!({ "port": port_clone, "event": p }),
                 );
             });
+            match &result {
+                Ok(()) => log::info!("[batch-flash] slot done    port={}", port_clone),
+                Err(tyutool_core::FlashError::Cancelled) => {
+                    log::info!("[batch-flash] slot cancelled port={}", port_clone)
+                }
+                Err(e) => log::warn!(
+                    "[batch-flash] slot failed   port={} error={}",
+                    port_clone,
+                    e
+                ),
+            }
         });
 
         // Step 4: Insert under lock (brief)
