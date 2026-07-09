@@ -5,28 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Settings · tyutool Usage Guide</title>
   <link rel="stylesheet" href="../assets/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>try{var t=localStorage.getItem("tyutool-docs-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+  <script src="../assets/theme.js" defer></script>
 </head>
 <body>
-  <header class="site-header">
+    <header class="site-header">
     <div class="bar">
-      <span class="brand">tyutool · Usage Guide</span>
+      <a class="brand" href="index.html">tyutool · Usage Guide</a>
+      <button class="icon-btn theme-toggle" type="button" data-mode="system" aria-label="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </button>
+      <button class="icon-btn toc-toggle" type="button" aria-label="On this page" aria-expanded="false" data-toc-title="On this page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      </button>
       <span class="lang"><a href="settings.html" aria-current="true">English</a><a href="../zh/settings.html">中文</a></span>
     </div>
   </header>
   <div class="layout">
-    <aside class="side-nav">
-      <h2>Usage Guide</h2>
-      <ul>
-        <li><a href="getting-started.html">Getting Started</a></li>
-        <li><a href="concepts.html">Concepts</a></li>
-        <li><a href="flash.html">Firmware Flash</a></li>
-        <li><a href="serial-debug.html">Serial Debug</a></li>
-        <li><a href="settings.html" aria-current="page">Settings</a></li>
-        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
-        <li><a href="cli.html">CLI</a></li>
-        <li><a href="faq.html">FAQ</a></li>
-      </ul>
-    </aside>
     <main class="content">
       <h1>Settings</h1>
       <p class="lead">This page is the complete reference for the <code>/settings</code> page: every configurable option in one place, covering the update center, appearance &amp; language, diagnostics &amp; logs, serial logs, about, and how settings themselves persist.</p>
