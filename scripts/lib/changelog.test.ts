@@ -14,8 +14,11 @@ describe('buildDraftSection', () => {
     const s = buildDraftSection('3.0.14', '2026-06-18');
     expect(s).toContain('## [3.0.14] - 2026-06-18');
     expect(s).toContain(DRAFT_MARKER);
-    expect(s).toContain('### 新功能 / Features');
-    expect(s).toContain('### 问题修复 / Bug Fixes');
+    expect(s).toContain('### 新功能');
+    expect(s).toContain('### Features');
+    expect(s).toContain('### 问题修复');
+    expect(s).toContain('### Bug Fixes');
+    expect(s).toContain('\n---\n'); // the inter-language separator
   });
 });
 
