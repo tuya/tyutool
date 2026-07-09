@@ -94,24 +94,6 @@ fn parse_hex(s: Option<&str>, field: &str) -> Result<u32, FlashError> {
 
 /// Retrieve `UsbPortInfo` for the given port name from the OS port list.
 /// Falls back to a zeroed-out struct for non-USB / unlisted ports.
-/// UART reset for ESP32 family — uses `Connection::reset` (internally `reset_after_flash`),
-/// matching the default post-flash reset path in `run_esp`.
-pub(crate) fn esp_uart_hard_reset(port_name: &str) -> Result<(), FlashError> {
-    let port_info = usb_port_info(port_name);
-    let serial = serialport::new(port_name, 115_200)
-        .timeout(Duration::from_millis(500))
-        .open_native()
-        .map_err(|e| FlashError::Plugin(format!("cannot open port {port_name}: {e}")))?;
-    let mut conn = Connection::new(
-        serial,
-        port_info,
-        ResetAfterOperation::HardReset,
-        ResetBeforeOperation::DefaultReset,
-        115_200,
-    );
-    conn.reset().map_err(esp_err)
-}
-
 fn usb_port_info(port_name: &str) -> UsbPortInfo {
     if let Ok(ports) = serialport::available_ports() {
         for p in &ports {
