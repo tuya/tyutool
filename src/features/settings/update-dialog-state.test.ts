@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  deriveUpdateSourceAction,
   deriveUpdateSummaryState,
   type UpdateDialogSourceState,
 } from "./update-dialog-state";
@@ -114,5 +115,63 @@ describe("deriveUpdateSummaryState", () => {
     });
 
     expect(result.kind).toBe("installing");
+  });
+});
+
+describe("deriveUpdateSourceAction", () => {
+  it("uses in-app download for the primary available source when supported", () => {
+    const result = deriveUpdateSourceAction({
+      source: makeSourceState("available", { id: "github" }),
+      summaryKind: "available",
+      isTauri: true,
+      installTypeReady: true,
+      manualUpdateOnly: false,
+      inAppUpdateSupported: true,
+      primaryAvailableSourceId: "github",
+    });
+
+    expect(result).toBe("download");
+  });
+
+  it("falls back to the selected source release page for non-primary sources", () => {
+    const result = deriveUpdateSourceAction({
+      source: makeSourceState("available", { id: "gitee" }),
+      summaryKind: "available",
+      isTauri: true,
+      installTypeReady: true,
+      manualUpdateOnly: false,
+      inAppUpdateSupported: true,
+      primaryAvailableSourceId: "github",
+    });
+
+    expect(result).toBe("manual");
+  });
+
+  it("uses the source release page when the install type only supports manual updates", () => {
+    const result = deriveUpdateSourceAction({
+      source: makeSourceState("available", { id: "github" }),
+      summaryKind: "available",
+      isTauri: true,
+      installTypeReady: true,
+      manualUpdateOnly: true,
+      inAppUpdateSupported: false,
+      primaryAvailableSourceId: "github",
+    });
+
+    expect(result).toBe("manual");
+  });
+
+  it("hides source actions outside the available state", () => {
+    const result = deriveUpdateSourceAction({
+      source: makeSourceState("available", { id: "github" }),
+      summaryKind: "downloading",
+      isTauri: true,
+      installTypeReady: true,
+      manualUpdateOnly: false,
+      inAppUpdateSupported: true,
+      primaryAvailableSourceId: "github",
+    });
+
+    expect(result).toBe("none");
   });
 });

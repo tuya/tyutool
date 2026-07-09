@@ -115,6 +115,7 @@
       "sourceElapsed": "{time}s",
       "sourceFailures": "{count} source(s) failed",
       "btnUpdate": "Update",
+      "updateFromSource": "Update from This Source",
       "downloading": "Downloading v{version} from {source}",
       "downloadProgress": "{percent}%   {downloaded}/{total}",
       "cancel": "Cancel",
