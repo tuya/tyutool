@@ -47,6 +47,9 @@ tmp/
 # ── Scripts generated assets ──────────────────────────────────────────────────
 scripts/icon-source.png
 
+# ── Git worktrees ─────────────────────────────────────────────────────────────
+.worktrees/
+
 # ── Superpowers ───────────────────────────────────────────────────────────────
 docs/superpowers/
 .superpowers/
