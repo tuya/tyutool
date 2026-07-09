@@ -33,6 +33,9 @@ watch(
 
 app.config.errorHandler = (err, _instance, info) => {
   rLog.error(`[app] unhandled Vue error: ${err} (info: ${info})`);
+  if (import.meta.env.DEV) {
+    console.error('[app] unhandled Vue error:', err, info);
+  }
 };
 
 window.addEventListener('unhandledrejection', event => {

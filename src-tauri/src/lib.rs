@@ -1210,6 +1210,7 @@ async fn serial_debug_open(
         .map_err(|_| "debug state poisoned".to_string())?;
     if guard.is_some() {
         // Another open won the race while we were in spawn_blocking; discard this session.
+        log::warn!("[serial-debug] open lost race: already open");
         session.close();
         return Err("already open".into());
     }
