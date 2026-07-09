@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>串口调试 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/serial-debug.html">English</a><a href="serial-debug.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html" aria-current="page">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>串口调试</h1>
+      <p class="lead">本页是 <code>/serial-debug</code> 页面的完整参考：一个完整的串口终端 / 日志监视器，覆盖连接与 UART 配置、设备复位、ASCII / Hex 日志视图、发送栏、Hex 弹窗、关键词过滤标签，以及自动释放与自动保存。</p>
+
+      <h2 id="overview">1. 总览</h2>
+      <p><code>/serial-debug</code> 是一个<strong>完整的串口终端</strong>，既可以用来观察设备实时打印的日志，也可以向设备发送指令或数据。整个界面由顶部连接栏、中间的日志视图、底部的发送栏，以及右侧的过滤标签/设置区组成。</p>
+      <p>页面带有一个<strong>保活（keep-alive）</strong>机制：当你从串口调试页跳到其他页面（例如去 <a href="flash.html">固件烧录</a>看一下进度）再回来时，后台的 RX 接收流不会中断，<strong>回来后仍能继续看到</strong>设备在这段时间打印的内容，不会因为切换页面而丢数据。</p>
+      <figure class="shot todo">
+        <figcaption>串口调试页总览：连接栏、日志视图、发送栏、过滤标签</figcaption>
+        <!-- capture: serial-debug-overview.png -->
+      </figure>
+      <div class="callout note">
+        <span class="title">与固件烧录页共用串口</span>
+        串口调试页与<a href="flash.html">固件烧录</a>页<strong>共用同一批串口</strong>，同一时刻只能由一方占用某个端口。关于让端口在不同页面之间切换的机制，见下方<a href="#auto">自动释放</a>。
+      </div>
+
+      <h2 id="connect">2. 连接与串口配置</h2>
+      <p>顶部连接栏用于建立和管理串口连接：</p>
+      <ul>
+        <li><strong>串口选择</strong>：下拉列出当前可用串口，每次打开会重新扫描。</li>
+        <li><strong>连接 / 断开</strong>：手动打开或关闭与所选串口的链路。</li>
+        <li><strong>状态指示</strong>：显示当前端口是已连接 / 未连接 / 被其他页面占用。</li>
+      </ul>
+      <p>常规参数（波特率等）直接在连接栏选择；<strong>高级 UART 设置</strong>则放在<a href="settings.html">设置</a>弹窗里，包含：</p>
+      <table>
+        <thead><tr><th>参数</th><th>可选值</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>波特率（Baud）</td><td><code>9600</code>–<code>921600</code> 档位 + 自定义</td><td>未手动覆盖时，<strong>默认取当前所选 flash 芯片的日志波特率</strong>（见<a href="flash.html#chip">芯片清单</a>）。</td></tr>
+          <tr><td>数据位（Data bits）</td><td><code>5</code> / <code>6</code> / <code>7</code> / <code>8</code></td><td>每帧数据位数。</td></tr>
+          <tr><td>校验位（Parity）</td><td><code>none</code> / <code>odd</code> / <code>even</code></td><td>无 / 奇校验 / 偶校验。</td></tr>
+          <tr><td>停止位（Stop bits）</td><td><code>1</code> / <code>1.5</code> / <code>2</code></td><td>每帧停止位数。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip">
+        <span class="title">波特率跟随芯片</span>
+        如果你只是想看某款芯片的启动日志，无需手动查它的日志波特率——只要先在烧录页选好芯片型号，串口调试页的波特率就会<strong>自动对齐</strong>到该芯片的日志波特率；手动改过之后则以你的设置为准。
+      </div>
+
+      <h2 id="reset">3. 设备复位</h2>
+      <p>串口调试页支持通过 <strong>DTR / RTS</strong> 信号线复位设备，方便在不拔插的情况下让设备重启、重新打印启动日志。</p>
+      <ul>
+        <li><strong>复位当前会话端口</strong>：直接对当前连接的串口拉一次 DTR/RTS 复位序列。</li>
+        <li><strong>复位其他控制端口</strong>：当设备的复位引脚并不在日志串口上时，可以通过一个<strong>运行时芯片 id（runtime chip id）</strong>指定另一个控制端口去触发复位，复位完成后再回到日志端口继续接收。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">复位 ≠ 断开</span>
+        复位只改变 DTR/RTS 电平让设备重启，<strong>不会断开</strong>当前串口连接；复位后设备重新打印的内容会继续出现在日志视图里。
+      </div>
+
+      <h2 id="log-view">4. 日志视图</h2>
+      <p>日志视图是页面的主体，实时滚动显示收到的数据。它支持<strong>两种视图</strong>与一组显示开关：</p>
+      <ul>
+        <li><strong>ASCII 视图</strong> 与 <strong>Hex 视图</strong>：可在普通文本和十六进制之间切换；Hex 视图可设置<strong>每行字节数</strong>（8 / 16 / 32），并把不可见字节以十六进制明文展示。</li>
+        <li><strong>ANSI 着色开关</strong>：解析日志中的 ANSI 颜色转义码并上色，便于区分不同等级的日志。</li>
+        <li><strong>字号</strong>：10–18px 范围内调节，适应不同屏幕和阅读习惯。</li>
+        <li><strong>时间戳开关</strong>：在每行前显示接收时间。</li>
+        <li><strong>方向徽标开关</strong>：在每行前标注 <strong>TX</strong>（发送）/ <strong>RX</strong>（接收）/ <strong>SYS</strong>（系统消息）方向。</li>
+        <li><strong>清空（clear）</strong>：清掉当前可见缓冲区。</li>
+        <li><strong>导出（export）</strong>：把当前日志导出为文件。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>Hex 视图：每行字节数、方向徽标、时间戳</figcaption>
+        <!-- capture: serial-debug-hex-view.png -->
+      </figure>
+      <div class="callout warn">
+        <span class="title">可见窗口上限 3000 行</span>
+        为保证性能，<strong>可见窗口最多保留 3000 行</strong>；超出后旧行会被从视口移除。需要完整会话记录时请使用下方<a href="#auto">自动保存</a>，或在数据丢失前及时<strong>导出</strong>。
+      </div>
+
+      <h2 id="send-bar">5. 发送栏</h2>
+      <p>底部的发送栏用于向设备<strong>主动发送数据</strong>：</p>
+      <ul>
+        <li><strong>ASCII 或 Hex 模式</strong>：ASCII 模式按文本发送；Hex 模式按十六进制字节发送（用于发送二进制指令）。</li>
+        <li><strong>可选 <code>\r\n</code></strong>：发送时是否在末尾追加回车换行，按目标设备的协议勾选。</li>
+        <li><strong>回车发送</strong>：按 <kbd>Enter</kbd> 即发送当前输入框内容。</li>
+        <li><strong>发送历史</strong>：最多保留 <strong>20 条</strong>历史；用 <kbd>↑</kbd> / <kbd>↓</kbd> 在历史条目之间快速翻选，无需重复输入。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>发送栏：ASCII/Hex 切换、<code>\r\n</code> 选项、历史下拉</figcaption>
+        <!-- capture: serial-debug-send-bar.png -->
+      </figure>
+
+      <h2 id="hex-popup">6. Hex 弹窗</h2>
+      <p>在日志视图中<strong>选中一段 RX 数据</strong>后，可以打开一个 <strong>Hex 弹窗</strong>，把所选字节同时以<strong>十六进制和 ASCII</strong> 两种形式并排展示，方便逐字节核对一段二进制回复或协议帧。</p>
+      <div class="callout tip">
+        <span class="title">什么时候用</span>
+        当设备返回的是结构化二进制（例如自定义协议帧、授权回复）而不是可读文本时，用 Hex 弹窗逐字节检查比在 ASCII 视图里看乱码要可靠得多。
+      </div>
+
+      <h2 id="filter-tabs">7. 过滤标签（Watch chips）</h2>
+      <p>过滤标签（watch chips）让你给<strong>感兴趣的关键词</strong>各建一个标签，从而在一长串日志里只看相关内容：</p>
+      <ul>
+        <li><strong>关键词</strong>：可以是<strong>纯文本</strong>，也可以是<strong>正则表达式</strong>。</li>
+        <li><strong>自动配色</strong>：每个标签自动从 <strong>6 色循环</strong>里取一个颜色，便于一眼区分。</li>
+        <li><strong>实时计数</strong>：每个标签上显示当前会话内<strong>命中的条数</strong>，随日志增长实时更新。</li>
+        <li><strong>按标签过滤</strong>：点选某个标签后，视图只显示<strong>匹配该关键词</strong>的行；<strong>“全部（All）”</strong>标签则恢复显示全部内容。</li>
+        <li><strong>“加载更早（load older）”</strong>：匹配结果较多时分页加载更早的命中行。</li>
+      </ul>
+      <p>过滤是在<strong>服务端、针对整个会话</strong>执行的，而不是只过滤当前可见窗口——因此即便旧数据已经从 3000 行视口里被移除，过滤结果仍能把它找回来。</p>
+      <figure class="shot todo">
+        <figcaption>过滤标签：关键词、6 色徽标、实时计数、“全部”标签</figcaption>
+        <!-- capture: serial-debug-filter-tabs.png -->
+      </figure>
+
+      <h2 id="auto">8. 自动释放 / 自动保存</h2>
+      <p>这两项功能都在<a href="settings.html">设置</a>里配置，用来让长时间挂着的串口调试会话更省心。</p>
+      <h3>自动释放（Auto-release）</h3>
+      <p>自动释放解决的是<strong>端口争用</strong>问题：</p>
+      <ul>
+        <li>当<strong>固件烧录</strong>页需要使用某个端口、而该端口正被串口调试占用时，串口调试会<strong>自动释放</strong>该端口交给烧录使用；可以开启<strong>确认提示</strong>，在释放前先问你一句。</li>
+        <li>烧录结束后，串口调试会<strong>自动恢复</strong>之前的连接，继续接收日志，无需你手动重连。</li>
+      </ul>
+      <h3>自动保存（Auto-save）</h3>
+      <p>自动保存用于留一份<strong>完整的会话日志</strong>，避免超过 3000 行视口上限后丢数据：</p>
+      <ul>
+        <li><strong>保存目录</strong>：选一个目录，串口调试会把整段会话流式写入其中。</li>
+        <li><strong>时间戳文件名</strong>：可选在文件名里加上时间戳，便于区分不同会话。</li>
+        <li><strong>分块写入</strong>：以最大 <strong>128 KiB</strong> 的块落盘，兼顾写入效率与及时性。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">自动保存 vs 手动导出</span>
+        手动导出（见<a href="#log-view">日志视图</a>）保存的是<strong>当前可见窗口</strong>内的内容；自动保存则是把<strong>整个会话</strong>持续落盘，是留存长时间日志的正确做法。
+      </div>
+
+      <nav class="pager">
+        <a href="flash.html">← 固件烧录</a>
+        <a href="settings.html">设置 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
