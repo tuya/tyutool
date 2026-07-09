@@ -503,6 +503,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Device reset (DTR/RTS) completed on {}", port);
         }
         Commands::Update { check, source } => {
+            log::info!("[cli] update check={} source={:?}", check, source);
             update::run_update(check, source)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
