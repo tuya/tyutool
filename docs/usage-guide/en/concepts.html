@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Concepts · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · Usage Guide</span>
+      <span class="lang"><a href="concepts.html" aria-current="true">English</a><a href="../zh/concepts.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>Usage Guide</h2>
+      <ul>
+        <li><a href="getting-started.html">Getting Started</a></li>
+        <li><a href="concepts.html" aria-current="page">Concepts</a></li>
+        <li><a href="flash.html">Firmware Flash</a></li>
+        <li><a href="serial-debug.html">Serial Debug</a></li>
+        <li><a href="settings.html">Settings</a></li>
+        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>Concepts</h1>
+      <p class="lead">Before you click a single button, take a few minutes to learn this vocabulary — it makes every later page make sense. This page covers concepts only; there are no step-by-step actions here.</p>
+
+      <p>tyutool talks to a device over a serial chain: commands issued by tyutool on your PC travel through a USB-serial adapter as UART electrical signals to the device's SoC, which then reads and writes the flash chip. The figure below shows the full topology of this chain.</p>
+
+      <figure class="diagram">
+        <img src="../assets/images/concepts-uart-topology.svg" alt="Topology diagram: PC running tyutool connects via USB to a USB-serial adapter, then via UART (TX/RX/GND) to an IoT device containing an SoC and a Flash chip">
+        <figcaption>Figure 1 · The flashing chain from tyutool to the device</figcaption>
+      </figure>
+
+      <div class="callout note">
+        <span class="title">Reading guide</span>
+        New to firmware flashing? Read sections 1–6 in order; sections 7 and 8 work as a quick-reference glossary you can come back to whenever an unfamiliar term appears later in the guide.
+      </div>
+
+      <h2 id="firmware">What is firmware</h2>
+      <p>Firmware is the program stored on the device's flash chip — it decides what the device does at boot, how it connects to the network, and which features it offers. You can think of it as the device's "operating system plus application" bundled into one blob of binary data.</p>
+      <p>You typically replace firmware for one of these reasons:</p>
+      <ul>
+        <li><strong>Update</strong>: flash a newer version from the vendor or community to gain features or fixes.</li>
+        <li><strong>Repair</strong>: when a device is bricked or misbehaving, restore it with a known-good firmware.</li>
+        <li><strong>Customization</strong>: flash custom or third-party firmware to change the device's behavior.</li>
+      </ul>
+      <p>Firmware is ultimately just a sequence of bytes, and flashing is the act of writing those bytes verbatim into the flash chip.</p>
+
+      <h2 id="flashing">Flashing</h2>
+      <p>Flashing (also called writing or brushing) is the act of writing firmware bytes into the device's flash chip. By analogy: it is like copying a file from your PC onto the device's permanent storage. The difference is that the transfer uses a serial chain, not a network cable or USB stick.</p>
+      <p>The data flows along the chain like this:</p>
+      <ol class="steps">
+        <li>tyutool reads the firmware file on your PC and slices it into data chunks.</li>
+        <li>The chunks travel over USB to the USB-serial adapter, which converts them to UART signals.</li>
+        <li>The UART signals (TX/RX/GND) reach the device's SoC, which then writes the data into the flash chip.</li>
+      </ol>
+      <p>After flashing, the device runs the newly written firmware on its next power-up.</p>
+
+      <div class="callout warn">
+        <span class="title">Note</span>
+        Flashing is an overwriting write: the new firmware replaces whatever occupied the corresponding flash region before. Unless you backed up the old firmware, you generally cannot restore it directly — always <a href="#read">read</a> a backup of anything important first.
+      </div>
+
+      <h2 id="erase">Erase</h2>
+      <p>Erasing is the act of clearing flash cells in a region to their blank state (all <code>0xFF</code>). The physics of flash chips dictates that "writing can only turn a 1 into a 0," so you usually must erase before writing new data.</p>
+      <p>Common use cases:</p>
+      <ul>
+        <li><strong>Clear before write</strong>: wipe old data / old auth so the new firmware lands cleanly.</li>
+        <li><strong>Full-chip erase</strong>: clear the entire flash, often used to zero out a device or fully clean it before switching firmware.</li>
+      </ul>
+      <p>tyutool provides several full-chip erase presets, ordered from narrowest to widest scope:</p>
+      <table>
+        <thead><tr><th>Erase preset</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>authInfo</code></td><td>Erases only the authorization region (UUID/AuthKey), keeping firmware and other data intact.</td></tr>
+          <tr><td><code>fullChipNoRf</code></td><td>Full-chip erase but preserves the RF calibration region, so the device can still connect to the network.</td></tr>
+          <tr><td><code>fullChip</code></td><td>Full, complete erase — every region is cleared, including RF calibration.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip">
+        <span class="title">Tip</span>
+        Not sure which to pick? <code>fullChipNoRf</code> is the most common "safe thorough" erase: it wipes the firmware but keeps RF calibration, so the device can still go online afterwards.
+      </div>
+
+      <h2 id="read">Read</h2>
+      <p>Reading is the inverse of flashing: it copies the contents of the flash chip out and saves them as a file on your PC. This file is usually called a "backup" or "dump."</p>
+      <p>The main use of reading is <strong>backup</strong>: before you flash or erase, first read out the device's current flash contents and store them safely. If something goes wrong later, you can use that backup to restore the device to its original state.</p>
+      <ul>
+        <li><strong>Full read</strong>: read the entire flash into a single file — the safest way to back up.</li>
+        <li><strong>Segment read</strong>: read only one address range (segment) to inspect a specific region.</li>
+      </ul>
+
+      <h2 id="authorize">Authorize (TuyaOpen UART auth)</h2>
+      <p>Authorizing is the act of writing device credentials so the device can connect to the Tuya cloud. The credentials consist of two parts:</p>
+      <ul>
+        <li><strong>UUID</strong>: the device's unique identifier.</li>
+        <li><strong>AuthKey</strong>: the authentication key paired with the UUID.</li>
+      </ul>
+      <p>Authorization and firmware flashing are <strong>two independent things</strong>: firmware is the program; authorization is the identity credential. A device can run the latest firmware yet fail to reach the cloud because it has no credentials, and it can hold valid credentials while running old firmware. Neither substitutes for the other.</p>
+      <div class="callout danger">
+        <span class="title">Important</span>
+        UUID and AuthKey are not arbitrary values you can make up — they are credentials <strong>purchased</strong> from Tuya. Writing forged or duplicate credentials prevents the device from going online properly and can even pollute the whole device pool. Only use legitimately purchased credentials.
+      </div>
+      <p>tyutool distinguishes two authorization operations:</p>
+      <ul>
+        <li><strong>Auth-read</strong>: reads only the device's current UUID/AuthKey without writing anything — used for verification or troubleshooting.</li>
+        <li><strong>Auth-write</strong>: writes the UUID/AuthKey you supply into the device, completing authorization.</li>
+      </ul>
+
+      <h2 id="serial">Serial port / UART / baud rate</h2>
+      <p>A serial port is a "one bit at a time" communication interface. PCs usually lack a native serial port, so you use a <strong>USB-serial adapter</strong> to convert USB signals into UART signals the device understands. Common adapter chips include CH340, CP2102, and FT232.</p>
+      <p><strong>UART</strong> (Universal Asynchronous Receiver-Transmitter) is the device-side form of the serial port. The three most commonly used wires are:</p>
+      <ul>
+        <li><strong>TX</strong>: transmit — sends data out.</li>
+        <li><strong>RX</strong>: receive — accepts data coming from the other end.</li>
+        <li><strong>GND</strong>: ground — both sides must share ground to read levels correctly.</li>
+      </ul>
+      <p>Wiring must <strong>cross over</strong>: the PC side's TX connects to the device's RX, and vice versa (see Figure 1 above).</p>
+      <p>The <strong>baud rate</strong> is the speed of serial communication, measured in bits per second. Both sides must use the same baud rate, or the received data is pure garbage. tyutool supports several baud rates; the common ones are:</p>
+      <table>
+        <thead><tr><th>Baud rate</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td><code>115200</code></td><td>The most universal, stable default — supported by virtually every chip.</td></tr>
+          <tr><td><code>460800</code></td><td>Faster, good for medium-sized firmware while remaining stable.</td></tr>
+          <tr><td><code>921600</code></td><td>High speed; saves significant time on large firmware, but requires the chip and cabling to support it.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip">
+        <span class="title">How to choose</span>
+        Start at <code>115200</code> for safety; once it is stable and you want more speed, step up to a higher baud rate. If flashing fails or you see checksum errors, drop back to a lower baud rate first while troubleshooting.
+      </div>
+
+      <h2 id="chip">Chip selection</h2>
+      <p>Before flashing you must select the correct <strong>chip model</strong> in tyutool. This matters because the chip model determines three things:</p>
+      <ul>
+        <li><strong>Protocol</strong>: different chips enter flashing mode and handshake in different ways.</li>
+        <li><strong>Baud rate</strong>: some chips only support specific rates or ceilings.</li>
+        <li><strong>Flash size</strong>: the chip model sets the addressable flash capacity, which affects read/erase ranges.</li>
+      </ul>
+      <p>Selecting the wrong chip may simply fail to flash, or worse, corrupt data. For the full list of chips tyutool supports, see the <a href="flash.html">Firmware Flash</a> page and the <a href="cli.html">CLI</a> page.</p>
+
+      <h2 id="terminology">TY tool terminology table</h2>
+      <p>The table below collects the high-frequency terms used throughout this guide for quick lookup. Other pages also link back here the first time they mention a term.</p>
+      <table>
+        <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Flash</strong></td><td>The non-volatile storage chip on the device that holds firmware; also the umbrella term for read/write/erase operations on it.</td></tr>
+          <tr><td><strong>Erase</strong></td><td>Clear a flash region to <code>0xFF</code>.</td></tr>
+          <tr><td><strong>Read</strong></td><td>Copy flash contents to a PC file (backup / dump).</td></tr>
+          <tr><td><strong>Authorize</strong></td><td>Write UUID + AuthKey so the device can reach the Tuya cloud.</td></tr>
+          <tr><td><strong>UUID</strong></td><td>Device unique identifier, paired with AuthKey during authorization.</td></tr>
+          <tr><td><strong>AuthKey</strong></td><td>Authentication key that, together with UUID, forms the device's cloud credentials.</td></tr>
+          <tr><td><strong>Baud</strong></td><td>Baud rate — serial speed (bits/sec); both sides must match.</td></tr>
+          <tr><td><strong>UART</strong></td><td>Universal Asynchronous Receiver-Transmitter — the device-side serial form (TX/RX/GND).</td></tr>
+          <tr><td><strong>Segment</strong></td><td>An address range of the flash that can be read or flashed individually.</td></tr>
+          <tr><td><strong>Erase preset</strong></td><td>A predefined erase scheme by scope: <code>authInfo</code> / <code>fullChipNoRf</code> / <code>fullChip</code>.</td></tr>
+          <tr><td><strong>MAC</strong></td><td>Media Access Control address — the device's network hardware identifier; some chips also write it during flashing.</td></tr>
+        </tbody>
+      </table>
+
+      <nav class="pager">
+        <a href="getting-started.html">← Getting Started</a>
+        <a href="flash.html">Firmware Flash →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
