@@ -40,20 +40,38 @@ pub struct SerialIo {
 
 impl SerialIo {
     pub fn open(port_name: &str, baud: u32) -> Result<Self, ProtocolError> {
+        log::info!("[serial] opening port {} @ {} baud", port_name, baud);
         let port = serialport::new(port_name, baud)
             .timeout(Duration::from_millis(100))
             .open()
-            .map_err(|e| ProtocolError::Io(io::Error::other(e.to_string())))?;
+            .map_err(|e| {
+                log::warn!(
+                    "[serial] failed to open port {} @ {} baud: {}",
+                    port_name,
+                    baud,
+                    e
+                );
+                ProtocolError::Io(io::Error::other(e.to_string()))
+            })?;
         Ok(Self { port })
     }
 
     /// Re-open the serial port at a different baud rate.
     pub fn reopen(&mut self, port_name: &str, baud: u32) -> Result<(), ProtocolError> {
+        log::info!("[serial] reopening port {} @ {} baud", port_name, baud);
         // Drop old port, open new one
         let port = serialport::new(port_name, baud)
             .timeout(Duration::from_millis(100))
             .open()
-            .map_err(|e| ProtocolError::Io(io::Error::other(e.to_string())))?;
+            .map_err(|e| {
+                log::warn!(
+                    "[serial] failed to reopen port {} @ {} baud: {}",
+                    port_name,
+                    baud,
+                    e
+                );
+                ProtocolError::Io(io::Error::other(e.to_string()))
+            })?;
         self.port = port;
         Ok(())
     }

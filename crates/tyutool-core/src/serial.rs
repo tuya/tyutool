@@ -393,6 +393,7 @@ fn device_reset_with_strategy(
     port: &mut dyn serialport::SerialPort,
     strategy: DeviceResetStrategy,
 ) -> Result<(), FlashError> {
+    log::info!("[serial] device reset via {:?}", strategy);
     match strategy {
         DeviceResetStrategy::BekenBk => {
             write_dtr(port, false)?;
