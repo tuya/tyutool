@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Serial Debug · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · Usage Guide</span>
+      <span class="lang"><a href="serial-debug.html" aria-current="true">English</a><a href="../zh/serial-debug.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>Usage Guide</h2>
+      <ul>
+        <li><a href="getting-started.html">Getting Started</a></li>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="flash.html">Firmware Flash</a></li>
+        <li><a href="serial-debug.html" aria-current="page">Serial Debug</a></li>
+        <li><a href="settings.html">Settings</a></li>
+        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>Serial Debug</h1>
+      <p class="lead">This page is the complete reference for the <code>/serial-debug</code> page: a full serial terminal / log monitor, covering connect &amp; UART config, device reset, ASCII / Hex log views, the send bar, the Hex popup, keyword filter tabs, and auto-release &amp; auto-save.</p>
+
+      <h2 id="overview">1. Overview</h2>
+      <p><code>/serial-debug</code> is a <strong>full serial terminal</strong>: you can both watch the device's live log output and send commands or data to it. The layout is made up of the top connection bar, the central log view, the bottom send bar, and the filter-tabs / settings area on the side.</p>
+      <p>The page has a <strong>keep-alive</strong> mechanism: when you navigate away from Serial Debug (say, to check <a href="flash.html">Firmware Flash</a> progress) and come back, the background RX stream keeps running, so you <strong>still see what the device printed</strong> while you were away — navigating between pages does not drop data.</p>
+      <figure class="shot todo">
+        <figcaption>Serial Debug overview: connection bar, log view, send bar, filter tabs</figcaption>
+        <!-- capture: serial-debug-overview.png -->
+      </figure>
+      <div class="callout note">
+        <span class="title">Shares ports with Firmware Flash</span>
+        Serial Debug and <a href="flash.html">Firmware Flash</a> <strong>share the same ports</strong>; only one of them can hold a given port at a time. For how ports get handed off between pages, see <a href="#auto">Auto-release</a> below.
+      </div>
+
+      <h2 id="connect">2. Connect &amp; UART config</h2>
+      <p>The top connection bar establishes and manages the serial link:</p>
+      <ul>
+        <li><strong>Serial port</strong>: a dropdown of currently available ports; the list is rescanned each time you open it.</li>
+        <li><strong>Connect / Disconnect</strong>: manually open or close the link to the selected port.</li>
+        <li><strong>Status indicator</strong>: shows whether the port is connected / disconnected / held by another page.</li>
+      </ul>
+      <p>The common parameters (baud, etc.) are picked right on the connection bar; the <strong>advanced UART settings</strong> live in the <a href="settings.html">Settings</a> modal:</p>
+      <table>
+        <thead><tr><th>Parameter</th><th>Values</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Baud</td><td><code>9600</code>–<code>921600</code> steps + custom</td><td>Unless you override it, it <strong>defaults to the log baud of the currently selected flash chip</strong> (see the <a href="flash.html#chip">chip manifest</a>).</td></tr>
+          <tr><td>Data bits</td><td><code>5</code> / <code>6</code> / <code>7</code> / <code>8</code></td><td>Data bits per frame.</td></tr>
+          <tr><td>Parity</td><td><code>none</code> / <code>odd</code> / <code>even</code></td><td>No parity / odd / even.</td></tr>
+          <tr><td>Stop bits</td><td><code>1</code> / <code>1.5</code> / <code>2</code></td><td>Stop bits per frame.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip">
+        <span class="title">Baud follows the chip</span>
+        If you just want to read a chip's boot log, you don't need to look up its log baud yourself — pick the chip model on the Flash page and Serial Debug's baud <strong>snaps to that chip's log baud</strong> automatically. Once you change it manually, your value wins.
+      </div>
+
+      <h2 id="reset">3. Device reset</h2>
+      <p>Serial Debug can reset the device via the <strong>DTR / RTS</strong> lines, so you can reboot it and re-watch the boot log without unplugging anything.</p>
+      <ul>
+        <li><strong>Reset the session port</strong>: pulls a DTR/RTS reset sequence on the currently connected port.</li>
+        <li><strong>Reset a different control port</strong>: when the device's reset pin is not on the log port, you can use a <strong>runtime chip id</strong> to target another control port for the reset, then return to the log port and keep receiving.</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">Reset is not disconnect</span>
+        A reset only toggles DTR/RTS to reboot the device; it <strong>does not close</strong> the current serial connection. Anything the device prints after rebooting keeps showing up in the log view.
+      </div>
+
+      <h2 id="log-view">4. Log view</h2>
+      <p>The log view is the main body of the page, scrolling incoming data live. It supports <strong>two views</strong> plus a set of display toggles:</p>
+      <ul>
+        <li><strong>ASCII view</strong> and <strong>Hex view</strong>: switch between plain text and hexadecimal; the Hex view lets you set <strong>bytes per row</strong> (8 / 16 / 32) and renders invisible bytes as explicit hex.</li>
+        <li><strong>ANSI color toggle</strong>: parses ANSI color escape codes from the log and colorizes it, making log levels easier to tell apart.</li>
+        <li><strong>Font size</strong>: adjustable from 10–18px to suit your screen and eyes.</li>
+        <li><strong>Timestamp toggle</strong>: prefixes each line with its receive time.</li>
+        <li><strong>Direction badge toggle</strong>: prefixes each line with a <strong>TX</strong> (sent) / <strong>RX</strong> (received) / <strong>SYS</strong> (system) badge.</li>
+        <li><strong>Clear</strong>: wipes the currently visible buffer.</li>
+        <li><strong>Export</strong>: saves the current log to a file.</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>Hex view: bytes per row, direction badges, timestamps</figcaption>
+        <!-- capture: serial-debug-hex-view.png -->
+      </figure>
+      <div class="callout warn">
+        <span class="title">Visible window caps at 3000 lines</span>
+        For performance, the <strong>visible window keeps at most 3000 lines</strong>; once exceeded, the oldest lines are dropped from the viewport. When you need the full session record, use <a href="#auto">Auto-save</a> below, or <strong>export</strong> in time before data is lost.
+      </div>
+
+      <h2 id="send-bar">5. Send bar</h2>
+      <p>The bottom send bar is for <strong>actively sending data</strong> to the device:</p>
+      <ul>
+        <li><strong>ASCII or Hex mode</strong>: ASCII mode sends as text; Hex mode sends as hexadecimal bytes (for binary commands).</li>
+        <li><strong>Optional <code>\r\n</code></strong>: choose whether to append a CR/LF on send, per the target device's protocol.</li>
+        <li><strong>Enter to send</strong>: press <kbd>Enter</kbd> to send the current input.</li>
+        <li><strong>Send history</strong>: keeps up to <strong>20 entries</strong>; use <kbd>↑</kbd> / <kbd>↓</kbd> to flip through history without retyping.</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>Send bar: ASCII/Hex toggle, <code>\r\n</code> option, history dropdown</figcaption>
+        <!-- capture: serial-debug-send-bar.png -->
+      </figure>
+
+      <h2 id="hex-popup">6. Hex popup</h2>
+      <p>After <strong>selecting a span of RX data</strong> in the log view, you can open a <strong>Hex popup</strong> that shows the selected bytes side by side in <strong>both hexadecimal and ASCII</strong>, handy for byte-by-byte inspection of a binary reply or protocol frame.</p>
+      <div class="callout tip">
+        <span class="title">When to use it</span>
+        When the device returns structured binary (a custom protocol frame, an auth reply) rather than readable text, inspecting it byte by byte in the Hex popup is far more reliable than squinting at garbage in the ASCII view.
+      </div>
+
+      <h2 id="filter-tabs">7. Filter tabs (Watch chips)</h2>
+      <p>Filter tabs (watch chips) let you give each <strong>keyword you care about</strong> its own tab, so you can focus on just the relevant lines in a long log:</p>
+      <ul>
+        <li><strong>Keyword</strong>: can be <strong>plain text</strong> or a <strong>regular expression</strong>.</li>
+        <li><strong>Auto-color</strong>: each tab automatically takes a color from a <strong>6-color cycle</strong>, so they're easy to tell apart at a glance.</li>
+        <li><strong>Live counts</strong>: each tab shows the number of <strong>matches in the current session</strong>, updating live as the log grows.</li>
+        <li><strong>Filter by tab</strong>: selecting a tab filters the view to lines <strong>matching its keyword</strong>; the <strong>"All"</strong> tab restores the full view.</li>
+        <li><strong>"Load older"</strong>: paginates in earlier matches when there are many.</li>
+      </ul>
+      <p>Filtering runs <strong>server-side over the whole session</strong>, not just over the current visible window — so even data that has aged out of the 3000-line viewport can still be recovered by a filter.</p>
+      <figure class="shot todo">
+        <figcaption>Filter tabs: keywords, 6-color badges, live counts, "All" tab</figcaption>
+        <!-- capture: serial-debug-filter-tabs.png -->
+      </figure>
+
+      <h2 id="auto">8. Auto-release &amp; auto-save</h2>
+      <p>Both features are configured in <a href="settings.html">Settings</a> and make a long-running Serial Debug session more hands-off.</p>
+      <h3>Auto-release</h3>
+      <p>Auto-release solves <strong>port contention</strong>:</p>
+      <ul>
+        <li>When <strong>Firmware Flash</strong> needs a port that Serial Debug is currently holding, Serial Debug <strong>auto-releases</strong> that port for flashing; an optional <strong>confirm prompt</strong> asks you first before releasing.</li>
+        <li>After flashing finishes, Serial Debug <strong>auto-resumes</strong> the previous connection and keeps receiving the log — no manual reconnect needed.</li>
+      </ul>
+      <h3>Auto-save</h3>
+      <p>Auto-save keeps a <strong>complete session log</strong> on disk, so you don't lose data once it passes the 3000-line viewport cap:</p>
+      <ul>
+        <li><strong>Save directory</strong>: pick a directory and Serial Debug streams the whole session into it.</li>
+        <li><strong>Timestamped filename</strong>: optionally add a timestamp to the filename to tell sessions apart.</li>
+        <li><strong>Chunked writes</strong>: flushes to disk in chunks of up to <strong>128 KiB</strong>, balancing throughput with timeliness.</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">Auto-save vs manual export</span>
+        Manual export (see <a href="#log-view">Log view</a>) saves what's in the <strong>current visible window</strong>; auto-save streams the <strong>entire session</strong> to disk continuously, and is the right way to retain long logs.
+      </div>
+
+      <nav class="pager">
+        <a href="flash.html">← Firmware Flash</a>
+        <a href="settings.html">Settings →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
