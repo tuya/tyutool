@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAQ · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · Usage Guide</span>
+      <span class="lang"><a href="faq.html" aria-current="true">English</a><a href="../zh/faq.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>Usage Guide</h2>
+      <ul>
+        <li><a href="getting-started.html">Getting Started</a></li>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="flash.html">Firmware Flash</a></li>
+        <li><a href="serial-debug.html">Serial Debug</a></li>
+        <li><a href="settings.html">Settings</a></li>
+        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="faq.html" aria-current="page">FAQ</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>FAQ &amp; Troubleshooting</h1>
+      <p class="lead">This page is problem-first: it states the <strong>symptom</strong> you see, then gives the shortest path to diagnose and fix it. Both CLI snippets and GUI actions are listed — pick whichever matches your entry point. Can't find your issue here? See the last section, <a href="#report-bug">how to report a bug</a>.</p>
+
+      <h2 id="ports">1. Ports &amp; connection</h2>
+
+      <h3 id="port-not-listed">Device / serial port not listed in the dropdown</h3>
+      <p><strong>Symptom:</strong> the port selector at the top of the GUI is empty, or <code>tyutool list-ports</code> prints nothing.</p>
+      <ol class="steps">
+        <li>Unplug and replug the USB adapter; try a different USB port or cable (many issues are power / contact problems).</li>
+        <li>Confirm the <strong>driver for the USB-to-serial chip is installed</strong>: CH340 / CP2102 / FT232 are the three most common. In Windows Device Manager there should be no warning triangle.</li>
+        <li>Double-check from the CLI that the port is actually visible:<pre>tyutool list-ports
+tyutool usb-port-survey   # dumps raw USB metadata, handy for cross-OS debugging</pre></li>
+        <li>macOS users: the system denies ordinary users access to serial devices by default — see <a href="#macos-serial-perm">macOS serial permission</a>.</li>
+        <li>Linux users: make sure your user is in the <code>dialout</code> / <code>tty</code> group and you have <strong>logged out and back in</strong>.</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">Port still not showing?</span>
+        Click <strong>Refresh</strong> at the top of the GUI, or reopen the app; the CLI re-enumerates ports on every run.
+      </div>
+
+      <h3 id="macos-serial-perm">macOS serial permission</h3>
+      <p><strong>Symptom:</strong> the port is visible, but opening it fails with a permission error, or it doesn't appear at all.</p>
+      <p>macOS denies ordinary users access to serial devices by default. Add your user to the <code>dialout</code> group, then <strong>log out and back in</strong> for it to take effect:</p>
+      <pre>sudo dseditgroup -o edit -a $USER -t user dialout</pre>
+      <p>Newer macOS versions also prompt under <strong>System Settings → Privacy &amp; Security → Accessories</strong> (label varies by macOS version) — remember to allow tyutool access to the USB serial adapter. See the <a href="../../../README.md">README troubleshooting table</a>.</p>
+
+      <h3 id="port-busy">Port busy / "in use"</h3>
+      <p><strong>Symptom:</strong> opening the port fails with <code>Permission denied</code>, <code>Device or resource busy</code>, or a "port already in use" message.</p>
+      <ul>
+        <li>Another program holds the port: a serial debug tool (<a href="serial-debug.html">Serial Debug</a>), the Arduino IDE, minicom, picocom, etc. <strong>Close them</strong> and retry.</li>
+        <li>Another tyutool session of your own still holds it (e.g. the GUI and CLI targeting the same device at once).</li>
+        <li>If you want tyutool to let go when you switch away, enable <strong>auto-release serial port</strong> in <strong>Settings</strong>.</li>
+      </ul>
+
+      <h2 id="flashing">2. Flashing</h2>
+
+      <h3 id="flash-fails">Flash fails / handshake error</h3>
+      <p><strong>Symptom:</strong> the log shows <code>Handshake</code> failure, <code>Failed to sync</code>, or an error right at the start of flashing.</p>
+      <ul>
+        <li><strong>Wrong chip selected</strong>: specify it explicitly with <code>-d &lt;chip&gt;</code> on the CLI (supported list in the <a href="cli.html#supported-devices">CLI reference</a>), e.g. <code>-d bk7231n</code>, <code>-d esp32</code>, <code>-d t5ai</code>. Chip names are case-insensitive.</li>
+        <li><strong>Wrong baud rate</strong>: drop to a conservative low baud first (e.g. <code>115200</code> for the BK family), then raise once stable. Default bauds per chip are in the <a href="cli.html#supported-devices">supported-chips table</a>.</li>
+        <li><strong>Device not in download mode</strong>: hold the chip's download/reset pin while powering on, or run <code>tyutool reset</code> once and retry.</li>
+        <li><strong>Loose wiring / insufficient power</strong>: TX/RX swapped, no common GND, or an underpowered USB port can corrupt handshake timing. Try a shorter shielded cable or external power.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">Reduce to a minimal repro first</span>
+        From the CLI: <code>tyutool read -d &lt;chip&gt; -p &lt;port&gt; -l 0x1000</code> reads a small slice. If it reads, the link is OK and the problem is firmware/addresses; if it can't, the link/permissions/driver is at fault.
+      </div>
+
+      <h3 id="erase-alignment">Erase reports "unaligned" (alignment error)</h3>
+      <p><strong>Symptom:</strong> <code>erase</code> fails with something like <code>unaligned</code>, <code>address not aligned</code>, or <code>sector boundary</code>.</p>
+      <p>Flash erase must be sector-aligned — for most tyutool chips the sector size is <strong>4 KiB</strong>. Both the start address and length must align to <code>0x1000</code>:</p>
+      <pre># Correct: start and length both aligned to 4 KiB
+tyutool erase -d bk7231n -s 0x0000 -l 0x200000
+tyutool erase -d bk7231n -s 0x8000 -l 0x4000
+
+# Wrong: 0x9000 is not a multiple of 4 KiB
+tyutool erase -d bk7231n -s 0x9000 -l 0x1000   # ❌ unaligned</pre>
+      <div class="callout tip">
+        <span class="title">Don't want to compute by hand?</span>
+        Use the GUI <strong>align</strong> action, or <strong>round any address down</strong> to the nearest <code>0x1000</code> (e.g. <code>0x9xxx → 0x9000</code>) and pad the length accordingly.
+      </div>
+
+      <h3 id="progress-stalls">Progress stalls / stuck</h3>
+      <p><strong>Symptom:</strong> one of Erase / Write / Verify sits at 0% for a long time, or retries repeatedly.</p>
+      <ul>
+        <li><strong>Baud too high</strong>: packet loss at high baud cascades into retransmits. Step down one notch (e.g. <code>921600 → 460800 → 115200</code>) and retry.</li>
+        <li><strong>Cable / power</strong>: cheap USB cables, long jumper wires, or peripherals drawing load degrade the signal. Use a shorter cable / external power.</li>
+        <li><strong>Read detailed logs</strong>: in <strong>Settings → Diagnostics</strong> turn on <strong>debug logging</strong>, or pass <code>--verbose</code> to the CLI and bump the log level to <code>debug</code>/<code>trace</code> to see exactly where it stalls. Log paths are in <a href="cli.html#global-options">CLI global options</a>.</li>
+        <li>Press <code>Ctrl+C</code> to <strong>cancel gracefully</strong> (it closes the port and reports <code>Cancelled</code>) instead of leaving the device half-flashed.</li>
+      </ul>
+
+      <h2 id="authorization">3. Authorization</h2>
+
+      <h3 id="authorize-fails">Authorize fails</h3>
+      <p><strong>Symptom:</strong> <code>tyutool authorize</code> or the GUI authorization reports a write failure, or says the UUID/AuthKey is invalid.</p>
+      <ul>
+        <li><strong>UUID / AuthKey invalid or already used</strong>: on some platforms credentials are <strong>single-use per device</strong> — once consumed they're spent. Try a fresh pair.</li>
+        <li><strong>Read the current state first</strong>: run <code>tyutool authorize -p &lt;port&gt;</code> (without <code>--uuid/--authkey</code>) to do a read-only auth-read and check whether a credential is already present or empty.</li>
+        <li><strong>Pass them as a pair</strong>: when writing, <code>--uuid</code> and <code>--authkey</code> must be given <strong>together</strong>; supplying only one is rejected.</li>
+        <li><strong>Chip timing</strong>: some chips require <code>-d</code> to select the right authorization timing (e.g. <code>-d esp32</code>, <code>-d t5ai</code>); omitting it uses the generic timing.</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">Where credentials come from</span>
+        UUID/AuthKey are usually obtained from the Tuya developer platform and are bound to a specific chip/product. Make sure the credentials you have <strong>match the chip</strong> and haven't already been used on another device.
+      </div>
+
+      <h3 id="credential-display">Credential display issues</h3>
+      <p><strong>Symptom:</strong> you can't see the full UUID/AuthKey, or what you copy comes out as <code>****</code>.</p>
+      <ul>
+        <li>For security, the GUI masks credentials by default. Toggle <strong>Show</strong> to reveal plaintext, or use the <strong>Copy</strong> button to put them straight on the clipboard.</li>
+        <li>From the CLI, read with auth-read:<pre>tyutool authorize -p &lt;port&gt;
+tyutool authorize -p &lt;port&gt; -d esp32   # read with chip-specific timing</pre></li>
+        <li>After copying, consider <strong>clearing the clipboard</strong> or disabling logging to avoid leaving plaintext credentials in log files.</li>
+      </ul>
+
+      <h2 id="platform">4. Platform</h2>
+
+      <h3 id="macos-gatekeeper">Can't open on macOS / Gatekeeper block</h3>
+      <p><strong>Symptom:</strong> double-clicking tyutool.app shows "cannot be opened because the developer cannot be verified," or it's blocked by Gatekeeper.</p>
+      <p>The macOS build of tyutool is not Apple-notarized (this is expected). Pick either way to clear it:</p>
+      <ol class="steps">
+        <li><strong>GUI</strong>: in Finder, Control-click <code>tyutool.app</code> → <strong>Open</strong>, then click <strong>Open</strong> again in the dialog; or go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong> on the tyutool prompt.</li>
+        <li><strong>Command line</strong>: strip the extended attributes (quarantine flag):<pre>xattr -dr com.apple.quarantine /path/to/tyutool.app</pre> After that you can double-click to open normally.</li>
+      </ol>
+      <p>See the <a href="../../../README.md">README troubleshooting table</a>.</p>
+
+      <h3 id="linux-blank-window">Linux blank / white window</h3>
+      <p><strong>Symptom:</strong> on Linux (especially VMs / machines without a dedicated GPU) the window opens <strong>completely blank</strong>, or shows menus but no content.</p>
+      <p>WebKit2GTK's compositing mode fails on some GPU drivers. Set an environment variable to disable compositing before launch:</p>
+      <pre>export WEBKIT_DISABLE_COMPOSITING_MODE=1
+./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage</pre>
+      <p>Add that <code>export</code> line to your <code>~/.bashrc</code> / <code>~/.zshrc</code> to make it permanent. See the <a href="../../../README.md">README troubleshooting table</a>.</p>
+
+      <h3 id="windows-webview2">Windows missing WebView2</h3>
+      <p><strong>Symptom:</strong> on Windows the app fails to start with an error about WebView2, or the window won't render.</p>
+      <p>The tyutool Windows GUI depends on the <strong>Microsoft Edge WebView2 Runtime</strong>. Win11 usually has it preinstalled; if it's missing, install the Evergreen Runtime:</p>
+      <ol class="steps">
+        <li>Open the <a href="https://developer.microsoft.com/microsoft-edge/webview2/">official WebView2 download page</a>.</li>
+        <li>Download the <strong>Evergreen Standalone Installer</strong> (bootstrapper).</li>
+        <li>Run the installer and restart tyutool.</li>
+      </ol>
+      <div class="callout note">
+        <span class="title">Enterprise / offline environments</span>
+        If the machine can't reach the internet, download the <strong>offline Evergreen Standalone Installer</strong> (or a Fixed Version bundle) to a fixed path and configure environment variables such as <code>WEBVIEW2_RELEASE_CHANNEL</code> per the Microsoft docs.
+      </div>
+
+      <h2 id="logs-feedback">5. Logs &amp; feedback</h2>
+
+      <h3 id="report-bug">How to report a bug (with logs)</h3>
+      <p>If you hit a problem this page doesn't cover, follow this flow — <strong>attaching logs dramatically speeds up diagnosis</strong>.</p>
+      <ol class="steps">
+        <li><strong>Export / open logs</strong>:
+          <ul>
+            <li><strong>GUI</strong>: go to <strong>Settings → Diagnostics</strong>, click <strong>View logs</strong> to open the in-app log viewer; inside it, click <strong>Export Logs &amp; Report Issue</strong>, which bundles the logs into a zip and opens a <strong>GitHub issue form pre-filled with the version and OS fields</strong>. You can also click <strong>Open log folder</strong> to grab the file manually.</li>
+            <li><strong>CLI</strong>: the log path is printed in the startup banner's <code>log:</code> line; each run produces a separate file such as <code>~/.local/share/tyutool/tyutool-&lt;timestamp&gt;.log</code> (macOS: <code>~/Library/Application Support/tyutool/</code>; Windows: <code>%APPDATA%\tyutool\</code>). Add <code>--verbose</code> to mirror diagnostics to stderr.</li>
+          </ul>
+        </li>
+        <li><strong>Use the issue template</strong>: go to the repo's <a href="https://github.com/ZingerLight/tyutool/issues/new/choose">Issues → New issue</a> and pick <strong>🐞 Bug report</strong> (template: <a href="https://github.com/ZingerLight/tyutool/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml"><code>.github/ISSUE_TEMPLATE/bug_report.yml</code></a>).</li>
+        <li><strong>Fill in the key fields</strong>:
+          <ul>
+            <li><strong>Version</strong> (Settings → About)</li>
+            <li><strong>Operating system</strong> (e.g. Windows 11 / macOS 14 / Ubuntu 24.04)</li>
+            <li><strong>Chip</strong> (e.g. BK7231N, T5AI)</li>
+            <li><strong>Platform</strong>: Desktop GUI or CLI</li>
+            <li><strong>Baud</strong> (for flashing issues)</li>
+            <li><strong>Steps to reproduce</strong>, <strong>Expected vs. actual</strong></li>
+          </ul>
+        </li>
+        <li><strong>Attach the session log</strong>: drag the exported log zip <strong>straight into the issue input box</strong> to upload; for the CLI, paste the <code>tyutool-&lt;timestamp&gt;.log</code> from that specific run.</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">Sensitive info in the logs?</span>
+        Authorization logs may contain UUID/AuthKey. Before submitting, search the log viewer and redact them, or use <strong>Export</strong> to trim unrelated sessions.
+      </div>
+
+      <nav class="pager">
+        <a href="cli.html">← CLI</a>
+        <a href="index.html">Back to home →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — flashing tool for Tuya-class IoT device firmware</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
