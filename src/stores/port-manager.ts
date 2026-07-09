@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { rLog } from "@/utils/log";
 
 export type PortOwnerId = "flash" | "serial-debug" | string;
 export type ReleaseReason = "requested" | "unplugged" | "error";
@@ -33,15 +34,24 @@ export const usePortManagerStore = defineStore("port-manager", () => {
       if (resume.value.get(claim.port) === claim.id) {
         resume.value.delete(claim.port);
       }
+      rLog.info(
+        `[port-manager] acquired port=${claim.port} by=${claim.id} (was free)`,
+      );
       return "ok";
     }
     if (current.id === claim.id) {
       // Refresh callbacks; same owner.
       owners.value.set(claim.port, claim);
+      rLog.debug(
+        `[port-manager] acquired port=${claim.port} by=${claim.id} (refresh)`,
+      );
       return "ok";
     }
     const approved = await current.onReleaseRequest(claim.id);
     if (!approved) {
+      rLog.info(
+        `[port-manager] acquire denied port=${claim.port} by=${claim.id} (owner ${current.id} refused)`,
+      );
       return "denied";
     }
     // Re-check: another concurrent acquire may have already swapped the owner
@@ -50,16 +60,22 @@ export const usePortManagerStore = defineStore("port-manager", () => {
     if (!stillCurrent || stillCurrent !== current) {
       // Owner changed during the await. Don't forcibly steal from a newcomer —
       // treat as if we lost the race and let the caller retry if they want.
+      rLog.info(
+        `[port-manager] acquire denied port=${claim.port} by=${claim.id} (owner changed during await)`,
+      );
       return "denied";
     }
     if (releasing.value.get(claim.port) === current) {
+      rLog.info(
+        `[port-manager] acquire denied port=${claim.port} by=${claim.id} (owner already releasing)`,
+      );
       return "denied";
     }
     releasing.value.set(claim.port, current);
     try {
       await current.onReleased("requested");
     } catch (e) {
-      console.warn('[port-manager] onReleased("requested") threw:', e);
+      rLog.warn(`[port-manager] onReleased("requested") threw: ${e}`);
     } finally {
       if (releasing.value.get(claim.port) === current) {
         releasing.value.delete(claim.port);
@@ -67,12 +83,18 @@ export const usePortManagerStore = defineStore("port-manager", () => {
     }
     const ownerAfterRelease = owners.value.get(claim.port);
     if (!ownerAfterRelease || ownerAfterRelease !== current) {
+      rLog.info(
+        `[port-manager] acquire denied port=${claim.port} by=${claim.id} (owner changed after release)`,
+      );
       return "denied";
     }
     owners.value.set(claim.port, claim);
     if (resume.value.get(claim.port) === claim.id) {
       resume.value.delete(claim.port);
     }
+    rLog.info(
+      `[port-manager] acquired port=${claim.port} by=${claim.id} (preempted ${current.id})`,
+    );
     return "ok";
   }
 
@@ -87,6 +109,7 @@ export const usePortManagerStore = defineStore("port-manager", () => {
     if (!current || current.id !== ownerId) {
       return;
     }
+    rLog.info(`[port-manager] released port=${port} by=${ownerId}`);
     owners.value.delete(port);
   }
 
@@ -97,10 +120,11 @@ export const usePortManagerStore = defineStore("port-manager", () => {
   function notifyUnplugged(port: string): void {
     const current = owners.value.get(port);
     if (current) {
+      rLog.info(`[port-manager] unplugged port=${port} (was ${current.id})`);
       try {
         current.onReleased("unplugged");
       } catch (e) {
-        console.warn('[port-manager] onReleased("unplugged") threw:', e);
+        rLog.warn(`[port-manager] onReleased("unplugged") threw: ${e}`);
       }
       owners.value.delete(port);
     }
