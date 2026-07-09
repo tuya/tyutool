@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>快速上手 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+  <style>
+    /* feature-card grid for the "next steps" cards */
+    .features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+    .features a{display:block;padding:18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-soft);color:var(--fg)}
+    .features a:hover{text-decoration:none;border-color:var(--brand);box-shadow:var(--shadow)}
+    .features h3{margin:0 0 6px;font-size:1.05rem;color:var(--brand)}
+    .features p{margin:0;font-size:.92rem;color:var(--muted)}
+    @media (max-width:880px){ .features{grid-template-columns:repeat(2,1fr)} }
+    @media (max-width:560px){ .features{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/getting-started.html">English</a><a href="getting-started.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html" aria-current="page">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>快速上手</h1>
+      <p class="lead">本页带你从「下载了 App」一路走到「成功烧录第一台设备」。整条路径是线性的，按顺序读完即可完成第一次烧录，预计 5–10 分钟。</p>
+
+      <div class="callout note">
+        <span class="title">先读</span>
+        如果你完全没接触过固件刷写，先看 <a href="concepts.html">基础概念</a>。
+      </div>
+
+      <h2 id="prerequisites">前置准备</h2>
+      <p>动手前请确认以下清单均已就绪——烧录需要软硬件齐备，缺一不可。</p>
+      <ul>
+        <li><strong>一台受支持的设备</strong>：tyutool 面向涂鸦类（Tuya-class）IoT 设备，具体支持的芯片型号见<a href="flash.html">固件烧录</a>页。</li>
+        <li><strong>一个 USB 转串口适配器</strong>：正确接到设备的 UART（TX/RX/GND，视情况再接电源）。接线时必须<strong>交叉</strong>：电脑端 TX 接设备端 RX，反之亦然。</li>
+        <li><strong>设备进入下载/烧录模式</strong>：不同设备进入方式各异（按键组合、短接焊点、上电时序等）。</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">注意</span>
+        接线方式与进入下载模式的方法是<strong>设备相关</strong>的，没有通用步骤——请先查阅你的设备说明或<a href="faq.html">常见问题</a>。tyutool <strong>无法</strong>替你把设备切进下载模式，这一步必须由你手动完成；设备没进下载模式时，tyutool 会一直等待握手并最终超时。相关概念（UART / 下载模式 / 波特率）见<a href="concepts.html">基础概念</a>。
+      </div>
+
+      <h2 id="download">下载与安装</h2>
+      <p>tyutool 为 Windows、macOS、Linux 提供预编译安装包。请到项目的 README 下载表，按你的操作系统选择对应版本，下载后照常规方式安装即可。各平台的常见坑点如下（完整说明见<a href="faq.html">常见问题</a>）。</p>
+
+      <div class="callout warn">
+        <span class="title">macOS Gatekeeper</span>
+        首次打开未签名 App 时，系统会拦截「无法验证开发者」。可在终端执行 <code>xattr -dr com.apple.quarantine /path/to/tyutool.app</code> 移除隔离属性后再启动。详见 <a href="faq.html">常见问题</a>。
+      </div>
+      <div class="callout warn">
+        <span class="title">macOS 串口权限</span>
+        macOS 默认禁止普通用户访问串口设备。请把当前用户加入 <code>dialout</code> 组：<code>sudo dseditgroup -o edit -a $USER -t user dialout</code>，然后<strong>注销重新登录</strong>生效。详见 <a href="faq.html">常见问题</a>。
+      </div>
+      <div class="callout warn">
+        <span class="title">Linux 白屏</span>
+        部分 Linux 桌面下，tyutool 启动后窗口空白不渲染。以 <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> 方式启动可绕过。详见 <a href="faq.html">常见问题</a>。
+      </div>
+      <div class="callout tip">
+        <span class="title">小提示</span>
+        三个平台的小坑都属于<strong>环境</strong>问题，与 tyutool 本身无关；解决后通常一劳永逸，之后不会再遇到。
+      </div>
+
+      <h2 id="first-launch">首次启动</h2>
+      <p>安装完成后启动 tyutool，主窗口分为两部分：左侧是导航<strong>侧边栏</strong>，右侧是当前功能的工作区。侧边栏提供四个主要入口：</p>
+      <ul>
+        <li><strong>Flash</strong>（固件烧录）——烧录、读取、擦除 flash 芯片。</li>
+        <li><strong>Serial Debug</strong>（串口调试）——实时收发串口数据、查看设备日志。</li>
+        <li><strong>Toolbox</strong>（工具箱）——辅助工具集合。</li>
+        <li><strong>Settings</strong>（设置）——配置路径、日志级别等应用选项。</li>
+      </ul>
+      <p>本页剩下的步骤都在 <strong>Flash</strong> 页完成——它是你第一次烧录时唯一需要关心的入口。</p>
+
+      <figure class="shot todo">
+        <figcaption>截图：tyutool 主窗口停在 Flash 页，串口下拉框展开、显示已检测到的端口，状态点为绿色。</figcaption>
+        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports, status dot green -->
+      </figure>
+
+      <h2 id="connect">连接设备</h2>
+      <p>接线检查无误、设备已进入下载模式后，按下面顺序在 tyutool 里建立连接。</p>
+      <ol class="steps">
+        <li>把 USB 转串口适配器插到电脑的 USB 口。</li>
+        <li>在 tyutool 的 Flash 页，点击<strong>串口</strong>下拉框。</li>
+        <li>在列出的端口里选择你的适配器（如 <code>COM3</code> / <code>/dev/ttyUSB0</code> / <code>/dev/cu.SLAB_USBtoUART</code>）。</li>
+        <li>留意旁边的<strong>状态点</strong>：绿色表示已连接并就绪；灰色或红色表示未连上或握手失败。</li>
+      </ol>
+      <p>选好端口后，波特率与芯片型号会由 tyutool <strong>自动建议</strong>一个合理默认值，多数情况下可直接采用；需要调整时也可手动覆盖。</p>
+
+      <figure class="shot todo">
+        <figcaption>截图：Flash 页顶部连接栏——已选中端口、状态点绿色、波特率与芯片已自动填入。</figcaption>
+        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports, status dot green -->
+      </figure>
+
+      <div class="callout tip">
+        <span class="title">小提示</span>
+        如果下拉框里看不到任何端口，先确认适配器已插好、驱动已装（CH340/CP2102/FT232），并检查 macOS/Linux 的串口访问权限（见上方安装小节）。
+      </div>
+
+      <h2 id="first-flash">完成第一次烧录</h2>
+      <p>设备连上后，烧录本身的操作非常简短。按顺序走完以下步骤即可写入第一份固件。</p>
+      <ol class="steps">
+        <li><strong>选择芯片型号</strong>：在 Flash 页顶部选择你设备对应的芯片（型号决定了通信协议与地址布局，选错会烧录失败）。</li>
+        <li><strong>选择固件</strong>：切到 <strong>Flash</strong> 标签，点击选择固件文件，挑一份 <code>.bin</code> 固件。</li>
+        <li><strong>确认地址</strong>：选好固件后，写入地址会<strong>自动填入</strong>默认值，一般无需修改。</li>
+        <li><strong>点击烧录</strong>：点击 <strong>Flash</strong> 按钮开始写入。</li>
+        <li><strong>观察进度</strong>：盯着进度条与下方日志，正常会一路推进到 100%。</li>
+        <li><strong>等待重启</strong>：写入完成后设备会<strong>自动重启</strong>并运行新固件——到这里你的第一次烧录就完成了。</li>
+      </ol>
+      <p>各步骤的进阶选项（地址微调、擦除策略、校验、保存日志等）请见<a href="flash.html">固件烧录</a>页。</p>
+      <div class="callout danger">
+        <span class="title">重要</span>
+        烧录期间<strong>切勿</strong>拔掉 USB 线或断电，否则可能写坏数据。万一烧录失败，先降到 <code>115200</code> 波特率重试；仍不行则参考<a href="faq.html">常见问题</a>。
+      </div>
+
+      <h2 id="next-steps">下一步</h2>
+      <p>恭喜完成第一次烧录！接下来可以按需求深入各个功能页：</p>
+      <div class="features">
+        <a href="flash.html">
+          <h3>固件烧录</h3>
+          <p>地址微调、擦除策略、校验等进阶选项。</p>
+        </a>
+        <a href="serial-debug.html">
+          <h3>串口调试</h3>
+          <p>实时收发数据，排查设备启动日志。</p>
+        </a>
+        <a href="settings.html">
+          <h3>设置</h3>
+          <p>配置路径、日志级别等应用选项。</p>
+        </a>
+        <a href="batch-flash-auth.html">
+          <h3>批量烧录授权</h3>
+          <p>批量处理多台设备并写入授权。</p>
+        </a>
+        <a href="cli.html">
+          <h3>命令行</h3>
+          <p>无界面环境或脚本化场景下使用 tyutool。</p>
+        </a>
+      </div>
+
+      <nav class="pager">
+        <a href="index.html">← 首页</a>
+        <a href="flash.html">固件烧录 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
