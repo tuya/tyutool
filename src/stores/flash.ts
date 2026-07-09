@@ -803,6 +803,7 @@ export const useFlashStore = defineStore("flash", () => {
         appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
         releaseIfAutoConnected();
+        rLog.error(`[flash] IPC error (kind=${kind}): ${msg}`);
       }
     } else {
       try {
@@ -818,6 +819,7 @@ export const useFlashStore = defineStore("flash", () => {
         appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
         releaseIfAutoConnected();
+        rLog.error(`[flash] WS error (kind=${kind}): ${msg}`);
       }
     }
   }
