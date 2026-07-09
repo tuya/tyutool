@@ -8,6 +8,7 @@ import { i18n } from './i18n';
 import { registerFontAwesome } from './icons';
 import { router } from './router';
 import { useSettingsStore, resolveLocale } from './stores/settings';
+import { rLog } from '@/utils/log';
 
 const app = createApp(App);
 const pinia = createPinia();
@@ -30,5 +31,16 @@ watch(
   { immediate: true },
 );
 
+app.config.errorHandler = (err, _instance, info) => {
+  rLog.error(`[app] unhandled Vue error: ${err} (info: ${info})`);
+};
+
+window.addEventListener('unhandledrejection', event => {
+  rLog.error(`[app] unhandled promise rejection: ${event.reason}`);
+});
+
 app.mount('#app');
-void bootstrapApp();
+
+void bootstrapApp().catch(e => {
+  rLog.error(`[app] bootstrap failed: ${e}`);
+});
