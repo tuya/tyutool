@@ -497,6 +497,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => choose_port()?,
             };
             let chip_id = normalize_chip_id(&device);
+            log::info!("[cli] reset port={} chip={}", port, chip_id);
             device_reset_dtr_rts(&port, &chip_id)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
             log::info!("Device reset (DTR/RTS) completed on {}", port);
@@ -506,6 +507,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
         Commands::Serve { port } => {
+            log::info!("[cli] serve on port {}", port);
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve::run_serve(port))?;
         }
@@ -528,6 +530,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => choose_port()?,
             };
             let chip_id = device.as_deref().map(normalize_chip_id).unwrap_or_default();
+            let mode = if uuid.is_some() {
+                "read+write"
+            } else {
+                "read-only"
+            };
+            log::info!(
+                "[cli] authorize chip={} port={} mode={}",
+                chip_id,
+                port,
+                mode
+            );
             let job = FlashJob {
                 mode: FlashMode::Authorize,
                 chip_id,
@@ -575,6 +588,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => compute_end_from_file(&start, &file)?,
             };
             let chip_id = normalize_chip_id(&device);
+            log::info!(
+                "[cli] write chip={} port={} baud={} start={} end={} file={}",
+                chip_id,
+                port,
+                baud,
+                start,
+                end,
+                file
+            );
 
             let reporter = CliReporter::new(force_plain);
 
@@ -618,6 +640,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let length_val = parse_hex_addr(&length)?;
             let end = format!("0x{:08X}", start_val + length_val);
             let chip_id = normalize_chip_id(&device);
+            log::info!(
+                "[cli] read chip={} port={} baud={} start={} end={} file={}",
+                chip_id,
+                port,
+                baud,
+                start,
+                end,
+                file
+            );
 
             let reporter = CliReporter::new(force_plain);
 
@@ -660,6 +691,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let length_val = parse_hex_addr(&length)?;
             let end = format!("0x{:08X}", start_val + length_val);
             let chip_id = normalize_chip_id(&device);
+            log::info!(
+                "[cli] erase chip={} port={} baud={} start={} end={}",
+                chip_id,
+                port,
+                baud,
+                start,
+                end
+            );
 
             let reporter = CliReporter::new(force_plain);
 
