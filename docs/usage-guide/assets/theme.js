@@ -16,19 +16,6 @@
     return 'system';
   }
 
-  function appliedTheme() {
-    var dt = document.documentElement.dataset.theme;
-    return dt === 'light' || dt === 'dark' ? dt : 'system';
-  }
-
-  // what the button shows: the explicit saved pref, else reflect OS when system
-  function buttonMode() {
-    var saved = currentMode();
-    if (saved !== 'system') return saved;
-    var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    return dark ? 'dark' : 'light';
-  }
-
   function syncThemeButton(btn) {
     // the icon shown reflects the *preference*: light / dark / auto(system).
     // aria-label is a static prefix from the page; we append the mode word.
