@@ -1,5 +1,7 @@
 # tyutool CLI Reference
 
+> A styled, user-facing version of this reference lives in the [usage guide](../usage-guide/en/cli.html) (`../usage-guide/zh/cli.html` for 中文). This markdown file remains the authoritative source — update it whenever the CLI changes.
+
 `tyutool` is a command-line tool for flashing, reading, and managing Tuya-class IoT device firmware over UART.
 
 ## Installation

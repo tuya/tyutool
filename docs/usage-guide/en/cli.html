@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CLI · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · Usage Guide</span>
+      <span class="lang"><a href="cli.html" aria-current="true">English</a><a href="../zh/cli.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>Usage Guide</h2>
+      <ul>
+        <li><a href="getting-started.html">Getting Started</a></li>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="flash.html">Firmware Flash</a></li>
+        <li><a href="serial-debug.html">Serial Debug</a></li>
+        <li><a href="settings.html">Settings</a></li>
+        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
+        <li><a href="cli.html" aria-current="page">CLI</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>Command-Line Interface (CLI)</h1>
+      <p class="lead"><code>tyutool</code> is a command-line tool for flashing, reading, and managing Tuya-class IoT device firmware over UART. This page ports the full <code>docs/cli.md</code> CLI reference into the guide's shared look-and-feel — no information is dropped, only rendered more readably (callouts, tables, code blocks).</p>
+
+      <h2 id="when-to-use">1. When to use the CLI</h2>
+      <p>Reach for the CLI when you need to <strong>script things, run batches in CI, or operate on headless servers</strong>, or simply when you <strong>prefer the terminal</strong> over a GUI. It shares the same <code>tyutool-core</code> flash logic as the desktop app, is feature-equivalent to the GUI, and can be driven directly by pipes, cron, and scripts.</p>
+
+      <h2 id="install">2. Install</h2>
+      <p>Download the latest release binary from the GitHub Releases page. Place it on your <code>PATH</code>.</p>
+      <pre>Download the latest release binary → put it on your PATH</pre>
+
+      <h2 id="global-options">3. Global options</h2>
+      <table>
+        <thead><tr><th>Option</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>--verbose</code></td><td>Write developer diagnostic logs to stderr (always written to log file).</td></tr>
+          <tr><td><code>--plain</code></td><td>Force plain text output (ASCII-only, no spinner or progress bar).</td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>Log file location:</strong> each run writes to its own session file named <code>tyutool-&lt;timestamp&gt;.log</code>; a session log is capped at 10 MB and rolls over to <code>tyutool-&lt;timestamp&gt;-1.log</code>, <code>-2.log</code>, … beyond that. Old session files are pruned at startup.</p>
+      <ul>
+        <li>Linux: <code>~/.local/share/tyutool/tyutool-&lt;timestamp&gt;.log</code></li>
+        <li>macOS: <code>~/Library/Application Support/tyutool/tyutool-&lt;timestamp&gt;.log</code></li>
+        <li>Windows: <code>%APPDATA%\tyutool\tyutool-&lt;timestamp&gt;.log</code></li>
+      </ul>
+      <div class="callout note">
+        <span class="title">Rollover file naming</span>
+        When a single session log exceeds 10 MB it rolls over to <code>tyutool-&lt;ts&gt;-1.log</code>, <code>-2.log</code>, …; <code>&lt;ts&gt;</code> is this session's timestamp and <code>N</code> is the rollover index. Each tyutool startup also prunes old session files.
+      </div>
+
+      <p><strong>Port selection</strong> (commands that take <code>-p/--port</code>): when <code>-p</code> is omitted, a <strong>single</strong> available port is used automatically. If <strong>multiple</strong> ports are present, you are prompted to choose one on an interactive terminal; in a non-interactive context (CI, pipe) the command errors and asks you to pass <code>-p</code> explicitly.</p>
+
+      <h2 id="subcommands">4. Subcommands</h2>
+      <p>The 10 subcommands below are listed in logical order. Each has: a usage line (<code>&lt;pre&gt;</code>), a flag table (<code>&lt;table&gt;</code>), and an example (<code>&lt;pre&gt;</code>). Flags and defaults are identical to <code>docs/cli.md</code>.</p>
+
+      <h3 id="cmd-write"><code>write</code> — Flash firmware to device</h3>
+      <pre>tyutool write -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [--end &lt;END&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Short</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>Chip name (see supported list)</td><td>required</td></tr>
+          <tr><td><code>--file</code></td><td><code>-f</code></td><td>Firmware <code>.bin</code> file path</td><td>required</td></tr>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>Serial port (e.g. <code>/dev/ttyUSB0</code>, <code>COM3</code>)</td><td>auto-detect first port</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART baud rate</td><td>chip-specific (see below)</td></tr>
+          <tr><td><code>--start</code></td><td><code>-s</code></td><td>Flash start address (hex, e.g. <code>0x0</code>)</td><td><code>0x00000000</code></td></tr>
+          <tr><td><code>--end</code></td><td></td><td>Flash end address (hex); defaults to <code>start + file size</code></td><td>computed</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Example:</strong></p>
+      <pre>tyutool write -d bk7231n -f firmware.bin -p /dev/ttyUSB0</pre>
+
+      <hr>
+
+      <h3 id="cmd-read"><code>read</code> — Read flash contents from device</h3>
+      <pre>tyutool read -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [-l &lt;LENGTH&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Short</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>Chip name</td><td>required</td></tr>
+          <tr><td><code>--file</code></td><td><code>-f</code></td><td>Output <code>.bin</code> file path</td><td>required</td></tr>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>Serial port</td><td>auto-detect</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART baud rate</td><td>chip-specific</td></tr>
+          <tr><td><code>--start</code></td><td><code>-s</code></td><td>Read start address (hex)</td><td><code>0x00000000</code></td></tr>
+          <tr><td><code>--length</code></td><td><code>-l</code></td><td>Read length (hex)</td><td><code>0x200000</code></td></tr>
+        </tbody>
+      </table>
+      <p><strong>Example:</strong></p>
+      <pre>tyutool read -d bk7231n -f flash_dump.bin -l 0x200000</pre>
+
+      <hr>
+
+      <h3 id="cmd-erase"><code>erase</code> — Erase flash region on device</h3>
+      <pre>tyutool erase -d &lt;DEVICE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [-l &lt;LENGTH&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Short</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>Chip name</td><td>required</td></tr>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>Serial port</td><td>auto-detect</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART baud rate</td><td>chip-specific</td></tr>
+          <tr><td><code>--start</code></td><td><code>-s</code></td><td>Erase start address (hex)</td><td><code>0x00000000</code></td></tr>
+          <tr><td><code>--length</code></td><td><code>-l</code></td><td>Erase length (hex)</td><td><code>0x200000</code></td></tr>
+        </tbody>
+      </table>
+      <p>The erase region is <code>start</code> … <code>start + length</code>. Some chips align the region to their sector size.</p>
+      <p><strong>Example:</strong></p>
+      <pre>tyutool erase -d bk7231n -s 0x0 -l 0x200000</pre>
+
+      <hr>
+
+      <h3 id="cmd-list-ports"><code>list-ports</code> — List available serial ports</h3>
+      <pre>tyutool list-ports [--json]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>--json</code></td><td>Output a JSON array of port objects instead of tab-separated columns.</td></tr>
+        </tbody>
+      </table>
+      <p>Default output is tab-separated columns: <code>path</code>, <code>vid:pid</code>, <code>usb_interface</code>, <code>port_role</code>, <code>display_name</code>.</p>
+      <p>With <code>--json</code>, each entry includes <code>path</code>, <code>name</code>, <code>usbVid</code>, <code>usbPid</code>, <code>usbSerial</code>, <code>usbInterface</code>, and <code>portRole</code> (fields that are unknown are <code>null</code>).</p>
+
+      <hr>
+
+      <h3 id="cmd-reset"><code>reset</code> — Hardware-reset device via DTR/RTS</h3>
+      <pre>tyutool reset [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Short</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>Serial port</td><td>auto-detect</td></tr>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>Chip family (affects reset timing)</td><td><code>bk7231n</code></td></tr>
+        </tbody>
+      </table>
+
+      <hr>
+
+      <h3 id="cmd-authorize"><code>authorize</code> — TuyaOpen device authorization</h3>
+      <pre>tyutool authorize [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>-p</code> / <code>--port</code></td><td>Serial port (default: auto-detect)</td></tr>
+          <tr><td><code>-d</code> / <code>--device</code></td><td>Chip type — selects per-chip auth timing (e.g. <code>esp32</code>, <code>t5ai</code>). Optional; omit to use generic timing.</td></tr>
+          <tr><td><code>--uuid</code></td><td>UUID to write (omit to read current authorization state only)</td></tr>
+          <tr><td><code>--authkey</code></td><td>AuthKey to write (omit to read only)</td></tr>
+        </tbody>
+      </table>
+      <p>To write authorization you must pass <strong>both</strong> <code>--uuid</code> and <code>--authkey</code>. Passing only one is rejected with an error. Passing neither performs a read-only <code>auth-read</code>.</p>
+      <p><strong>Read current auth state:</strong></p>
+      <pre>tyutool authorize -p /dev/ttyUSB0
+tyutool authorize -p /dev/ttyUSB0 -d esp32</pre>
+      <p><strong>Write new authorization:</strong></p>
+      <pre>tyutool authorize -p /dev/ttyUSB0 -d esp32 --uuid abc123 --authkey def456</pre>
+
+      <hr>
+
+      <h3 id="cmd-update"><code>update</code> — Self-update binary</h3>
+      <pre>tyutool update [--check] [--source &lt;github|gitee&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>--check</code></td><td>Only check version, do not download.</td></tr>
+          <tr><td><code>--source</code></td><td>Update source (<code>github</code> default, <code>gitee</code> for China).</td></tr>
+        </tbody>
+      </table>
+
+      <hr>
+
+      <h3 id="cmd-serve"><code>serve</code> — WebSocket server (dev/IDE mode)</h3>
+      <pre>tyutool serve [--port &lt;PORT&gt;]</pre>
+      <p>Starts a local WebSocket server for browser-based flash operations (used by tuyaopen-ide). Default port: <code>9527</code>.</p>
+
+      <hr>
+
+      <h3 id="cmd-completions"><code>completions</code> — Generate a shell completion script</h3>
+      <pre>tyutool completions &lt;SHELL&gt;</pre>
+      <p><code>&lt;SHELL&gt;</code> is one of <code>bash</code>, <code>zsh</code>, <code>fish</code>, <code>powershell</code>, <code>elvish</code>. The script is printed to stdout (no banner/log noise), so it can be sourced directly.</p>
+      <p><strong>Examples:</strong></p>
+      <pre># Bash (current shell)
+source &lt;(tyutool completions bash)
+
+# Zsh (install to a completions dir on your $fpath)
+tyutool completions zsh &gt; ~/.zfunc/_tyutool
+
+# PowerShell (Windows)
+tyutool completions powershell | Out-String | Invoke-Expression</pre>
+
+      <hr>
+
+      <h3 id="cmd-usb-port-survey"><code>usb-port-survey</code> — USB/serial metadata dump</h3>
+      <pre>tyutool usb-port-survey</pre>
+      <p>Outputs JSON with raw USB metadata for all ports. Used for cross-OS debugging.</p>
+
+      <h2 id="supported-devices">5. Supported devices</h2>
+      <table>
+        <thead><tr><th><code>--device</code> value</th><th>Chip</th><th>Default baud</th></tr></thead>
+        <tbody>
+          <tr><td><code>bk7231n</code></td><td>BK7231N</td><td>921600</td></tr>
+          <tr><td><code>t2</code></td><td>T2</td><td>921600</td></tr>
+          <tr><td><code>t3</code></td><td>T3</td><td>921600</td></tr>
+          <tr><td><code>t1</code></td><td>T1</td><td>921600</td></tr>
+          <tr><td><code>t5ai</code> (alias: <code>t5</code>)</td><td>T5AI</td><td>921600</td></tr>
+          <tr><td><code>ln882h</code></td><td>LN882H</td><td>115200</td></tr>
+          <tr><td><code>esp32</code></td><td>ESP32</td><td>460800</td></tr>
+          <tr><td><code>esp32c3</code></td><td>ESP32-C3</td><td>460800</td></tr>
+          <tr><td><code>esp32c6</code></td><td>ESP32-C6</td><td>460800</td></tr>
+          <tr><td><code>esp32p4</code></td><td>ESP32-P4</td><td>460800</td></tr>
+          <tr><td><code>esp32s3</code></td><td>ESP32-S3</td><td>460800</td></tr>
+        </tbody>
+      </table>
+      <p>Device names are case-insensitive (<code>--device T5AI</code>, <code>--device t5AI</code>, and <code>--device t5ai</code> are all equivalent).</p>
+
+      <h2 id="output-modes">6. Output modes</h2>
+      <p><strong>Rich mode</strong> (interactive TTY): spinner, progress bar with ANSI color, <code>✓</code> checkmarks.</p>
+      <p><strong>Plain mode</strong> (CI / piped / redirected): fixed-width phase labels, 10%-step percent ticks on long phases, ASCII-only separators.</p>
+      <p>Plain mode output example:</p>
+      <pre>tyutool v3.0.7  linux/x86_64
+
+write  BK7231N  /dev/ttyUSB0  921600
+  File   firmware.bin  1.8 MiB
+  Range  0x00000000 -> 0x001CE400
+
+Handshake         OK
+Erase             10%  20%  30%  40%  50%  60%  70%  80%  90%  OK
+Write [1/2]       10%  20%  30%  40%  50%  60%  70%  80%  90%  OK
+Write [2/2]       10%  20%  30%  40%  50%  60%  70%  80%  90%  OK
+Verify            OK
+Reboot            OK
+Flash OK  3.2s</pre>
+      <p>Exit code <code>0</code> on success, non-zero on failure or cancellation.</p>
+      <div class="callout note">
+        <span class="title">Cancellation</span>
+        During <code>write</code>, <code>read</code>, <code>erase</code>, or <code>authorize</code>, pressing <code>Ctrl+C</code> sets a cancellation flag so the job <strong>unwinds gracefully</strong> (closes the serial port and reports <code>Cancelled</code>) instead of the process being killed mid-transfer.
+      </div>
+
+      <h2 id="developer-reference">7. Developer reference</h2>
+      <div class="callout note">
+        <span class="title">Authoritative markdown source</span>
+        The authoritative markdown source for this page lives at the repo root as <code>docs/cli.md</code> (<code>../../cli.md</code> relative to this site root). Any CLI change <strong>must update <code>docs/cli.md</code> first</strong> — this is an explicit rule in <code>AGENTS.md</code>: "<code>docs/cli.md</code> is the authoritative CLI reference. Any change to CLI commands must include a <code>docs/cli.md</code> update in the same commit or PR." PRs that modify <code>crates/tyutool-cli/src/main.rs</code> (command definitions) without updating <code>docs/cli.md</code> must not be merged. This HTML page is only a mirror rendering of that markdown; the markdown remains the source of truth.
+      </div>
+
+      <nav class="pager">
+        <a href="batch-flash-auth.html">← Batch Flash &amp; Auth</a>
+        <a href="faq.html">FAQ →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
