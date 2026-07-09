@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting Started · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+  <style>
+    /* feature-card grid for the "next steps" cards */
+    .features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+    .features a{display:block;padding:18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-soft);color:var(--fg)}
+    .features a:hover{text-decoration:none;border-color:var(--brand);box-shadow:var(--shadow)}
+    .features h3{margin:0 0 6px;font-size:1.05rem;color:var(--brand)}
+    .features p{margin:0;font-size:.92rem;color:var(--muted)}
+    @media (max-width:880px){ .features{grid-template-columns:repeat(2,1fr)} }
+    @media (max-width:560px){ .features{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · Usage Guide</span>
+      <span class="lang"><a href="getting-started.html" aria-current="true">English</a><a href="../zh/getting-started.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>Usage Guide</h2>
+      <ul>
+        <li><a href="getting-started.html" aria-current="page">Getting Started</a></li>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="flash.html">Firmware Flash</a></li>
+        <li><a href="serial-debug.html">Serial Debug</a></li>
+        <li><a href="settings.html">Settings</a></li>
+        <li><a href="batch-flash-auth.html">Batch Flash &amp; Auth</a></li>
+        <li><a href="cli.html">CLI</a></li>
+        <li><a href="faq.html">FAQ</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>Getting Started</h1>
+      <p class="lead">This page walks you from "downloaded the app" all the way to "successfully flashed my first device." The path is linear — read it in order and you will have completed your first flash in about 5–10 minutes.</p>
+
+      <div class="callout note">
+        <span class="title">Read first</span>
+        If you have never flashed firmware before, start with <a href="concepts.html">Concepts</a>.
+      </div>
+
+      <h2 id="prerequisites">Prerequisites</h2>
+      <p>Before you start, confirm everything on this checklist is ready — flashing needs both hardware and software in place.</p>
+      <ul>
+        <li><strong>A supported device</strong>: tyutool targets Tuya-class IoT devices; the full list of supported chips is on the <a href="flash.html">Firmware Flash</a> page.</li>
+        <li><strong>A USB-serial adapter</strong>: wired correctly to the device's UART (TX/RX/GND, optionally power). Wiring must <strong>cross over</strong>: the PC side's TX goes to the device's RX, and vice versa.</li>
+        <li><strong>The device in bootloader/download mode</strong>: how to enter it varies per device (button combos, bridging test pads, power sequencing).</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">Note</span>
+        Wiring and entering download mode are <strong>device-specific</strong> — there is no universal procedure, so check your device's manual or the <a href="faq.html">FAQ</a> first. tyutool <strong>cannot</strong> put a device into download mode for you; you must do it yourself. When the device is not in download mode, tyutool waits for a handshake and eventually times out. For the underlying concepts (UART / download mode / baud rate), see <a href="concepts.html">Concepts</a>.
+      </div>
+
+      <h2 id="download">Download &amp; install</h2>
+      <p>tyutool ships prebuilt installers for Windows, macOS, and Linux. Go to the README download table, pick the build for your operating system, and install it the usual way. The common per-platform gotchas are below (full details in the <a href="faq.html">FAQ</a>).</p>
+
+      <div class="callout warn">
+        <span class="title">macOS Gatekeeper</span>
+        On first launch of an unsigned app, macOS blocks it as "cannot be verified." Run <code>xattr -dr com.apple.quarantine /path/to/tyutool.app</code> in a terminal to strip the quarantine flag, then launch. See the <a href="faq.html">FAQ</a>.
+      </div>
+      <div class="callout warn">
+        <span class="title">macOS serial permission</span>
+        macOS denies ordinary users access to serial devices by default. Add your user to the <code>dialout</code> group: <code>sudo dseditgroup -o edit -a $USER -t user dialout</code>, then <strong>log out and back in</strong> for it to take effect. See the <a href="faq.html">FAQ</a>.
+      </div>
+      <div class="callout warn">
+        <span class="title">Linux blank window</span>
+        On some Linux desktops the tyutool window comes up blank. Launch it as <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> to work around it. See the <a href="faq.html">FAQ</a>.
+      </div>
+      <div class="callout tip">
+        <span class="title">Tip</span>
+        All three platform quirks are <strong>environment</strong> issues, not tyutool bugs; once resolved they generally do not recur.
+      </div>
+
+      <h2 id="first-launch">First launch</h2>
+      <p>After installing, launch tyutool. The main window has two parts: a navigation <strong>sidebar</strong> on the left and the active feature's workspace on the right. The sidebar exposes four main destinations:</p>
+      <ul>
+        <li><strong>Flash</strong> — flash, read, and erase the flash chip.</li>
+        <li><strong>Serial Debug</strong> — send and receive serial data in real time, inspect device logs.</li>
+        <li><strong>Toolbox</strong> — a collection of helper tools.</li>
+        <li><strong>Settings</strong> — configure paths, log level, and other app options.</li>
+      </ul>
+      <p>The rest of this page stays entirely on the <strong>Flash</strong> page — it is the only destination you need for your first flash.</p>
+
+      <figure class="shot todo">
+        <figcaption>Screenshot: tyutool main window on the Flash page, serial-port dropdown open showing detected ports, status dot green.</figcaption>
+        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports, status dot green -->
+      </figure>
+
+      <h2 id="connect">Connect your device</h2>
+      <p>Once the wiring checks out and the device is in download mode, establish the connection in tyutool as follows.</p>
+      <ol class="steps">
+        <li>Plug the USB-serial adapter into a USB port on your PC.</li>
+        <li>On tyutool's Flash page, click the <strong>Serial port</strong> dropdown.</li>
+        <li>Pick your adapter from the listed ports (e.g. <code>COM3</code> / <code>/dev/ttyUSB0</code> / <code>/dev/cu.SLAB_USBtoUART</code>).</li>
+        <li>Watch the <strong>status dot</strong> next to it: green means connected and ready; grey or red means no connection or failed handshake.</li>
+      </ol>
+      <p>Once a port is chosen, tyutool <strong>auto-suggests</strong> a sensible default baud rate and chip model; in most cases you can accept them, and you can override manually if needed.</p>
+
+      <figure class="shot todo">
+        <figcaption>Screenshot: the connection bar atop the Flash page — port selected, status dot green, baud rate and chip auto-filled.</figcaption>
+        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports, status dot green -->
+      </figure>
+
+      <div class="callout tip">
+        <span class="title">Tip</span>
+        If the dropdown shows no ports at all, confirm the adapter is plugged in and its driver is installed (CH340/CP2102/FT232), and recheck macOS/Linux serial permissions (see the install section above).
+      </div>
+
+      <h2 id="first-flash">Your first flash</h2>
+      <p>With the device connected, the flash itself is short. Walk through these steps in order to write your first firmware.</p>
+      <ol class="steps">
+        <li><strong>Pick the chip model</strong>: at the top of the Flash page, select the chip that matches your device (the model decides the protocol and address layout; a wrong choice fails to flash).</li>
+        <li><strong>Choose the firmware</strong>: on the <strong>Flash</strong> tab, choose a firmware file and pick a <code>.bin</code> firmware.</li>
+        <li><strong>Confirm addresses</strong>: after selecting firmware, the write addresses <strong>auto-fill</strong> with defaults that you usually do not need to change.</li>
+        <li><strong>Click Flash</strong>: hit the <strong>Flash</strong> button to start writing.</li>
+        <li><strong>Watch progress</strong>: keep an eye on the progress bar and the log below it; a healthy run climbs steadily to 100%.</li>
+        <li><strong>Wait for reboot</strong>: when the write finishes, the device <strong>automatically reboots</strong> running the new firmware — your first flash is now complete.</li>
+      </ol>
+      <p>For the advanced options behind each step (address tweaks, erase strategy, verification, saving logs), see the <a href="flash.html">Firmware Flash</a> page.</p>
+      <div class="callout danger">
+        <span class="title">Important</span>
+        While flashing, <strong>do not</strong> unplug the USB cable or cut power — doing so can corrupt the data. If a flash fails, first drop to <code>115200</code> baud and retry; if it still fails, see the <a href="faq.html">FAQ</a>.
+      </div>
+
+      <h2 id="next-steps">Next steps</h2>
+      <p>Congratulations on your first flash! From here, dive into whichever feature matches your needs:</p>
+      <div class="features">
+        <a href="flash.html">
+          <h3>Firmware Flash</h3>
+          <p>Address tweaks, erase strategy, verification, and more.</p>
+        </a>
+        <a href="serial-debug.html">
+          <h3>Serial Debug</h3>
+          <p>Send and receive live data, inspect boot logs.</p>
+        </a>
+        <a href="settings.html">
+          <h3>Settings</h3>
+          <p>Configure paths, log level, and other app options.</p>
+        </a>
+        <a href="batch-flash-auth.html">
+          <h3>Batch Flash &amp; Auth</h3>
+          <p>Process many devices at once and write authorization.</p>
+        </a>
+        <a href="cli.html">
+          <h3>CLI</h3>
+          <p>Use tyutool headless or from scripts.</p>
+        </a>
+      </div>
+
+      <nav class="pager">
+        <a href="index.html">← Home</a>
+        <a href="flash.html">Firmware Flash →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
