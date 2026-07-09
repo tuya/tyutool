@@ -618,6 +618,7 @@ fn batch_flash_start(
 
 #[tauri::command]
 fn batch_flash_cancel_port(state: State<'_, BatchFlashState>, port: String) -> Result<(), String> {
+    log::info!("[batch-flash] cancel port={}", port);
     let slots = state.slots.lock().map_err(|e| e.to_string())?;
     if let Some(slot) = slots.get(&port) {
         slot.cancel.store(true, Ordering::SeqCst);
@@ -628,9 +629,11 @@ fn batch_flash_cancel_port(state: State<'_, BatchFlashState>, port: String) -> R
 #[tauri::command]
 fn batch_flash_cancel_all(state: State<'_, BatchFlashState>) -> Result<(), String> {
     let slots = state.slots.lock().map_err(|e| e.to_string())?;
+    let count = slots.len();
     for slot in slots.values() {
         slot.cancel.store(true, Ordering::SeqCst);
     }
+    log::info!("[batch-flash] cancel all count={}", count);
     Ok(())
 }
 
@@ -995,6 +998,7 @@ fn batch_auth_start(
 
 #[tauri::command]
 fn batch_auth_cancel_port(state: State<'_, BatchAuthState>, port: String) -> Result<(), String> {
+    log::info!("[batch-auth] cancel port={}", port);
     let slots = state.slots.lock().map_err(|e| e.to_string())?;
     if let Some(slot) = slots.get(&port) {
         slot.cancel.store(true, Ordering::SeqCst);
@@ -1005,9 +1009,11 @@ fn batch_auth_cancel_port(state: State<'_, BatchAuthState>, port: String) -> Res
 #[tauri::command]
 fn batch_auth_cancel_all(state: State<'_, BatchAuthState>) -> Result<(), String> {
     let slots = state.slots.lock().map_err(|e| e.to_string())?;
+    let count = slots.len();
     for slot in slots.values() {
         slot.cancel.store(true, Ordering::SeqCst);
     }
+    log::info!("[batch-auth] cancel all count={}", count);
     Ok(())
 }
 
@@ -1061,6 +1067,7 @@ fn batch_auth_read_ports(
         let config_clone = config.clone();
 
         let handle = std::thread::spawn(move || {
+            log::info!("[batch-auth-read] slot begin port={}", port_clone);
             let result = tyutool_core::read_auth_probe(
                 &port_clone,
                 &config_clone.chip_id,
@@ -1079,12 +1086,18 @@ fn batch_auth_read_ports(
                             "uuid": r.uuid,
                         }),
                     );
+                    log::info!(
+                        "[batch-auth-read] done port={} mac={}",
+                        port_clone,
+                        r.mac.as_deref().unwrap_or("")
+                    );
                 }
                 Err(tyutool_core::FlashError::Cancelled) => {
                     let _ = app_clone.emit(
                         "batch-auth-read-progress",
                         serde_json::json!({ "port": port_clone, "step": "cancelled" }),
                     );
+                    log::info!("[batch-auth-read] cancelled port={}", port_clone);
                 }
                 Err(e) => {
                     let _ = app_clone.emit(
@@ -1095,6 +1108,7 @@ fn batch_auth_read_ports(
                             "error": e.to_string(),
                         }),
                     );
+                    log::warn!("[batch-auth-read] failed port={} error={}", port_clone, e);
                 }
             }
         });
