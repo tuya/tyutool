@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>基础概念 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/concepts.html">English</a><a href="concepts.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html" aria-current="page">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>基础概念</h1>
+      <p class="lead">在动手点击按钮之前，先花几分钟读懂这套词汇表——它能让你在后续每一页都看得明白。本页只讲概念，不涉及具体操作。</p>
+
+      <p>tyutool 通过一条串口链路与设备通信：电脑上的 tyutool 发出的指令，经由 USB 转串口适配器，以 UART 电信号的形式送达设备里的 SoC，最终读写那颗 flash 芯片。下图展示了这条链路的完整拓扑。</p>
+
+      <figure class="diagram">
+        <img src="../assets/images/concepts-uart-topology.svg" alt="电脑经 USB 转串口适配器、UART（TX/RX/GND）连接到包含 SoC 与 Flash 芯片的 IoT 设备的拓扑图">
+        <figcaption>图 1 · tyutool 到设备的烧录链路拓扑</figcaption>
+      </figure>
+
+      <div class="callout note">
+        <span class="title">阅读建议</span>
+        第一次接触固件烧录？建议按顺序读完前 6 节；第 7、8 节可作为术语速查表，在后续页面遇到不熟悉的词时回来查阅。
+      </div>
+
+      <h2 id="firmware">什么是固件</h2>
+      <p>固件（firmware）就是存放在设备 flash 芯片里的程序——它决定设备开机后做什么、如何连网、能提供哪些功能。你可以把它理解为设备的“操作系统 + 应用程序”合在一起的一块二进制数据。</p>
+      <p>你之所以要替换固件，通常是为了以下几种目的：</p>
+      <ul>
+        <li><strong>升级</strong>：刷入厂商或社区提供的更新版本，获得新功能或修复缺陷。</li>
+        <li><strong>修复</strong>：设备变砖、启动异常时，用一份已知完好的固件把设备救回来。</li>
+        <li><strong>定制</strong>：刷入自定义或第三方固件（如改造后的固件），改变设备行为。</li>
+      </ul>
+      <p>固件本质上就是一段字节数据，烧录的过程就是把这些字节原样写进 flash 芯片的过程。</p>
+
+      <h2 id="flashing">什么是烧录 / 刷写</h2>
+      <p>烧录（flashing，也叫刷写）就是把固件字节写入设备 flash 芯片的动作。打个比方：这就像把一个文件从你的电脑“复制”到设备的永久存储里。区别在于，这里用的不是网线或 U 盘，而是一条串口链路。</p>
+      <p>整条链路是这样传递数据的：</p>
+      <ol class="steps">
+        <li>tyutool 读取你电脑上的固件文件，把它切成一段段数据块。</li>
+        <li>数据块经 USB 送到 USB 转串口适配器，转换成 UART 电信号。</li>
+        <li>UART 信号（TX/RX/GND）送到设备 SoC，SoC 再把数据写进 flash 芯片。</li>
+      </ol>
+      <p>烧录完成后，设备下一次上电就会运行新写入的固件。</p>
+
+      <div class="callout warn">
+        <span class="title">注意</span>
+        烧录是覆盖性写入：新固件会覆盖 flash 中对应区域的旧内容。如果旧固件没有备份，刷写后通常无法直接还原——重要数据请先<a href="#read">读取</a>备份。
+      </div>
+
+      <h2 id="erase">擦除 Erase</h2>
+      <p>擦除（erase）是把 flash 某些区域的存储单元清空为空白状态（全 <code>0xFF</code>）的动作。flash 芯片的物理特性决定了“写入只能把 1 变成 0”，所以写入新数据前通常需要先擦除。</p>
+      <p>常见的使用场景：</p>
+      <ul>
+        <li><strong>写入前清场</strong>：清除旧数据/旧授权，确保新固件干净落地。</li>
+        <li><strong>整片擦除</strong>：把 flash 全部清空，常用于设备归零或换固件前的彻底清理。</li>
+      </ul>
+      <p>tyutool 提供了几种整片擦除预设（erase preset），按擦除范围由窄到宽排列：</p>
+      <table>
+        <thead><tr><th>擦除预设</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>authInfo</code></td><td>只擦除授权信息区（UUID/AuthKey），保留固件与其他数据。</td></tr>
+          <tr><td><code>fullChipNoRf</code></td><td>整片擦除，但保留射频校准区（RF cal），避免设备无法连网。</td></tr>
+          <tr><td><code>fullChip</code></td><td>整片完全擦除，所有区域一律清空（含射频校准）。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip">
+        <span class="title">小提示</span>
+        不确定该选哪种？<code>fullChipNoRf</code> 是最常用的“安全彻底擦除”：清空固件但保留射频校准，避免设备刷完连不上网。
+      </div>
+
+      <h2 id="read">读取 Read</h2>
+      <p>读取（read）是烧录的逆操作：把 flash 芯片里的内容复制出来，保存成你电脑上的一个文件。这个文件通常叫做“备份”或“dump”。</p>
+      <p>读取最大的用途是<strong>备份</strong>：在动手烧录或擦除之前，先把设备当前的 flash 内容完整读出来存好。万一后续操作出了问题，你可以用这份备份把设备恢复原状。</p>
+      <ul>
+        <li><strong>整片读取</strong>：把 flash 全部内容读成一个文件，最稳妥的备份方式。</li>
+        <li><strong>分段读取</strong>：只读取某个地址段（segment），用于查看特定区域内容。</li>
+      </ul>
+
+      <h2 id="authorize">授权 Authorize（TuyaOpen UART auth）</h2>
+      <p>授权（authorize）是写入设备凭据的动作，让设备能够连接涂鸦云。这套凭据由两部分组成：</p>
+      <ul>
+        <li><strong>UUID</strong>：设备的唯一标识符。</li>
+        <li><strong>AuthKey</strong>：与 UUID 配对的认证密钥。</li>
+      </ul>
+      <p>授权与烧录固件是<strong>两件独立的事</strong>：固件是程序，授权是身份凭证。一台设备可以装着最新固件却因为没有授权而连不上云，也可以有合法授权却跑着旧固件。两者互不替代。</p>
+      <div class="callout danger">
+        <span class="title">重要</span>
+        UUID 与 AuthKey 不是随便填的——它们是从涂鸦<strong>购买</strong>来的凭据。写入伪造或重复的凭据会导致设备无法正常上线，甚至污染整个设备池。请只使用合法购得的凭据。
+      </div>
+      <p>tyutool 区分两种授权操作：</p>
+      <ul>
+        <li><strong>授权读取（auth-read）</strong>：只读取设备当前的 UUID/AuthKey，不写入任何内容，用于核对或排查。</li>
+        <li><strong>授权写入（auth-write）</strong>：把你提供的 UUID/AuthKey 写入设备，完成授权。</li>
+      </ul>
+
+      <h2 id="serial">串口 / UART / 波特率</h2>
+      <p>串口（serial port）是一种“一次传一位”的通信接口。电脑本身通常没有原生串口，所以要用一个 <strong>USB 转串口适配器</strong>（USB-serial adapter），把 USB 信号转换成设备能识别的 UART 信号。常见适配器芯片有 CH340、CP2102、FT232 等。</p>
+      <p><strong>UART</strong>（通用异步收发传输器）是串口在设备端的具体形式，最常用的三根线是：</p>
+      <ul>
+        <li><strong>TX</strong>：发送端，把数据送出去。</li>
+        <li><strong>RX</strong>：接收端，收对方发来的数据。</li>
+        <li><strong>GND</strong>：地线，双方共地才能正确判断电平。</li>
+      </ul>
+      <p>接线时必须<strong>交叉</strong>：电脑端的 TX 接设备端的 RX，反之亦然（见上方图 1）。</p>
+      <p><strong>波特率</strong>（baud rate）是串口通信的速率，单位是 bit/秒。通信双方的波特率必须一致，否则收到的全是乱码。tyutool 支持多种波特率，常见的有以下几种：</p>
+      <table>
+        <thead><tr><th>波特率</th><th>典型用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>115200</code></td><td>最通用、最稳定的默认速率，几乎所有芯片都支持。</td></tr>
+          <tr><td><code>460800</code></td><td>较快，适合中等容量固件，稳定性仍较好。</td></tr>
+          <tr><td><code>921600</code></td><td>高速，大固件烧录时显著节省时间，但需芯片与线材支持。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip">
+        <span class="title">选择建议</span>
+        从 <code>115200</code> 开始最稳妥；如果稳定且需要提速，再逐步尝试更高的波特率。遇到烧录失败、校验错误时，优先降回低波特率排查。
+      </div>
+
+      <h2 id="chip">芯片型号</h2>
+      <p>烧录前必须在 tyutool 里选择正确的<strong>芯片型号</strong>。这一步很关键，因为芯片型号决定了三件事：</p>
+      <ul>
+        <li><strong>通信协议</strong>：不同芯片进入烧录模式的方式、握手命令各不相同。</li>
+        <li><strong>波特率</strong>：某些芯片只支持特定速率或上限。</li>
+        <li><strong>Flash 容量</strong>：芯片型号决定了可寻址的 flash 大小，影响读取/擦除的范围。</li>
+      </ul>
+      <p>选错芯片轻则烧录失败，重则可能写坏数据。tyutool 支持的完整芯片列表，请见<a href="flash.html">固件烧录</a>页与<a href="cli.html">命令行</a>页。</p>
+
+      <h2 id="terminology">TY 工具术语表</h2>
+      <p>下表汇总本指南中出现的高频术语，方便随时回查。其他页面在首次提到某个术语时，也会链接到本表。</p>
+      <table>
+        <thead><tr><th>术语</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Flash</strong></td><td>设备上存放固件的非易失性存储芯片；也指对它进行读/写/擦的操作总称。</td></tr>
+          <tr><td><strong>Erase</strong></td><td>擦除，把 flash 指定区域清空为 <code>0xFF</code>。</td></tr>
+          <tr><td><strong>Read</strong></td><td>读取，把 flash 内容复制到电脑文件（备份/dump）。</td></tr>
+          <tr><td><strong>Authorize</strong></td><td>授权，写入 UUID + AuthKey 让设备可连涂鸦云。</td></tr>
+          <tr><td><strong>UUID</strong></td><td>设备唯一标识符，授权时与 AuthKey 配对使用。</td></tr>
+          <tr><td><strong>AuthKey</strong></td><td>认证密钥，与 UUID 一起构成设备上云凭据。</td></tr>
+          <tr><td><strong>Baud</strong></td><td>波特率，串口通信速率（bit/秒），双方必须一致。</td></tr>
+          <tr><td><strong>UART</strong></td><td>通用异步收发传输器，设备端串口的具体形式（TX/RX/GND）。</td></tr>
+          <tr><td><strong>Segment</strong></td><td>段，flash 的一个地址区间，可单独读取或烧录。</td></tr>
+          <tr><td><strong>Erase preset</strong></td><td>擦除预设，按范围预定义的擦除方案：<code>authInfo</code> / <code>fullChipNoRf</code> / <code>fullChip</code>。</td></tr>
+          <tr><td><strong>MAC</strong></td><td>媒体访问控制地址，设备的网络硬件标识，部分芯片烧录时也会写入。</td></tr>
+        </tbody>
+      </table>
+
+      <nav class="pager">
+        <a href="getting-started.html">← 快速上手</a>
+        <a href="flash.html">固件烧录 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
