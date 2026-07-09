@@ -115,6 +115,7 @@
       "sourceElapsed": "耗时 {time}s",
       "sourceFailures": "{count} 个源失败",
       "btnUpdate": "更新",
+      "updateFromSource": "从此源更新",
       "downloading": "从 {source} 下载 v{version}",
       "downloadProgress": "{percent}%   {downloaded}/{total}",
       "cancel": "取消",

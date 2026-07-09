@@ -24,6 +24,7 @@ logs/
 
 # ── Temp / scratch ────────────────────────────────────────────────────────────
 tmp/
+.tmp/
 
 # ── Environment overrides (never commit secrets) ──────────────────────────────
 .env.local

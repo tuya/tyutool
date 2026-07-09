@@ -10,8 +10,10 @@ import {
   isNewerVersion,
 } from "./update-sources";
 import {
+  deriveUpdateSourceAction,
   deriveUpdateSummaryState,
   type UpdateDialogSourceState,
+  type UpdateSourceActionKind,
   type UpdateDialogSourceStatus,
 } from "./update-dialog-state";
 import { renderMarkdown } from "./render-markdown";
@@ -251,6 +253,30 @@ const showRestartActions = computed(
     summaryState.value.kind === "ready" ||
     summaryState.value.kind === "installing",
 );
+
+function sourceActionKind(source: SourceState): UpdateSourceActionKind {
+  return deriveUpdateSourceAction({
+    source,
+    summaryKind: summaryState.value.kind,
+    isTauri: isTauriRuntime(),
+    installTypeReady: installTypeReady.value,
+    manualUpdateOnly: manualUpdateOnly.value,
+    inAppUpdateSupported: inAppUpdateSupported.value,
+    primaryAvailableSourceId: primaryAvailableSource.value?.id ?? null,
+  });
+}
+
+async function triggerSourceAction(source: SourceState): Promise<void> {
+  const action = sourceActionKind(source);
+  if (action === "download") {
+    await startDownload(source);
+    return;
+  }
+
+  if (action === "manual") {
+    await openManualReleaseDownload(source);
+  }
+}
 
 function sourceStatusLabel(source: SourceState): string {
   switch (source.status) {
@@ -784,6 +810,21 @@ async function openManualReleaseDownload(
                   >
                     {{ source.error }}
                   </p>
+
+                  <button
+                    v-if="sourceActionKind(source) !== 'none'"
+                    type="button"
+                    class="ud-source-action"
+                    :class="
+                      sourceActionKind(source) === 'download'
+                        ? 'ud-btn-primary'
+                        : 'ud-btn-secondary'
+                    "
+                    :disabled="downloading || installing"
+                    @click="triggerSourceAction(source)"
+                  >
+                    {{ t("settings.update.updateFromSource") }}
+                  </button>
                 </article>
               </div>
             </section>
@@ -1397,6 +1438,11 @@ async function openManualReleaseDownload(
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
+}
+
+.ud-source-action {
+  margin-top: auto;
+  width: 100%;
 }
 
 .md-content :deep(:first-child) {
