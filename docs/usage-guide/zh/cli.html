@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>命令行 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/cli.html">English</a><a href="cli.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html" aria-current="page">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>命令行工具</h1>
+      <p class="lead"><code>tyutool</code> 是一个命令行工具，用于通过 UART 烧录、读取和管理涂鸦类 IoT 设备固件。本页把 <code>docs/cli.md</code> 的完整 CLI 参考移植成统一样式的 HTML 版本——内容一字不少，仅做了更易读的排版（提示框、表格、代码块）。</p>
+
+      <h2 id="when-to-use">1. 什么时候用 CLI</h2>
+      <p>当你需要<strong>脚本化、在 CI 里跑批、在无桌面的服务器上操作</strong>，或者你<strong>更习惯终端</strong>而不是 GUI 时，CLI 是最顺手的入口。它和桌面应用共享同一套 <code>tyutool-core</code> 烧录逻辑，能力与 GUI 对等，且可被管道、cron、脚本直接驱动。</p>
+
+      <h2 id="install">2. 安装</h2>
+      <p>从 GitHub Releases 页面下载最新版本的发布二进制文件，并将其放到你的 <code>PATH</code> 中。</p>
+      <pre>下载最新 release 二进制 → 放到 PATH 上</pre>
+
+      <h2 id="global-options">3. 全局选项</h2>
+      <table>
+        <thead><tr><th>选项</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>--verbose</code></td><td>把开发者诊断日志写到 stderr（日志文件里始终会写）。</td></tr>
+          <tr><td><code>--plain</code></td><td>强制输出纯文本（仅 ASCII，无 spinner / 进度条）。</td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>日志文件位置：</strong>每次运行都会写到一个独立的会话文件 <code>tyutool-&lt;timestamp&gt;.log</code>；单个会话日志上限 10 MB，超出后滚动为 <code>tyutool-&lt;timestamp&gt;-1.log</code>、<code>-2.log</code>…… 旧的会话文件在启动时会被清理（pruning）。</p>
+      <ul>
+        <li>Linux：<code>~/.local/share/tyutool/tyutool-&lt;timestamp&gt;.log</code></li>
+        <li>macOS：<code>~/Library/Application Support/tyutool/tyutool-&lt;timestamp&gt;.log</code></li>
+        <li>Windows：<code>%APPDATA%\tyutool\tyutool-&lt;timestamp&gt;.log</code></li>
+      </ul>
+      <div class="callout note">
+        <span class="title">滚动文件命名</span>
+        当单次会话日志超过 10 MB 时，会滚动到 <code>tyutool-&lt;ts&gt;-1.log</code>、<code>-2.log</code>……；<code>&lt;ts&gt;</code> 是本次会话的时间戳，<code>N</code> 是滚动序号。每次启动 tyutool 时还会修剪旧的会话文件。
+      </div>
+
+      <p><strong>端口选择</strong>（带 <code>-p/--port</code> 的命令）：省略 <code>-p</code> 时，若只有<strong>一个</strong>可用端口，会自动使用它；若存在<strong>多个</strong>端口，在交互式终端上会提示你选择一个，而在非交互环境（CI、管道）下命令会报错并要求你显式传 <code>-p</code>。</p>
+
+      <h2 id="subcommands">4. 子命令</h2>
+      <p>下列 10 个子命令按字母/逻辑顺序给出。每个子命令含：用法行（<code>&lt;pre&gt;</code>）、参数表（<code>&lt;table&gt;</code>）、示例（<code>&lt;pre&gt;</code>）。参数与默认值与 <code>docs/cli.md</code> 完全一致。</p>
+
+      <h3 id="cmd-write"><code>write</code> — 烧录固件到设备</h3>
+      <pre>tyutool write -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [--end &lt;END&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>简写</th><th>说明</th><th>默认值</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>芯片名（见支持列表）</td><td>必填</td></tr>
+          <tr><td><code>--file</code></td><td><code>-f</code></td><td>固件 <code>.bin</code> 文件路径</td><td>必填</td></tr>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>串口（如 <code>/dev/ttyUSB0</code>、<code>COM3</code>）</td><td>自动检测第一个端口</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART 波特率</td><td>按芯片不同（见下表）</td></tr>
+          <tr><td><code>--start</code></td><td><code>-s</code></td><td>Flash 起始地址（十六进制，如 <code>0x0</code>）</td><td><code>0x00000000</code></td></tr>
+          <tr><td><code>--end</code></td><td></td><td>Flash 结束地址（十六进制）；默认为 <code>start + 文件大小</code></td><td>计算得出</td></tr>
+        </tbody>
+      </table>
+      <p><strong>示例：</strong></p>
+      <pre>tyutool write -d bk7231n -f firmware.bin -p /dev/ttyUSB0</pre>
+
+      <hr>
+
+      <h3 id="cmd-read"><code>read</code> — 从设备读取 Flash 内容</h3>
+      <pre>tyutool read -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [-l &lt;LENGTH&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>简写</th><th>说明</th><th>默认值</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>芯片名</td><td>必填</td></tr>
+          <tr><td><code>--file</code></td><td><code>-f</code></td><td>输出 <code>.bin</code> 文件路径</td><td>必填</td></tr>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>串口</td><td>自动检测</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART 波特率</td><td>按芯片不同</td></tr>
+          <tr><td><code>--start</code></td><td><code>-s</code></td><td>读取起始地址（十六进制）</td><td><code>0x00000000</code></td></tr>
+          <tr><td><code>--length</code></td><td><code>-l</code></td><td>读取长度（十六进制）</td><td><code>0x200000</code></td></tr>
+        </tbody>
+      </table>
+      <p><strong>示例：</strong></p>
+      <pre>tyutool read -d bk7231n -f flash_dump.bin -l 0x200000</pre>
+
+      <hr>
+
+      <h3 id="cmd-erase"><code>erase</code> — 擦除设备上的 Flash 区域</h3>
+      <pre>tyutool erase -d &lt;DEVICE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [-l &lt;LENGTH&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>简写</th><th>说明</th><th>默认值</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>芯片名</td><td>必填</td></tr>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>串口</td><td>自动检测</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART 波特率</td><td>按芯片不同</td></tr>
+          <tr><td><code>--start</code></td><td><code>-s</code></td><td>擦除起始地址（十六进制）</td><td><code>0x00000000</code></td></tr>
+          <tr><td><code>--length</code></td><td><code>-l</code></td><td>擦除长度（十六进制）</td><td><code>0x200000</code></td></tr>
+        </tbody>
+      </table>
+      <p>擦除区域为 <code>start</code> … <code>start + length</code>。某些芯片会把该区域对齐到其扇区大小（sector size）。</p>
+      <p><strong>示例：</strong></p>
+      <pre>tyutool erase -d bk7231n -s 0x0 -l 0x200000</pre>
+
+      <hr>
+
+      <h3 id="cmd-list-ports"><code>list-ports</code> — 列出可用串口</h3>
+      <pre>tyutool list-ports [--json]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>--json</code></td><td>输出端口对象的 JSON 数组，而非制表符分隔的列。</td></tr>
+        </tbody>
+      </table>
+      <p>默认输出为制表符分隔的列：<code>path</code>、<code>vid:pid</code>、<code>usb_interface</code>、<code>port_role</code>、<code>display_name</code>。</p>
+      <p>加 <code>--json</code> 时，每个条目包含 <code>path</code>、<code>name</code>、<code>usbVid</code>、<code>usbPid</code>、<code>usbSerial</code>、<code>usbInterface</code>、<code>portRole</code>（未知字段为 <code>null</code>）。</p>
+
+      <hr>
+
+      <h3 id="cmd-reset"><code>reset</code> — 通过 DTR/RTS 硬件复位设备</h3>
+      <pre>tyutool reset [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>简写</th><th>说明</th><th>默认值</th></tr></thead>
+        <tbody>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>串口</td><td>自动检测</td></tr>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>芯片系列（影响复位时序）</td><td><code>bk7231n</code></td></tr>
+        </tbody>
+      </table>
+
+      <hr>
+
+      <h3 id="cmd-authorize"><code>authorize</code> — TuyaOpen 设备授权</h3>
+      <pre>tyutool authorize [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>-p</code> / <code>--port</code></td><td>串口（默认：自动检测）</td></tr>
+          <tr><td><code>-d</code> / <code>--device</code></td><td>芯片类型——选择按芯片而定的授权时序（如 <code>esp32</code>、<code>t5ai</code>）。可选；省略则使用通用时序。</td></tr>
+          <tr><td><code>--uuid</code></td><td>要写入的 UUID（省略则只读取当前授权状态）</td></tr>
+          <tr><td><code>--authkey</code></td><td>要写入的 AuthKey（省略则只读取）</td></tr>
+        </tbody>
+      </table>
+      <p>写入授权时必须<strong>同时</strong>传 <code>--uuid</code> 和 <code>--authkey</code>。只传其中一个会被拒绝并报错。两者都不传则执行只读的 <code>auth-read</code>。</p>
+      <p><strong>读取当前授权状态：</strong></p>
+      <pre>tyutool authorize -p /dev/ttyUSB0
+tyutool authorize -p /dev/ttyUSB0 -d esp32</pre>
+      <p><strong>写入新授权：</strong></p>
+      <pre>tyutool authorize -p /dev/ttyUSB0 -d esp32 --uuid abc123 --authkey def456</pre>
+
+      <hr>
+
+      <h3 id="cmd-update"><code>update</code> — 自更新二进制</h3>
+      <pre>tyutool update [--check] [--source &lt;github|gitee&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>--check</code></td><td>只检查版本，不下载。</td></tr>
+          <tr><td><code>--source</code></td><td>更新源（默认 <code>github</code>，国内用 <code>gitee</code>）。</td></tr>
+        </tbody>
+      </table>
+
+      <hr>
+
+      <h3 id="cmd-serve"><code>serve</code> — WebSocket 服务器（开发/IDE 模式）</h3>
+      <pre>tyutool serve [--port &lt;PORT&gt;]</pre>
+      <p>启动一个本地 WebSocket 服务器，用于基于浏览器的烧录操作（供 tuyaopen-ide 使用）。默认端口：<code>9527</code>。</p>
+
+      <hr>
+
+      <h3 id="cmd-completions"><code>completions</code> — 生成 shell 补全脚本</h3>
+      <pre>tyutool completions &lt;SHELL&gt;</pre>
+      <p><code>&lt;SHELL&gt;</code> 取值之一：<code>bash</code>、<code>zsh</code>、<code>fish</code>、<code>powershell</code>、<code>elvish</code>。脚本打印到 stdout（无 banner / 日志噪声），可直接 source。</p>
+      <p><strong>示例：</strong></p>
+      <pre># Bash（当前 shell）
+source &lt;(tyutool completions bash)
+
+# Zsh（安装到 $fpath 里的某个补全目录）
+tyutool completions zsh &gt; ~/.zfunc/_tyutool
+
+# PowerShell（Windows）
+tyutool completions powershell | Out-String | Invoke-Expression</pre>
+
+      <hr>
+
+      <h3 id="cmd-usb-port-survey"><code>usb-port-survey</code> — USB/串口元数据转储</h3>
+      <pre>tyutool usb-port-survey</pre>
+      <p>输出包含所有端口原始 USB 元数据的 JSON。用于跨操作系统排错调试。</p>
+
+      <h2 id="supported-devices">5. 支持的芯片</h2>
+      <table>
+        <thead><tr><th><code>--device</code> 值</th><th>芯片</th><th>默认波特率</th></tr></thead>
+        <tbody>
+          <tr><td><code>bk7231n</code></td><td>BK7231N</td><td>921600</td></tr>
+          <tr><td><code>t2</code></td><td>T2</td><td>921600</td></tr>
+          <tr><td><code>t3</code></td><td>T3</td><td>921600</td></tr>
+          <tr><td><code>t1</code></td><td>T1</td><td>921600</td></tr>
+          <tr><td><code>t5ai</code>（别名：<code>t5</code>）</td><td>T5AI</td><td>921600</td></tr>
+          <tr><td><code>ln882h</code></td><td>LN882H</td><td>115200</td></tr>
+          <tr><td><code>esp32</code></td><td>ESP32</td><td>460800</td></tr>
+          <tr><td><code>esp32c3</code></td><td>ESP32-C3</td><td>460800</td></tr>
+          <tr><td><code>esp32c6</code></td><td>ESP32-C6</td><td>460800</td></tr>
+          <tr><td><code>esp32p4</code></td><td>ESP32-P4</td><td>460800</td></tr>
+          <tr><td><code>esp32s3</code></td><td>ESP32-S3</td><td>460800</td></tr>
+        </tbody>
+      </table>
+      <p>芯片名大小写不敏感（<code>--device T5AI</code>、<code>--device t5AI</code> 与 <code>--device t5ai</code> 等价）。</p>
+
+      <h2 id="output-modes">6. 输出模式</h2>
+      <p><strong>Rich 模式</strong>（交互式 TTY）：spinner、带 ANSI 颜色的进度条、<code>✓</code> 对勾。</p>
+      <p><strong>Plain 模式</strong>（CI / 管道 / 重定向）：固定宽度的阶段标签、长阶段每 10% 输出一个百分比刻度、仅 ASCII 的分隔符。</p>
+      <p>Plain 模式输出示例：</p>
+      <pre>tyutool v3.0.7  linux/x86_64
+
+write  BK7231N  /dev/ttyUSB0  921600
+  File   firmware.bin  1.8 MiB
+  Range  0x00000000 -> 0x001CE400
+
+Handshake         OK
+Erase             10%  20%  30%  40%  50%  60%  70%  80%  90%  OK
+Write [1/2]       10%  20%  30%  40%  50%  60%  70%  80%  90%  OK
+Write [2/2]       10%  20%  30%  40%  50%  60%  70%  80%  90%  OK
+Verify            OK
+Reboot            OK
+Flash OK  3.2s</pre>
+      <p>成功退出码为 <code>0</code>，失败或取消时为非零。</p>
+      <div class="callout note">
+        <span class="title">取消（Cancellation）</span>
+        在 <code>write</code>、<code>read</code>、<code>erase</code> 或 <code>authorize</code> 期间按 <code>Ctrl+C</code>，会设置一个取消标志，使任务<strong>优雅退出</strong>（关闭串口并报告 <code>Cancelled</code>），而不是在传输中途把进程杀掉。
+      </div>
+
+      <h2 id="developer-reference">7. 开发者参考</h2>
+      <div class="callout note">
+        <span class="title">权威 markdown 源</span>
+        本页对应的 markdown 权威源文件位于仓库根目录的 <code>docs/cli.md</code>（相对本站点根为 <code>../../cli.md</code>）。任何 CLI 变更都<strong>必须先更新 <code>docs/cli.md</code></strong>——这是 <code>AGENTS.md</code> 里明确规定的规则：“<code>docs/cli.md</code> is the authoritative CLI reference. Any change to CLI commands must include a <code>docs/cli.md</code> update in the same commit or PR.” 修改 <code>crates/tyutool-cli/src/main.rs</code>（命令定义）却不更新 <code>docs/cli.md</code> 的 PR 不予合并。本 HTML 页面只是该 markdown 的镜像渲染，内容请以 markdown 为准。
+      </div>
+
+      <nav class="pager">
+        <a href="batch-flash-auth.html">← 批量烧录授权</a>
+        <a href="faq.html">常见问题 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
