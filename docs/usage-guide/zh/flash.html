@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>固件烧录 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="bar">
+      <span class="brand">tyutool · 使用指南</span>
+      <span class="lang"><a href="../en/flash.html">English</a><a href="flash.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side-nav">
+      <h2>使用指南</h2>
+      <ul>
+        <li><a href="getting-started.html">快速上手</a></li>
+        <li><a href="concepts.html">基础概念</a></li>
+        <li><a href="flash.html" aria-current="page">固件烧录</a></li>
+        <li><a href="serial-debug.html">串口调试</a></li>
+        <li><a href="settings.html">设置</a></li>
+        <li><a href="batch-flash-auth.html">批量烧录授权</a></li>
+        <li><a href="cli.html">命令行</a></li>
+        <li><a href="faq.html">常见问题</a></li>
+      </ul>
+    </aside>
+    <main class="content">
+      <h1>固件烧录</h1>
+      <p class="lead">本页是 <code>/flash</code> 页面的完整参考：连接栏、Flash / Erase / Read / Authorize 四个标签、芯片清单表、多段烧录、擦除预设，以及右侧的进度与日志。</p>
+
+      <h2 id="overview">1. 页面总览</h2>
+      <p>打开 <code>/flash</code> 页面后，整个界面由三部分组成：</p>
+      <ul>
+        <li><strong>顶部连接栏</strong>：选择串口、波特率、芯片型号，并显示连接状态。</li>
+        <li><strong>左侧/中部操作卡片</strong>：四个标签 —— Flash（烧录）、Erase（擦除）、Read（读取）、Authorize（授权）。</li>
+        <li><strong>右侧进度与日志</strong>：实时显示当前操作的分阶段进度和滚动日志。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>顶部连接栏：串口选择、波特率、芯片型号、状态点</figcaption>
+        <!-- capture: flash-connection-bar.png -->
+      </figure>
+
+      <h2 id="connection">2. 连接栏</h2>
+      <p>连接栏位于页面顶部，集中了所有与设备链路相关的控件：</p>
+      <ul>
+        <li><strong>串口（Serial port）</strong>：下拉列出系统当前可用的串口；每次打开下拉时会<strong>重新扫描</strong>串口列表，避免插拔后列表过期。</li>
+        <li><strong>波特率（Baud）</strong>：提供常用档位 <code>115200</code> / <code>460800</code> / <code>921600</code> / <code>1000000</code> / <code>1500000</code> / <code>2000000</code>，以及 <strong>custom</strong>（自定义，范围 300–4,000,000）。在 Authorize（授权）标签下，这里设置的是<strong>授权波特率</strong>而非烧录波特率。</li>
+        <li><strong>芯片选择器（Chip selector）</strong>：选择目标芯片型号；在 Authorize 标签下会额外多出一个 <code>other</code>（仅授权）选项。</li>
+        <li><strong>状态点</strong>：用颜色指示当前串口连接状态（已连接 / 未连接 / 占用中）。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">自动连接 / 自动释放</span>
+        启动一项操作时，如果串口尚未连接，tyutool 会<strong>自动连接</strong>所选串口；操作完成后会<strong>自动释放</strong>该端口，便于其他程序（或串口调试页）接管。
+      </div>
+
+      <h2 id="chip">3. 选择芯片</h2>
+      <p>芯片型号决定三件事：<strong>通信协议</strong>、<strong>默认波特率</strong>、<strong>可寻址的 flash 容量</strong>。下表是 tyutool 支持的全部芯片清单（值来自 <code>chip-manifests.ts</code>，为权威来源）：</p>
+      <table>
+        <thead><tr><th>芯片（<code>-d</code>）</th><th>烧录波特率</th><th>授权波特率</th><th>Flash 容量</th><th>擦除预设</th></tr></thead>
+        <tbody>
+          <tr><td><code>esp32</code></td><td><code>460800</code></td><td><code>115200</code></td><td>4 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32c3</code></td><td><code>460800</code></td><td><code>115200</code></td><td>4 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32c6</code></td><td><code>460800</code></td><td><code>115200</code></td><td>8 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32p4</code></td><td><code>460800</code></td><td><code>115200</code></td><td>16 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>esp32s3</code></td><td><code>460800</code></td><td><code>115200</code></td><td>16 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>t5ai</code>（别名 <code>t5</code>）</td><td><code>921600</code></td><td><code>115200</code></td><td>8 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>t1</code></td><td><code>921600</code></td><td><code>115200</code></td><td>8 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>t3</code></td><td><code>921600</code></td><td><code>115200</code></td><td>4 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>t2</code></td><td><code>921600</code></td><td><code>115200</code></td><td>2 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>bk7231n</code></td><td><code>921600</code></td><td><code>115200</code></td><td>2 MiB</td><td><code>authInfo</code>, <code>fullChipNoRf</code></td></tr>
+          <tr><td><code>ln882h</code></td><td><code>115200</code></td><td><code>115200</code></td><td>2 MiB</td><td><code>fullChip</code></td></tr>
+          <tr><td><code>other</code>（仅授权）</td><td>—</td><td><code>115200</code></td><td>—</td><td>无（无 flash 插件）</td></tr>
+        </tbody>
+      </table>
+      <div class="callout note">
+        <span class="title">默认芯片与别名</span>
+        首次启动 tyutool 时默认选中 <code>t5ai</code>。旧版的 <code>t5</code> / <code>T5</code> 是 <code>t5ai</code> 的别名，会被自动归一化为 <code>t5ai</code>。
+      </div>
+      <div class="callout tip">
+        <span class="title">关于擦除对齐</span>
+        所有芯片在擦除时都要求 <strong>4 KiB 对齐</strong>（起止地址必须是 <code>0x1000</code> 的整数倍）；仅授权专用的 <code>other</code> 芯片豁免——它没有可烧录的 flash。这一点在下方 <a href="#erase">擦除标签</a>会再次提及。
+      </div>
+
+      <h2 id="flash">4. Flash 标签 — 烧录</h2>
+      <p>Flash 标签用于把固件写入 flash。它支持<strong>多段烧录</strong>：你可以一次性把多份固件写到不同的地址段，例如先写 <em>bootloader</em> 再写 <em>app</em>。</p>
+      <p>段（segment）表格最多支持 <strong>10 段</strong>，每段包含：</p>
+      <ul>
+        <li><strong>固件路径</strong>：支持 <code>.bin</code> / <code>.hex</code> / <code>.elf</code> / <code>.img</code> 等格式。</li>
+        <li><strong>起始地址（start）</strong> 与 <strong>结束地址（end）</strong>：十六进制。</li>
+      </ul>
+      <p>段与段之间会自动衔接：</p>
+      <ul>
+        <li>点击“添加段（add segment）”时，新段的起始地址默认等于<strong>上一段的结束地址</strong>，省去手动输入。</li>
+        <li>为某一段选择固件文件后，结束地址会<strong>自动计算</strong>为 <code>start + 文件大小</code>。</li>
+      </ul>
+      <p>只有当<strong>所有段都已填入固件路径</strong>时，Flash 按钮才会启用；任一段缺少路径时按钮保持禁用。</p>
+      <figure class="shot todo">
+        <figcaption>Flash 标签：多段表格、起始/结束地址、Flash 按钮</figcaption>
+        <!-- capture: flash-flash-tab.png -->
+      </figure>
+      <div class="callout tip">
+        <span class="title">多段烧录的典型场景</span>
+        最常见的用法是“bootloader + app”：第一段写引导程序（地址较低），第二段写主应用。一次性写入可以避免分两次操作、中间忘记切换地址导致的覆盖事故。
+      </div>
+
+      <h2 id="erase">5. Erase 标签 — 擦除</h2>
+      <p>Erase 标签用于擦除 flash 中的指定区域。提供两种擦除方式：</p>
+      <ul>
+        <li><strong>按地址擦除</strong>：输入起始（start）和结束（end）地址（十六进制），界面会<strong>实时校验对齐</strong>。</li>
+        <li><strong>高级 — 擦除预设（Advanced）</strong>：按芯片型号提供预设范围，具体见上方<a href="#chip">芯片清单表</a>（<code>authInfo</code> / <code>fullChipNoRf</code> / <code>fullChip</code>，并非每款芯片都全部具备）。</li>
+      </ul>
+      <p>擦除预设（erase preset）的含义：</p>
+      <table>
+        <thead><tr><th>预设类型</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>authInfo</code></td><td>只擦除授权信息区（UUID/AuthKey），保留固件与其他数据。</td></tr>
+          <tr><td><code>fullChipNoRf</code></td><td>整片擦除但保留射频校准区（RF cal），避免设备无法连网。</td></tr>
+          <tr><td><code>fullChip</code></td><td>整片完全擦除，所有区域一律清空（含射频校准）。</td></tr>
+        </tbody>
+      </table>
+      <p>执行擦除前会弹出<strong>确认对话框</strong>。如果所选芯片要求 4 KiB 对齐而你输入的范围不对齐，对话框会说明原因并提供一个“对齐（align）”操作，它会<strong>自动改写</strong>起止地址到最近的合法对齐边界后再执行。</p>
+      <div class="callout danger">
+        <span class="title">危险：擦除会破坏数据</span>
+        擦除会把目标区域清空为 <code>0xFF</code>，<strong>不可撤销</strong>。整片擦除尤其会清空射频校准（RF cal），可能导致设备刷完后<strong>无法连网</strong>。重要内容请先用 <a href="#read">Read 标签</a>备份。
+      </div>
+      <figure class="shot todo">
+        <figcaption>Erase 标签：起止地址、对齐校验、高级预设</figcaption>
+        <!-- capture: flash-erase-tab.png -->
+      </figure>
+
+      <h2 id="read">6. Read 标签 — 读取</h2>
+      <p>Read 标签用于把 flash 内容读出来存成文件，是<strong>备份</strong>的主要手段：</p>
+      <ul>
+        <li><strong>保存目录</strong>：在 Tauri 桌面端选择一个保存目录；在网页端则是浏览器<strong>下载</strong>。</li>
+        <li><strong>文件名</strong>：默认为 <code>tyutool_read_&lt;chip&gt;.bin</code>（例如 <code>tyutool_read_t5ai.bin</code>）。</li>
+        <li><strong>结束地址</strong>：默认取该芯片的<strong>完整 flash 容量</strong>（见<a href="#chip">芯片表</a>），即默认做整片读取。</li>
+      </ul>
+      <p>如果目标文件<strong>已存在</strong>，会弹出对话框让你选择：<strong>覆盖（Overwrite）</strong> 还是 <strong>追加时间戳（Append-timestamp）</strong>（即文件名后自动加上时间后缀，避免覆盖旧文件）。</p>
+      <figure class="shot todo">
+        <figcaption>Read 标签：保存目录、文件名、起止地址</figcaption>
+        <!-- capture: flash-read-tab.png -->
+      </figure>
+
+      <h2 id="authorize">7. Authorize 标签 — 授权</h2>
+      <p>Authorize 标签用于 TuyaOpen UART 授权，写入设备上云凭据（UUID + AuthKey）：</p>
+      <ul>
+        <li><strong>UUID</strong> 与 <strong>AuthKey</strong> 输入框：内容会被<strong>掩码显示</strong>，且<strong>不允许复制</strong>，以防凭据泄露。</li>
+        <li><strong>复制凭据（Copy credentials）</strong> 按钮：在受控场景下把当前凭据复制出来。</li>
+        <li>页面提供指向 <strong>TuyaOpen 授权购买</strong> 与<strong>本地化授权文档</strong>的外部链接。</li>
+      </ul>
+      <p>授权分两种操作：</p>
+      <ul>
+        <li><strong>读取授权（Read Auth）</strong>：仅探测设备当前的 UUID/AuthKey，<strong>只占用串口</strong>，不写入任何内容。</li>
+        <li><strong>授权（Authorize）</strong>：执行写入，<strong>需要先填好 UUID 与 AuthKey</strong>。执行前会有确认提示流程。</li>
+      </ul>
+      <div class="callout danger">
+        <span class="title">凭据请妥善保管</span>
+        UUID 与 AuthKey 是从涂鸦<strong>购买</strong>的凭据，写入伪造或重复的值会导致设备无法上线甚至污染设备池。请勿在截图、日志、聊天中泄露凭据。此外，<code>other</code> 芯片<strong>仅支持授权</strong>，没有 flash 插件，无法烧录。
+      </div>
+      <figure class="shot todo">
+        <figcaption>Authorize 标签：UUID/AuthKey 掩码输入、读取授权与授权按钮</figcaption>
+        <!-- capture: flash-authorize-tab.png -->
+      </figure>
+
+      <h2 id="progress">8. 进度与日志</h2>
+      <p>页面右侧是一个常驻的<strong>进度 + 日志</strong>面板：</p>
+      <ul>
+        <li><strong>分阶段进度条</strong>：按操作阶段（phase）显示进度，每个阶段有自己的<strong>主题色</strong>、当前<strong>百分比</strong>；对于无法预估进度的阶段会显示<strong>不确定（indeterminate）</strong>状态。</li>
+        <li><strong>日志面板</strong>：滚动显示操作日志，提供 <strong>锁定自动滚动（lock auto-scroll）</strong>、<strong>清空（clear）</strong>、<strong>复制（copy）</strong> 三个控件。</li>
+      </ul>
+      <figure class="shot todo">
+        <figcaption>右侧进度条与日志面板（分阶段进度 + 日志控件）</figcaption>
+        <!-- capture: flash-progress-log.png -->
+      </figure>
+
+      <h2 id="port-ownership">9. 端口占用</h2>
+      <p>固件烧录页与<strong>串口调试</strong>页<strong>共用同一批串口</strong>。两者不能同时占用同一个端口。</p>
+      <div class="callout warn">
+        <span class="title">端口被占用时</span>
+        如果串口调试页当前正占用某个端口，在烧录页操作该端口时，tyutool 会<strong>请你先释放</strong>它；你也可以在串口调试的设置里开启<strong>自动释放（auto-release）</strong>，让它在其他页面需要时自动让出端口。详见 <a href="serial-debug.html">串口调试</a>页。
+      </div>
+
+      <nav class="pager">
+        <a href="getting-started.html">← 快速上手</a>
+        <a href="serial-debug.html">串口调试 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
