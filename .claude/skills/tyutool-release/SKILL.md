@@ -40,11 +40,18 @@ The script:
 
 ---
 
-## Mode B — Manual (staged)
+## Mode B — Manual (staged, via PR)
 
-Use this when you've already written the CHANGELOG (e.g. during release prep).
+Use this when you've already written the CHANGELOG (e.g. during release prep), or when `gh` / push-to-`refactor/v3` permissions are unavailable.
+
+Releases land on `refactor/v3` **via a PR** (never a direct push — AGENTS.md forbids direct commits to `refactor/v3`). The tag is created on the merged commit afterwards.
 
 ```bash
+# 0. Start from a clean, synced refactor/v3
+git checkout refactor/v3
+git pull origin refactor/v3
+git checkout -b yj/release-3.1.4        # <initials>/release-<version>
+
 # 1. Bump versions + insert CHANGELOG draft
 pnpm version:set 3.1.4
 
@@ -61,13 +68,20 @@ git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
         Cargo.lock CHANGELOG.md
 git commit -m "chore(release): bump version to 3.1.4 and update changelog"
 
-# 5. Push and wait for CI to pass
-git push origin refactor/v3
+# 5. Push the branch and open a PR → refactor/v3
+git push -u origin yj/release-3.1.4
+gh pr create --base refactor/v3 --head yj/release-3.1.4 \
+  --title "chore(release): v3.1.4" \
+  --body "Release bump to 3.1.4. After merge, tag v3.1.4 on refactor/v3 to trigger release CI."
 
-# 6. Tag and push → triggers release CI
+# 6. After the PR merges, sync local refactor/v3, then tag and push → triggers release CI
+git checkout refactor/v3
+git pull origin refactor/v3
 git tag v3.1.4
 git push origin v3.1.4
 ```
+
+> The version bump should be the **only** change on the release branch — one commit, easy to review. If CI on the PR fails, fix on the release branch (or rebase) and re-push; do not tag until `refactor/v3` holds the merged commit.
 
 ---
 
@@ -85,23 +99,35 @@ git push origin v3.1.4
 
 ## CHANGELOG Format
 
-Each release entry uses bilingual inline bullets:
+Each release entry uses a **two-block** bilingual layout: a full Chinese block, a `---` separator, then a full English block.
 
 ```markdown
-## [3.1.4] - 2026-07-01
+## [3.2.2] - 2026-07-09
 
-### 新功能 / Features
+### 新功能
 
-- `module`：中文描述 / English description
+- `module`：中文描述
 
-### 问题修复 / Bug Fixes
+### 问题修复
 
-- `module`：中文描述 / English description
+- `module`：中文描述
 
-### 工程改进 / Engineering
+---
 
-- `ci`：中文描述 / English description
+### Features
+
+- `module`: English description
+
+### Bug Fixes
+
+- `module`: English description
 ```
+
+Rules:
+- The `---` line separates the Chinese and English blocks within one version section — it is reserved for this purpose only.
+- The ` / ` character sequence is **not** a language boundary; it may appear inside either language (e.g. `关闭 / 1 小时`, `off / 1h`).
+- If a section has no English translation, omit the `---` and English block entirely; the Chinese block alone is fine.
+- The in-app updater splits on `---` and shows only the block matching the user's language.
 
 The `<!-- 润色后删除本行 / remove this line after editing -->` draft marker must be **removed** before the tag push — `pnpm run release` and `pnpm run release:gui` both enforce this.
 
