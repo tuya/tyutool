@@ -3,7 +3,9 @@
   <title id="diagTitle">PC to IoT device UART flashing topology</title>
   <desc id="diagDesc">A PC running tyutool connects over USB to a USB-serial adapter, which connects over UART (TX, RX, GND) to an IoT device containing an SoC and a flash chip.</desc>
 
-  <!-- Theme-aware palette: matches docs/usage-guide/assets/style.css -->
+  <!-- Theme-aware palette: matches docs/usage-guide/assets/style.css.
+       Responds to BOTH the OS media query (system mode) and the page's
+       explicit [data-theme="dark"] attribute (when this SVG is inlined). -->
   <style>
     .bg{fill:#ffffff}
     .box{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5}
@@ -16,6 +18,8 @@
     .ttl{fill:#1f2328;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;font-weight:700}
     .sub{fill:#57606a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
     .pin{fill:#2563eb;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700;font-size:13px}
+    .dot-wire{fill:#2563eb;stroke:none}
+    .dot-gnd{fill:#57606a;stroke:none}
     @media (prefers-color-scheme: dark){
       .bg{fill:#0d1117}
       .box{fill:#161b22;stroke:#30363d}
@@ -28,7 +32,23 @@
       .ttl{fill:#e6edf3}
       .sub{fill:#9198a1}
       .pin{fill:#58a6ff}
+      .dot-wire{fill:#58a6ff}
+      .dot-gnd{fill:#9198a1}
     }
+    :root[data-theme="dark"] .bg,
+    [data-theme="dark"] .bg{fill:#0d1117}
+    [data-theme="dark"] .box{fill:#161b22;stroke:#30363d}
+    [data-theme="dark"] .inner{fill:#0d1117;stroke:#30363d}
+    [data-theme="dark"] .frame{stroke:#30363d}
+    [data-theme="dark"] .wire{stroke:#58a6ff}
+    [data-theme="dark"] .gnd{stroke:#9198a1}
+    [data-theme="dark"] .cable{stroke:#e6edf3}
+    [data-theme="dark"] .lbl,
+    [data-theme="dark"] .ttl{fill:#e6edf3}
+    [data-theme="dark"] .sub{fill:#9198a1}
+    [data-theme="dark"] .pin{fill:#58a6ff}
+    [data-theme="dark"] .dot-wire{fill:#58a6ff}
+    [data-theme="dark"] .dot-gnd{fill:#9198a1}
   </style>
 
   <rect class="bg" x="0" y="0" width="920" height="400"/>
@@ -57,8 +77,8 @@
     <rect class="box" x="300" y="140" width="180" height="120" rx="10"/>
     <!-- dongle glyph -->
     <rect class="inner" x="320" y="170" width="140" height="46" rx="4"/>
-    <circle cx="335" cy="193" r="4" class="wire" fill="#2563eb" stroke="none"/>
-    <circle cx="350" cy="193" r="4" class="gnd" fill="#57606a" stroke="none"/>
+    <circle cx="335" cy="193" r="4" class="dot-wire"/>
+    <circle cx="350" cy="193" r="4" class="dot-gnd"/>
     <text class="ttl" x="390" y="160" text-anchor="middle" font-size="14">USB-Serial adapter</text>
     <text class="sub" x="390" y="232" text-anchor="middle" font-size="11">CH340 / CP2102 / FT232 …</text>
     <text class="sub" x="390" y="248" text-anchor="middle" font-size="10">USB ↔ UART bridge</text>
