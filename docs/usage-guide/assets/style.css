@@ -107,9 +107,13 @@ img{max-width:100%;height:auto}
 .icon-btn.theme-toggle[data-mode="system"] .icon-sun{display:none}
 .icon-btn.theme-toggle[data-mode="system"] .icon-auto{display:inline}
 
-/* ─── TOC popover ───────────────────────────────────────────── */
-.toc-popover{position:fixed;top:calc(var(--header-h) + 8px);right:24px;width:264px;max-height:min(70vh,560px);overflow-y:auto;background:var(--vp-bg);border:1px solid var(--vp-border);border-radius:8px;box-shadow:var(--vp-shadow-2);padding:12px 8px;z-index:40;font-size:14px;line-height:24px}
-.toc-popover[hidden]{display:none}
+/* ─── TOC (permanently visible on wide screens) ─────────────── */
+/* Shown only when the viewport is wide enough that the centered content
+   (max 864px) and the 264px TOC column don't collide. The centered 864px
+   content's right edge is (V+864)/2; the TOC's left edge is V-24-264.
+   Collision-free requires V-288 > (V+864)/2 → V > 1440. So show at ≥1440px. */
+.toc-popover{display:none;position:fixed;top:calc(var(--header-h) + 8px);right:24px;width:264px;max-height:calc(100vh - var(--header-h) - 32px);overflow-y:auto;background:var(--vp-bg);border:1px solid var(--vp-border);border-radius:8px;box-shadow:var(--vp-shadow-2);padding:12px 8px;z-index:40;font-size:14px;line-height:24px}
+@media (min-width:1440px){ .toc-popover{display:block} }
 .toc-popover .toc-title{padding:0 8px 8px;font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--vp-text-3)}
 .toc-popover a{display:block;padding:4px 8px;color:var(--vp-text-2);text-decoration:none;border-left:2px solid transparent;transition:color .2s}
 .toc-popover a:hover{color:var(--vp-brand-1)}

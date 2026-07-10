@@ -57,20 +57,20 @@
     }
   }
 
-  /* ── table of contents ───────────────────────────────── */
+  /* ── table of contents ─────────────────────────────────
+     Permanently visible (no toggle). Built from .content h2[id]/h3[id].
+     Hidden on pages with no content headings (home/landing). */
   function initToc() {
-    var btn = document.querySelector('.toc-toggle');
-    if (!btn) return;
     var headings = document.querySelectorAll('.content h2[id], .content h3[id]');
-    if (!headings.length) { btn.style.display = 'none'; return; }
+    if (!headings.length) return;
+    var zh = document.documentElement.lang === 'zh-CN';
 
-    // build popover
     var nav = document.createElement('nav');
     nav.className = 'toc-popover';
-    nav.setAttribute('hidden', '');
+    nav.setAttribute('aria-label', zh ? '本页目录' : 'On this page');
     var title = document.createElement('div');
     title.className = 'toc-title';
-    title.textContent = btn.dataset.tocTitle || 'On this page';
+    title.textContent = zh ? '本页目录' : 'On this page';
     nav.appendChild(title);
     var links = [];
     Array.prototype.forEach.call(headings, function (h) {
@@ -78,21 +78,10 @@
       a.href = '#' + h.id;
       a.textContent = h.textContent.replace(/^\s*\d+\.\s*/, '').trim();
       if (h.tagName === 'H3') a.className = 'level-3';
-      a.addEventListener('click', function () { close(); });
       nav.appendChild(a);
       links.push({ el: a, heading: h });
     });
     document.body.appendChild(nav);
-
-    function open() { nav.removeAttribute('hidden'); btn.setAttribute('aria-expanded', 'true'); }
-    function close() { nav.setAttribute('hidden', ''); btn.setAttribute('aria-expanded', 'false'); }
-    function toggle() { nav.hasAttribute('hidden') ? open() : close(); }
-    btn.addEventListener('click', function (e) { e.stopPropagation(); toggle(); });
-    nav.addEventListener('click', function (e) { e.stopPropagation(); });
-    document.addEventListener('click', function (e) { if (!nav.hasAttribute('hidden')) close(); });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !nav.hasAttribute('hidden')) { close(); btn.focus(); }
-    });
 
     // scroll-spy (throttled via rAF). anchor-jump smoothing respects
     // prefers-reduced-motion via the html{scroll-behavior} rule in style.css.
