@@ -54,3 +54,7 @@ docs/superpowers/
 # ── Claude Code ───────────────────────────────────────────────────────────────
 .claude/*
 !.claude/skills/
+
+# ── ZCode / git worktrees ─────────────────────────────────────────────────────
+.worktrees/
+.zcode/
