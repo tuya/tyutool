@@ -34,8 +34,137 @@
       <p>tyutool talks to a device over a serial chain: commands issued by tyutool on your PC travel through a USB-serial adapter as UART electrical signals to the device's SoC, which then reads and writes the flash chip. The figure below shows the full topology of this chain.</p>
 
       <figure class="diagram">
-        <img src="../assets/images/concepts-uart-topology.svg" alt="Topology diagram: PC running tyutool connects via USB to a USB-serial adapter, then via UART (TX/RX/GND) to an IoT device containing an SoC and a Flash chip">
-        <figcaption>Figure 1 · The flashing chain from tyutool to the device</figcaption>
+        <!-- diagram source: assets/images/concepts-uart-topology.svg — keep in sync -->
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 400" role="img" aria-labelledby="diagTitle diagDesc">
+          <title id="diagTitle">PC to IoT device UART flashing topology</title>
+          <desc id="diagDesc">A PC running tyutool connects over USB to a USB-serial adapter, which connects over UART (TX, RX, GND) to an IoT device containing an SoC and a flash chip.</desc>
+
+          <!-- Theme-aware palette: matches docs/usage-guide/assets/style.css.
+               Responds to BOTH the OS media query (system mode) and the page's
+               explicit [data-theme="dark"] attribute (when this SVG is inlined). -->
+          <style>
+            .bg{fill:#ffffff}
+            .box{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5}
+            .inner{fill:#ffffff;stroke:#d0d7de;stroke-width:1.25}
+            .frame{fill:none;stroke:#d0d7de;stroke-width:1.5;stroke-dasharray:5 4}
+            .wire{stroke:#2563eb;stroke-width:2.5;fill:none}
+            .gnd{stroke:#57606a;stroke-width:2.5;fill:none}
+            .cable{stroke:#1f2328;stroke-width:4;fill:none;stroke-linecap:round}
+            .lbl{fill:#1f2328;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+            .ttl{fill:#1f2328;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;font-weight:700}
+            .sub{fill:#57606a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+            .pin{fill:#2563eb;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700;font-size:13px}
+            .dot-wire{fill:#2563eb;stroke:none}
+            .dot-gnd{fill:#57606a;stroke:none}
+            @media (prefers-color-scheme: dark){
+              .bg{fill:#0d1117}
+              .box{fill:#161b22;stroke:#30363d}
+              .inner{fill:#0d1117;stroke:#30363d}
+              .frame{stroke:#30363d}
+              .wire{stroke:#58a6ff}
+              .gnd{stroke:#9198a1}
+              .cable{stroke:#e6edf3}
+              .lbl{fill:#e6edf3}
+              .ttl{fill:#e6edf3}
+              .sub{fill:#9198a1}
+              .pin{fill:#58a6ff}
+              .dot-wire{fill:#58a6ff}
+              .dot-gnd{fill:#9198a1}
+            }
+            :root[data-theme="dark"] .bg,
+            [data-theme="dark"] .bg{fill:#0d1117}
+            [data-theme="dark"] .box{fill:#161b22;stroke:#30363d}
+            [data-theme="dark"] .inner{fill:#0d1117;stroke:#30363d}
+            [data-theme="dark"] .frame{stroke:#30363d}
+            [data-theme="dark"] .wire{stroke:#58a6ff}
+            [data-theme="dark"] .gnd{stroke:#9198a1}
+            [data-theme="dark"] .cable{stroke:#e6edf3}
+            [data-theme="dark"] .lbl,
+            [data-theme="dark"] .ttl{fill:#e6edf3}
+            [data-theme="dark"] .sub{fill:#9198a1}
+            [data-theme="dark"] .pin{fill:#58a6ff}
+            [data-theme="dark"] .dot-wire{fill:#58a6ff}
+            [data-theme="dark"] .dot-gnd{fill:#9198a1}
+          </style>
+
+          <rect class="bg" x="0" y="0" width="920" height="400"/>
+
+          <!-- ===== PC (running tyutool) ===== -->
+          <g id="pc">
+            <rect class="box" x="30" y="140" width="150" height="120" rx="10"/>
+            <!-- monitor glyph -->
+            <rect class="inner" x="55" y="158" width="100" height="62" rx="4"/>
+            <line x1="80" y1="232" x2="130" y2="232" class="gnd" stroke-width="2"/>
+            <line x1="105" y1="220" x2="105" y2="232" class="gnd" stroke-width="2"/>
+            <text class="ttl" x="105" y="180" text-anchor="middle" font-size="17">PC</text>
+            <text class="sub" x="105" y="200" text-anchor="middle" font-size="11">running tyutool</text>
+            <text class="lbl" x="105" y="250" text-anchor="middle" font-size="12">Host computer</text>
+          </g>
+
+          <!-- ===== USB cable ===== -->
+          <g id="usb">
+            <line class="cable" x1="180" y1="200" x2="300" y2="200"/>
+            <text class="pin" x="240" y="188" text-anchor="middle">USB</text>
+            <text class="sub" x="240" y="216" text-anchor="middle" font-size="10">universal serial bus</text>
+          </g>
+
+          <!-- ===== USB-Serial adapter ===== -->
+          <g id="adapter">
+            <rect class="box" x="300" y="140" width="180" height="120" rx="10"/>
+            <!-- dongle glyph -->
+            <rect class="inner" x="320" y="170" width="140" height="46" rx="4"/>
+            <circle cx="335" cy="193" r="4" class="dot-wire"/>
+            <circle cx="350" cy="193" r="4" class="dot-gnd"/>
+            <text class="ttl" x="390" y="160" text-anchor="middle" font-size="14">USB-Serial adapter</text>
+            <text class="sub" x="390" y="232" text-anchor="middle" font-size="11">CH340 / CP2102 / FT232 …</text>
+            <text class="sub" x="390" y="248" text-anchor="middle" font-size="10">USB ↔ UART bridge</text>
+          </g>
+
+          <!-- ===== UART wires (TX / RX / GND) ===== -->
+          <g id="uart">
+            <!-- TX: adapter TX -> device RX (cross over) -->
+            <line class="wire" x1="480" y1="180" x2="620" y2="210"/>
+            <!-- RX: adapter RX -> device TX (cross over) -->
+            <line class="wire" x1="480" y1="210" x2="620" y2="180"/>
+            <!-- GND -->
+            <line class="gnd" x1="480" y1="225" x2="620" y2="225"/>
+            <!-- labels near adapter side -->
+            <text class="pin" x="500" y="174">TX</text>
+            <text class="pin" x="500" y="218">RX</text>
+            <text class="pin" x="500" y="240">GND</text>
+            <!-- labels near device side -->
+            <text class="pin" x="595" y="174" text-anchor="end">RX</text>
+            <text class="pin" x="595" y="218" text-anchor="end">TX</text>
+            <text class="pin" x="595" y="240" text-anchor="end">GND</text>
+            <text class="sub" x="550" y="262" text-anchor="middle" font-size="10">UART — TX/RX cross, GND common</text>
+          </g>
+
+          <!-- ===== IoT device (SoC + Flash chip) ===== -->
+          <g id="device">
+            <rect class="box" x="620" y="100" width="200" height="220" rx="10"/>
+            <text class="ttl" x="720" y="124" text-anchor="middle" font-size="15">IoT device</text>
+            <!-- SoC -->
+            <rect class="inner" x="640" y="142" width="160" height="66" rx="6"/>
+            <text class="lbl" x="720" y="168" text-anchor="middle" font-size="14" font-weight="600">SoC</text>
+            <text class="sub" x="720" y="190" text-anchor="middle" font-size="11">MCU + radio (Wi-Fi/BLE)</text>
+            <!-- Flash chip -->
+            <rect class="inner" x="640" y="226" width="160" height="66" rx="6"/>
+            <text class="lbl" x="720" y="252" text-anchor="middle" font-size="14" font-weight="600">Flash chip</text>
+            <text class="sub" x="720" y="274" text-anchor="middle" font-size="11">firmware stored here</text>
+            <!-- internal SoC<->Flash bus -->
+            <line class="gnd" x1="720" y1="208" x2="720" y2="226" stroke-width="2"/>
+            <text class="sub" x="720" y="310" text-anchor="middle" font-size="10">target of flash / erase / read</text>
+          </g>
+
+          <!-- ===== Legend / flow caption ===== -->
+          <g id="legend">
+            <rect class="frame" x="30" y="346" width="860" height="40" rx="8"/>
+            <text class="lbl" x="460" y="370" text-anchor="middle" font-size="12">
+              Flow: tyutool → USB → adapter → UART (TX/RX/GND) → SoC → Flash chip
+            </text>
+          </g>
+        </svg>
+        <figcaption>Figure 1 · tyutool-to-device flashing topology</figcaption>
       </figure>
 
       <div class="callout note">
