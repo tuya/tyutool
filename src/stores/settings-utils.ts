@@ -86,7 +86,9 @@ export function loadStoredLogLevel(): LogLevelId {
   if (val && ["error", "warn", "info", "debug", "trace"].includes(val)) {
     return val as LogLevelId;
   }
-  return "info";
+  // 默认 debug:与后端 tauri-plugin-log 的启动级别保持一致,
+  // 批量授权排查依赖 debug 级的串口收发日志(见 authorize.rs 的 [serial] 日志)。
+  return "debug";
 }
 
 export function loadStoredSerialPortIndicatorsEnabled(): boolean {

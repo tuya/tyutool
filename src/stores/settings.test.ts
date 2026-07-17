@@ -64,12 +64,12 @@ describe("useSettingsStore setters", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults to system theme, auto locale, log enabled at info", () => {
+  it("defaults to system theme, auto locale, log enabled at debug", () => {
     const s = useSettingsStore();
     expect(s.theme).toBe("system");
     expect(s.locale).toBe("auto");
     expect(s.logEnabled).toBe(true);
-    expect(s.logLevel).toBe("info");
+    expect(s.logLevel).toBe("debug");
     expect(s.serialPortIndicatorsEnabled).toBe(true);
     expect(s.autoUpdateInterval).toBe("6h");
   });

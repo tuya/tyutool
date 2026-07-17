@@ -109,8 +109,8 @@ describe("loadStoredLogEnabled", () => {
 });
 
 describe("loadStoredLogLevel", () => {
-  it('returns "info" when no stored value', () => {
-    expect(loadStoredLogLevel()).toBe("info");
+  it('returns "debug" when no stored value (matches backend default)', () => {
+    expect(loadStoredLogLevel()).toBe("debug");
   });
 
   it("returns stored valid level", () => {
@@ -120,9 +120,9 @@ describe("loadStoredLogLevel", () => {
     }
   });
 
-  it('returns "info" for invalid level', () => {
+  it('returns "debug" for invalid level', () => {
     localStorage.setItem(LOG_LEVEL_KEY, "verbose");
-    expect(loadStoredLogLevel()).toBe("info");
+    expect(loadStoredLogLevel()).toBe("debug");
   });
 });
 

@@ -119,9 +119,9 @@ describe("useSettingsStore init() + web persistence", () => {
     const s = useSettingsStore();
     s.init();
 
-    s.setLogLevel("debug");
+    s.setLogLevel("info");
     await nextTick();
-    expect(localStorage.getItem(LOG_LEVEL_KEY)).toBe("debug");
+    expect(localStorage.getItem(LOG_LEVEL_KEY)).toBe("info");
 
     s.setLogLevel("trace");
     await nextTick();
