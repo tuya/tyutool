@@ -13,6 +13,7 @@ import BatchFlashAuthToolbar from "./components/BatchFlashAuthToolbar.vue";
 import BatchFlashAuthSlotList from "./components/BatchFlashAuthSlotList.vue";
 import ToolboxBreadcrumb from "@/features/toolbox/components/ToolboxBreadcrumb.vue";
 import DisclaimerModal from "./components/DisclaimerModal.vue";
+import { DISCLAIMER_KEY } from "./disclaimer";
 
 const { t } = useI18n();
 const store = useBatchFlashAuthStore();
@@ -22,7 +23,6 @@ const indicatorActivePorts = computed(() => unref(portIndicators.activePorts));
 
 const router = useRouter();
 
-const DISCLAIMER_KEY = "tyutool-batch-auth-disclaimer-v1";
 const showDisclaimer = ref(false);
 
 function onDisclaimerConfirm(dontShowAgain: boolean) {
