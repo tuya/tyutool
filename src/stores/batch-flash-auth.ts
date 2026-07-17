@@ -7,6 +7,7 @@ import { i18n } from "@/i18n";
 import { rLog } from "@/utils/log";
 import {
   BATCH_FLASH_CAPABLE_CHIPS,
+  OTP_CAPABLE_CHIPS,
   type BatchSlotState,
   type BatchSlotStatus,
   type CumulativeStats,
@@ -94,6 +95,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   // ── Computed ──────────────────────────────────────────────────────────────
   const canFlash = computed(() =>
     (BATCH_FLASH_CAPABLE_CHIPS as readonly string[]).includes(chipId.value),
+  );
+
+  /** Whether the current chip's firmware supports OTP (write-once) storage. */
+  const isOtpCapable = computed(() =>
+    (OTP_CAPABLE_CHIPS as readonly string[]).includes(chipId.value),
   );
 
   const opMode = computed<BatchOpMode>(() =>
@@ -873,6 +879,26 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     () => void saveSharedConfig(),
   );
 
+  // OTP is write-once — a device that already holds different credentials can
+  // never be overwritten, so "Overwrite" is meaningless for OTP. Force Skip.
+  watch(
+    () => authConfig.value.authStorage,
+    (storage) => {
+      if (storage === "otp" && authConfig.value.conflictPolicy !== "skip") {
+        authConfig.value.conflictPolicy = "skip";
+      }
+    },
+    { immediate: true },
+  );
+
+  // Only OTP-capable chips may keep OTP storage; switching to any other chip
+  // resets storage to KV so a stale "otp" cannot leak to a non-OTP chip.
+  watch(chipId, () => {
+    if (!isOtpCapable.value && authConfig.value.authStorage === "otp") {
+      authConfig.value.authStorage = "kv";
+    }
+  });
+
   return {
     // State
     slots,
@@ -895,6 +921,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     excelError,
     // Computed
     canFlash,
+    isOtpCapable,
     opMode,
     currentStats,
     inputsValid,

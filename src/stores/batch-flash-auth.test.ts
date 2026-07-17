@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // src/stores/batch-flash-auth.test.ts
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { nextTick } from "vue";
 import { setActivePinia, createPinia } from "pinia";
 import { useBatchFlashAuthStore } from "./batch-flash-auth";
 import type { BatchSlotState } from "@/features/batch-flash-auth/types";
@@ -8,6 +9,31 @@ import type { BatchSlotState } from "@/features/batch-flash-auth/types";
 vi.mock("@/runtime", () => ({
   isTauriRuntime: () => false,
 }));
+
+describe("OTP storage coupling", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("forces conflictPolicy to skip when OTP storage is selected", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "t5ai";
+    store.authConfig.conflictPolicy = "overwrite";
+    store.authConfig.authStorage = "otp";
+    await nextTick();
+    expect(store.authConfig.conflictPolicy).toBe("skip");
+    expect(store.isOtpCapable).toBe(true);
+  });
+
+  it("resets authStorage to kv when switching to a non-OTP-capable chip", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "t5ai";
+    store.authConfig.authStorage = "otp";
+    await nextTick();
+    store.chipId = "esp32";
+    await nextTick();
+    expect(store.authConfig.authStorage).toBe("kv");
+    expect(store.isOtpCapable).toBe(false);
+  });
+});
 
 describe("opMode", () => {
   beforeEach(() => setActivePinia(createPinia()));
@@ -204,7 +230,13 @@ describe("canStart / canRetry / canCancel", () => {
     store.addPorts(["COM3"]);
     store.chipId = "esp32";
     store.authConfig.excelPath = "/auth.xlsx";
-    store.excelStats = { total: 10, used: 0, inProgress: 0, remaining: 10 };
+    store.excelStats = {
+      total: 10,
+      used: 0,
+      inProgress: 0,
+      remaining: 10,
+      invalid: 0,
+    };
     expect(store.canStart).toBe(true);
   });
 
@@ -228,7 +260,13 @@ describe("canStart / canRetry / canCancel", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.authConfig.excelPath = "/auth.xlsx";
-    store.excelStats = { total: 10, used: 10, inProgress: 0, remaining: 0 };
+    store.excelStats = {
+      total: 10,
+      used: 10,
+      inProgress: 0,
+      remaining: 0,
+      invalid: 0,
+    };
     expect(store.canStart).toBe(false);
   });
 
@@ -1024,7 +1062,13 @@ describe("startBatch — firmware toggle in Tauri mode", () => {
     store.flashFirmware = false;
     store.firmwarePath = "/path/to/fw.bin";
     store.authConfig.excelPath = "/auth.xlsx";
-    store.excelStats = { total: 1, used: 0, inProgress: 0, remaining: 1 };
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
 
     await store.startBatch();
 

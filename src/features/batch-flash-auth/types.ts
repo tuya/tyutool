@@ -9,6 +9,10 @@ export const BATCH_AUTH_TOOL_CHIP_OPTIONS = ["esp32", "t5ai", "other"] as const;
 // When GD32 support is added to the Rust plugin registry, append "gd32" here.
 export const BATCH_FLASH_CAPABLE_CHIPS = ["esp32", "t5ai"] as const;
 
+/** Chips whose firmware supports OTP (write-once eFuse) auth storage.
+ *  Only these expose the OTP option; for any other chip the tool writes KV. */
+export const OTP_CAPABLE_CHIPS = ["t5ai"] as const;
+
 export type BatchOpMode = "auth-only" | "flash-then-auth";
 
 export type BatchSlotStatus =
@@ -121,6 +125,8 @@ export interface ExcelStats {
   /** Rows in MacRead/AuthWritten state: code allocated but auth not yet confirmed. */
   inProgress: number;
   remaining: number;
+  /** Rows whose UUID/AuthKey fail the firmware length rules; never allocated. */
+  invalid: number;
 }
 
 /** Discriminated by `kind`; carries the counts the UI needs to render a

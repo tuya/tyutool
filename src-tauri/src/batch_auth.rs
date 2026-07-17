@@ -46,6 +46,8 @@ struct RowData {
     step: Option<String>,
     last_error: Option<String>,
     extra_cells: Vec<(usize, String)>,
+    /// UUID/AuthKey pass the firmware length rules. Computed on load.
+    valid: bool,
 }
 
 #[derive(Debug)]
@@ -62,6 +64,18 @@ pub struct ExcelStats {
     pub used: usize,
     pub in_progress: usize,
     pub remaining: usize,
+    /// Rows whose UUID/AuthKey fail the firmware length rules (UUID 16/20,
+    /// AuthKey 32). These are never allocated and never counted as `remaining`.
+    pub invalid: usize,
+}
+
+/// Mirror of the firmware's credential-length rules (`tuya_authorize.c`).
+/// A row failing this is a data-entry error that would be rejected by the
+/// device, so it must not be handed out or burned.
+fn credentials_valid(uuid: &str, authkey: &str) -> bool {
+    let ul = uuid.chars().count();
+    let kl = authkey.chars().count();
+    (ul == 16 || ul == 20) && kl == 32
 }
 
 struct AllocatorState {
@@ -182,6 +196,15 @@ impl ExcelRowAllocator {
                 .map(|i| (i, get(i)))
                 .collect();
 
+            let valid = credentials_valid(&uuid, &authkey);
+            if !valid {
+                log::warn!(
+                    "[batch-auth] invalid credential length in Excel: uuid_len={} authkey_len={}",
+                    uuid.chars().count(),
+                    authkey.chars().count()
+                );
+            }
+
             rows.push(RowData {
                 uuid,
                 authkey,
@@ -195,6 +218,7 @@ impl ExcelRowAllocator {
                 },
                 last_error: error_str,
                 extra_cells,
+                valid,
             });
         }
 
@@ -242,20 +266,22 @@ impl ExcelRowAllocator {
         let remaining = state
             .rows
             .iter()
-            .filter(|r| r.status == RowStatus::Available)
+            .filter(|r| r.status == RowStatus::Available && r.valid)
             .count();
+        let invalid = state.rows.iter().filter(|r| !r.valid).count();
         ExcelStats {
             total,
             used,
             in_progress,
             remaining,
+            invalid,
         }
     }
 
     pub fn allocate_row(&self) -> Result<ExcelRow, String> {
         let mut state = self.state.lock().unwrap();
         for (idx, row) in state.rows.iter_mut().enumerate() {
-            if row.status == RowStatus::Available {
+            if row.status == RowStatus::Available && row.valid {
                 row.status = RowStatus::MacRead;
                 return Ok(ExcelRow {
                     row_idx: idx,
@@ -490,8 +516,27 @@ fn save_workbook(state: &AllocatorState) -> Result<(), String> {
         }
     }
 
-    wb.save(&state.path)
-        .map_err(|e| format!("Failed to save Excel: {e}"))
+    // Atomic write: build into a temp file, then rename over the target so a
+    // crash/power-loss mid-write can never truncate the ledger — the ledger is
+    // the ONLY record of which OTP codes were burned to which devices.
+    let tmp = state.path.with_extension("xlsx.tmp");
+    wb.save(&tmp)
+        .map_err(|e| format!("Failed to write temp Excel: {e}"))?;
+
+    // Roll the current (last known-good) file into a snapshot before we
+    // overwrite it. Two backups exist: `.xlsx.bak` = pristine original (made
+    // once, in update_row_state), `.xlsx.prev.bak` = last successful save.
+    if state.path.exists() {
+        let prev = state.path.with_extension("xlsx.prev.bak");
+        if let Err(e) = std::fs::copy(&state.path, &prev) {
+            log::warn!("[batch-auth] prev-snapshot backup failed: {e}");
+        }
+    }
+
+    std::fs::rename(&tmp, &state.path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Failed to commit Excel: {e}")
+    })
 }
 
 #[cfg(test)]
@@ -499,7 +544,7 @@ mod tests {
     use super::*;
 
     /// Write a minimal .xlsx with the given headers + string data rows.
-    fn write_xlsx(path: &Path, headers: &[&str], rows: &[Vec<&str>]) {
+    fn write_xlsx<S: AsRef<str>>(path: &Path, headers: &[&str], rows: &[Vec<S>]) {
         let mut wb = XlsxWorkbook::new();
         let ws = wb.add_worksheet();
         for (c, h) in headers.iter().enumerate() {
@@ -507,10 +552,23 @@ mod tests {
         }
         for (r, row) in rows.iter().enumerate() {
             for (c, val) in row.iter().enumerate() {
-                ws.write((r + 1) as u32, c as u16, *val).unwrap();
+                ws.write((r + 1) as u32, c as u16, val.as_ref()).unwrap();
             }
         }
         wb.save(path).unwrap();
+    }
+
+    /// A firmware-valid 20-char UUID derived from a short tag (padded with 'x').
+    fn vu(tag: &str) -> String {
+        format!("{tag:x<20}")
+    }
+    /// A firmware-valid 32-char AuthKey derived from a short tag (padded with 'k').
+    fn vk(tag: &str) -> String {
+        format!("{tag:k<32}")
+    }
+    /// Build a `Vec<String>` row from string-ish parts (ergonomic fixtures).
+    fn row(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
@@ -542,9 +600,15 @@ mod tests {
             &path,
             &["UUID", "AUTHKEY", "STATUS", "MAC", "TIMESTAMP"],
             &[
-                vec!["uuid-a", "key-a", "", "", ""],
-                vec!["uuid-b", "key-b", "", "", ""],
-                vec!["uuid-c", "key-c", "DONE", "AA:BB", "2024-01-01T00:00:00Z"],
+                row(&[&vu("uuid-a"), &vk("key-a"), "", "", ""]),
+                row(&[&vu("uuid-b"), &vk("key-b"), "", "", ""]),
+                row(&[
+                    &vu("uuid-c"),
+                    &vk("key-c"),
+                    "DONE",
+                    "AA:BB",
+                    "2024-01-01T00:00:00Z",
+                ]),
             ],
         );
 
@@ -555,12 +619,12 @@ mod tests {
 
         // Allocate returns the first Available row; MacRead counts as in_progress.
         let row_a = alloc.allocate_row().unwrap();
-        assert_eq!(row_a.uuid, "uuid-a");
+        assert_eq!(row_a.uuid, vu("uuid-a"));
         let s = alloc.stats();
         assert_eq!((s.used, s.remaining, s.in_progress), (1, 1, 1));
 
         let row_b = alloc.allocate_row().unwrap();
-        assert_eq!(row_b.uuid, "uuid-b");
+        assert_eq!(row_b.uuid, vu("uuid-b"));
         assert_eq!(alloc.stats().remaining, 0);
 
         // Exhausted — no Available rows left.
@@ -584,7 +648,7 @@ mod tests {
         let s = reloaded.stats();
         assert_eq!((s.total, s.used), (3, 2));
         let found = reloaded.find_by_mac("11:22:33:44:55:66").unwrap();
-        assert_eq!(found.1, "uuid-a");
+        assert_eq!(found.1, vu("uuid-a"));
     }
 
     /// Legacy Excel produced by an older tyutool build may carry OTPLOCKED rows.
@@ -597,8 +661,14 @@ mod tests {
             &path,
             &["UUID", "AUTHKEY", "STATUS", "MAC", "TIMESTAMP"],
             &[
-                vec!["uuid-a", "key-a", "OTPLOCKED", "AA:BB:CC:DD:EE:FF", ""],
-                vec!["uuid-b", "key-b", "", "", ""],
+                row(&[
+                    &vu("uuid-a"),
+                    &vk("key-a"),
+                    "OTPLOCKED",
+                    "AA:BB:CC:DD:EE:FF",
+                    "",
+                ]),
+                row(&[&vu("uuid-b"), &vk("key-b"), "", "", ""]),
             ],
         );
 
@@ -607,7 +677,7 @@ mod tests {
         // OTPLOCKED row counts as used; the empty row remains available.
         assert_eq!((s.total, s.used, s.remaining), (2, 1, 1));
         let found = alloc.find_by_mac("AA:BB:CC:DD:EE:FF").unwrap();
-        assert_eq!(found.1, "uuid-a");
+        assert_eq!(found.1, vu("uuid-a"));
     }
 
     #[test]
@@ -626,7 +696,10 @@ mod tests {
         write_xlsx(
             &path,
             &["UUID", "AUTHKEY"],
-            &[vec!["uuid-a", "key-a"], vec!["uuid-b", "key-b"]],
+            &[
+                row(&[&vu("uuid-a"), &vk("key-a")]),
+                row(&[&vu("uuid-b"), &vk("key-b")]),
+            ],
         );
 
         let alloc = ExcelRowAllocator::load(&path).unwrap();
@@ -650,7 +723,7 @@ mod tests {
         // 现在可以按 MAC 找到
         let found = alloc.find_by_mac("AA:BB:CC:DD:EE:FF").unwrap();
         assert_eq!(found.0, 0);
-        assert_eq!(found.1, "uuid-a");
+        assert_eq!(found.1, vu("uuid-a"));
 
         // 继续推进状态
         alloc
@@ -689,13 +762,17 @@ mod tests {
     fn update_row_state_with_error_preserves_step() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.xlsx");
-        write_xlsx(&path, &["UUID", "AUTHKEY"], &[vec!["uuid-a", "key-a"]]);
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY"],
+            &[row(&[&vu("uuid-a"), &vk("key-a")])],
+        );
 
         let alloc = ExcelRowAllocator::load(&path).unwrap();
-        let row = alloc.allocate_row().unwrap();
+        let alloc_row = alloc.allocate_row().unwrap();
         alloc
             .update_row_state(
-                row.row_idx,
+                alloc_row.row_idx,
                 "11:22:33:44:55:66",
                 RowStatus::AuthWritten,
                 Some("auth_written"),
@@ -719,25 +796,28 @@ mod tests {
         write_xlsx(
             &path,
             &["UUID", "AUTHKEY"],
-            &[vec!["uuid-a", "key-a"], vec!["uuid-b", "key-b"]],
+            &[
+                row(&[&vu("uuid-a"), &vk("key-a")]),
+                row(&[&vu("uuid-b"), &vk("key-b")]),
+            ],
         );
 
         let alloc = ExcelRowAllocator::load(&path).unwrap();
 
         // Device A already carries uuid-a (Skip path). Claim that row for A's MAC.
         alloc
-            .confirm_existing_uuid("uuid-a", "AA:AA:AA:AA:AA:AA")
+            .confirm_existing_uuid(&vu("uuid-a"), "AA:AA:AA:AA:AA:AA")
             .unwrap();
         let s = alloc.stats();
         assert_eq!(s.used, 1);
         assert_eq!(s.remaining, 1);
         // The claimed row is now bound to A's MAC.
         let found = alloc.find_by_mac("AA:AA:AA:AA:AA:AA").unwrap();
-        assert_eq!(found.1, "uuid-a");
+        assert_eq!(found.1, vu("uuid-a"));
 
         // A later blank device must NOT get uuid-a again — it gets uuid-b.
-        let row = alloc.allocate_row().unwrap();
-        assert_eq!(row.uuid, "uuid-b");
+        let alloc_row = alloc.allocate_row().unwrap();
+        assert_eq!(alloc_row.uuid, vu("uuid-b"));
 
         // Persisted across reload.
         let reloaded = ExcelRowAllocator::load(&path).unwrap();
@@ -748,7 +828,11 @@ mod tests {
     fn confirm_existing_uuid_is_noop_for_unknown_or_claimed_rows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.xlsx");
-        write_xlsx(&path, &["UUID", "AUTHKEY"], &[vec!["uuid-a", "key-a"]]);
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY"],
+            &[row(&[&vu("uuid-a"), &vk("key-a")])],
+        );
 
         let alloc = ExcelRowAllocator::load(&path).unwrap();
 
@@ -759,10 +843,10 @@ mod tests {
 
         // Bind uuid-a to one device, then a second device reporting the same
         // UUID must not steal/overwrite the already-bound row.
-        alloc.confirm_existing_uuid("uuid-a", "11:11").unwrap();
-        alloc.confirm_existing_uuid("uuid-a", "22:22").unwrap();
+        alloc.confirm_existing_uuid(&vu("uuid-a"), "11:11").unwrap();
+        alloc.confirm_existing_uuid(&vu("uuid-a"), "22:22").unwrap();
         let found = alloc.find_by_mac("11:11").unwrap();
-        assert_eq!(found.1, "uuid-a");
+        assert_eq!(found.1, vu("uuid-a"));
         assert!(alloc.find_by_mac("22:22").is_none());
         assert_eq!(alloc.stats().used, 1);
     }
@@ -776,8 +860,8 @@ mod tests {
             &path,
             &["UUID", "AUTHKEY", "STATUS", "MAC"],
             &[
-                vec!["uuid-a", "key-a", "DONE", "AA:BB:CC:DD:EE:FF"],
-                vec!["uuid-b", "key-b", "DONE", "AA:BB:CC:DD:EE:FF"],
+                row(&[&vu("uuid-a"), &vk("key-a"), "DONE", "AA:BB:CC:DD:EE:FF"]),
+                row(&[&vu("uuid-b"), &vk("key-b"), "DONE", "AA:BB:CC:DD:EE:FF"]),
             ],
         );
         // Load succeeds (the duplicate only triggers a log::warn).
@@ -785,6 +869,77 @@ mod tests {
         // find_by_mac returns the first matching row deterministically.
         let found = alloc.find_by_mac("AA:BB:CC:DD:EE:FF").unwrap();
         assert_eq!(found.0, 0);
-        assert_eq!(found.1, "uuid-a");
+        assert_eq!(found.1, vu("uuid-a"));
+    }
+
+    #[test]
+    fn invalid_length_rows_are_counted_and_never_allocated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.xlsx");
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY"],
+            &[
+                row(&["short-uuid", &vk("key-a")]),  // bad UUID length
+                row(&[&vu("uuid-b"), "shortkey"]),   // bad AuthKey length
+                row(&[&vu("uuid-c"), &vk("key-c")]), // valid
+            ],
+        );
+
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+        let s = alloc.stats();
+        assert_eq!(s.total, 3);
+        assert_eq!(s.invalid, 2);
+        assert_eq!(s.remaining, 1, "only the one valid row counts as remaining");
+
+        // Allocation skips the two malformed rows and hands out the valid one.
+        let first = alloc.allocate_row().unwrap();
+        assert_eq!(first.uuid, vu("uuid-c"));
+        // Now exhausted — the invalid rows are never handed out.
+        assert!(alloc.allocate_row().is_err());
+    }
+
+    #[test]
+    fn save_is_atomic_and_writes_prev_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.xlsx");
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY"],
+            &[row(&[&vu("uuid-a"), &vk("key-a")])],
+        );
+
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+        let r = alloc.allocate_row().unwrap();
+        // First save creates the pristine .bak; no temp file is left behind.
+        alloc
+            .update_row_state(
+                r.row_idx,
+                "AA:BB",
+                RowStatus::MacRead,
+                Some("mac_read"),
+                None,
+            )
+            .unwrap();
+        assert!(path.with_extension("xlsx.bak").exists());
+        assert!(
+            !path.with_extension("xlsx.tmp").exists(),
+            "temp file must be renamed away"
+        );
+
+        // Second save rolls the previous good copy into .prev.bak.
+        alloc
+            .update_row_state(
+                r.row_idx,
+                "AA:BB",
+                RowStatus::AuthVerified,
+                Some("auth_verified"),
+                None,
+            )
+            .unwrap();
+        assert!(path.with_extension("xlsx.prev.bak").exists());
+        // Main file is valid and reloadable after the atomic rename.
+        let reloaded = ExcelRowAllocator::load(&path).unwrap();
+        assert_eq!(reloaded.stats().used, 1);
     }
 }
