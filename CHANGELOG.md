@@ -2,6 +2,50 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.2] - 2026-07-17
+
+### 新功能
+
+- `batch-auth`：完成批次可一键归档——将授权表副本、固件（记录 SHA-256）、日志压缩包和批次摘要/槽位明细导出到带时间戳的文件夹
+- `batch-auth`：剩余数量为 0 时仍可启动批次进行恢复核对，表格中已记录的设备按 MAC 重新匹配，支持 KV 丢失或写入中断后的补录
+- `batch-auth`：OTP 授权改为「一次性写入」语义，移除多余的 eFuse 锁定及锁后重启校验步骤；旧版本 Excel 中的 OTPLOCKED 行仍兼容解析
+- `batch-auth`：新增 ESP32 授权固件（1.0.0），T5AI 授权固件更新至最新构建
+- `settings`：「关于」页新增「重新显示批量授权风险提示」按钮，无需开发者工具即可恢复已关闭的提示
+- `settings`：更新说明现在只显示当前界面语言对应的内容
+- `log`：全面加强诊断日志——串口开关/复位、烧录与授权关键节点、批量授权槽位生命周期、Excel 行写入审计、IPC 失败和 CLI 子命令现在都会写入日志文件，便于问题排查
+
+### 问题修复
+
+- `batch-auth`：加固 OTP 写一次安全——Excel 台账原子写入并滚动备份、装载时校验 UUID/AuthKey 长度（非法行标红并排除分配）、写入失败但设备已持有目标凭据时判定为成功；OTP 模式下冲突策略强制为「跳过」
+- `batch-auth`：批次运行期间独占锁定 Excel 文件，写入失败会明确提示；批次结束后释放锁并重新读取文件，避免内存旧数据覆盖手工修改
+- `batch-auth`：默认固件列表现在按芯片区分，切换芯片不再残留上一芯片的固件版本或下载错误芯片的固件
+- `batch-auth`：授权完成/跳过后徽标状态正确更新，跳过行显示设备已有的 UUID，成功行不再误显示「未授权」
+- `auth`：空 KV/OTP 设备回显的 "Authorization read failure." 现在按「未授权」处理，不再误报无效字符错误或在预检中浪费重试
+- `esp`：原生 USB（USB-Serial-JTAG，如 ESP32-P4）端口现在强制使用 USB 复位序列，连接失败时给出可操作的下载模式指引
+- `settings`：默认日志等级改为 debug 并在启动时同步到后端，确保排查所需的串口诊断日志默认写入文件
+
+---
+
+### Features
+
+- `batch-auth`: Completed batches can be archived in one click — exports the auth-sheet copy, firmware binary (SHA-256 recorded), zipped logs, and batch summary/slot details into a timestamped folder
+- `batch-auth`: Batches can now start at remaining = 0 for recovery verification — devices already recorded in the sheet are re-matched by MAC, supporting resume after KV loss or interrupted writes
+- `batch-auth`: OTP authorization now uses write-once semantics, removing the redundant eFuse lock and post-lock reboot/verify steps; OTPLOCKED rows in Excel files from older builds still parse
+- `batch-auth`: Add ESP32 auth firmware (1.0.0) and update the T5AI auth firmware to the latest build
+- `settings`: Add a "show batch-auth risk notice again" button in About so the dismissed notice can be restored without DevTools
+- `settings`: Release notes now show only the content matching the active UI language
+- `log`: Strengthen diagnostic logging across the board — serial open/close/reset, flash and authorize milestones, batch-auth slot lifecycle, Excel row-write audit trail, IPC failures, and CLI subcommands are now recorded in the log file for troubleshooting
+
+### Bug Fixes
+
+- `batch-auth`: Harden write-once OTP safety — atomic Excel ledger writes with rolling backups, UUID/AuthKey length validation on load (invalid rows flagged red and excluded from allocation), and write failures where the device already holds the target credentials are treated as success; OTP mode forces the conflict policy to Skip
+- `batch-auth`: Hold an exclusive lock on the Excel file while a batch runs and surface write failures clearly; the lock is released after the batch so the sheet is editable and re-read, preventing stale in-memory rows from clobbering manual edits
+- `batch-auth`: The default firmware list is now per-chip, so switching chips no longer leaves the previous chip's versions in the dropdown or downloads the wrong chip's binary
+- `batch-auth`: Auth badges update correctly after done/skipped — skipped rows show the device's existing UUID, and successful rows can no longer read "not authorized"
+- `auth`: The "Authorization read failure." echo from empty KV/OTP devices is now treated as unauthorized instead of raising a bogus invalid-characters error or burning precheck retries
+- `esp`: Native-USB ports (USB-Serial-JTAG, e.g. ESP32-P4) now force the USB reset sequence, and connect failures give actionable download-mode guidance
+- `settings`: Default log level is now debug and is synced to the backend at startup, so the serial diagnostics needed for troubleshooting are written to the log file by default
+
 ## [3.2.1] - 2026-07-09
 
 ### 新功能
