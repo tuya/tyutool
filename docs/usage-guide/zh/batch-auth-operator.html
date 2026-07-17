@@ -195,9 +195,13 @@
           <tr><td><strong>logs.zip</strong></td><td>本次会话的全部日志，排查问题的原始依据。</td></tr>
           <tr><td><strong>batch-summary.json</strong></td><td>当时的完整配置（芯片 / 波特率 / 固件 / 策略 / 存储模式）、环境（版本 / 系统）、统计与最后一轮明细。</td></tr>
           <tr><td><strong>batch-slots.csv</strong></td><td>最后一轮每口的结果与错误信息，Excel 可直接打开。</td></tr>
-          <tr><td>（建议手工补一张）<strong>完成横幅截图</strong></td><td>本单成绩单，一目了然。</td></tr>
+          <tr><td><strong>完成横幅截图</strong></td><td>本单成绩单，一目了然。</td></tr>
         </tbody>
       </table>
+      <div class="callout warn">
+        <span class="title">档案是敏感资料，防泄露</span>
+        档案里的<strong>授权表副本含 UUID 和 AuthKey</strong>（花钱买的凭据），日志里也可能带设备信息。请存放在受控位置（受限访问的目录 / 内部网盘），<strong>不要发到聊天群、公开网盘或工单附件里整包外传</strong>；需要给人排查时，只提供日志和错误信息，授权表一律不外发。
+      </div>
 
       <h2 id="troubleshoot">5. 出错速查</h2>
       <p>按现象找处理办法：</p>
@@ -220,8 +224,8 @@
         <li><strong>一句话现象描述</strong>：什么时候、做到哪一步、第几台开始出错；用外置 USB 转串口适配器的，注明芯片型号（CH340 / CP2102 等）。</li>
       </ul>
       <div class="callout note">
-        <span class="title">别拖</span>
-        应用会自动清理旧日志，跑新批次也会覆盖现场——出错后<strong>当天</strong>就归档。
+        <span class="title">别拖，也别泄露</span>
+        应用会自动清理旧日志，跑新批次也会覆盖现场——出错后<strong>当天</strong>就归档。外发排查材料时只给<strong>日志和错误信息</strong>：档案里的授权表副本含 AuthKey，<strong>不要整包外传</strong>（见<a href="#archive">归档说明</a>的防泄露提示）。
       </div>
 
       <h2 id="safety">6. 安全铁律</h2>

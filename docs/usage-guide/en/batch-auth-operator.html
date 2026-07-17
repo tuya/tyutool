@@ -194,9 +194,13 @@
           <tr><td><strong>logs.zip</strong></td><td>All logs from this session — the raw evidence for troubleshooting.</td></tr>
           <tr><td><strong>batch-summary.json</strong></td><td>The full config at the time (chip / baud rates / firmware / policy / storage mode), environment (version / OS), stats and the final round's detail.</td></tr>
           <tr><td><strong>batch-slots.csv</strong></td><td>Per-port results and error messages of the final round; opens directly in Excel.</td></tr>
-          <tr><td>(worth adding by hand) <strong>a completion-banner screenshot</strong></td><td>The job's report card at a glance.</td></tr>
+          <tr><td><strong>Completion-banner screenshot</strong></td><td>The job's report card at a glance.</td></tr>
         </tbody>
       </table>
+      <div class="callout warn">
+        <span class="title">The archive is sensitive — don't leak it</span>
+        The archived <strong>auth-sheet copy contains UUIDs and AuthKeys</strong> (paid credentials), and the logs may carry device information. Keep the archive in a controlled location (access-restricted folder / internal storage), and <strong>never post it wholesale to chat groups, public drives, or ticket attachments</strong>. When someone needs to troubleshoot, share only the logs and error messages — the auth sheet never leaves.
+      </div>
 
       <h2 id="troubleshoot">5. Quick fixes</h2>
       <p>Find your symptom, apply the fix:</p>
@@ -219,8 +223,8 @@
         <li><strong>A one-line description</strong>: when it happened, at which step, from which device onward; if you use an external USB-serial adapter, note its chip (CH340 / CP2102, etc.).</li>
       </ul>
       <div class="callout note">
-        <span class="title">Don't wait</span>
-        The app prunes old logs automatically, and running another batch overwrites the scene — archive <strong>the same day</strong> the failure happens.
+        <span class="title">Don't wait — and don't leak</span>
+        The app prunes old logs automatically, and running another batch overwrites the scene — archive <strong>the same day</strong> the failure happens. When sharing material for troubleshooting, send only the <strong>logs and error messages</strong>: the archived auth-sheet copy contains AuthKeys, so <strong>never forward the archive wholesale</strong> (see the leak warning in the <a href="#archive">archive section</a>).
       </div>
 
       <h2 id="safety">6. Safety rules</h2>
