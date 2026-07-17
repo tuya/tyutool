@@ -620,9 +620,7 @@
       "storageMode": "写入位置",
       "storageKv": "KV",
       "storageOtp": "OTP / eFuse",
-      "storageOtpWarning": "授权信息将永久烧入 eFuse，不可撤销，无法修改或清除。",
-      "otpLockToggle": "授权写入并校验通过后熔断 eFuse（永久锁定 OTP）",
-      "otpLockDescription": "开启后将发送 auth-otp-lock 命令烧断 eFuse，此后任何 OTP 区写入都会被硬件拒绝，且不可恢复。仅在确认本批次设备需要永久锁定时勾选；每次启动该开关都会自动重置为关闭。",
+      "storageOtpWarning": "授权信息将永久烧入 eFuse，一次写入后不可撤销，无法修改或清除。",
       "excelTotal": "总计",
       "excelUsed": "已用",
       "excelInProgress": "占用中",
@@ -752,7 +750,7 @@
       },
       "item2": {
         "title": "OTP 授权永久不可撤销",
-        "body": "选择 OTP 存储模式并启用 eFuse 锁定时，授权数据将永久写入芯片，无法擦除、修改或撤销。锁定失败或写入中途取消的设备必须从产线隔离，不得出货，需人工核查。"
+        "body": "选择 OTP 存储模式时，授权数据一次性永久写入芯片 eFuse，无法擦除、修改或撤销。写入中途取消或失败的设备必须从产线隔离，不得出货，需人工核查。"
       },
       "item3": {
         "title": "Excel 授权文件须妥善保管",

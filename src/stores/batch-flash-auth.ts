@@ -76,7 +76,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     excelPath: "",
     conflictPolicy: "skip",
     authStorage: "kv",
-    lockOtpAfterAuth: false,
   });
   const batchStartTime = ref<number | null>(null);
   const batchEndTime = ref<number | null>(null);
@@ -362,7 +361,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
-      lockOtpAfterAuth: authConfig.value.lockOtpAfterAuth,
     };
     await invoke("batch_auth_start", { config, ports: idlePorts });
   }
@@ -427,7 +425,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
-      lockOtpAfterAuth: authConfig.value.lockOtpAfterAuth,
     };
     await invoke("batch_auth_start", { config, ports: [port] });
   }
@@ -761,13 +758,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (cumulative) cumulativeStats.value = cumulative;
     if (filter) filterConfig.value = filter;
     if (savedAuthConfig) {
+      // Pick known fields explicitly: legacy sessions may have persisted a
+      // now-removed `lockOtpAfterAuth` key that must not leak back in.
       authConfig.value = {
-        ...savedAuthConfig,
+        excelPath: savedAuthConfig.excelPath ?? "",
+        conflictPolicy: savedAuthConfig.conflictPolicy ?? "skip",
         authStorage: (savedAuthConfig.authStorage as "kv" | "otp") ?? "kv",
-        // MANDATORY: never trust the persisted value. Burning eFuse is
-        // irreversible; the toggle must be re-checked by the operator on
-        // every app start, regardless of last session's choice.
-        lockOtpAfterAuth: false,
       };
     }
     if (sharedConfig) {
@@ -870,16 +866,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     unlistenRead?.();
     unlistenRead = undefined;
   }
-
-  // ── Safety: reset lockOtpAfterAuth when leaving the (t5ai, otp) path ─────
-  // The lock toggle is only meaningful for T5AI OTP writes. If the user
-  // switches chip or storage mode, force the toggle off so a checked-but-hidden
-  // state cannot reappear when the user returns to the dangerous combination.
-  watch([chipId, () => authConfig.value.authStorage], ([chip, storage]) => {
-    if (!(chip === "t5ai" && storage === "otp")) {
-      authConfig.value.lockOtpAfterAuth = false;
-    }
-  });
 
   watch(authConfig, () => void saveAuthConfig(), { deep: true });
   watch(

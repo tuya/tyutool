@@ -489,7 +489,6 @@ struct BatchAuthStartConfig {
     excel_path: String,
     conflict_policy: String,
     auth_storage: Option<String>,
-    lock_otp_after_auth: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -682,27 +681,14 @@ fn batch_auth_start(
         _ => tyutool_core::AuthStorage::Kv,
     };
 
-    let lock_otp_after_auth = config.lock_otp_after_auth.unwrap_or(false)
-        && config.chip_id.eq_ignore_ascii_case("t5ai")
-        && matches!(auth_storage, tyutool_core::AuthStorage::Otp);
-
-    if config.lock_otp_after_auth.unwrap_or(false) && !lock_otp_after_auth {
-        log::warn!(
-            "[batch-auth] lock_otp_after_auth requested but suppressed (chip={} storage={:?}); request will not burn eFuse",
-            config.chip_id,
-            auth_storage
-        );
-    }
-
     log::info!(
-        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} storage={:?} conflict={} lock_otp={}",
+        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} storage={:?} conflict={}",
         config.chip_id,
         config.excel_path,
         config.firmware_path.as_deref().unwrap_or("(none)"),
         ports.len(),
         auth_storage,
         config.conflict_policy,
-        lock_otp_after_auth,
     );
 
     let allocator = {
@@ -826,9 +812,8 @@ fn batch_auth_start(
 
             // find_by_mac: look up Excel row by device MAC address
             let alloc_find = alloc_clone.clone();
-            let find_by_mac = move |mac: &str| -> Option<(usize, String, String, bool)> {
-                alloc_find.find_by_mac(mac)
-            };
+            let find_by_mac =
+                move |mac: &str| -> Option<(usize, String, String)> { alloc_find.find_by_mac(mac) };
 
             // allocate_row: claim a new unused row
             let alloc_alloc = alloc_clone.clone();
@@ -856,7 +841,6 @@ fn batch_auth_start(
                             U::AuthVerified => {
                                 (RowStatus::AuthVerified, Some("auth_verified"), None)
                             }
-                            U::OtpLocked => (RowStatus::OtpLocked, Some("otp_locked"), None),
                             // Done: keep last step in Excel (STATUS=DONE is sufficient)
                             U::Done => (RowStatus::Done, None, None),
                             U::StepFailed { step, error } => {
@@ -883,7 +867,6 @@ fn batch_auth_start(
                 auth_baud_rate: config_clone.auth_baud_rate,
                 conflict_policy,
                 auth_storage,
-                lock_otp: lock_otp_after_auth,
             };
             let result = tyutool_core::run_batch_auth_slot(
                 &port_clone,

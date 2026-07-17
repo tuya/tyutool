@@ -187,34 +187,6 @@ async function browseExcel() {
           />
           <span>{{ t("batchFlashAuth.config.storageOtpWarning") }}</span>
         </div>
-        <!-- OTP eFuse lock toggle (irreversible — burns eFuse) -->
-        <label
-          v-if="
-            store.chipId === 't5ai' && store.authConfig.authStorage === 'otp'
-          "
-          class="flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-xs"
-          :style="{
-            borderColor: 'var(--ty-danger, #ef4444)',
-            backgroundColor:
-              'color-mix(in srgb, var(--ty-danger, #ef4444) 8%, transparent)',
-            color: 'var(--ty-danger, #ef4444)',
-          }"
-        >
-          <input
-            type="checkbox"
-            v-model="store.authConfig.lockOtpAfterAuth"
-            :disabled="store.isBusy"
-            class="mt-0.5 shrink-0"
-          />
-          <span class="flex flex-col gap-0.5">
-            <span class="font-semibold">
-              {{ t("batchFlashAuth.config.otpLockToggle") }}
-            </span>
-            <span class="text-[var(--ty-text-muted)]">
-              {{ t("batchFlashAuth.config.otpLockDescription") }}
-            </span>
-          </span>
-        </label>
       </div>
     </div>
   </div>

@@ -29,7 +29,8 @@ pub enum RowStatus {
     AuthWritten,
     /// auth-read 验证通过。
     AuthVerified,
-    /// auth-otp-lock 成功（仅在启用 lock_otp 时出现）。
+    /// 历史遗留状态：旧版本的 auth-otp-lock 成功会写入 OTPLOCKED。
+    /// 当前固件已移除 OTP 锁定命令，不再产生此状态，仅为读取旧 Excel 保留。
     OtpLocked,
     /// 完整流程结束（对应 AlreadyDone / 正常成功）。
     Done,
@@ -266,15 +267,12 @@ impl ExcelRowAllocator {
         Err("Authorization codes exhausted — no available rows in Excel".into())
     }
 
-    /// 按 MAC 查找已绑定的行。返回 `(row_idx, uuid, authkey, already_otp_locked)`，未找到返回 `None`。
-    /// `already_otp_locked` 为 `true` 表示上次已完成 OTP 熔断（STATUS=OtpLocked 或 STEP=otp_locked）。
-    pub fn find_by_mac(&self, mac: &str) -> Option<(usize, String, String, bool)> {
+    /// 按 MAC 查找已绑定的行。返回 `(row_idx, uuid, authkey)`，未找到返回 `None`。
+    pub fn find_by_mac(&self, mac: &str) -> Option<(usize, String, String)> {
         let state = self.state.lock().unwrap();
         state.rows.iter().enumerate().find_map(|(i, r)| {
             if r.mac.as_deref() == Some(mac) {
-                let already_otp_locked = matches!(r.status, RowStatus::OtpLocked)
-                    || r.step.as_deref() == Some("otp_locked");
-                Some((i, r.uuid.clone(), r.authkey.clone(), already_otp_locked))
+                Some((i, r.uuid.clone(), r.authkey.clone()))
             } else {
                 None
             }
@@ -586,6 +584,29 @@ mod tests {
         let s = reloaded.stats();
         assert_eq!((s.total, s.used), (3, 2));
         let found = reloaded.find_by_mac("11:22:33:44:55:66").unwrap();
+        assert_eq!(found.1, "uuid-a");
+    }
+
+    /// Legacy Excel produced by an older tyutool build may carry OTPLOCKED rows.
+    /// OTP lock is gone, but such rows must still parse and count as authorized.
+    #[test]
+    fn legacy_otplocked_rows_still_read_as_authorized() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.xlsx");
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY", "STATUS", "MAC", "TIMESTAMP"],
+            &[
+                vec!["uuid-a", "key-a", "OTPLOCKED", "AA:BB:CC:DD:EE:FF", ""],
+                vec!["uuid-b", "key-b", "", "", ""],
+            ],
+        );
+
+        let alloc = ExcelRowAllocator::load(&path).unwrap();
+        let s = alloc.stats();
+        // OTPLOCKED row counts as used; the empty row remains available.
+        assert_eq!((s.total, s.used, s.remaining), (2, 1, 1));
+        let found = alloc.find_by_mac("AA:BB:CC:DD:EE:FF").unwrap();
         assert_eq!(found.1, "uuid-a");
     }
 

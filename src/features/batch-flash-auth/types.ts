@@ -57,12 +57,6 @@ export interface BatchAuthConfigData {
   excelPath: string;
   conflictPolicy: "skip" | "overwrite";
   authStorage: "kv" | "otp";
-  /** Send `auth-otp-lock` after a successful new-firmware write+verify.
-   *  ONLY effective when chipId='t5ai' AND authStorage='otp'.
-   *  IRREVERSIBLE — burns the device eFuse.
-   *  Default false; forced to false on every app start (see store
-   *  loadPersistedData). */
-  lockOtpAfterAuth: boolean;
 }
 
 /** `batch-flash-progress` event payload from Rust. */
@@ -118,10 +112,6 @@ export interface BatchAuthStartConfig {
   conflictPolicy: "skip" | "overwrite";
   /** Auth storage destination. Only T5AI supports "otp"; defaults to "kv". */
   authStorage?: "kv" | "otp";
-  /** Send `auth-otp-lock` after successful write+verify. ONLY effective
-   *  when chipId='t5ai' AND authStorage='otp'. IRREVERSIBLE — burns eFuse.
-   *  The Tauri backend re-validates chip + storage before forwarding. */
-  lockOtpAfterAuth?: boolean;
 }
 
 // Mirrors src_tauri::batch_auth::ExcelStats

@@ -47,13 +47,13 @@
       <h2 id="disclaimer">2. Disclaimer</h2>
       <p>Because batch authorization can trigger <strong>irreversible</strong> eFuse burns, this page shows a disclaimer dialog on <strong>first visit</strong>:</p>
       <ul>
-        <li><strong>First-visit dialog</strong>: explains the risks of batch authorization (especially that OTP + eFuse lock is irreversible) and requires you to acknowledge before continuing.</li>
+        <li><strong>First-visit dialog</strong>: explains the risks of batch authorization (especially that OTP writes are irreversible) and requires you to acknowledge before continuing.</li>
         <li><strong>Don't show again</strong>: checking this persists the choice to <code>localStorage</code> so the dialog doesn't reappear.</li>
         <li><strong>Cancel returns to <code>/toolbox</code></strong>: pressing cancel on the disclaimer sends you back to the toolbox instead of entering the batch page.</li>
       </ul>
       <div class="callout warn">
         <span class="title">Read the disclaimer carefully</span>
-        The disclaimer isn't a formality — once OTP storage mode and the eFuse lock are enabled, <strong>burns cannot be undone</strong>. Make sure you understand every risk in section 9 before checking "don't show again".
+        The disclaimer isn't a formality — once you pick OTP storage mode, credentials are <strong>burned into eFuse once and cannot be undone</strong>. Make sure you understand every risk in section 9 before checking "don't show again".
       </div>
 
       <h2 id="shared-config">3. Shared config</h2>
@@ -82,14 +82,11 @@
       <ul>
         <li><strong>Excel spreadsheet (<code>.xlsx</code>)</strong>: selecting the auth-code sheet triggers validation immediately, showing <strong>total / used / in-progress / remaining</strong>. If <strong>remaining = 0</strong> or the file is invalid, the <strong>Start button is disabled</strong>.</li>
         <li><strong>Conflict policy</strong>: what to do when the target device already has auth — <code>Skip</code> or <code>Overwrite</code>.</li>
-        <li><strong>Storage mode</strong>: available only for <strong>T5AI</strong> — <code>KV</code> (key-value region, rewritable) or <code>OTP</code> (one-time region). Choosing <code>OTP</code> shows an <strong>irreversibility warning</strong>.</li>
-        <li><strong>OTP eFuse lock toggle (<code>lockOtpAfterAuth</code>)</strong>: appears only under <strong>T5AI + OTP</strong>. When on, after the auth write completes the device's <strong>eFuse is burned</strong>, permanently locking the OTP region — <strong>irreversible</strong>.</li>
+        <li><strong>Storage mode</strong>: available only for <strong>T5AI</strong> — <code>KV</code> (key-value region, rewritable) or <code>OTP</code> (one-time region, write-once). Choosing <code>OTP</code> shows an <strong>irreversibility warning</strong>.</li>
       </ul>
       <div class="callout danger">
-        <span class="title">Danger: OTP + eFuse lock is irreversible</span>
-        When storage mode is <code>OTP</code> and <code>lockOtpAfterAuth</code> is on, each device burns its <strong>eFuse</strong> after authorization completes, permanently locking the OTP region — this <strong>cannot be undone</strong> by any means, and the region can never be rewritten. In a batch scenario, one wrong config <strong>cascades to ruin the whole batch</strong>. Only enable it after you are fully certain of the chip, firmware, and auth codes.
-        <br><br>
-        As a <strong>safety net</strong>, <code>lockOtpAfterAuth</code> is <strong>force-reset to <code>false</code> on every app start</strong>, and is likewise <strong>force-reset to <code>false</code> whenever leaving (t5ai, otp)</strong> — i.e. switching to a non-T5AI chip or back to KV storage mode. In other words, you must <strong>re-enable it from scratch every time</strong>; it never carries over from a previous session you forgot to turn off.
+        <span class="title">Danger: OTP writes are irreversible</span>
+        When storage mode is <code>OTP</code>, credentials are <strong>burned into the chip eFuse once</strong> at the end of authorization. The firmware treats the OTP region as <strong>write-once</strong> — once populated it refuses further writes, and the region can never be erased, modified, or rewritten by any means. In a batch scenario, one wrong config (chip, firmware, or auth codes) <strong>cascades to ruin the whole batch</strong>. Only use OTP for a batch after you are fully certain everything is correct.
       </div>
 
       <h2 id="dashboard">5. Dashboard</h2>
@@ -175,10 +172,8 @@
       <h2 id="safety">9. Safety callouts</h2>
       <p>Batch Flash &amp; Auth is the <strong>only feature in tyutool that triggers irreversible hardware operations</strong>. Keep these two ironclad rules in mind:</p>
       <div class="callout danger">
-        <span class="title">Rule one: OTP + eFuse lock is irreversible</span>
-        With storage mode set to <code>OTP</code> and <code>lockOtpAfterAuth</code> on, every device burns its <strong>eFuse</strong> after authorization, <strong>permanently locking</strong> the OTP region — no means can restore or rewrite it. In a batch, one wrong config ruins the whole batch.
-        <br><br>
-        <strong>Safety net</strong>: <code>lockOtpAfterAuth</code> is <strong>force-reset to <code>false</code> on every app start</strong>, and is likewise <strong>force-reset to <code>false</code> whenever leaving (t5ai, otp)</strong> (switching to a non-T5AI chip, or back to KV mode). You must <strong>re-enable it from scratch every time</strong>; it never carries over from a session you forgot to turn off.
+        <span class="title">Rule one: OTP writes are irreversible</span>
+        With storage mode set to <code>OTP</code>, every device <strong>burns its eFuse once</strong> after authorization. The firmware treats the OTP region as <strong>write-once</strong> — once populated it can never be erased, modified, or rewritten by any means. In a batch, one wrong config ruins the whole batch.
       </div>
       <div class="callout danger">
         <span class="title">Rule two: cancelledAfterWrite devices must be physically quarantined</span>
@@ -186,7 +181,7 @@
       </div>
       <div class="callout warn">
         <span class="title">Pre-batch checklist</span>
-        Before starting a batch, confirm each item: the chip is correct, the firmware source and version are right, the auth sheet is validated with enough remaining codes, and the conflict policy is as intended. If you're enabling OTP + eFuse lock, validate the <strong>full flow on a single device first</strong> before committing the whole batch.
+        Before starting a batch, confirm each item: the chip is correct, the firmware source and version are right, the auth sheet is validated with enough remaining codes, and the conflict policy is as intended. If you're using OTP storage mode, validate the <strong>full flow on a single device first</strong> before committing the whole batch.
       </div>
 
       <nav class="pager">
