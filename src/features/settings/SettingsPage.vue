@@ -11,6 +11,7 @@ import type {
   // ThemeStyle,
 } from "@/stores/settings";
 import { isTauriRuntime } from "@/runtime";
+import { DISCLAIMER_KEY } from "@/features/batch-flash-auth/disclaimer";
 import { openLogsFolder as openLogsFolderAction } from "./open-logs-folder";
 import UpdateDialog from "./UpdateDialog.vue";
 import LogViewerDialog from "./LogViewerDialog.vue";
@@ -104,6 +105,19 @@ async function openOpensourceLicenses(): Promise<void> {
       "_blank",
     );
   }
+}
+
+// Show inline "done" feedback after resetting the batch-auth disclaimer;
+// there is no general-purpose toast, so this transient flag is enough.
+const disclaimerReset = ref(false);
+let disclaimerResetTimer: ReturnType<typeof setTimeout> | undefined;
+function resetBatchAuthDisclaimer(): void {
+  localStorage.removeItem(DISCLAIMER_KEY);
+  disclaimerReset.value = true;
+  clearTimeout(disclaimerResetTimer);
+  disclaimerResetTimer = setTimeout(() => {
+    disclaimerReset.value = false;
+  }, 2500);
 }
 </script>
 
@@ -501,6 +515,21 @@ async function openOpensourceLicenses(): Promise<void> {
         >
           {{ t("settings.opensource") }}
         </button>
+        <button
+          v-if="isTauriRuntime()"
+          type="button"
+          class="ty-btn-secondary settings-inline-action w-full justify-center sm:w-auto"
+          @click="resetBatchAuthDisclaimer"
+        >
+          {{ t("settings.resetDisclaimer") }}
+        </button>
+        <span
+          v-if="disclaimerReset"
+          class="disclaimer-reset-feedback"
+          role="status"
+        >
+          {{ t("settings.resetDisclaimerDone") }}
+        </span>
       </div>
     </section>
 
@@ -934,6 +963,12 @@ async function openOpensourceLicenses(): Promise<void> {
   margin-top: 0.95rem;
   border-top: 1px solid color-mix(in srgb, var(--ty-border) 82%, transparent);
   padding-top: 1rem;
+}
+
+.disclaimer-reset-feedback {
+  color: color-mix(in srgb, var(--ty-primary) 85%, var(--ty-text-muted));
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 @media (max-width: 900px) {
