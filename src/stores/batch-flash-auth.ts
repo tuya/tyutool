@@ -269,16 +269,21 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!entry) return;
     selectedDefaultVersion.value = version;
     void saveFirmwareConfig();
+    const chipAtStart = chipId.value;
     defaultFirmwareStatus.value = "downloading";
     defaultFirmwareError.value = "";
     firmwareDownloadProgress.value = 0;
     try {
-      firmwarePath.value = await downloadAuthFirmware(entry);
+      const path = await downloadAuthFirmware(entry);
+      // Chip switched mid-download: the binary belongs to the old chip.
+      if (chipId.value !== chipAtStart) return;
+      firmwarePath.value = path;
       rLog.info(
         `[batch-auth] firmware ready: source=default version=${version} path=${firmwarePath.value}`,
       );
       defaultFirmwareStatus.value = "ready";
     } catch (e) {
+      if (chipId.value !== chipAtStart) return;
       firmwarePath.value = "";
       defaultFirmwareStatus.value = "error";
       defaultFirmwareError.value = e instanceof Error ? e.message : String(e);
@@ -921,6 +926,20 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   watch(chipId, () => {
     if (!isOtpCapable.value && authConfig.value.authStorage === "otp") {
       authConfig.value.authStorage = "kv";
+    }
+  });
+
+  // The default-firmware list is per-chip: on chip switch, drop the previous
+  // chip's list and firmware path (the manifest may have nothing at all for
+  // the new chip) and reload. An in-flight manifest load already filters by
+  // the new chipId on completion, so it is not restarted.
+  watch(chipId, () => {
+    if (firmwareSource.value !== "default") return;
+    firmwarePath.value = "";
+    defaultFirmwareEntries.value = [];
+    defaultFirmwareError.value = "";
+    if (defaultFirmwareStatus.value !== "loading") {
+      void loadDefaultFirmwareList();
     }
   });
 
