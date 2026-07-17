@@ -203,6 +203,10 @@ export const useSettingsStore = defineStore("settings", () => {
     if (isTauriRuntime()) {
       _ready = loadFromTauriStore().then(() => {
         applyThemeToDom(theme.value);
+        // Sync the backend log level with the loaded (or default) setting.
+        // Without this, the backend stays at its builder default and the
+        // level shown in Settings may not be what is actually in effect.
+        void applyLogLevel();
       });
     }
 
