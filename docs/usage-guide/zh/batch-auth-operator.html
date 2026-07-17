@@ -26,126 +26,206 @@
   <div class="layout">
     <main class="content">
       <h1>批量授权 · 操作员指南</h1>
-      <p class="lead">本页写给<strong>使用 tyutool 进行批量烧录授权的操作员</strong>：怎么准备、怎么操作、出了问题怎么办。不需要任何技术背景。</p>
+      <p class="lead">本页写给<strong>使用 tyutool 进行批量烧录授权的操作员</strong>，按"照着做"的顺序组织。不需要任何技术背景。</p>
 
       <div class="callout note">
         <span class="title">走错页了？</span>
         如果你是<strong>固件开发者</strong>（需要知道固件要实现哪些功能才能被批量授权），请看 <a href="batch-auth-developer.html">批量授权 · 固件开发者必读</a>。
       </div>
 
+      <nav class="flow" aria-label="操作流程">
+        <a href="#prepare"><span class="num">1</span>开工前清单</a><span class="sep">→</span>
+        <a href="#configure"><span class="num">2</span>配置</a><span class="sep">→</span>
+        <a href="#start"><span class="num">3</span>接线与启动</a><span class="sep">→</span>
+        <a href="#read-results"><span class="num">4</span>核对结果</a><span class="sep">·</span>
+        <a class="plain" href="#troubleshoot">出错速查</a>
+        <a class="plain" href="#safety">安全铁律</a>
+      </nav>
+
       <h2 id="what-it-does">1. 这个工具做什么</h2>
-      <p>把很多台设备<strong>一次性</strong>处理完——只要把多块设备插到电脑的多个串口上，点一下按钮，tyutool 就会<strong>同时</strong>给它们烧录固件并写入上网所需的授权码。授权码不是你手动敲的，而是从一份 Excel 表格里自动一行行读取。</p>
+      <p>把很多台设备<strong>一次性</strong>处理完：把多块设备插到电脑的多个串口上，点一下<strong>"全部开始"</strong>，tyutool 就会<strong>同时</strong>给它们烧录固件并写入上网所需的授权码。授权码不用手敲，从一份 Excel 表里自动一行行读取。</p>
       <figure class="shot">
         <img src="../assets/images/batch-overview.png" alt="批量烧录授权页总览：配置区、仪表盘、工具栏与端口列表" loading="lazy">
-        <figcaption>批量烧录授权页总览：左侧配置区（芯片 / 波特率 / 固件 / 授权表）、顶部仪表盘（烧录与授权累计统计）、工具栏，以及下方端口列表。</figcaption>
+        <figcaption>页面从上到下：<strong>完成横幅</strong>（批次结束时出现）、<strong>仪表盘</strong>（烧录累计 / 授权累计 / 本次批次）、<strong>"配置"折叠面板</strong>（共享配置 + 批量授权配置）、<strong>工具栏</strong>（自动分配 / 串口过滤 / 全部读取 / 全部开始），以及<strong>端口列表</strong>（一台设备一行）。</figcaption>
       </figure>
 
-      <h2 id="prepare">2. 开始前要准备什么</h2>
-      <ul>
-        <li><strong>桌面版 tyutool</strong>：本功能只能在桌面应用里用，网页版不可用。请按你的系统下载安装（当前最新版 v3.2.1，点一下即下载）：
-          <ul>
-            <li><strong>Windows（x64，安装包）</strong>：<a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_windows_x86_64_nsis_3.2.1.exe">tyutool-gui_windows_x86_64_nsis_3.2.1.exe</a></li>
-            <li><strong>macOS（通用，安装包）</strong>：<a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_macos_universal_dmg_3.2.1.dmg">tyutool-gui_macos_universal_dmg_3.2.1.dmg</a></li>
-            <li><strong>Linux（x64，AppImage）</strong>：<a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage">tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage</a>（下载后 <code>chmod +x</code> 再运行）</li>
-          </ul>
-        </li>
-        <li><strong>授权码 Excel 表（<code>.xlsx</code>）</strong>：这是从涂鸦<strong>购买</strong>来的授权码（获取：<a href="https://tuyaopen.ai/zh/pricing">https://tuyaopen.ai/zh/pricing</a>）。表格至少要有两列：<strong>UUID</strong> 和 <strong>AuthKey</strong>（列名不区分大小写）。其余列 tyutool 会自动补充状态、MAC、时间等。</li>
-        <li><strong>设备 + 串口线</strong>：把要处理的设备用 USB 转串口线接到电脑，每台设备占一个串口。<strong>注意（T5/T5AI）</strong>：设备上有两个串口——<strong>烧录/授权口</strong>和<strong>日志口</strong>；烧录与授权走的是<strong>同一个烧录/授权口</strong>，请务必接到这个口，<strong>不要接到日志口</strong>，否则烧录和授权都会失败。</li>
-        <li><strong>串口驱动</strong>：装好 USB 转串口芯片的驱动（CH340 / CP2102 / FT232 等），否则电脑看不到串口。</li>
-        <li><strong>要烧录的固件</strong>（可选）：如果这一步还要刷固件，准备好固件文件（<code>.bin</code>），或使用 tyutool 提供的官方授权固件下载。</li>
-      </ul>
-      <div class="callout note">
-        <span class="title">保持最新</span>
-        装好后如果出了新版本，<strong>推荐用应用内的“检查更新”进行升级，使用最新版本。</strong>
+      <h2 id="prepare">2. 开工前清单</h2>
+      <p>逐项确认下面这张表，全部就绪再开工：</p>
+      <table>
+        <thead><tr><th>准备项</th><th>怎么算就绪</th></tr></thead>
+        <tbody>
+          <tr><td><strong>桌面版 tyutool</strong></td><td>已安装。下载见下表；装好后用应用内<strong>"检查更新"</strong>保持最新。</td></tr>
+          <tr><td><strong>授权码 Excel 表（<code>.xlsx</code>）</strong></td><td>表里至少有 <strong>UUID</strong> 和 <strong>AuthKey</strong> 两列（列名不区分大小写），其余列 tyutool 自动补。授权码从涂鸦购买：<a href="https://tuyaopen.ai/zh/pricing">tuyaopen.ai/zh/pricing</a>。</td></tr>
+          <tr><td><strong>设备 + 串口线</strong></td><td>每台设备一根 USB 转串口线，占一个串口。</td></tr>
+          <tr><td><strong>串口驱动</strong></td><td>已装好 USB 转串口芯片驱动（CH340 / CP2102 / FT232 等），电脑能看到串口。</td></tr>
+          <tr><td><strong>固件文件（仅需烧录时）</strong></td><td>按<a href="#handoff">交接单</a>准备 <code>.bin</code>，或用 tyutool 内置的"默认授权固件"下载。</td></tr>
+        </tbody>
+      </table>
+      <table>
+        <thead><tr><th>系统</th><th>安装包（v3.2.1；新版本以 <a href="https://github.com/tuya/tyutool/releases">GitHub Releases</a> 为准）</th></tr></thead>
+        <tbody>
+          <tr><td>Windows（x64）</td><td><a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_windows_x86_64_nsis_3.2.1.exe">tyutool-gui_windows_x86_64_nsis_3.2.1.exe</a></td></tr>
+          <tr><td>macOS（通用）</td><td><a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_macos_universal_dmg_3.2.1.dmg">tyutool-gui_macos_universal_dmg_3.2.1.dmg</a></td></tr>
+          <tr><td>Linux（x64）</td><td><a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage">tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage</a>（下载后 <code>chmod +x</code> 再运行）</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <span class="title">T5 / T5AI 接线注意</span>
+        设备上有<strong>两个串口</strong>：烧录/授权口和日志口。烧录与授权走的是<strong>同一个烧录/授权口</strong>，请务必接到这个口，<strong>不要接日志口</strong>，否则烧录和授权都会失败。
       </div>
       <div class="callout warn">
         <span class="title">授权码很贵重</span>
         UUID 和 AuthKey 是花钱买来的凭据，一码对应一台设备。请妥善保管 Excel 文件，不要泄露到聊天、截图里。
       </div>
 
-      <h2 id="first-visit">3. 第一次进入</h2>
-      <p>第一次打开批量授权页时，会弹出一个<strong>免责声明对话框</strong>，提醒你这功能涉及不可逆的操作。确认你理解后点继续即可进入页面。如果勾选了<strong>“不再提示”</strong>，下次就不会再弹；点<strong>取消</strong>会退回工具箱，不进入页面。</p>
-      <div class="callout tip">
-        <span class="title">想让它重新出现？</span>
-        如果之前勾了“不再提示”又想再看一次，到 <a href="settings.html">设置 → 关于</a>，点<strong>“重新显示批量授权风险提示”</strong>即可，下次进入批量授权页会再次弹出。
-      </div>
-
-      <h2 id="steps">4. 一次完整操作怎么走</h2>
-      <ol class="steps">
-        <li><strong>选芯片型号</strong>：按你设备的芯片选（例如 <code>esp32</code>、<code>t5ai</code>；如果只授权不烧录可选 <code>other</code>）。</li>
-        <li><strong>设波特率</strong>：烧录波特率和授权波特率分别设置；不确定就用默认值。</li>
-        <li><strong>选固件</strong>（仅当需要烧录时）：开关打开“烧录固件”，选本地 <code>.bin</code>，或用“默认”从官方下载授权固件（按芯片过滤、可选版本、显示下载进度）。</li>
-        <li><strong>选授权码 Excel 表</strong>：选中后界面立即显示 <strong>总数 / 已用 / 进行中 / 剩余</strong>。确认<strong>“剩余”大于 0</strong>——否则启动按钮会保持禁用。</li>
-        <li><strong>设置冲突策略</strong>：遇到已带授权的设备是<strong>跳过</strong>还是<strong>覆盖</strong>。</li>
-        <li><strong>（仅 T5AI）选存储模式</strong>：<code>KV</code>（可重写）或 <code>OTP</code>（写一次不可逆，详见 <a href="#safety">安全须知</a>）。</li>
-        <li><strong>自动分配端口</strong>：点“自动分配”，把所有可用串口加为处理插槽。</li>
-        <li><strong>启动</strong>：点“启动”开始整批处理。空闲端口较多（&gt; 8）时会弹确认框，避免误启动。</li>
-        <li><strong>看仪表盘等完成</strong>：实时看烧录/授权的累计统计、当前批次进度；整批结束会有完成横幅（全部成功 / 全部失败 / 部分成功 / 全部跳过）。</li>
-        <li><strong>核对结果</strong>：逐行检查每个端口的状态，失败的可以点错误看详情并<strong>重试</strong>。</li>
-      </ol>
-      <div class="callout tip">
-        <span class="title">想先探一下设备现状？</span>
-        点工具栏的<strong>“全部读取”</strong>，会对非活动插槽做只读探测（读 MAC、读现有授权），<strong>不写入任何内容</strong>，适合批量前摸底。
-      </div>
-
-      <h2 id="read-results">5. 看懂结果</h2>
-      <p>每个参与处理的端口占一行，你会看到这几样东西：</p>
-      <ul>
-        <li><strong>状态徽标</strong>（带颜色）：告诉你这行当前是什么情况。常见状态如下：</li>
-      </ul>
+      <h3 id="handoff">和固件开发者对齐：配置交接单</h3>
+      <p>批量要用的每一项配置都应由<strong>固件开发者给出</strong>、由<strong>操作员照单核对</strong>——不要靠猜。建议把下表复制到工单或群里，开发者逐项填写，操作员开工前逐行核对：</p>
       <table>
-        <thead><tr><th>状态</th><th>什么意思</th></tr></thead>
+        <thead><tr><th>配置项</th><th>固件开发者填写</th><th>操作员核对</th></tr></thead>
         <tbody>
-          <tr><td><code>done</code>（完成）</td><td>这台设备烧录和授权都成功了，是好品。</td></tr>
-          <tr><td><code>failed</code>（失败）</td><td>某一步出错了。点错误信息看详情，可以<strong>重试</strong>。</td></tr>
-          <tr><td><code>skipped</code>（跳过）</td><td>这台设备已经有授权，按你设的“跳过”策略跳过了。</td></tr>
-          <tr><td><code>no_code</code>（无码）</td><td>授权码用完了，没分到码给这台设备。</td></tr>
-          <tr><td>其他（处理中）</td><td>显示“正在读取/正在烧录/正在授权”等都属于<strong>还在处理</strong>，等它跑完即可。</td></tr>
+          <tr><td><strong>芯片型号</strong></td><td>目标芯片（如 <code>esp32</code> / <code>t5ai</code>；只授权不烧录写 <code>other</code>）</td><td>批量页"芯片"选择与交接单一致</td></tr>
+          <tr><td><strong>操作模式</strong></td><td><strong>只授权</strong>还是<strong>先烧固件再授权</strong>（即开发者页的路径 A / 路径 B）</td><td>"烧录固件"开关：只授权 = 关，先烧再授 = 开</td></tr>
+          <tr><td><strong>固件文件与版本</strong></td><td>文件名 + 版本号；用官方 auth-firmware 的注明版本</td><td>选中的固件文件名/版本一致（归档的 batch-summary.json 会记录 SHA256，可事后核查）</td></tr>
+          <tr><td><strong>烧录波特率</strong></td><td>推荐值（按芯片）</td><td>一致；想降波特率先和开发者确认</td></tr>
+          <tr><td><strong>授权波特率</strong></td><td>固件 shell 的波特率（通常 <code>115200</code>）</td><td>一致</td></tr>
+          <tr><td><strong>存储模式</strong></td><td><code>KV</code> 或 <code>OTP</code>（仅 T5AI；选 OTP 必须显著标注）</td><td>一致；OTP 必须先单台验证（见<a href="#safety">安全铁律</a>）</td></tr>
+          <tr><td><strong>冲突策略</strong></td><td>跳过 / 覆盖（OTP 只能跳过）</td><td>一致</td></tr>
+          <tr><td><strong>授权表</strong></td><td>用哪一份 Excel、本批预计数量</td><td>文件选对；界面"剩余" ≥ 本批<strong>新设备</strong>数量（恢复/重试已登记设备不占新码）</td></tr>
+          <tr><td><strong>接线</strong></td><td>烧录/授权口的位置说明（T5 勿接日志口）</td><td>按说明接线</td></tr>
+          <tr><td><strong>MAC 唯一性</strong></td><td>确认每台设备已烧录<strong>全球唯一、互不重复</strong>的 MAC，并注明 MAC 在哪个环节个性化</td><td>知悉：tyutool <strong>不校验</strong> MAC 是否与其他设备冲突。授权码与 MAC 绑定，重复的 MAC 会让不同设备共用同一个授权码，设备在涂鸦平台将无法正常识别</td></tr>
+          <tr><td><strong>单台试通</strong></td><td>已按<a href="batch-auth-developer.html#self-test">固件自测清单</a>手工测试通过</td><td>产线环境再单台跑通一次，再小批量试跑</td></tr>
+          <tr><td><strong>特殊事项</strong></td><td>默认 MAC 处理、供电要求、其他注意点</td><td>已逐条知悉</td></tr>
         </tbody>
       </table>
-      <ul>
-        <li><strong>进度条</strong>：烧录阶段会显示分阶段进度。</li>
-        <li><strong>MAC / UUID</strong>：读取到后会显示在这行。</li>
-        <li><strong>错误信息</strong>：失败时显示；点开可看详情并<strong>复制</strong>，方便报问题。</li>
+      <div class="callout tip">
+        <span class="title">对不上怎么办</span>
+        任何一项与交接单不一致，<strong>先停下来找固件开发者确认</strong>，不要按自己的理解改配置——尤其是存储模式和固件版本。
+      </div>
+
+      <h2 id="steps">3. 操作流程</h2>
+      <p>打开 tyutool，左侧导航进入<strong>工具箱 → 批量烧录授权</strong>。</p>
+      <div class="callout note">
+        <span class="title">第一次进入</span>
+        会弹出<strong>免责声明对话框</strong>（本功能涉及不可逆操作），点继续即可进入；勾选"不再提示"后下次不弹。想再看一次：<a href="settings.html">设置 → 关于</a> → <strong>"重新显示批量授权风险提示"</strong>。
+      </div>
+
+      <h3 id="configure">阶段一 · 配置（展开顶部"配置"面板）</h3>
+      <ul class="plain">
+        <li>① <strong>选择芯片型号</strong>：如 <code>ESP32</code>、<code>T5AI</code>；只授权不烧录选 <code>other</code>。</li>
+        <li>② <strong>设置烧录波特率</strong>。</li>
+        <li>③ <strong>设置授权波特率</strong>：不确定就用默认值。</li>
+        <li>④ <strong>是否烧录固件</strong>：开启后会<strong>先烧录固件、再授权</strong>。</li>
+        <li>⑤ <strong>固件文件</strong>：本地文件 / 默认授权固件，二选一。</li>
+        <li>⑥ 本地文件：<strong>选择固件位置</strong>；默认授权固件：<strong>选择版本</strong>（建议使用最新版），下载就绪后显示"固件已就绪"。</li>
       </ul>
-
-      <h2 id="troubleshoot">6. 出错了怎么办</h2>
-
-      <h3>应用打不开 / 白屏</h3>
-      <ul>
-        <li><strong>Linux 下打开是白屏或空白窗口</strong>（虚拟机里尤其常见）：WebKit2GTK 的 GPU 合成失败所致。启动前设一个环境变量再运行：
-          <pre><code>export WEBKIT_DISABLE_COMPOSITING_MODE=1
-./tyutool-gui_linux_x86_64_appimage_*.AppImage</code></pre>
-        </li>
-        <li><strong>macOS 提示“无法验证开发者”</strong>：tyutool 的安装包没有 Apple 签名，这是正常的。打开<strong>系统设置 → 隐私与安全性 → 仍要打开</strong>；或在访达里按住 Control 点 <code>tyutool.app</code> → <strong>打开</strong>。</li>
+      <figure class="shot">
+        <img src="../assets/images/batch-config.png" alt="配置区特写：芯片、烧录/授权波特率、烧录固件开关与固件来源" loading="lazy">
+        <figcaption>配置区（共享配置）</figcaption>
+      </figure>
+      <ul class="plain">
+        <li>① <strong>选择授权表</strong>（<code>.xlsx</code>）。</li>
+        <li>② <strong>查看表中授权码信息是否符合预期</strong>：总计 / 已用 / 占用中 / 剩余。给新设备分码需要"剩余" &gt; 0；仅恢复/重试已登记设备时剩余 0 也可启动（tyutool 会按 MAC 找回各自原来的码）。</li>
+        <li>③ <strong>遇到已带授权的设备怎么办</strong>：跳过（推荐）还是覆盖。</li>
       </ul>
+      <figure class="shot">
+        <img src="../assets/images/batch-sheet-stats.png" alt="批量授权配置：授权表选择、统计条与冲突策略" loading="lazy">
+        <figcaption>批量授权配置</figcaption>
+      </figure>
+      <p><strong>（仅 T5AI）选存储模式</strong>：芯片选 <code>T5AI</code> 时，批量授权配置里会多出"存储模式"选项（上图为 ESP32，无此项）。<code>KV</code> 可重写；<code>OTP</code> 写一次不可逆，用前必读 <a href="#safety">安全铁律</a>。</p>
 
-      <h3>端口没出现 / 打不开</h3>
+      <h3 id="start">阶段二 · 接线与启动</h3>
+      <div class="callout tip">
+        <span class="title">建议一步一步来：先小批量试跑</span>
+        不要第一次就把整批设备全插上。推荐节奏：<strong>先用 1 台设备完整跑通</strong>（配置、烧录、授权、核对全流程）→ <strong>再用 2～4 台小批量试跑</strong>，确认每行都是 <code>done</code> → 最后再上整批。前面多花几分钟，能避免整批返工。
+      </div>
+      <p><strong>接好设备</strong>（每台设备一个串口；T5/T5AI 务必接<strong>烧录/授权口</strong>）后，只需两步：</p>
+      <ol class="steps">
+        <li>点 ① <strong>自动分配</strong>：扫描并把所有可用串口加为处理插槽，每口一行、状态"空闲"。</li>
+        <li>点 ⑥ <strong>全部开始</strong>：开始整批处理；空闲端口较多（&gt; 8）时会先弹确认框防误点。</li>
+      </ol>
+      <div class="callout warn">
+        <span class="title">按启动键前，最后 30 秒检查</span>
+        各项配置和<a href="#handoff">配置交接单</a>逐行对上了吗？芯片型号对？固件版本对？授权表"剩余"够？冲突策略符合预期？如果用 <code>OTP</code>——先用一台设备完整跑通验证过了吗？
+      </div>
+      <figure class="shot">
+        <img src="../assets/images/batch-port-slots.png" alt="工具栏与端口插槽列表：自动分配、串口过滤、全部读取、取消、重试失败、全部开始，及单口读取" loading="lazy">
+        <figcaption>工具栏与端口列表</figcaption>
+      </figure>
+      <div class="callout note">
+        <span class="title">工具栏其他按钮（按需使用）</span>
+        ② <strong>串口过滤</strong>——屏蔽不参与批量的串口（角标 = 已屏蔽数量）；③ <strong>全部读取</strong>——只读摸底（读 MAC、读现有授权，<strong>不写入任何内容</strong>），适合启动前确认设备现状；④ <strong>取消</strong>——停掉进行中的批次；⑤ <strong>重试失败</strong>——一键重跑所有失败行；⑦ 单口<strong>"读取"</strong>——只探测这一台。
+      </div>
+
+      <h3 id="watch">阶段三 · 等待与核对</h3>
+      <ol class="steps">
+        <li><strong>看仪表盘等完成</strong>：实时显示烧录/授权累计统计和当前批次进度；整批结束会出<strong>完成横幅</strong>（全部成功 / 全部失败 / 部分成功 / 全部跳过）。</li>
+        <li><strong>逐行核对</strong>：每个端口一行，按状态徽标判断好坏（见<a href="#read-results">下一节</a>）；失败的点错误信息看详情并<strong>重试</strong>。</li>
+        <li><strong>归档（整单跑完时）</strong>：一份授权表的任务全部跑完后，点完成横幅上的<strong>"归档"</strong>按钮一键存档；分多轮跑的中间轮次不用归档（详见<a href="#archive">归档说明</a>）。</li>
+      </ol>
+      <figure class="shot">
+        <img src="../assets/images/batch-dashboard.png" alt="仪表盘与完成横幅：烧录累计、授权累计、本次批次统计，整批结束后出现完成横幅与归档按钮" loading="lazy">
+        <figcaption>仪表盘与完成横幅（右侧为"归档"按钮）</figcaption>
+      </figure>
+
+      <h2 id="read-results">4. 看懂结果</h2>
+      <p>每个端口一行，一行里有：<strong>状态徽标</strong>（带颜色）、烧录阶段的<strong>进度条</strong>、读取到的 <strong>MAC / UUID</strong>，以及失败时的<strong>错误信息</strong>（点开可看详情并复制）。判断标准就一张表：</p>
+      <table>
+        <thead><tr><th>状态</th><th>什么意思</th><th>要做什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>done</code>（完成）</td><td>烧录和授权都成功。</td><td>好品，正常流转。</td></tr>
+          <tr><td><code>failed</code>（失败）</td><td>某一步出错了。</td><td>点错误信息看详情，可<strong>重试</strong>。</td></tr>
+          <tr><td><code>skipped</code>（跳过）</td><td>设备已有授权，按"跳过"策略略过。</td><td>确认符合预期即可。</td></tr>
+          <tr><td><code>no_code</code>（无码）</td><td>这是台<strong>新设备</strong>（表里没登记过），且"剩余"已经是 0，分不到新码。</td><td>补充"剩余"充足的授权表后重跑这台；表里已登记的设备不受影响。</td></tr>
+          <tr><td>其他（处理中）</td><td>"正在读取 / 正在烧录 / 正在授权"等。</td><td>还在跑，等它完成。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="archive">整单跑完，归档留底</h3>
+      <p>先分清两个词，避免歧义：点一次"全部开始"叫<strong>一轮</strong>；一份授权表对应的整个生产任务叫<strong>一单</strong>（一单往往分很多轮跑完，比如 4 个串口 × 250 轮 = 1000 台）。<strong>归档以"单"为单位：一份授权表 = 一个档案文件夹，整单跑完（或中途要换表时）归档一次即可</strong>——分多少轮不影响，因为每台设备的状态、MAC、时间都实时写回了授权表，Excel 副本就是全量台账。</p>
+      <div class="callout tip">
+        <span class="title">一键归档</span>
+        完成横幅右侧有<strong>"归档"</strong>按钮：选一个存放目录，tyutool 会自动创建带时间戳的档案文件夹（如 <code>batch-archive_20260717-143205_esp32/</code>），存入<strong>授权表副本（全量台账）、固件文件（含 SHA256 校验值）、日志 logs.zip、摘要 batch-summary.json</strong>（配置、环境、统计）<strong>和 batch-slots.csv</strong>。注意：summary 里的 <code>lastRun</code> 和 csv 只是<strong>最后一轮的现场快照</strong>——查全量始终以 Excel 副本为准。
+      </div>
+      <p>档案的价值：授权码是花钱买的，这份档案就是<strong>"哪台设备用了哪个码"的台账</strong>，日后出货追溯、售后定位全靠它。点"归档"后，档案文件夹里有：</p>
+      <table>
+        <thead><tr><th>档案内容</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><strong>授权表 Excel 副本</strong></td><td>全量台账：本单每台设备的状态、MAC、时间都在表里。归档后不要再手工改动。</td></tr>
+          <tr><td><strong>固件文件</strong></td><td>回答"当时刷的到底是哪个固件"；SHA256 校验值记在 batch-summary.json 里。</td></tr>
+          <tr><td><strong>logs.zip</strong></td><td>本次会话的全部日志，排查问题的原始依据。</td></tr>
+          <tr><td><strong>batch-summary.json</strong></td><td>当时的完整配置（芯片 / 波特率 / 固件 / 策略 / 存储模式）、环境（版本 / 系统）、统计与最后一轮明细。</td></tr>
+          <tr><td><strong>batch-slots.csv</strong></td><td>最后一轮每口的结果与错误信息，Excel 可直接打开。</td></tr>
+          <tr><td>（建议手工补一张）<strong>完成横幅截图</strong></td><td>本单成绩单，一目了然。</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="troubleshoot">5. 出错速查</h2>
+      <p>按现象找处理办法：</p>
+      <table>
+        <thead><tr><th>现象</th><th>怎么处理</th></tr></thead>
+        <tbody>
+          <tr><td>应用打不开 / 窗口白屏</td><td>安装类问题：Linux 白屏见 <a href="faq.html#linux-blank-window">FAQ · Linux 窗口空白</a>；macOS 提示"无法验证开发者"见 <a href="faq.html#macos-gatekeeper">FAQ · Gatekeeper 拦截</a>。</td></tr>
+          <tr><td>端口没出现 / 打不开</td><td>换一根 USB 线、换一个 USB 口；确认驱动已装好；<strong>关掉其他占用串口的程序</strong>（串口调试软件、Arduino IDE 等）。更多见 <a href="faq.html#ports">FAQ · 连接/端口</a>。</td></tr>
+          <tr><td>全部失败 / 大量失败</td><td><strong>先用单台设备试通</strong>再投整批；把波特率降到 <code>115200</code>；检查 USB 供电，必要时外接供电。</td></tr>
+          <tr><td>Excel 提示"文件被占用"</td><td>先<strong>关掉 Excel / WPS</strong> 再重新选表（批量运行期间 tyutool 会锁住文件防冲突）。</td></tr>
+          <tr><td>Excel 提示表无效</td><td>检查表里是否有 <strong>UUID</strong> 和 <strong>AuthKey</strong> 两列，且长度正确。</td></tr>
+          <tr><td>需要详细日志 / 报问题</td><td>先按<a href="#save-evidence">下面的清单</a>把现场保存好；导出日志见 <a href="faq.html#logs-feedback">FAQ · 如何反馈 bug</a>。</td></tr>
+        </tbody>
+      </table>
+      <h3 id="save-evidence">报问题前，先把现场保存好</h3>
+      <p>最快的办法：<strong>趁现场还在，直接点完成横幅上的"归档"</strong>——错误明细、日志、授权表副本、配置与环境信息一次全部存下（见<a href="#archive">归档说明</a>；单条错误全文也可以点失败行的错误 → 详情 → 复制）。归档之外，只需再手工补三样：</p>
       <ul>
-        <li>换一根 USB 线、换一个 USB 口（很多问题是线材或接触不良）。</li>
-        <li>确认串口芯片驱动已装好（CH340 / CP2102 / FT232）。</li>
-        <li><strong>关掉其他正在用串口的程序</strong>（其他串口调试软件、Arduino IDE 等），它们可能占着端口。</li>
-        <li>更多排查见 <a href="faq.html#ports">常见问题 · 连接/端口</a>。</li>
+        <li><strong>界面截图</strong>：失败行所在的端口列表，要能看到端口号、状态徽标、停在哪一步。<strong>注意遮住 AuthKey</strong>——UUID 可以保留，用来对上是哪一行。</li>
+        <li><strong>问题设备实物</strong>：贴标签单独放好，别混回好品堆——尤其是带危险徽标的设备（见<a href="#safety">安全铁律</a>）。</li>
+        <li><strong>一句话现象描述</strong>：什么时候、做到哪一步、第几台开始出错；用外置 USB 转串口适配器的，注明芯片型号（CH340 / CP2102 等）。</li>
       </ul>
+      <div class="callout note">
+        <span class="title">别拖</span>
+        应用会自动清理旧日志，跑新批次也会覆盖现场——出错后<strong>当天</strong>就归档。
+      </div>
 
-      <h3>全部失败 / 大量失败</h3>
-      <ul>
-        <li><strong>先用单台设备试通</strong>，确认整个流程跑通，再投入整批。</li>
-        <li><strong>把波特率调低</strong>（例如降到 <code>115200</code>），高波特率下丢包会让失败激增。</li>
-        <li>供电不足也会导致批量失败——检查 USB 口供电，必要时换外接供电。</li>
-      </ul>
-
-      <h3>Excel 报错（被占用 / 无效）</h3>
-      <ul>
-        <li>提示“文件被占用”：先<strong>关掉 Excel / WPS</strong>再重新选表。批量运行期间 tyutool 会锁住文件防止冲突。</li>
-        <li>提示表无效：检查表里是否确实有 <strong>UUID</strong> 和 <strong>AuthKey</strong> 两列，且 UUID/AuthKey 长度正确。</li>
-      </ul>
-
-      <h3>想看更详细的日志 / 报问题</h3>
-      <p>失败的详细信息在每行的错误对话框里；如果需要更深入排查，参考 <a href="faq.html#logs-feedback">常见问题 · 如何反馈 bug</a> 导出日志。</p>
-
-      <h2 id="safety">7. 安全须知</h2>
-      <p>批量授权是 tyutool 里<strong>唯一会触发不可逆硬件操作</strong>的功能。请记住下面两条：</p>
+      <h2 id="safety">6. 安全铁律</h2>
+      <p>批量授权是 tyutool 里<strong>唯一会触发不可逆硬件操作</strong>的功能。记住两条铁律：</p>
       <div class="callout danger">
         <span class="title">铁律一：OTP 模式写一次不可逆</span>
         如果存储模式选了 <code>OTP</code>（仅 T5AI 可选），授权码会<strong>一次性烧进芯片</strong>，<strong>永远无法擦除或修改</strong>。一旦配错（芯片型号错、固件错、授权码错），整批设备都会被毁掉。所以：<strong>用 OTP 之前，务必先用一台设备把整个流程完整跑通验证，确认无误后再批量。</strong>
@@ -155,12 +235,8 @@
         <figcaption>选择 <code>OTP</code> 存储模式时界面会明确提示：写入后不可撤销。请务必先单台验证。</figcaption>
       </figure>
       <div class="callout danger">
-        <span class="title">铁律二：出现“已写入后取消”危险徽标的设备必须单独放一边</span>
-        如果某台设备在<strong>授权可能已经写入之后</strong>才被取消，它会显示一个<strong>物理隔离危险徽标</strong>——意思是授权可能已经写进去了，设备状态不确定。这种设备<strong>不能当成好品</strong>，也不要直接重新跑批量，必须<strong>单独拿出来核实</strong>清楚后再决定怎么处理。
-      </div>
-      <div class="callout warn">
-        <span class="title">批量前的检查清单</span>
-        启动整批前，逐项确认：芯片型号对、固件版本对、授权表已校验且“剩余”够、冲突策略符合预期；用 OTP 的话务必先单台验证。
+        <span class="title">铁律二：带"已写入后取消"危险徽标的设备必须单独放一边</span>
+        如果某台设备在<strong>授权可能已经写入之后</strong>才被取消，它会显示一个<strong>物理隔离危险徽标</strong>——授权可能已写进去，设备状态不确定。这种设备<strong>不能当成好品</strong>，也不要直接重新跑批量，必须<strong>单独拿出来核实</strong>清楚后再决定怎么处理。
       </div>
 
       <nav class="pager">

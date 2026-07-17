@@ -26,126 +26,205 @@
   <div class="layout">
     <main class="content">
       <h1>Batch Auth · Operator Guide</h1>
-      <p class="lead">This page is for <strong>operators using tyutool to batch flash and authorize</strong>: how to prepare, how to operate, and what to do when something breaks. No technical background required.</p>
+      <p class="lead">This page is for <strong>operators using tyutool to batch flash and authorize</strong>, organized as a follow-along workflow. No technical background required.</p>
 
       <div class="callout note">
         <span class="title">Wrong page?</span>
         If you are a <strong>firmware developer</strong> (you need to know what your firmware must implement to be batch-authorizable), see <a href="batch-auth-developer.html">Batch Auth · Firmware Developer Guide</a>.
       </div>
 
+      <nav class="flow" aria-label="Workflow">
+        <a href="#prepare"><span class="num">1</span>Pre-flight checklist</a><span class="sep">→</span>
+        <a href="#configure"><span class="num">2</span>Configure</a><span class="sep">→</span>
+        <a href="#start"><span class="num">3</span>Wire up &amp; start</a><span class="sep">→</span>
+        <a href="#read-results"><span class="num">4</span>Check results</a><span class="sep">·</span>
+        <a class="plain" href="#troubleshoot">Quick fixes</a>
+        <a class="plain" href="#safety">Safety rules</a>
+      </nav>
+
       <h2 id="what-it-does">1. What this tool does</h2>
-      <p>It processes <strong>many devices at once</strong> — plug multiple devices into your computer's serial ports, click one button, and tyutool <strong>simultaneously</strong> flashes firmware and writes the credentials each device needs to connect to the cloud. You don't type the credentials by hand; they're read row-by-row from an Excel spreadsheet.</p>
+      <p>It processes <strong>many devices at once</strong>: plug multiple devices into your computer's serial ports, click <strong>"Start All"</strong>, and tyutool <strong>simultaneously</strong> flashes firmware and writes the credentials each device needs to connect to the cloud. You never type the credentials by hand — they're read row-by-row from an Excel spreadsheet.</p>
       <figure class="shot">
         <img src="../assets/images/batch-overview.png" alt="Batch Flash &amp; Auth overview: config area, dashboard, toolbar and port list" loading="lazy">
-        <figcaption>Batch Flash &amp; Auth overview: left config area (chip / baud / firmware / auth sheet), top dashboard (flash and auth cumulative stats), toolbar, and the port list below.</figcaption>
+        <figcaption>Top to bottom: the <strong>completion banner</strong> (appears when a batch finishes), the <strong>dashboard</strong> (flash cumulative / auth cumulative / current batch), the collapsible <strong>Config panel</strong> (shared config + batch auth config), the <strong>toolbar</strong> (Auto-assign / port filter / Read All / Start All), and the <strong>port list</strong> (one row per device).</figcaption>
       </figure>
 
-      <h2 id="prepare">2. What to prepare beforehand</h2>
-      <ul>
-        <li><strong>The desktop tyutool app</strong>: this feature only works in the desktop app, not on the web. Download and install for your OS (current latest release v3.2.1; links start the download):
-          <ul>
-            <li><strong>Windows (x64, installer)</strong>: <a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_windows_x86_64_nsis_3.2.1.exe">tyutool-gui_windows_x86_64_nsis_3.2.1.exe</a></li>
-            <li><strong>macOS (Universal, installer)</strong>: <a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_macos_universal_dmg_3.2.1.dmg">tyutool-gui_macos_universal_dmg_3.2.1.dmg</a></li>
-            <li><strong>Linux (x64, AppImage)</strong>: <a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage">tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage</a> (<code>chmod +x</code> after download, then run)</li>
-          </ul>
-        </li>
-        <li><strong>An auth-code Excel sheet (<code>.xlsx</code>)</strong>: these are credentials <strong>purchased</strong> from Tuya (get them at <a href="https://tuyaopen.ai/pricing">https://tuyaopen.ai/pricing</a>). The sheet needs at least two columns: <strong>UUID</strong> and <strong>AuthKey</strong> (column names are case-insensitive). tyutool fills in the other columns (status, MAC, timestamp, etc.) automatically.</li>
-        <li><strong>Devices + serial cables</strong>: connect each device to the computer via a USB-to-serial adapter; each device occupies one serial port. <strong>Note (T5/T5AI)</strong>: the device has two UARTs — a <strong>flash/auth port</strong> and a <strong>log port</strong>; flashing and authorization both use the <strong>same flash/auth port</strong>. Make sure you wire to that port, <strong>not the log port</strong>, or flashing and auth will fail.</li>
-        <li><strong>Serial drivers</strong>: install the driver for your USB-to-serial chip (CH340 / CP2102 / FT232, etc.), otherwise the computer won't see the port.</li>
-        <li><strong>The firmware to flash</strong> (optional): if this step also flashes firmware, have the <code>.bin</code> file ready, or use the official auth firmware that tyutool can download.</li>
-      </ul>
-      <div class="callout note">
-        <span class="title">Stay up to date</span>
-        If a newer version comes out after you install, <strong>update via the in-app "Check for updates" and use the latest version.</strong>
+      <h2 id="prepare">2. Pre-flight checklist</h2>
+      <p>Confirm every row in this table before you start:</p>
+      <table>
+        <thead><tr><th>Item</th><th>Ready when…</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Desktop tyutool app</strong></td><td>Installed. Downloads below; after installing, keep it current via the in-app <strong>"Check for updates"</strong>.</td></tr>
+          <tr><td><strong>Auth-code Excel sheet (<code>.xlsx</code>)</strong></td><td>Has at least a <strong>UUID</strong> and an <strong>AuthKey</strong> column (names are case-insensitive); tyutool fills in the rest. Credentials are purchased from Tuya: <a href="https://tuyaopen.ai/pricing">tuyaopen.ai/pricing</a>.</td></tr>
+          <tr><td><strong>Devices + serial cables</strong></td><td>One USB-to-serial cable per device; each device occupies one serial port.</td></tr>
+          <tr><td><strong>Serial drivers</strong></td><td>USB-to-serial chip driver installed (CH340 / CP2102 / FT232, etc.) and the computer can see the ports.</td></tr>
+          <tr><td><strong>Firmware file (only if flashing)</strong></td><td>Prepare the <code>.bin</code> per the <a href="#handoff">handoff sheet</a>, or use tyutool's built-in "default auth firmware" download.</td></tr>
+        </tbody>
+      </table>
+      <table>
+        <thead><tr><th>OS</th><th>Installer (v3.2.1; check <a href="https://github.com/tuya/tyutool/releases">GitHub Releases</a> for newer versions)</th></tr></thead>
+        <tbody>
+          <tr><td>Windows (x64)</td><td><a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_windows_x86_64_nsis_3.2.1.exe">tyutool-gui_windows_x86_64_nsis_3.2.1.exe</a></td></tr>
+          <tr><td>macOS (Universal)</td><td><a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_macos_universal_dmg_3.2.1.dmg">tyutool-gui_macos_universal_dmg_3.2.1.dmg</a></td></tr>
+          <tr><td>Linux (x64)</td><td><a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage">tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage</a> (<code>chmod +x</code> after download, then run)</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <span class="title">T5 / T5AI wiring note</span>
+        The device has <strong>two UARTs</strong>: a flash/auth port and a log port. Flashing and authorization both use the <strong>same flash/auth port</strong> — make sure you wire to that port, <strong>not the log port</strong>, or both flashing and auth will fail.
       </div>
       <div class="callout warn">
         <span class="title">Auth codes are valuable</span>
         UUID and AuthKey are paid credentials, one code per device. Keep the Excel file safe and never leak it in chats or screenshots.
       </div>
 
-      <h2 id="first-visit">3. First time you enter</h2>
-      <p>The first time you open the batch auth page, a <strong>disclaimer dialog</strong> appears reminding you that this feature performs irreversible operations. Acknowledge it to continue. Checking <strong>"don't show again"</strong> suppresses it next time; clicking <strong>Cancel</strong> returns you to the toolbox without entering the page.</p>
-      <div class="callout tip">
-        <span class="title">Want it back?</span>
-        If you previously checked "don't show again" and want to see the notice once more, go to <a href="settings.html">Settings → About</a> and click <strong>"Show batch-auth risk notice again"</strong> — the dialog will reappear the next time you enter the Batch Auth page.
-      </div>
-
-      <h2 id="steps">4. How a full run works</h2>
-      <ol class="steps">
-        <li><strong>Pick the chip</strong>: choose your device's chip (e.g. <code>esp32</code>, <code>t5ai</code>; pick <code>other</code> for auth-only without flashing).</li>
-        <li><strong>Set baud rates</strong>: set the flash baud and the auth baud separately; leave defaults if unsure.</li>
-        <li><strong>Pick firmware</strong> (only if flashing): turn on "flash firmware", choose a local <code>.bin</code>, or use "default" to download the official auth firmware (filtered by chip, with a version dropdown and download progress).</li>
-        <li><strong>Pick the auth-code Excel sheet</strong>: selecting it immediately shows <strong>total / used / in-progress / remaining</strong>. Confirm <strong>"remaining" is greater than 0</strong> — otherwise the Start button stays disabled.</li>
-        <li><strong>Set the conflict policy</strong>: <strong>Skip</strong> or <strong>Overwrite</strong> when a device already has auth.</li>
-        <li><strong>(T5AI only) Pick the storage mode</strong>: <code>KV</code> (rewritable) or <code>OTP</code> (write-once, irreversible — see <a href="#safety">Safety</a>).</li>
-        <li><strong>Auto-assign ports</strong>: click "Auto-assign" to add all available serial ports as slots.</li>
-        <li><strong>Start</strong>: click "Start" to begin the batch. If there are many idle ports (&gt; 8), a confirmation dialog appears to avoid accidental launches.</li>
-        <li><strong>Watch the dashboard</strong>: track the cumulative flash/auth stats and the current batch progress in real time; a completion banner appears at the end (all-success / all-failed / partial / all-skipped).</li>
-        <li><strong>Check the results</strong>: inspect each port's status row by row; for failures, click the error to see details and <strong>retry</strong>.</li>
-      </ol>
-      <div class="callout tip">
-        <span class="title">Want to peek at the devices first?</span>
-        Click <strong>"Read All"</strong> on the toolbar to run a read-only probe (read MAC, read existing auth) on non-active slots — <strong>it writes nothing</strong>, great for a pre-batch check.
-      </div>
-
-      <h2 id="read-results">5. Reading the results</h2>
-      <p>Each port in the batch occupies one row showing:</p>
-      <ul>
-        <li><strong>A status badge</strong> (colored) telling you the row's current state. Common statuses:</li>
-      </ul>
+      <h3 id="handoff">Align with the firmware developer: the config handoff sheet</h3>
+      <p>Every setting used in the batch should be <strong>specified by the firmware developer</strong> and <strong>verified by the operator against the sheet</strong> — never guessed. Copy this table into your ticket or chat, have the developer fill it in, and check it row by row before starting:</p>
       <table>
-        <thead><tr><th>Status</th><th>What it means</th></tr></thead>
+        <thead><tr><th>Setting</th><th>Firmware developer fills in</th><th>Operator verifies</th></tr></thead>
         <tbody>
-          <tr><td><code>done</code></td><td>This device flashed and authorized successfully — it's a good unit.</td></tr>
-          <tr><td><code>failed</code></td><td>A step errored. Click the error message for details; you can <strong>retry</strong>.</td></tr>
-          <tr><td><code>skipped</code></td><td>This device already had auth; skipped per your "skip" policy.</td></tr>
-          <tr><td><code>no_code</code></td><td>Auth codes ran out; no code was assigned to this device.</td></tr>
-          <tr><td>Others (processing)</td><td>Anything showing "reading / flashing / authorizing" is <strong>still processing</strong>; just wait for it to finish.</td></tr>
+          <tr><td><strong>Chip</strong></td><td>Target chip (e.g. <code>esp32</code> / <code>t5ai</code>; <code>other</code> for auth-only)</td><td>The "chip" selection on the batch page matches</td></tr>
+          <tr><td><strong>Operation mode</strong></td><td><strong>Auth-only</strong> or <strong>flash-then-auth</strong> (path A / path B on the developer page)</td><td>"Flash firmware" switch: auth-only = off, flash-then-auth = on</td></tr>
+          <tr><td><strong>Firmware file &amp; version</strong></td><td>File name + version; note the official auth-firmware version if used</td><td>The selected firmware name/version matches (the archived batch-summary.json records the SHA-256 for later checks)</td></tr>
+          <tr><td><strong>Flash baud rate</strong></td><td>Recommended value (per chip)</td><td>Matches; confirm with the developer before lowering it</td></tr>
+          <tr><td><strong>Auth baud rate</strong></td><td>The firmware shell's baud (usually <code>115200</code>)</td><td>Matches</td></tr>
+          <tr><td><strong>Storage mode</strong></td><td><code>KV</code> or <code>OTP</code> (T5AI only; OTP must be flagged prominently)</td><td>Matches; OTP requires a single-device validation first (see <a href="#safety">safety rules</a>)</td></tr>
+          <tr><td><strong>Conflict policy</strong></td><td>Skip / Overwrite (OTP forces Skip)</td><td>Matches</td></tr>
+          <tr><td><strong>Auth sheet</strong></td><td>Which Excel file, expected batch size</td><td>Right file selected; "remaining" ≥ the number of <strong>new devices</strong> in the batch (recovering/retrying recorded devices consumes no new codes)</td></tr>
+          <tr><td><strong>Wiring</strong></td><td>Where the flash/auth port is (T5: never the log port)</td><td>Wired as described</td></tr>
+          <tr><td><strong>MAC uniqueness</strong></td><td>Confirm every device carries a <strong>globally unique, non-repeating</strong> MAC, and note at which production step MACs are personalized</td><td>Acknowledged: tyutool does <strong>not</strong> check MACs for conflicts across devices. Auth codes are bound to MACs — duplicate MACs make different devices share the same auth code, and those devices cannot be recognized correctly on the Tuya platform</td></tr>
+          <tr><td><strong>Single-device pass</strong></td><td>Passed the <a href="batch-auth-developer.html#self-test">firmware self-test checklist</a> by hand</td><td>Run one device end-to-end on the production setup, then a small trial batch</td></tr>
+          <tr><td><strong>Special notes</strong></td><td>Default-MAC handling, power requirements, other gotchas</td><td>Acknowledged item by item</td></tr>
         </tbody>
       </table>
-      <ul>
-        <li><strong>Progress bar</strong>: shown during the flash phase, advancing per phase.</li>
-        <li><strong>MAC / UUID</strong>: shown on the row once read.</li>
-        <li><strong>Error message</strong>: shown on failure; click it for details and <strong>copy</strong> support, handy when reporting an issue.</li>
+      <div class="callout tip">
+        <span class="title">If something doesn't match</span>
+        If any row disagrees with the handoff sheet, <strong>stop and confirm with the firmware developer</strong> — don't adjust settings on your own interpretation, especially the storage mode and firmware version.
+      </div>
+
+      <h2 id="steps">3. The workflow</h2>
+      <p>Open tyutool and go to <strong>Toolbox → Batch Flash &amp; Auth</strong> in the left navigation.</p>
+      <div class="callout note">
+        <span class="title">First time you enter</span>
+        A <strong>disclaimer dialog</strong> appears (this feature performs irreversible operations). Acknowledge it to enter; checking "don't show again" suppresses it next time. To see it again: <a href="settings.html">Settings → About</a> → <strong>"Show batch-auth risk notice again"</strong>.
+      </div>
+
+      <h3 id="configure">Phase one · Configure (expand the Config panel at the top)</h3>
+      <ul class="plain">
+        <li>① <strong>Pick the chip</strong>: e.g. <code>ESP32</code>, <code>T5AI</code>; <code>other</code> for auth-only without flashing.</li>
+        <li>② <strong>Set the flash baud rate</strong>.</li>
+        <li>③ <strong>Set the auth baud rate</strong>: leave the default if unsure.</li>
+        <li>④ <strong>Whether to flash firmware</strong>: when on, each device is <strong>flashed first, then authorized</strong>.</li>
+        <li>⑤ <strong>Firmware file</strong>: local file / default auth firmware — pick one.</li>
+        <li>⑥ Local file: <strong>pick the firmware path</strong>; default auth firmware: <strong>pick a version</strong> (latest recommended) — "firmware ready" appears once the download completes.</li>
       </ul>
-
-      <h2 id="troubleshoot">6. What to do when something breaks</h2>
-
-      <h3>App won't open / blank window</h3>
-      <ul>
-        <li><strong>Linux shows a blank/white window</strong> (especially common in VMs): WebKit2GTK GPU compositing failure. Set an environment variable before launching:
-          <pre><code>export WEBKIT_DISABLE_COMPOSITING_MODE=1
-./tyutool-gui_linux_x86_64_appimage_*.AppImage</code></pre>
-        </li>
-        <li><strong>macOS says "developer cannot be verified"</strong>: tyutool builds are not Apple-signed — this is expected. Go to <strong>System Settings → Privacy &amp; Security → Open Anyway</strong>; or Control-click <code>tyutool.app</code> in Finder → <strong>Open</strong>.</li>
+      <figure class="shot">
+        <img src="../assets/images/batch-config.png" alt="Config area close-up: chip, flash/auth baud rates, flash-firmware switch and firmware source" loading="lazy">
+        <figcaption>The config area (shared config)</figcaption>
+      </figure>
+      <ul class="plain">
+        <li>① <strong>Pick the auth sheet</strong> (<code>.xlsx</code>).</li>
+        <li>② <strong>Check that the sheet's code stats look as expected</strong>: Total / Used / Occupied / Remaining. New devices need "Remaining" &gt; 0; recovery/retry of recorded devices can start at 0 (tyutool matches each device back to its own row by MAC).</li>
+        <li>③ <strong>Decide what to do with devices that already carry auth</strong>: Skip (recommended) or Overwrite.</li>
       </ul>
+      <figure class="shot">
+        <img src="../assets/images/batch-sheet-stats.png" alt="Batch auth config: auth sheet picker, stats strip and conflict policy" loading="lazy">
+        <figcaption>Batch auth config</figcaption>
+      </figure>
+      <p><strong>(T5AI only) Pick the storage mode</strong>: when the chip is <code>T5AI</code>, a "storage mode" option appears in the batch auth config (the screenshot above shows ESP32, which has none). <code>KV</code> is rewritable; <code>OTP</code> is write-once and irreversible — read the <a href="#safety">safety rules</a> first.</p>
 
-      <h3>Port doesn't appear / won't open</h3>
+      <h3 id="start">Phase two · Wire up &amp; start</h3>
+      <div class="callout tip">
+        <span class="title">Go step by step: trial a small batch first</span>
+        Don't plug in the whole batch on your first run. Recommended pace: <strong>run 1 device through the full flow first</strong> (configure, flash, authorize, verify) → <strong>then trial a small batch of 2–4 devices</strong> and confirm every row shows <code>done</code> → only then commit the full batch. A few extra minutes up front saves reworking an entire batch.
+      </div>
+      <p><strong>Connect the devices</strong> (one serial port per device; T5/T5AI: wire to the <strong>flash/auth port</strong>), then it's just two steps:</p>
+      <ol class="steps">
+        <li>Click ① <strong>Auto-assign</strong>: scan and add every available serial port as a slot, one row per port in "idle" state.</li>
+        <li>Click ⑥ <strong>Start All</strong>: begins the batch; with many idle ports (&gt; 8) a confirmation dialog appears first to prevent accidental launches.</li>
+      </ol>
+      <div class="callout warn">
+        <span class="title">Last 30-second check before pressing Start</span>
+        Does every setting match the <a href="#handoff">config handoff sheet</a> row by row? Chip correct? Firmware version correct? Enough "remaining" on the auth sheet? Conflict policy as intended? If using <code>OTP</code> — did you validate the full flow on a single device first?
+      </div>
+      <figure class="shot">
+        <img src="../assets/images/batch-port-slots.png" alt="Toolbar and port slot list: auto-assign, port filter, read all, cancel, retry failed, start all, and per-port read" loading="lazy">
+        <figcaption>Toolbar and port list</figcaption>
+      </figure>
+      <div class="callout note">
+        <span class="title">Other toolbar buttons (use as needed)</span>
+        ② <strong>port filter</strong> — block ports that shouldn't join the batch (badge = blocked count); ③ <strong>Read All</strong> — a read-only probe (reads MAC and existing auth, <strong>writes nothing</strong>), good for checking device state before starting; ④ <strong>Cancel</strong> — stop the running batch; ⑤ <strong>Retry Failed</strong> — re-run all failed rows in one click; ⑦ per-port <strong>"Read"</strong> — probe just that one device.</div>
+
+      <h3 id="watch">Phase three · Wait &amp; verify</h3>
+      <ol class="steps">
+        <li><strong>Watch the dashboard</strong>: cumulative flash/auth stats and the current batch progress update in real time; a <strong>completion banner</strong> appears at the end (all-success / all-failed / partial / all-skipped).</li>
+        <li><strong>Verify row by row</strong>: one row per port; judge each by its status badge (see the <a href="#read-results">next section</a>). For failures, click the error for details and <strong>retry</strong>.</li>
+        <li><strong>Archive (when the job is done)</strong>: after the whole auth sheet's task has finished, click <strong>"Archive"</strong> on the completion banner to export everything in one step; intermediate rounds of a multi-round job don't need archiving (see the <a href="#archive">archive section</a>).</li>
+      </ol>
+      <figure class="shot">
+        <img src="../assets/images/batch-dashboard.png" alt="Dashboard and completion banner: flash cumulative, auth cumulative and current-batch stats, with the completion banner and Archive button after the batch finishes" loading="lazy">
+        <figcaption>The dashboard and completion banner (the "Archive" button on its right)</figcaption>
+      </figure>
+
+      <h2 id="read-results">4. Reading the results</h2>
+      <p>Each port occupies one row showing: a colored <strong>status badge</strong>, a <strong>progress bar</strong> during the flash phase, the <strong>MAC / UUID</strong> once read, and an <strong>error message</strong> on failure (click for details and copy). One table is all you need:</p>
+      <table>
+        <thead><tr><th>Status</th><th>What it means</th><th>What to do</th></tr></thead>
+        <tbody>
+          <tr><td><code>done</code></td><td>Flashed and authorized successfully.</td><td>Good unit — moves on.</td></tr>
+          <tr><td><code>failed</code></td><td>A step errored.</td><td>Click the error for details; you can <strong>retry</strong>.</td></tr>
+          <tr><td><code>skipped</code></td><td>Device already had auth; skipped per your policy.</td><td>Confirm that's what you intended.</td></tr>
+          <tr><td><code>no_code</code></td><td>This is a <strong>new device</strong> (no row in the sheet) and "remaining" is 0, so no code could be assigned.</td><td>Re-run this device with a sheet that has "remaining" codes; devices already recorded in the sheet are unaffected.</td></tr>
+          <tr><td>Others (processing)</td><td>"reading / flashing / authorizing" etc.</td><td>Still running — wait for it to finish.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="archive">Archive when the job is done</h3>
+      <p>Two terms, to avoid ambiguity: one click of "Start All" is a <strong>round</strong>; the whole production task tied to one auth sheet is a <strong>job</strong> (a job usually spans many rounds — e.g. 4 ports × 250 rounds = 1000 devices). <strong>Archiving is per job: one auth sheet = one archive folder, created once when the job finishes (or before switching to another sheet)</strong> — the number of rounds doesn't matter, because every device's status, MAC and timestamp are written back into the sheet as you go; the Excel copy is the complete ledger.</p>
+      <div class="callout tip">
+        <span class="title">One-click archive</span>
+        The completion banner has an <strong>"Archive"</strong> button: pick a destination directory and tyutool creates a timestamped archive folder (e.g. <code>batch-archive_20260717-143205_esp32/</code>) containing the <strong>auth-sheet copy (the full ledger), the firmware file (with its SHA-256), a logs.zip, batch-summary.json</strong> (config, environment, stats) <strong>and batch-slots.csv</strong>. Note: the <code>lastRun</code> section and the csv are only a <strong>snapshot of the final round</strong> — the Excel copy is always the authority for the full job.
+      </div>
+      <p>Why it matters: auth codes are paid for — this archive is your <strong>"which device got which code" ledger</strong>, and shipping traceability and after-sales lookups depend on it. After clicking "Archive", the folder contains:</p>
+      <table>
+        <thead><tr><th>Archive content</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Auth-sheet Excel copy</strong></td><td>The full ledger: every device's status, MAC and timestamp for the job. Don't hand-edit it after archiving.</td></tr>
+          <tr><td><strong>Firmware file</strong></td><td>Answers "exactly which firmware was flashed"; its SHA-256 is recorded in batch-summary.json.</td></tr>
+          <tr><td><strong>logs.zip</strong></td><td>All logs from this session — the raw evidence for troubleshooting.</td></tr>
+          <tr><td><strong>batch-summary.json</strong></td><td>The full config at the time (chip / baud rates / firmware / policy / storage mode), environment (version / OS), stats and the final round's detail.</td></tr>
+          <tr><td><strong>batch-slots.csv</strong></td><td>Per-port results and error messages of the final round; opens directly in Excel.</td></tr>
+          <tr><td>(worth adding by hand) <strong>a completion-banner screenshot</strong></td><td>The job's report card at a glance.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="troubleshoot">5. Quick fixes</h2>
+      <p>Find your symptom, apply the fix:</p>
+      <table>
+        <thead><tr><th>Symptom</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>App won't open / blank window</td><td>Installation issues: Linux blank window, see <a href="faq.html#linux-blank-window">FAQ · Linux blank window</a>; macOS "developer cannot be verified", see <a href="faq.html#macos-gatekeeper">FAQ · Gatekeeper block</a>.</td></tr>
+          <tr><td>Port doesn't appear / won't open</td><td>Try another USB cable or USB port; make sure the driver is installed; <strong>close other programs holding the serial port</strong> (serial-debug tools, Arduino IDE, etc.). More in <a href="faq.html#ports">FAQ · Ports &amp; connection</a>.</td></tr>
+          <tr><td>All failures / lots of failures</td><td><strong>Get a single device working first</strong>, then commit the batch; lower the baud to <code>115200</code>; check USB power, use external power if needed.</td></tr>
+          <tr><td>Excel says "file locked"</td><td><strong>Close Excel / WPS</strong> first, then reselect the sheet (tyutool locks the file during a batch run to prevent conflicts).</td></tr>
+          <tr><td>Excel says the sheet is invalid</td><td>Check the sheet has <strong>UUID</strong> and <strong>AuthKey</strong> columns with the correct lengths.</td></tr>
+          <tr><td>Need detailed logs / reporting an issue</td><td>First save the evidence per the <a href="#save-evidence">checklist below</a>; to export logs see <a href="faq.html#logs-feedback">FAQ · How to report a bug</a>.</td></tr>
+        </tbody>
+      </table>
+      <h3 id="save-evidence">Before reporting: preserve the scene</h3>
+      <p>The fastest way: <strong>while the scene is still intact, click "Archive" on the completion banner</strong> — error details, logs, the auth-sheet copy, and config/environment info are all saved in one go (see the <a href="#archive">archive section</a>; a single error's full text can also be copied via the failed row's error → details → copy). Beyond the archive, only three things need doing by hand:</p>
       <ul>
-        <li>Try a different USB cable or USB port (many issues are cable or contact related).</li>
-        <li>Make sure the serial-chip driver is installed (CH340 / CP2102 / FT232).</li>
-        <li><strong>Close other programs using the serial port</strong> (other serial-debug tools, Arduino IDE, etc.) — they may be holding it.</li>
-        <li>More troubleshooting in <a href="faq.html#ports">FAQ · Connections / Ports</a>.</li>
+        <li><strong>A UI screenshot</strong>: the port list with the failed rows, showing port names, status badges and which step it stopped at. <strong>Mask the AuthKey</strong> — the UUID can stay, it's how you match the row.</li>
+        <li><strong>The affected devices themselves</strong>: label them and set them aside — don't mix them back with good units, especially any showing the danger badge (see <a href="#safety">Safety rules</a>).</li>
+        <li><strong>A one-line description</strong>: when it happened, at which step, from which device onward; if you use an external USB-serial adapter, note its chip (CH340 / CP2102, etc.).</li>
       </ul>
+      <div class="callout note">
+        <span class="title">Don't wait</span>
+        The app prunes old logs automatically, and running another batch overwrites the scene — archive <strong>the same day</strong> the failure happens.
+      </div>
 
-      <h3>All failures / lots of failures</h3>
-      <ul>
-        <li><strong>Get it working on a single device first</strong>, then commit to the whole batch.</li>
-        <li><strong>Lower the baud rate</strong> (e.g. down to <code>115200</code>) — packet loss at high baud causes failures to spike.</li>
-        <li>Insufficient power also causes batch failures — check USB power, use external power if needed.</li>
-      </ul>
-
-      <h3>Excel errors (locked / invalid)</h3>
-      <ul>
-        <li>"File locked": <strong>close Excel / WPS</strong> first, then reselect the sheet. During a batch run tyutool locks the file to prevent conflicts.</li>
-        <li>"Invalid sheet": check the sheet really has <strong>UUID</strong> and <strong>AuthKey</strong> columns with the correct lengths.</li>
-      </ul>
-
-      <h3>Need more detailed logs / to report an issue</h3>
-      <p>Failure details are in each row's error dialog; for deeper troubleshooting, follow <a href="faq.html#logs-feedback">FAQ · How to report a bug</a> to export logs.</p>
-
-      <h2 id="safety">7. Safety</h2>
-      <p>Batch authorization is the <strong>only feature in tyutool that performs irreversible hardware operations</strong>. Keep these two rules in mind:</p>
+      <h2 id="safety">6. Safety rules</h2>
+      <p>Batch authorization is the <strong>only feature in tyutool that performs irreversible hardware operations</strong>. Two iron rules:</p>
       <div class="callout danger">
         <span class="title">Rule one: OTP mode is write-once and irreversible</span>
         If you select <code>OTP</code> storage mode (T5AI only), credentials are <strong>burned into the chip once</strong> and <strong>can never be erased or modified</strong>. One wrong setting (wrong chip, wrong firmware, wrong codes) ruins the whole batch. So: <strong>before using OTP, run the full flow end-to-end on a single device to validate it; only commit the whole batch once confirmed correct.</strong>
@@ -156,11 +235,7 @@
       </figure>
       <div class="callout danger">
         <span class="title">Rule two: devices showing the "cancelled-after-write" danger badge must be set aside</span>
-        If a device is cancelled <strong>after the auth write may have already landed</strong>, it shows a <strong>physical-quarantine danger badge</strong> — meaning the auth may already have been written and the device's state is uncertain. Such devices <strong>must not be treated as good units</strong> and must not be re-run through the batch directly; <strong>set them aside and verify each one individually</strong> before deciding what to do.
-      </div>
-      <div class="callout warn">
-        <span class="title">Pre-batch checklist</span>
-        Before starting the batch, confirm each item: the chip is correct, the firmware version is correct, the auth sheet is validated with enough "remaining", and the conflict policy is as intended; if using OTP, validate on a single device first.
+        If a device is cancelled <strong>after the auth write may have already landed</strong>, it shows a <strong>physical-quarantine danger badge</strong> — the auth may already be written and the device's state is uncertain. Such devices <strong>must not be treated as good units</strong> and must not be re-run through the batch directly; <strong>set them aside and verify each one individually</strong> before deciding what to do.
       </div>
 
       <nav class="pager">
