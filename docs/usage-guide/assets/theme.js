@@ -76,7 +76,7 @@
     Array.prototype.forEach.call(headings, function (h) {
       var a = document.createElement('a');
       a.href = '#' + h.id;
-      a.textContent = h.textContent.replace(/^\s*\d+\.\s*/, '').trim();
+      a.textContent = h.textContent.trim();
       if (h.tagName === 'H3') a.className = 'level-3';
       nav.appendChild(a);
       links.push({ el: a, heading: h });
