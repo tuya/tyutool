@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { nextTick } from "vue";
 import { setActivePinia, createPinia } from "pinia";
+import { i18n } from "@/i18n";
 import { useBatchFlashAuthStore } from "./batch-flash-auth";
 import type { BatchSlotState } from "@/features/batch-flash-auth/types";
 
@@ -1080,6 +1081,130 @@ describe("startBatch — firmware toggle in Tauri mode", () => {
         flashEndHex: undefined,
       }),
     });
+  });
+});
+
+describe("batch_auth_start rejection — slots must not hang in reading_mac", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  async function setupStore(startError: string) {
+    const invoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "batch_auth_start") throw startError;
+      if (cmd === "validate_excel_cmd")
+        return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
+      return undefined;
+    });
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const store = useStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.chipId = "esp32";
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+    // Prime the mocked module and let the excelPath watcher settle: the
+    // store resolves "@tauri-apps/api/core" lazily, and the very first
+    // resolution after vi.doMock can still yield the real module. Importing
+    // it here (and flushing pending microtasks) guarantees startAuth's own
+    // lazy import hits the mock.
+    await import("@tauri-apps/api/core");
+    await new Promise((r) => setTimeout(r, 0));
+    return { store, invoke };
+  }
+
+  it("startAuth rejection with a known sentinel fails all started slots with the localized message", async () => {
+    const { store } = await setupStore("excel.locked");
+    await store.startAuth();
+    const expected = i18n.global.t("batchFlashAuth.errors.excel.locked");
+    for (const slot of store.slots) {
+      expect(slot.status).toBe("failed");
+      expect(slot.error).toBe(expected);
+    }
+  });
+
+  it("startAuth rejection with an unknown error passes the raw string through", async () => {
+    const { store } = await setupStore("some raw backend error");
+    await store.startAuth();
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].error).toBe("some raw backend error");
+  });
+
+  it("retryPort rejection fails only that port", async () => {
+    const { store } = await setupStore("excel.locked");
+    store.slots[0].status = "failed";
+    await store.retryPort("COM3");
+    const expected = i18n.global.t("batchFlashAuth.errors.excel.locked");
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].error).toBe(expected);
+    expect(store.slots[1].status).toBe("idle");
+  });
+});
+
+describe("autoAssign — stale slot pruning in Tauri mode", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  async function setupStore(currentPorts: string[]) {
+    const invoke = vi
+      .fn()
+      .mockResolvedValue(currentPorts.map((path) => ({ path })));
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    return useStore();
+  }
+
+  it("removes idle slots whose port is no longer enumerated", async () => {
+    const store = await setupStore(["COM4", "COM14"]);
+    store.addPorts(["COM39", "COM40"]);
+    await store.autoAssign();
+    expect(store.slots.map((s) => s.port)).toEqual(["COM4", "COM14"]);
+  });
+
+  it("keeps active slots even if their port disappears from enumeration", async () => {
+    const store = await setupStore(["COM4"]);
+    store.addPorts(["COM39", "COM40"]);
+    store.slots[0].status = "authorizing";
+    await store.autoAssign();
+    expect(store.slots.map((s) => s.port)).toEqual(["COM39", "COM4"]);
+  });
+
+  it("removes stale done/failed slots on refresh", async () => {
+    const store = await setupStore(["COM4"]);
+    store.addPorts(["COM39", "COM40"]);
+    store.slots[0].status = "done";
+    store.slots[1].status = "failed";
+    await store.autoAssign();
+    expect(store.slots.map((s) => s.port)).toEqual(["COM4"]);
   });
 });
 

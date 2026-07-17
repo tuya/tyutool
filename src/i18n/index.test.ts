@@ -44,6 +44,15 @@ describe("i18n instance", () => {
 });
 
 describe("dynamic key families", () => {
+  it("EXCEL_ERROR_CODES values are defined in both locales", async () => {
+    const { EXCEL_ERROR_CODES } =
+      await import("@/features/batch-flash-auth/types");
+    for (const key of Object.values(EXCEL_ERROR_CODES)) {
+      expect(i18n.global.te(key, "en")).toBe(true);
+      expect(i18n.global.te(key, "zh-CN")).toBe(true);
+    }
+  });
+
   it("batchFlashAuth.phase.* keys are defined for all currentPhase values", () => {
     const phases = [
       // auth sub-phases

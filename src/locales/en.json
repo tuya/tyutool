@@ -686,7 +686,9 @@
     "errors": {
       "excel": {
         "fileNotFound": "File not found",
-        "notXlsxFormat": "Please select an .xlsx file"
+        "notXlsxFormat": "Please select an .xlsx file",
+        "locked": "The Excel file is open in another program — close it and retry",
+        "changedWhileRunning": "Cannot switch the Excel file while ports are running"
       }
     },
     "status": {
