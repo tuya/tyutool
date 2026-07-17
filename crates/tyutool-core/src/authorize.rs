@@ -674,6 +674,17 @@ impl<T: AuthIo> AuthSession<T> {
                 return Ok(Some((uuid.to_string(), authkey.to_string())));
             }
         }
+        // The firmware reports an empty or unreadable store with an explicit
+        // "Authorization read failure." echo (`tuya_authorize.c`) — an
+        // un-authorized device, not garbled serial data. Check before the
+        // garbled-data heuristic: the echo (and the bk_printf diagnostics that
+        // accompany it) contains spaces and would otherwise trip it.
+        if relevant
+            .iter()
+            .any(|l| l.to_lowercase().contains("authorization read failure"))
+        {
+            return Ok(None);
+        }
         if relevant.iter().any(|line| {
             let trimmed = line.trim();
             !trimmed.is_empty()
@@ -2220,6 +2231,19 @@ mod tests {
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn auth_read_treats_read_failure_echo_as_unauthorized() {
+        // An empty OTP/KV store makes the firmware echo "Authorization read
+        // failure." plus bk_printf diagnostics — an un-authorized device, not
+        // garbled serial data.
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth-read 1\r\ntuyaopen license chip otp read failed, rt:-1\r\nAuthorization read failure.\r\ntuya> \r\n",
+        );
+        let mut sess = session(mock);
+        assert_eq!(sess.auth_read(AuthStorage::Otp).unwrap(), None);
     }
 
     #[test]
