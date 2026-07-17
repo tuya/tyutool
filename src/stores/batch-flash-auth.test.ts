@@ -1158,6 +1158,109 @@ describe("batch_auth_start rejection — slots must not hang in reading_mac", ()
   });
 });
 
+describe("default firmware list — per-chip isolation", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  const T5AI_MANIFEST = {
+    firmwares: [
+      {
+        version: "1.1.0",
+        chip: "t5ai",
+        url: "https://x/t5ai-1.1.0.bin",
+        sha256: "aa",
+      },
+      {
+        version: "1.0.0",
+        chip: "t5ai",
+        url: "https://x/t5ai-1.0.0.bin",
+        sha256: "bb",
+      },
+    ],
+  };
+
+  async function setupStore(downloadImpl?: () => Promise<string>) {
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    vi.doMock("@/features/batch-flash-auth/auth-firmware", async () => {
+      const actual = await vi.importActual<
+        typeof import("@/features/batch-flash-auth/auth-firmware")
+      >("@/features/batch-flash-auth/auth-firmware");
+      return {
+        ...actual,
+        fetchAuthFirmwareManifest: vi.fn(async () => ({
+          sourceId: "github" as const,
+          manifest: T5AI_MANIFEST,
+        })),
+        downloadAuthFirmware: vi.fn(
+          downloadImpl ?? (async () => "/cache/fw.bin"),
+        ),
+      };
+    });
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const store = useStore();
+    return store;
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it("chip switch clears the previous chip's list and reloads for the new chip", async () => {
+    const store = await setupStore();
+    store.chipId = "t5ai";
+    store.firmwareSource = "default";
+    await settle();
+    await store.loadDefaultFirmwareList();
+    expect(store.defaultFirmwareEntries).toHaveLength(2);
+    store.firmwarePath = "/cache/t5ai.bin";
+
+    store.chipId = "esp32";
+    await settle();
+    // Manifest has no esp32 firmware: list must be empty, stale path gone.
+    expect(store.defaultFirmwareEntries).toHaveLength(0);
+    expect(store.firmwarePath).toBe("");
+  });
+
+  it("chip switch with a local firmware source leaves the path alone", async () => {
+    const store = await setupStore();
+    store.chipId = "t5ai";
+    store.firmwareSource = "local";
+    store.firmwarePath = "/my/local.bin";
+    await settle();
+
+    store.chipId = "esp32";
+    await settle();
+    expect(store.firmwarePath).toBe("/my/local.bin");
+  });
+
+  it("a download that finishes after a chip switch does not set the firmware path", async () => {
+    let resolveDownload!: (path: string) => void;
+    const store = await setupStore(
+      () => new Promise<string>((r) => (resolveDownload = r)),
+    );
+    store.chipId = "t5ai";
+    store.firmwareSource = "default";
+    await settle();
+    await store.loadDefaultFirmwareList();
+
+    const download = store.downloadDefaultFirmware("1.1.0");
+    store.chipId = "esp32";
+    await settle();
+    resolveDownload("/cache/t5ai-1.1.0.bin");
+    await download;
+    expect(store.firmwarePath).toBe("");
+  });
+});
+
 describe("autoAssign — stale slot pruning in Tauri mode", () => {
   beforeEach(() => {
     vi.resetModules();
