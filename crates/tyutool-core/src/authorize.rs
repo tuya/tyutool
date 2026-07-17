@@ -873,7 +873,8 @@ impl<T: AuthIo> AuthSession<T> {
             if is_new || is_old {
                 let elapsed_ms = reset_time.elapsed().as_millis();
                 log::info!(
-                    "flash.log.auth.shellReady: new_firmware={}, elapsed={}ms",
+                    "flash.log.auth.shellReady: port={} new_firmware={}, elapsed={}ms",
+                    self.port_name,
                     is_new,
                     elapsed_ms
                 );
@@ -885,6 +886,11 @@ impl<T: AuthIo> AuthSession<T> {
                     let _ = self.send_cmd("sys_version");
                     let vlines = self.read_response();
                     let version = vlines.iter().find_map(|l| parse_cli_version(l));
+                    log::info!(
+                        "flash.log.auth.cliVersion: port={} version={:?}",
+                        self.port_name,
+                        version
+                    );
                     let kind = match version {
                         Some(v) if v >= NEW_FIRMWARE_MIN => FirmwareKind::New(v),
                         _ => FirmwareKind::New(NEW_FIRMWARE_MIN),
@@ -898,7 +904,8 @@ impl<T: AuthIo> AuthSession<T> {
             if Instant::now() >= max_deadline {
                 let elapsed_ms = reset_time.elapsed().as_millis();
                 log::info!(
-                    "flash.log.auth.shellReady: timed_out elapsed={}ms, fallback=Old",
+                    "flash.log.auth.shellReady: port={} timed_out elapsed={}ms, fallback=Old",
+                    self.port_name,
                     elapsed_ms
                 );
                 self.drain_and_wake(cancel)?;
@@ -1436,6 +1443,12 @@ where
     check_cancel!();
     let firmware = sess.detect_firmware(cancel)?;
     check_cancel!();
+    log::info!(
+        "[batch-auth] firmware detected  port={port} kind={:?} storage={:?} conflict={:?}",
+        firmware,
+        config.auth_storage,
+        config.conflict_policy
+    );
 
     match firmware {
         FirmwareKind::New(_) => {

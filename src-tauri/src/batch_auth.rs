@@ -407,6 +407,11 @@ impl ExcelRowAllocator {
         step_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<(), String> {
+        log::info!(
+            "[batch-auth] excel-update  row={row_idx} mac={mac} status={status:?} step={} error={}",
+            step_name.unwrap_or("-"),
+            error.unwrap_or("-"),
+        );
         let mut state = self.state.lock().unwrap();
 
         if !state.backed_up {
