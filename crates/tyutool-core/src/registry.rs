@@ -117,14 +117,22 @@ where
             progress(FlashEvent::Done {
                 result: FlashResult::Ok { elapsed_secs },
             });
-            log::info!("run_job: completed in {:.1}s", elapsed_secs);
+            log::info!(
+                "run_job: port={} completed in {:.1}s",
+                job.port,
+                elapsed_secs
+            );
             Ok(())
         }
         Err(crate::error::FlashError::Cancelled) => {
             progress(FlashEvent::Done {
                 result: FlashResult::Cancelled { elapsed_secs },
             });
-            log::info!("run_job: cancelled after {:.1}s", elapsed_secs);
+            log::info!(
+                "run_job: port={} cancelled after {:.1}s",
+                job.port,
+                elapsed_secs
+            );
             Err(crate::error::FlashError::Cancelled)
         }
         Err(e) => {
@@ -134,7 +142,12 @@ where
                     elapsed_secs,
                 },
             });
-            log::error!("run_job: failed after {:.1}s: {}", elapsed_secs, e);
+            log::error!(
+                "run_job: port={} failed after {:.1}s: {}",
+                job.port,
+                elapsed_secs,
+                e
+            );
             Err(e)
         }
     }

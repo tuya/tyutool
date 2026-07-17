@@ -819,6 +819,10 @@ fn batch_auth_start(
                         authorize_storage: None,
                         confirm_overwrite: None,
                     };
+                    log::info!(
+                        "[batch-auth] flash start  port={port_clone} chip={} firmware={fw_path}",
+                        config_clone.chip_id
+                    );
                     let app2 = app_clone.clone();
                     let port2 = port_clone.clone();
                     let flash_result = tyutool_core::run_job(&job, &cancel_clone, |p| {
@@ -832,17 +836,22 @@ fn batch_auth_start(
                         );
                     });
                     if flash_result.is_err() || cancel_clone.load(Ordering::Relaxed) {
+                        let error = flash_result
+                            .err()
+                            .map(|e| e.to_string())
+                            .unwrap_or_else(|| "cancelled".into());
+                        log::warn!("[batch-auth] flash failed  port={port_clone} error={error}");
                         let _ = app_clone.emit(
                             "batch-auth-progress",
                             serde_json::json!({
                                 "port": port_clone,
                                 "step": "failed",
-                                "error": flash_result.err().map(|e| e.to_string())
-                                    .unwrap_or_else(|| "cancelled".into())
+                                "error": error
                             }),
                         );
                         return;
                     }
+                    log::info!("[batch-auth] flash done  port={port_clone}");
                     // Wait for the device to boot naturally after flash before the auth
                     // slot issues a hardware reset. Non-fatal: times out after 3 s max.
                     tyutool_core::wait_after_firmware_flash(
