@@ -46,4 +46,13 @@ describe("settings UI structure", () => {
     );
     expect(batchFlashAuthConfigSource).not.toContain('role="switch"');
   });
+
+  it("wires the batch-auth disclaimer reset button in the About section", () => {
+    expect(settingsPageSource).toContain(
+      'from "@/features/batch-flash-auth/disclaimer"',
+    );
+    expect(settingsPageSource).toContain("DISCLAIMER_KEY");
+    expect(settingsPageSource).toContain('t("settings.resetDisclaimer")');
+    expect(settingsPageSource).toContain('t("settings.resetDisclaimerDone")');
+  });
 });
