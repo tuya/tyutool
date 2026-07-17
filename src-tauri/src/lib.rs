@@ -2649,6 +2649,122 @@ fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), String> {
     )
 }
 
+/// The archive folder is created inside a user-chosen directory; reject names
+/// that could escape it (separators, traversal, leading dots).
+fn validate_archive_folder_name(name: &str) -> Result<(), String> {
+    let ok = !name.is_empty()
+        && name.len() <= 128
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if ok {
+        Ok(())
+    } else {
+        Err("invalid archive folder name".to_string())
+    }
+}
+
+/// Write the AppHandle-free part of a batch archive into `dest`: a copy of
+/// the auth Excel sheet, the optional firmware binary, batch-summary.json
+/// (with `environment` and firmware sha256/size merged in) and
+/// batch-slots.csv (UTF-8 BOM so Excel renders it correctly). logs.zip is
+/// added by the caller.
+fn write_batch_archive(
+    dest: &std::path::Path,
+    excel_src: &std::path::Path,
+    firmware_src: Option<&std::path::Path>,
+    summary_json: &str,
+    slots_csv: &str,
+    environment: serde_json::Value,
+) -> Result<(), String> {
+    std::fs::create_dir_all(dest).map_err(|e| format!("create archive dir: {e}"))?;
+
+    let excel_name = excel_src
+        .file_name()
+        .ok_or_else(|| "invalid excel path".to_string())?;
+    std::fs::copy(excel_src, dest.join(excel_name)).map_err(|e| format!("copy auth sheet: {e}"))?;
+
+    let mut summary: serde_json::Value =
+        serde_json::from_str(summary_json).map_err(|e| format!("invalid summary json: {e}"))?;
+
+    if let Some(fw) = firmware_src {
+        let fw_name = fw
+            .file_name()
+            .ok_or_else(|| "invalid firmware path".to_string())?;
+        let bytes = std::fs::read(fw).map_err(|e| format!("read firmware: {e}"))?;
+        std::fs::write(dest.join(fw_name), &bytes).map_err(|e| format!("copy firmware: {e}"))?;
+        if let Some(obj) = summary.get_mut("firmware").and_then(|v| v.as_object_mut()) {
+            obj.insert("sha256".into(), serde_json::json!(sha256_hex(&bytes)));
+            obj.insert("sizeBytes".into(), serde_json::json!(bytes.len()));
+            obj.insert(
+                "archivedFileName".into(),
+                serde_json::json!(fw_name.to_string_lossy()),
+            );
+        }
+    }
+
+    if let Some(obj) = summary.as_object_mut() {
+        obj.insert("environment".into(), environment);
+    }
+    let pretty = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?;
+    std::fs::write(dest.join("batch-summary.json"), pretty)
+        .map_err(|e| format!("write summary: {e}"))?;
+
+    let mut csv = Vec::with_capacity(slots_csv.len() + 3);
+    csv.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+    csv.extend_from_slice(slots_csv.as_bytes());
+    std::fs::write(dest.join("batch-slots.csv"), csv).map_err(|e| format!("write csv: {e}"))?;
+    Ok(())
+}
+
+/// Archive a finished batch run into `<dest_dir>/<folder_name>`: auth-sheet
+/// copy, optional firmware copy, batch-summary.json, batch-slots.csv and a
+/// logs.zip of the current session logs. Returns the created folder path.
+#[tauri::command]
+fn archive_batch_cmd(
+    app: AppHandle,
+    dest_dir: String,
+    folder_name: String,
+    excel_path: String,
+    firmware_path: Option<String>,
+    summary_json: String,
+    slots_csv: String,
+) -> Result<String, String> {
+    validate_archive_folder_name(&folder_name)?;
+    let dest = std::path::Path::new(&dest_dir).join(&folder_name);
+    let environment = serde_json::json!({
+        "app": app.package_info().name,
+        "version": app.package_info().version.to_string(),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "install": detect_install_type(),
+        "sessionId": SESSION_ID.get().map(String::as_str).unwrap_or(""),
+    });
+    write_batch_archive(
+        &dest,
+        std::path::Path::new(&excel_path),
+        firmware_path
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(std::path::Path::new),
+        &summary_json,
+        &slots_csv,
+        environment,
+    )?;
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    gather_and_write_logs_zip(
+        &log_dir,
+        &app.package_info().name,
+        &app.package_info().version.to_string(),
+        &detect_install_type(),
+        SESSION_ID.get().map(String::as_str).unwrap_or(""),
+        &dest.join("logs.zip"),
+    )?;
+    log::info!("[BatchAuth] archived batch to {}", dest.display());
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 /// Open an external URL in the system browser.
 ///
 /// On Linux this must NOT go through the opener plugin's detached spawn: when
@@ -2908,6 +3024,7 @@ pub fn run() {
             read_log_tail,
             open_log_file_in_editor,
             export_logs_zip,
+            archive_batch_cmd,
             open_external_url,
         ])
         .build(tauri::generate_context!())
@@ -3041,6 +3158,79 @@ mod tests {
 
         assert_eq!(pos.x, 100);
         assert_eq!(pos.y, 100);
+    }
+
+    #[test]
+    fn validate_archive_folder_name_accepts_generated_names() {
+        assert!(validate_archive_folder_name("batch-archive_20260717-143205_esp32").is_ok());
+    }
+
+    #[test]
+    fn validate_archive_folder_name_rejects_escapes() {
+        for bad in ["", "..", "a/b", "a\\b", ".hidden", "a b"] {
+            assert!(validate_archive_folder_name(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn write_batch_archive_produces_all_files_and_merges_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let excel = dir.path().join("codes.xlsx");
+        std::fs::write(&excel, b"excel-bytes").unwrap();
+        let fw = dir.path().join("auth.bin");
+        std::fs::write(&fw, b"abc").unwrap();
+        let dest = dir.path().join("archive");
+
+        write_batch_archive(
+            &dest,
+            &excel,
+            Some(&fw),
+            r#"{"firmware":{"source":"local"},"batch":{}}"#,
+            "port,status\r\nCOM3,done\r\n",
+            serde_json::json!({"os": "test"}),
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(dest.join("codes.xlsx")).unwrap(),
+            b"excel-bytes"
+        );
+        assert_eq!(std::fs::read(dest.join("auth.bin")).unwrap(), b"abc");
+        let csv = std::fs::read(dest.join("batch-slots.csv")).unwrap();
+        assert_eq!(&csv[..3], &[0xEF, 0xBB, 0xBF]);
+        let written: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dest.join("batch-summary.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(written["environment"]["os"], "test");
+        assert_eq!(written["firmware"]["sizeBytes"], 3);
+        assert_eq!(
+            written["firmware"]["sha256"],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(written["firmware"]["archivedFileName"], "auth.bin");
+    }
+
+    #[test]
+    fn write_batch_archive_without_firmware_skips_firmware_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let excel = dir.path().join("codes.xlsx");
+        std::fs::write(&excel, b"excel-bytes").unwrap();
+        let dest = dir.path().join("archive");
+
+        write_batch_archive(
+            &dest,
+            &excel,
+            None,
+            r#"{"firmware":null,"batch":{}}"#,
+            "port,status\r\n",
+            serde_json::json!({}),
+        )
+        .unwrap();
+
+        assert!(dest.join("codes.xlsx").exists());
+        assert!(dest.join("batch-summary.json").exists());
+        assert!(!dest.join("auth.bin").exists());
     }
 }
 

@@ -135,7 +135,11 @@ async function handleAutoAssign() {
                 ? t('batchFlashAuth.toolbar.selectExcelFirst')
                 : store.excelError
                   ? t('batchFlashAuth.toolbar.excelInvalid')
-                  : store.excelStats?.remaining === 0
+                  : store.excelStats &&
+                      store.excelStats.remaining +
+                        store.excelStats.used +
+                        store.excelStats.inProgress ===
+                        0
                     ? t('batchFlashAuth.toolbar.excelExhausted')
                     : t('batchFlashAuth.toolbar.noIdlePorts')
             : undefined

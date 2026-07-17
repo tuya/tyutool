@@ -70,13 +70,44 @@ const bannerText = computed(() => {
     <!-- Completion banner -->
     <div
       v-if="store.completionBanner"
-      class="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium"
+      class="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
       :style="{ backgroundColor: bannerBg, color: bannerTextColor }"
     >
-      <span>{{ bannerText }}</span>
+      <span class="min-w-0 flex-1">{{ bannerText }}</span>
+      <span
+        v-if="store.archiveStatus === 'done'"
+        class="max-w-[40%] truncate text-xs font-normal opacity-80"
+        :title="store.lastArchivePath"
+        >{{
+          t("batchFlashAuth.archive.done", { path: store.lastArchivePath })
+        }}</span
+      >
+      <span
+        v-else-if="store.archiveStatus === 'error'"
+        class="max-w-[40%] truncate text-xs font-normal text-[var(--ty-danger)]"
+        :title="store.archiveError"
+        >{{
+          t("batchFlashAuth.archive.failed", { error: store.archiveError })
+        }}</span
+      >
+      <button
+        v-if="store.canArchive"
+        type="button"
+        class="ty-btn-secondary flex shrink-0 items-center gap-1.5 text-xs"
+        :disabled="store.archiveStatus === 'archiving'"
+        :title="t('batchFlashAuth.archive.hint')"
+        @click="store.archiveBatch()"
+      >
+        <FontAwesomeIcon :icon="['fas', 'box-archive']" class="size-3" />
+        {{
+          store.archiveStatus === "archiving"
+            ? t("batchFlashAuth.archive.archiving")
+            : t("batchFlashAuth.archive.button")
+        }}
+      </button>
       <button
         type="button"
-        class="ml-3 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded opacity-60 transition-opacity hover:opacity-100"
+        class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded opacity-60 transition-opacity hover:opacity-100"
         :aria-label="t('common.closeDialog')"
         @click="store.dismissBanner()"
       >
