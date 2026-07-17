@@ -121,6 +121,71 @@ fn esp_err(e: espflash::Error) -> FlashError {
     FlashError::Plugin(e.to_string())
 }
 
+/// Espressif's USB vendor id (native USB-Serial-JTAG / USB-OTG peripherals).
+const ESPRESSIF_VID: u16 = 0x303a;
+/// PID of the built-in USB-Serial-JTAG peripheral.
+const USB_SERIAL_JTAG_PID: u16 = 0x1001;
+
+/// Choose the pre-connect reset strategy.
+///
+/// espflash's `DefaultReset` inspects the USB pid and only selects the
+/// USB-Serial-JTAG reset sequence when `pid == 0x1001`; otherwise it falls back
+/// to the classic DTR/RTS reset. Chips reached over a native USB peripheral
+/// (e.g. ESP32-P4) cannot be reset via DTR/RTS, so when we recognise a
+/// native-USB port whose pid was *not* surfaced as `0x1001` by the OS we force
+/// `UsbReset` instead of letting espflash pick the ineffective classic reset.
+///
+/// UART-bridge adapters (CP210x/CH340, etc.) keep `DefaultReset` — their vid and
+/// port names don't match, so existing ESP32/C3/S3-over-bridge setups are
+/// unaffected.
+fn choose_before_reset(port_name: &str, info: &UsbPortInfo) -> ResetBeforeOperation {
+    // pid already flags USB-Serial-JTAG: espflash's DefaultReset resolves to the
+    // correct sequence on its own — nothing to override.
+    if info.pid == USB_SERIAL_JTAG_PID {
+        return ResetBeforeOperation::DefaultReset;
+    }
+    let native_usb = info.vid == ESPRESSIF_VID
+        || port_name.contains("usbmodem") // macOS native USB CDC
+        || port_name.contains("ttyACM"); // Linux native USB CDC
+    if native_usb {
+        ResetBeforeOperation::UsbReset
+    } else {
+        ResetBeforeOperation::DefaultReset
+    }
+}
+
+/// Turn an espflash connect error into an actionable `FlashError`.
+///
+/// espflash's `Error::Connection` renders only as "Error while connecting to
+/// device" and boxes the real cause without exposing it via `source()`, so we
+/// attach our own guidance here and surface it to the user via
+/// `FlashEvent::Warning`. Non-connection variants keep espflash's own message.
+fn map_connect_error(
+    e: espflash::Error,
+    def: &EspChipDef,
+    progress: &dyn Fn(FlashEvent),
+) -> FlashError {
+    use espflash::Error as E;
+    match e {
+        E::Connection(_) => {
+            let guidance = format!(
+                "could not connect to {}. Put the device into download mode \
+                 (hold BOOT/GPIO0 while tapping RESET), then re-check the cable and port",
+                def.id
+            );
+            log::error!("ESP connect failed for {}: {e:#?}", def.id);
+            progress(FlashEvent::Warning {
+                message: guidance.clone(),
+            });
+            FlashError::Plugin(guidance)
+        }
+        E::ChipMismatch(expected, got) => FlashError::Plugin(format!(
+            "chip mismatch: selected {expected} but device reports {got}; pick the matching chip"
+        )),
+        other => esp_err(other),
+    }
+}
+
 // ── Main entry point ─────────────────────────────────────────────────────────
 
 /// Shared flash/erase/read implementation for all ESP32 plugin variants.
@@ -148,6 +213,13 @@ pub(crate) fn run_esp(
     log::info!("Opening port {}", job.port);
 
     let port_info = usb_port_info(&job.port);
+    let before_reset = choose_before_reset(&job.port, &port_info);
+    log::info!(
+        "ESP connect: reset strategy {:?} (vid={:#06x}, pid={:#06x})",
+        before_reset,
+        port_info.vid,
+        port_info.pid
+    );
 
     let serial = serialport::new(&job.port, 115_200)
         .timeout(Duration::from_millis(500))
@@ -158,7 +230,7 @@ pub(crate) fn run_esp(
         serial,
         port_info,
         ResetAfterOperation::HardReset,
-        ResetBeforeOperation::DefaultReset,
+        before_reset,
         115_200,
     );
 
@@ -169,15 +241,17 @@ pub(crate) fn run_esp(
         return Err(FlashError::Cancelled);
     }
 
-    let mut flasher = Flasher::connect(
+    let mut flasher = match Flasher::connect(
         conn,
         true,           // use_stub — loads RAM stub for faster flash ops
         false,          // verify — we do our own progress reporting
         false,          // skip
         Some(def.chip), // expected chip; mismatch → error
         None,           // baud — will change after stub loads if needed
-    )
-    .map_err(esp_err)?;
+    ) {
+        Ok(f) => f,
+        Err(e) => return Err(map_connect_error(e, def, progress)),
+    };
 
     // Log device information
     match flasher.device_info() {
@@ -542,6 +616,56 @@ fn read_flash_with_progress(
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    fn usb_info(vid: u16, pid: u16) -> UsbPortInfo {
+        UsbPortInfo {
+            vid,
+            pid,
+            serial_number: None,
+            manufacturer: None,
+            product: None,
+            interface: None,
+        }
+    }
+
+    #[test]
+    fn usb_serial_jtag_pid_keeps_default_reset() {
+        // espflash's DefaultReset already resolves pid 0x1001 to the JTAG sequence.
+        let info = usb_info(ESPRESSIF_VID, USB_SERIAL_JTAG_PID);
+        assert!(matches!(
+            choose_before_reset("/dev/cu.usbmodem1234", &info),
+            ResetBeforeOperation::DefaultReset
+        ));
+    }
+
+    #[test]
+    fn espressif_vid_without_jtag_pid_forces_usb_reset() {
+        // Native USB port whose pid the OS did not surface as 0x1001.
+        let info = usb_info(ESPRESSIF_VID, 0x0000);
+        assert!(matches!(
+            choose_before_reset("COM7", &info),
+            ResetBeforeOperation::UsbReset
+        ));
+    }
+
+    #[test]
+    fn macos_usbmodem_name_forces_usb_reset() {
+        let info = usb_info(0, 0); // pid/vid not surfaced by the OS
+        assert!(matches!(
+            choose_before_reset("/dev/cu.usbmodem5B5E1349761", &info),
+            ResetBeforeOperation::UsbReset
+        ));
+    }
+
+    #[test]
+    fn uart_bridge_keeps_default_reset() {
+        // CP210x bridge: not Espressif vid, name doesn't look like native USB.
+        let info = usb_info(0x10c4, 0xea60);
+        assert!(matches!(
+            choose_before_reset("/dev/cu.SLAB_USBtoUART", &info),
+            ResetBeforeOperation::DefaultReset
+        ));
+    }
 
     /// Collects every `FlashEvent` the adapter emits and returns the percent
     /// values seen (in order). Non-percent events are ignored for percent runs.
