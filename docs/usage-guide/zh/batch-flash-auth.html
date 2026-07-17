@@ -47,13 +47,13 @@
       <h2 id="disclaimer">2. 免责声明</h2>
       <p>由于批量授权可能触发<strong>不可逆</strong>的 eFuse 烧写，本页在<strong>首次访问</strong>时会弹出免责声明对话框：</p>
       <ul>
-        <li><strong>首次访问弹窗</strong>：说明批量授权的风险（尤其是 OTP + eFuse 锁不可逆），需要你确认知晓后才继续。</li>
+        <li><strong>首次访问弹窗</strong>：说明批量授权的风险（尤其是 OTP 写入不可逆），需要你确认知晓后才继续。</li>
         <li><strong>不再提示（don't show again）</strong>：勾选后该选择会写入 <code>localStorage</code>，之后不再弹出。</li>
         <li><strong>取消即返回</strong>：在免责声明对话框上点取消会直接退回 <code>/toolbox</code>，不会进入批量页面。</li>
       </ul>
       <div class="callout warn">
         <span class="title">请认真阅读免责声明</span>
-        免责声明不是走过场——一旦启用 OTP 存储模式并打开 eFuse 锁，<strong>烧写不可撤销</strong>。请确认你理解第 9 节的全部风险后再勾选“不再提示”。
+        免责声明不是走过场——一旦选择 OTP 存储模式，授权数据<strong>一次性写入 eFuse，不可撤销</strong>。请确认你理解第 9 节的全部风险后再勾选“不再提示”。
       </div>
 
       <h2 id="shared-config">3. 配置 — 共享</h2>
@@ -82,14 +82,11 @@
       <ul>
         <li><strong>Excel 表格（<code>.xlsx</code>）</strong>：选择授权码表后立即触发校验，显示 <strong>总数 / 已用 / 进行中 / 剩余</strong>。若<strong>剩余 = 0</strong>或文件无效，<strong>启动按钮禁用</strong>。</li>
         <li><strong>冲突策略（Conflict policy）</strong>：当目标设备已存在授权时如何处理 —— <code>Skip</code>（跳过）或 <code>Overwrite</code>（覆盖）。</li>
-        <li><strong>存储模式（Storage mode）</strong>：仅 <strong>T5AI</strong> 可选 —— <code>KV</code>（键值区，可重写）或 <code>OTP</code>（一次性存储区）。选择 <code>OTP</code> 会显示<strong>不可逆警告</strong>。</li>
-        <li><strong>OTP eFuse 锁开关（<code>lockOtpAfterAuth</code>）</strong>：仅在 <strong>T5AI + OTP</strong> 下出现。打开后，授权写入完成后会<strong>烧写 eFuse</strong>，永久锁定 OTP 区，<strong>不可逆</strong>。</li>
+        <li><strong>存储模式（Storage mode）</strong>：仅 <strong>T5AI</strong> 可选 —— <code>KV</code>（键值区，可重写）或 <code>OTP</code>（一次性存储区，写一次后不可覆盖）。选择 <code>OTP</code> 会显示<strong>不可逆警告</strong>。</li>
       </ul>
       <div class="callout danger">
-        <span class="title">危险：OTP + eFuse 锁不可逆</span>
-        当存储模式为 <code>OTP</code> 且打开 <code>lockOtpAfterAuth</code> 时，每个设备授权完成后会<strong>烧写 eFuse</strong>，把 OTP 区永久锁死——这一步<strong>不可撤销</strong>，无法通过任何手段恢复或重写。在批量场景下，一次错误配置会<strong>连锁毁掉整批设备</strong>。请仅在完全确认芯片型号、固件、授权码无误后再启用。
-        <br><br>
-        作为<strong>兜底保护</strong>，<code>lockOtpAfterAuth</code> 在<strong>每次应用启动时强制重置为 <code>false</code></strong>，并在<strong>离开 (t5ai, otp) 任一前置条件</strong>（即切到非 T5AI 芯片或切回 KV 存储模式）时同样<strong>强制重置为 <code>false</code></strong>。也就是说，你<strong>每次</strong>想启用 eFuse 锁都必须重新主动打开它，绝不会因为上次忘关而延续到下一次。
+        <span class="title">危险：OTP 写入不可逆</span>
+        当存储模式为 <code>OTP</code> 时，授权数据会<strong>一次性写入芯片 eFuse</strong>——固件对 OTP 区采用<strong>写一次</strong>语义：一旦写入非空即拒绝再次写入，无法通过任何手段擦除、修改或覆盖。在批量场景下，一次错误配置（芯片型号、固件、授权码）会<strong>连锁毁掉整批设备</strong>。请仅在完全确认无误后再对整批使用 OTP。
       </div>
 
       <h2 id="dashboard">5. 仪表盘</h2>
@@ -175,10 +172,8 @@
       <h2 id="safety">9. 安全提示</h2>
       <p>批量烧录授权是 tyutool 里<strong>唯一会触发不可逆硬件操作</strong>的功能。请牢记以下两条铁律：</p>
       <div class="callout danger">
-        <span class="title">铁律一：OTP + eFuse 锁不可逆</span>
-        存储模式选 <code>OTP</code> 并打开 <code>lockOtpAfterAuth</code> 后，每个设备授权完成都会<strong>烧写 eFuse</strong>，把 OTP 区<strong>永久锁死</strong>，任何手段都无法恢复或重写。批量场景下一次错配会毁掉整批设备。
-        <br><br>
-        <strong>兜底保证</strong>：<code>lockOtpAfterAuth</code> 在<strong>每次应用启动时强制重置为 <code>false</code></strong>，并在<strong>离开 (t5ai, otp) 任一前置条件</strong>（切到非 T5AI 芯片、或切回 KV 模式）时同样<strong>强制重置为 <code>false</code></strong>。你<strong>每次</strong>启用 eFuse 锁都必须重新主动打开，绝不会因上次忘关而延续。
+        <span class="title">铁律一：OTP 写入不可逆</span>
+        存储模式选 <code>OTP</code> 后，每个设备授权完成都会把授权数据<strong>一次性写入 eFuse</strong>。固件对 OTP 区采用<strong>写一次</strong>语义——区块非空即拒绝再写，任何手段都无法擦除、修改或覆盖。批量场景下一次错配会毁掉整批设备。
       </div>
       <div class="callout danger">
         <span class="title">铁律二：cancelledAfterWrite 设备必须物理隔离</span>
@@ -186,7 +181,7 @@
       </div>
       <div class="callout warn">
         <span class="title">批量前的检查清单</span>
-        启动整批任务前，请逐项确认：芯片型号正确、固件来源与版本无误、授权表已校验且剩余充足、冲突策略符合预期；若启用 OTP + eFuse 锁，请先用<strong>单台设备</strong>验证完整流程，再投入批量。
+        启动整批任务前，请逐项确认：芯片型号正确、固件来源与版本无误、授权表已校验且剩余充足、冲突策略符合预期；若使用 OTP 存储模式，请先用<strong>单台设备</strong>验证完整流程，再投入批量。
       </div>
 
       <nav class="pager">

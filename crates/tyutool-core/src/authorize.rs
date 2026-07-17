@@ -54,22 +54,15 @@ const AUTH_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// gap between the command echo and the response; must exceed worst-case burn time.
 const AUTH_WRITE_OTP_IDLE: Duration = Duration::from_secs(30);
 /// Total `auth_write` attempts per slot (first attempt + retries).
-/// OTP retries are safe because OTP storage can be rewritten until `auth-otp-lock` is issued.
+/// Retries are safe: a failed write leaves the OTP block empty (write-once
+/// firmware rejects writes only once the block is populated), so re-issuing
+/// the command does not corrupt a partial write.
 /// Old firmware does not support OTP, so retries on that path are always KV.
 const AUTH_WRITE_MAX_ATTEMPTS: u8 = 3;
 /// Hard ceiling for `auth-read` responses.
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Idle window for `auth-read` with OTP storage.
 const AUTH_READ_OTP_IDLE: Duration = Duration::from_secs(30);
-/// Total upper bound for the `auth-otp-lock` response wait.
-/// eFuse burning is a physical write that may take significantly longer
-/// than a normal shell command. This MUST be confirmed against real
-/// hardware before release (see hardware verification scenario 7 in the spec).
-const AUTH_OTP_LOCK_TIMEOUT: Duration = Duration::from_secs(60);
-/// Idle window for `auth-otp-lock`.
-const AUTH_OTP_LOCK_IDLE: Duration = Duration::from_secs(30);
-/// Delay between `auth-otp-lock` success and the subsequent `sys_reboot` command.
-const OTP_LOCK_REBOOT_DELAY: Duration = Duration::from_secs(1);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Maximum time to wait for natural device boot after firmware flash.
@@ -627,126 +620,6 @@ impl<T: AuthIo> AuthSession<T> {
         self.read_response_timed(CMD_TIMEOUT, idle)
     }
 
-    /// Send `auth-otp-lock` and parse the response.
-    ///
-    /// Returns `Ok(())` when the firmware confirms with
-    /// `"Authorization otp lock succeeds."`, `Err(FlashError::Plugin)`
-    /// otherwise (including explicit `"Authorization otp lock failure."`,
-    /// no response, and any other unrecognised output).
-    ///
-    /// **WARNING**: this command burns the eFuse and is irreversible.
-    /// Callers must gate it behind an explicit user opt-in.
-    ///
-    /// Uses [`AUTH_OTP_LOCK_TIMEOUT`] / [`AUTH_OTP_LOCK_IDLE`] rather than
-    /// the default shell-command timing because eFuse settling may delay
-    /// the response beyond the standard 50ms idle window.
-    fn auth_otp_lock(&mut self) -> Result<(), FlashError> {
-        self.send_cmd("auth-otp-lock")
-            .map_err(|e| FlashError::Plugin(format!("auth-otp-lock send failed: {e}")))?;
-        let lines = self.read_response_timed(AUTH_OTP_LOCK_TIMEOUT, AUTH_OTP_LOCK_IDLE);
-        log::debug!("[serial] auth-otp-lock raw={:?}", lines);
-
-        let mut saw_success = false;
-        let mut saw_failure = false;
-        for line in &lines {
-            let lower = line.to_lowercase();
-            let trimmed = lower.trim();
-            if trimmed.starts_with("authorization otp lock succeeds") {
-                saw_success = true;
-            } else if trimmed.starts_with("authorization otp lock failure") {
-                saw_failure = true;
-            }
-        }
-
-        match (saw_success, saw_failure) {
-            (true, _) => Ok(()),
-            (false, true) => Err(FlashError::Plugin(
-                "auth-otp-lock: device returned failure".into(),
-            )),
-            (false, false) => Err(FlashError::Plugin(
-                "auth-otp-lock: no recognisable response".into(),
-            )),
-        }
-    }
-
-    /// Issue a software reboot via `sys_reboot` and wait for the shell to become ready again.
-    ///
-    /// Unlike [`detect_firmware`], this does NOT perform a hardware reset — the
-    /// `sys_reboot` command itself triggers the device restart. Uses the same
-    /// polling loop as `detect_firmware` so timing stays consistent per-chip.
-    ///
-    /// On timeout (device doesn't respond within `boot_max_wait`) the function
-    /// logs a warning and returns `Ok(())`, leaving `auth_read` to surface any
-    /// real failure. Returns `Err(FlashError::Cancelled)` if cancelled.
-    fn soft_reboot_and_detect(&mut self, cancel: &AtomicBool) -> Result<(), FlashError> {
-        log::info!(
-            "[serial] soft-reboot: sending sys_reboot  port={}",
-            self.port_name
-        );
-        let _ = self.send_cmd("sys_reboot");
-
-        let boot_probe_start = self.timing.boot_probe_start;
-        let boot_probe_interval = self.timing.boot_probe_interval;
-        let boot_max_wait = self.timing.boot_max_wait;
-
-        let reset_time = Instant::now();
-
-        let first_probe_at = reset_time + boot_probe_start;
-        while Instant::now() < first_probe_at {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(FlashError::Cancelled);
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-
-        let max_deadline = reset_time + boot_max_wait;
-
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(FlashError::Cancelled);
-            }
-
-            let _ = self.send_cmd("sys_log_enable off");
-            let lines = self
-                .read_response_timed(boot_probe_interval.saturating_mul(2), boot_probe_interval);
-
-            let is_ready = lines.iter().any(|l| {
-                let lower = l.to_lowercase();
-                lower.contains("ok: log disabled")
-                    || lower.contains("no command")
-                    || is_shell_prompt(l)
-            });
-
-            if is_ready {
-                log::info!(
-                    "flash.log.auth.softRebootShellReady: elapsed={}ms port={}",
-                    reset_time.elapsed().as_millis(),
-                    self.port_name
-                );
-                self.drain_and_wake(cancel)?;
-                return Ok(());
-            }
-
-            if Instant::now() >= max_deadline {
-                log::warn!(
-                    "[serial] soft-reboot timed out waiting for shell  port={} elapsed={}ms",
-                    self.port_name,
-                    reset_time.elapsed().as_millis()
-                );
-                self.drain_and_wake(cancel)?;
-                return Ok(());
-            }
-
-            let next_probe_at = Instant::now() + boot_probe_interval;
-            while Instant::now() < next_probe_at {
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(FlashError::Cancelled);
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
-    }
-
     /// Send `auth-read` (or `auth-read <n>` for non-KV storage) and return `(uuid, authkey)` or `None`.
     fn auth_read(&mut self, storage: AuthStorage) -> Result<Option<(String, String)>, FlashError> {
         let cmd = if storage == AuthStorage::Kv {
@@ -1091,8 +964,6 @@ pub enum BatchAuthRowUpdate {
     AuthWritten,
     /// auth-read 验证通过。
     AuthVerified,
-    /// auth-otp-lock 成功。
-    OtpLocked,
     /// 流程全部完成。
     Done,
     /// 某步骤失败（行保持上一个成功状态；`step` 为失败步骤名）。
@@ -1105,7 +976,6 @@ pub struct BatchAuthSlotConfig {
     pub auth_baud_rate: u32,
     pub conflict_policy: ConflictPolicy,
     pub auth_storage: AuthStorage,
-    pub lock_otp: bool,
 }
 
 /// What to do when device already has conflicting auth.
@@ -1472,7 +1342,7 @@ pub fn wait_after_firmware_flash(port: &str, baud_rate: u32, chip_id: &str, canc
 
 /// Single-device batch authorization slot: open UART, read MAC, read/write auth, verify.
 ///
-/// - `find_by_mac` — look up an existing row by MAC (row already bound to this device).
+/// - `find_by_mac` — look up an existing row by MAC (returns `(row_idx, uuid, authkey)`).
 /// - `allocate_row` — lazily allocate a fresh, unbound row (called at most once).
 /// - `update_row(row_idx, mac, update)` — notify caller of per-step state changes.
 /// - `cancel` / `progress` — unchanged semantics.
@@ -1489,7 +1359,7 @@ pub fn run_batch_auth_slot<F, B, A, U>(
 ) -> Result<BatchAuthSlotResult, FlashError>
 where
     F: Fn(BatchAuthStep),
-    B: Fn(&str) -> Option<(usize, String, String, bool)>,
+    B: Fn(&str) -> Option<(usize, String, String)>,
     A: FnOnce() -> Option<(usize, String, String)>,
     U: Fn(usize, &str, BatchAuthRowUpdate),
 {
@@ -1550,86 +1420,9 @@ where
             )?;
 
             // ── 5. AlreadyDone check (MAC found + credentials match) ─────
-            if let Some((found_idx, ref found_uuid, ref found_key, already_locked)) = found_row {
+            if let Some((found_idx, ref found_uuid, ref found_key)) = found_row {
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == found_uuid && ex_k == found_key {
-                        if config.lock_otp && !already_locked {
-                            log::warn!(
-                                "[batch-auth] already-done, supplementing otp-lock  port={port} mac={mac}"
-                            );
-                            match sess.auth_otp_lock() {
-                                Ok(()) => {
-                                    update_row(found_idx, &mac, BatchAuthRowUpdate::OtpLocked);
-                                }
-                                Err(e) => {
-                                    let msg = e.to_string();
-                                    log::warn!(
-                                        "[batch-auth] otp-lock failed  port={port} mac={mac} err={msg}"
-                                    );
-                                    update_row(
-                                        found_idx,
-                                        &mac,
-                                        BatchAuthRowUpdate::StepFailed {
-                                            step: "otp_lock",
-                                            error: msg.clone(),
-                                        },
-                                    );
-                                    return Err(FlashError::Plugin(format!(
-                                        "auth-otp-lock failed: {msg}"
-                                    )));
-                                }
-                            }
-                            // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
-                            check_cancel!();
-                            std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
-                            log::info!(
-                                "[batch-auth] otp-lock: rebooting for secondary check  port={port} mac={mac}"
-                            );
-                            sess.soft_reboot_and_detect(cancel)?;
-                            check_cancel!();
-                            let post_lock_auth = sess.auth_read(config.auth_storage)?;
-                            match post_lock_auth {
-                                Some((rb_u, rb_k)) if rb_u == *found_uuid && rb_k == *found_key => {
-                                    log::info!(
-                                        "[batch-auth] otp-lock secondary verify ok  port={port} mac={mac}"
-                                    );
-                                }
-                                Some((rb_u, rb_k)) => {
-                                    let msg = format!(
-                                        "OTP lock secondary check failed: expected ({found_uuid},{found_key}), got ({rb_u},{rb_k})"
-                                    );
-                                    log::warn!(
-                                        "[batch-auth] otp-lock secondary verify mismatch  port={port} mac={mac}"
-                                    );
-                                    update_row(
-                                        found_idx,
-                                        &mac,
-                                        BatchAuthRowUpdate::StepFailed {
-                                            step: "otp_lock_verify",
-                                            error: msg.clone(),
-                                        },
-                                    );
-                                    return Err(FlashError::Plugin(msg));
-                                }
-                                None => {
-                                    let msg =
-                                        "OTP lock secondary check failed: no response from auth-read after reboot"
-                                            .to_string();
-                                    log::warn!(
-                                        "[batch-auth] otp-lock secondary verify no-response  port={port} mac={mac}"
-                                    );
-                                    update_row(
-                                        found_idx,
-                                        &mac,
-                                        BatchAuthRowUpdate::StepFailed {
-                                            step: "otp_lock_verify",
-                                            error: msg.clone(),
-                                        },
-                                    );
-                                    return Err(FlashError::Plugin(msg));
-                                }
-                            }
-                        }
                         log::info!("[batch-auth] already-done  port={port} mac={mac}");
                         update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
@@ -1650,7 +1443,7 @@ where
 
             // ── 7. Get row (found or allocate) ───────────────────────────
             let (row_idx, uuid, authkey) = match found_row {
-                Some((idx, u, k, _)) => (idx, u, k),
+                Some((idx, u, k)) => (idx, u, k),
                 None => match allocate_row() {
                     Some(r) => r,
                     None => {
@@ -1810,83 +1603,7 @@ where
                 }
             }
 
-            // ── 12. OTP lock (optional) ──────────────────────────────────
-            if config.lock_otp {
-                log::warn!(
-                    "[batch-auth] sending auth-otp-lock (irreversible)  port={port} mac={mac}"
-                );
-                match sess.auth_otp_lock() {
-                    Ok(()) => {
-                        log::info!("[batch-auth] otp-lock succeeded  port={port} mac={mac}");
-                        update_row(row_idx, &mac, BatchAuthRowUpdate::OtpLocked);
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        log::warn!("[batch-auth] otp-lock failed  port={port} mac={mac} err={msg}");
-                        update_row(
-                            row_idx,
-                            &mac,
-                            BatchAuthRowUpdate::StepFailed {
-                                step: "otp_lock",
-                                error: msg.clone(),
-                            },
-                        );
-                        return Err(FlashError::Plugin(format!("auth-otp-lock failed: {msg}")));
-                    }
-                }
-                // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
-                check_cancel!();
-                std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
-                log::info!(
-                    "[batch-auth] otp-lock: rebooting for secondary check  port={port} mac={mac}"
-                );
-                sess.soft_reboot_and_detect(cancel)?;
-                check_cancel!();
-                let post_lock_auth = sess.auth_read(config.auth_storage)?;
-                match post_lock_auth {
-                    Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
-                        log::info!(
-                            "[batch-auth] otp-lock secondary verify ok  port={port} mac={mac}"
-                        );
-                    }
-                    Some((rb_u, rb_k)) => {
-                        let msg = format!(
-                            "OTP lock secondary check failed: expected ({uuid},{authkey}), got ({rb_u},{rb_k})"
-                        );
-                        log::warn!(
-                            "[batch-auth] otp-lock secondary verify mismatch  port={port} mac={mac}"
-                        );
-                        update_row(
-                            row_idx,
-                            &mac,
-                            BatchAuthRowUpdate::StepFailed {
-                                step: "otp_lock_verify",
-                                error: msg.clone(),
-                            },
-                        );
-                        return Err(FlashError::Plugin(msg));
-                    }
-                    None => {
-                        let msg =
-                            "OTP lock secondary check failed: no response from auth-read after reboot"
-                                .to_string();
-                        log::warn!(
-                            "[batch-auth] otp-lock secondary verify no-response  port={port} mac={mac}"
-                        );
-                        update_row(
-                            row_idx,
-                            &mac,
-                            BatchAuthRowUpdate::StepFailed {
-                                step: "otp_lock_verify",
-                                error: msg.clone(),
-                            },
-                        );
-                        return Err(FlashError::Plugin(msg));
-                    }
-                }
-            }
-
-            // ── 13. Done ─────────────────────────────────────────────────
+            // ── 12. Done ─────────────────────────────────────────────────
             log::info!("[batch-auth] done  port={port} mac={mac} uuid={uuid}");
             if let Err(e) = sess.hardware_reset() {
                 log::warn!("[batch-auth] hardware_reset after Done failed  port={port}: {e}");
@@ -1937,86 +1654,9 @@ where
             )?;
 
             // ── 5. AlreadyDone check ─────────────────────────────────────
-            if let Some((found_idx, ref found_uuid, ref found_key, already_locked)) = found_row {
+            if let Some((found_idx, ref found_uuid, ref found_key)) = found_row {
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == found_uuid && ex_k == found_key {
-                        if config.lock_otp && !already_locked {
-                            log::warn!(
-                                "[batch-auth] already-done (old fw), supplementing otp-lock  port={port} mac={mac}"
-                            );
-                            match sess.auth_otp_lock() {
-                                Ok(()) => {
-                                    update_row(found_idx, &mac, BatchAuthRowUpdate::OtpLocked);
-                                }
-                                Err(e) => {
-                                    let msg = e.to_string();
-                                    log::warn!(
-                                        "[batch-auth] otp-lock failed (old fw)  port={port} mac={mac} err={msg}"
-                                    );
-                                    update_row(
-                                        found_idx,
-                                        &mac,
-                                        BatchAuthRowUpdate::StepFailed {
-                                            step: "otp_lock",
-                                            error: msg.clone(),
-                                        },
-                                    );
-                                    return Err(FlashError::Plugin(format!(
-                                        "auth-otp-lock failed: {msg}"
-                                    )));
-                                }
-                            }
-                            // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
-                            check_cancel!();
-                            std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
-                            log::info!(
-                                "[batch-auth] otp-lock: rebooting for secondary check (old fw)  port={port} mac={mac}"
-                            );
-                            sess.soft_reboot_and_detect(cancel)?;
-                            check_cancel!();
-                            let post_lock_auth = sess.auth_read(config.auth_storage)?;
-                            match post_lock_auth {
-                                Some((rb_u, rb_k)) if rb_u == *found_uuid && rb_k == *found_key => {
-                                    log::info!(
-                                        "[batch-auth] otp-lock secondary verify ok (old fw)  port={port} mac={mac}"
-                                    );
-                                }
-                                Some((rb_u, rb_k)) => {
-                                    let msg = format!(
-                                        "OTP lock secondary check failed: expected ({found_uuid},{found_key}), got ({rb_u},{rb_k})"
-                                    );
-                                    log::warn!(
-                                        "[batch-auth] otp-lock secondary verify mismatch (old fw)  port={port} mac={mac}"
-                                    );
-                                    update_row(
-                                        found_idx,
-                                        &mac,
-                                        BatchAuthRowUpdate::StepFailed {
-                                            step: "otp_lock_verify",
-                                            error: msg.clone(),
-                                        },
-                                    );
-                                    return Err(FlashError::Plugin(msg));
-                                }
-                                None => {
-                                    let msg =
-                                        "OTP lock secondary check failed: no response from auth-read after reboot"
-                                            .to_string();
-                                    log::warn!(
-                                        "[batch-auth] otp-lock secondary verify no-response (old fw)  port={port} mac={mac}"
-                                    );
-                                    update_row(
-                                        found_idx,
-                                        &mac,
-                                        BatchAuthRowUpdate::StepFailed {
-                                            step: "otp_lock_verify",
-                                            error: msg.clone(),
-                                        },
-                                    );
-                                    return Err(FlashError::Plugin(msg));
-                                }
-                            }
-                        }
                         log::info!("[batch-auth] already-done (old fw)  port={port} mac={mac}");
                         update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
@@ -2039,7 +1679,7 @@ where
 
             // ── 7. Get row (found or allocate) ───────────────────────────
             let (row_idx, uuid, authkey) = match found_row {
-                Some((idx, u, k, _)) => (idx, u, k),
+                Some((idx, u, k)) => (idx, u, k),
                 None => match allocate_row() {
                     Some(r) => r,
                     None => {
@@ -2211,87 +1851,7 @@ where
                 }
             }
 
-            // ── 13. OTP lock (optional) ──────────────────────────────────
-            if config.lock_otp {
-                log::warn!(
-                    "[batch-auth] sending auth-otp-lock (irreversible) (old fw)  port={port} mac={mac}"
-                );
-                match sess.auth_otp_lock() {
-                    Ok(()) => {
-                        log::info!(
-                            "[batch-auth] otp-lock succeeded (old fw)  port={port} mac={mac}"
-                        );
-                        update_row(row_idx, &mac, BatchAuthRowUpdate::OtpLocked);
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        log::warn!(
-                            "[batch-auth] otp-lock failed (old fw)  port={port} mac={mac} err={msg}"
-                        );
-                        update_row(
-                            row_idx,
-                            &mac,
-                            BatchAuthRowUpdate::StepFailed {
-                                step: "otp_lock",
-                                error: msg.clone(),
-                            },
-                        );
-                        return Err(FlashError::Plugin(format!("auth-otp-lock failed: {msg}")));
-                    }
-                }
-                // otp-lock succeeded: wait 1s, software-reboot, secondary auth-read check
-                check_cancel!();
-                std::thread::sleep(OTP_LOCK_REBOOT_DELAY);
-                log::info!(
-                    "[batch-auth] otp-lock: rebooting for secondary check (old fw)  port={port} mac={mac}"
-                );
-                sess.soft_reboot_and_detect(cancel)?;
-                check_cancel!();
-                let post_lock_auth = sess.auth_read(config.auth_storage)?;
-                match post_lock_auth {
-                    Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
-                        log::info!(
-                            "[batch-auth] otp-lock secondary verify ok (old fw)  port={port} mac={mac}"
-                        );
-                    }
-                    Some((rb_u, rb_k)) => {
-                        let msg = format!(
-                            "OTP lock secondary check failed: expected ({uuid},{authkey}), got ({rb_u},{rb_k})"
-                        );
-                        log::warn!(
-                            "[batch-auth] otp-lock secondary verify mismatch (old fw)  port={port} mac={mac}"
-                        );
-                        update_row(
-                            row_idx,
-                            &mac,
-                            BatchAuthRowUpdate::StepFailed {
-                                step: "otp_lock_verify",
-                                error: msg.clone(),
-                            },
-                        );
-                        return Err(FlashError::Plugin(msg));
-                    }
-                    None => {
-                        let msg =
-                            "OTP lock secondary check failed: no response from auth-read after reboot"
-                                .to_string();
-                        log::warn!(
-                            "[batch-auth] otp-lock secondary verify no-response (old fw)  port={port} mac={mac}"
-                        );
-                        update_row(
-                            row_idx,
-                            &mac,
-                            BatchAuthRowUpdate::StepFailed {
-                                step: "otp_lock_verify",
-                                error: msg.clone(),
-                            },
-                        );
-                        return Err(FlashError::Plugin(msg));
-                    }
-                }
-            }
-
-            // ── 14. Done ─────────────────────────────────────────────────
+            // ── 13. Done ─────────────────────────────────────────────────
             log::info!("[batch-auth] done (old fw)  port={port} mac={mac} uuid={uuid}");
             if let Err(e) = sess.hardware_reset() {
                 log::warn!(
@@ -3045,77 +2605,5 @@ mod tests {
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
             ))
         );
-    }
-
-    // ── auth_otp_lock ──────────────────────────────────────────────────
-
-    #[test]
-    fn auth_otp_lock_succeeds_on_success_line() {
-        let mut mock = MockAuthIo::new();
-        mock.add_response("auth-otp-lock\r\nAuthorization otp lock succeeds.\r\ntuya> \r\n");
-        let mut sess = session(mock);
-        assert!(sess.auth_otp_lock().is_ok());
-    }
-
-    #[test]
-    fn auth_otp_lock_fails_on_failure_line() {
-        let mut mock = MockAuthIo::new();
-        mock.add_response("auth-otp-lock\r\nAuthorization otp lock failure.\r\ntuya> \r\n");
-        let mut sess = session(mock);
-        let err = sess.auth_otp_lock().unwrap_err();
-        match err {
-            FlashError::Plugin(msg) => assert!(
-                msg.contains("device returned failure"),
-                "unexpected message: {msg}"
-            ),
-            other => panic!("expected Plugin error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn auth_otp_lock_fails_on_no_response() {
-        let mut mock = MockAuthIo::new();
-        mock.add_response("");
-        let mut sess = session(mock);
-        let err = sess.auth_otp_lock().unwrap_err();
-        match err {
-            FlashError::Plugin(msg) => assert!(
-                msg.contains("no recognisable response"),
-                "unexpected message: {msg}"
-            ),
-            other => panic!("expected Plugin error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn auth_otp_lock_is_case_insensitive() {
-        let mut mock = MockAuthIo::new();
-        mock.add_response("auth-otp-lock\r\nAUTHORIZATION OTP LOCK SUCCEEDS.\r\ntuya> \r\n");
-        let mut sess = session(mock);
-        assert!(sess.auth_otp_lock().is_ok());
-    }
-
-    #[test]
-    fn auth_otp_lock_ignores_unrelated_log_lines() {
-        let mut mock = MockAuthIo::new();
-        mock.add_response(
-            "auth-otp-lock\r\n[04-24 10:30:00] [INFO] efuse settling\r\nAuthorization otp lock succeeds.\r\n[04-24 10:30:01] noise\r\ntuya> \r\n",
-        );
-        let mut sess = session(mock);
-        assert!(sess.auth_otp_lock().is_ok());
-    }
-
-    #[test]
-    fn auth_otp_lock_treats_mixed_response_as_success() {
-        // Documents the policy: when both lines appear (e.g. echo residue),
-        // we trust the success line. The device's authoritative state is the
-        // last line printed; we don't expose the parser's order-sensitivity
-        // unless hardware verification reveals a real failure mode.
-        let mut mock = MockAuthIo::new();
-        mock.add_response(
-            "auth-otp-lock\r\nAuthorization otp lock failure.\r\nAuthorization otp lock succeeds.\r\ntuya> \r\n",
-        );
-        let mut sess = session(mock);
-        assert!(sess.auth_otp_lock().is_ok());
     }
 }

@@ -620,9 +620,7 @@
       "storageMode": "Storage",
       "storageKv": "KV",
       "storageOtp": "OTP / eFuse",
-      "storageOtpWarning": "Credentials will be permanently burned into eFuse and cannot be changed or erased.",
-      "otpLockToggle": "Burn eFuse after successful auth write + verify (permanently lock OTP)",
-      "otpLockDescription": "When enabled, sends auth-otp-lock to burn the eFuse. Future OTP writes will be rejected by hardware and this cannot be undone. Check only when this batch needs permanent locking; this toggle is reset to off on every app start.",
+      "storageOtpWarning": "Credentials are burned into eFuse once and cannot be changed or erased afterwards.",
       "excelTotal": "Total",
       "excelUsed": "Used",
       "excelInProgress": "Occupied",
@@ -752,7 +750,7 @@
       },
       "item2": {
         "title": "OTP Authorization Is Permanent and Irreversible",
-        "body": "When OTP storage mode is enabled with eFuse locking, authorization data is permanently burned into the chip and cannot be erased, modified, or revoked. Devices with a failed lock or interrupted write must be physically isolated from the production line for manual verification before any further use or shipment."
+        "body": "In OTP storage mode, authorization data is burned into the chip eFuse once and cannot be erased, modified, or revoked. Devices whose write is interrupted or fails must be physically isolated from the production line for manual verification before any further use or shipment."
       },
       "item3": {
         "title": "Keep the Authorization Excel File Secure",
