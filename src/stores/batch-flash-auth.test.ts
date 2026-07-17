@@ -257,7 +257,7 @@ describe("canStart / canRetry / canCancel", () => {
     expect(store.canStart).toBe(false);
   });
 
-  it("canStart is false when excel codes are exhausted", () => {
+  it("canStart stays true with remaining=0 when used rows exist (KV-loss recovery by MAC)", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.authConfig.excelPath = "/auth.xlsx";
@@ -267,6 +267,34 @@ describe("canStart / canRetry / canCancel", () => {
       inProgress: 0,
       remaining: 0,
       invalid: 0,
+    };
+    expect(store.canStart).toBe(true);
+  });
+
+  it("canStart stays true with remaining=0 when in-progress rows exist (resume interrupted writes)", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 10,
+      used: 8,
+      inProgress: 2,
+      remaining: 0,
+      invalid: 0,
+    };
+    expect(store.canStart).toBe(true);
+  });
+
+  it("canStart is false when the sheet has neither remaining codes nor any recorded history", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 10,
+      used: 0,
+      inProgress: 0,
+      remaining: 0,
+      invalid: 10,
     };
     expect(store.canStart).toBe(false);
   });
@@ -466,6 +494,35 @@ describe("handleAuthProgress", () => {
     expect(store.cumulativeStats.auth.total).toBe(1);
     expect(store.cumulativeStats.auth.success).toBe(1);
     expect(store.cumulativeStats.auth.fail).toBe(0);
+  });
+
+  it("done step overrides a stale not-authorized probe flag (device is authorized now)", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    // Pre-batch read probe on an unauthorized device left this flag behind.
+    store.slots[0].isAuthorized = false;
+    store.slots[0].status = "authorizing";
+    store.batchStartTime = Date.now();
+    // Rust's done event carries mac but no uuid.
+    store.handleAuthProgress({ port: "COM3", step: "done", mac: "aabbcc" });
+    expect(store.slots[0].status).toBe("done");
+    expect(store.slots[0].isAuthorized).toBe(true);
+  });
+
+  it("skipped step marks the device authorized and shows its existing uuid", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].isAuthorized = false;
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "skipped",
+      mac: "aabbcc",
+      existingUuid: "uuid-already-on-device",
+    });
+    expect(store.slots[0].status).toBe("skipped");
+    expect(store.slots[0].isAuthorized).toBe(true);
+    expect(store.slots[0].authUuid).toBe("uuid-already-on-device");
   });
 
   it("done step: flash cumulative NOT incremented (only auth counter goes up)", () => {

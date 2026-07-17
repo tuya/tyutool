@@ -34,6 +34,11 @@ import {
   normalizePortName,
 } from "@/features/batch-flash-auth/port-filter";
 import {
+  buildArchiveFolderName,
+  buildBatchArchiveSummary,
+  buildSlotsCsv,
+} from "@/features/batch-flash-auth/archive";
+import {
   loadBatchFlashAuthWorkspace,
   saveBatchFlashAuthCumulative,
   saveBatchFlashAuthFilterConfig,
@@ -86,6 +91,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const firmwareDownloadProgress = ref<number | null>(null);
   const excelStats = ref<ExcelStats | null>(null);
   const excelError = ref<string | null>(null);
+  const archiveStatus = ref<"idle" | "archiving" | "done" | "error">("idle");
+  const archiveError = ref<string>("");
+  const lastArchivePath = ref<string>("");
 
   let unlisten: (() => void) | undefined;
   let unlistenAuth: (() => void) | undefined;
@@ -127,7 +135,16 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       inputsValid.value &&
       !excelError.value &&
       excelStats.value !== null &&
-      excelStats.value.remaining > 0,
+      // Only NEW devices need an Available row ("remaining"). Devices already
+      // recorded in the sheet (in-progress or used rows) are matched by MAC
+      // and reuse their own row — recovery after KV loss or a retry works
+      // with remaining = 0, and unrecorded devices surface per-slot as
+      // no_code. Block start only when the sheet offers neither codes to
+      // allocate nor history to recover.
+      excelStats.value.remaining +
+        excelStats.value.inProgress +
+        excelStats.value.used >
+        0,
   );
   const canCancel = computed(() => isBusy.value);
   const canRetry = computed(() =>
@@ -138,6 +155,15 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     ),
   );
   const canReadAll = computed(() => !isBusy.value && slots.value.length > 0);
+  /** Archiving needs a finished batch (results to record) and the Excel path
+   *  (the sheet copy is the core of the archive). */
+  const canArchive = computed(
+    () =>
+      !isBusy.value &&
+      batchEndTime.value !== null &&
+      slots.value.length > 0 &&
+      !!authConfig.value.excelPath,
+  );
   const filterActive = computed(
     () => filterConfig.value.blockedPorts.length > 0,
   );
@@ -339,6 +365,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     batchStartTime.value = Date.now();
     batchEndTime.value = null;
     completionBanner.value = null;
+    archiveStatus.value = "idle";
+    archiveError.value = "";
+    lastArchivePath.value = "";
 
     for (const slot of slots.value.filter(
       (s) => !ACTIVE_STATUSES.includes(s.status),
@@ -513,6 +542,71 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     });
   }
 
+  // ── Archive ───────────────────────────────────────────────────────────────
+
+  /** Export the finished batch into an archive folder: a copy of the auth
+   *  Excel sheet, the firmware binary (when one was flashed), a logs.zip,
+   *  batch-summary.json and batch-slots.csv. The user picks the parent
+   *  directory; one timestamped subfolder is created per run. */
+  async function archiveBatch() {
+    if (!canArchive.value || !isTauriRuntime()) return;
+    if (archiveStatus.value === "archiving") return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const dir = await open({ directory: true, multiple: false });
+    if (typeof dir !== "string" || !dir) return;
+    archiveStatus.value = "archiving";
+    archiveError.value = "";
+    try {
+      const now = new Date();
+      const folderName = buildArchiveFolderName(chipId.value, now);
+      const summary = buildBatchArchiveSummary(
+        {
+          chipId: chipId.value,
+          opMode: opMode.value,
+          baudRate: baudRate.value,
+          authBaudRate: authBaudRate.value,
+          firmwareSource: firmwareSource.value,
+          firmwareVersion:
+            firmwareSource.value === "default"
+              ? selectedDefaultVersion.value
+              : "",
+          firmwarePath: firmwarePath.value,
+          excelPath: authConfig.value.excelPath,
+          conflictPolicy: authConfig.value.conflictPolicy,
+          authStorage: authConfig.value.authStorage,
+          excelStats: excelStats.value,
+          completionBanner: completionBanner.value,
+          batchStartTime: batchStartTime.value,
+          batchEndTime: batchEndTime.value,
+          currentBatchPorts: currentBatchPorts.value,
+          slots: slots.value,
+          cumulativeStats: cumulativeStats.value,
+          blockedPorts: filterConfig.value.blockedPorts,
+        },
+        now,
+      );
+      const slotsCsv = buildSlotsCsv(slots.value, currentBatchPorts.value);
+      const fw =
+        opMode.value === "flash-then-auth" ? firmwarePath.value : undefined;
+      const { invoke } = await import("@tauri-apps/api/core");
+      const path = await invoke<string>("archive_batch_cmd", {
+        destDir: dir,
+        folderName,
+        excelPath: authConfig.value.excelPath,
+        firmwarePath: fw,
+        summaryJson: JSON.stringify(summary),
+        slotsCsv,
+      });
+      lastArchivePath.value = path;
+      archiveStatus.value = "done";
+      rLog.info(`[batch-auth] batch archived to ${path}`);
+    } catch (e) {
+      archiveError.value = e instanceof Error ? e.message : String(e);
+      archiveStatus.value = "error";
+      rLog.error(`[batch-auth] archive failed: ${archiveError.value}`);
+    }
+  }
+
   // ── Progress event handler ────────────────────────────────────────────────
 
   function normalizePhase(phase: unknown): string {
@@ -573,6 +667,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         currentPhase: "",
         mac: ev.mac,
         authUuid: ev.uuid,
+        // The device is authorized by definition now; overwrite any stale
+        // "not authorized" flag left by a pre-batch read probe (the done
+        // event carries no uuid, so the probe flag would otherwise stick).
+        isAuthorized: true,
+        readError: undefined,
         excelError: ev.excelError,
       });
       cumulativeStats.value.auth.total++;
@@ -604,7 +703,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         status: "skipped",
         currentPhase: "",
         mac: ev.mac,
-        authUuid: ev.uuid,
+        // Skipped means the device already carries auth; the event reports
+        // it as existingUuid (there is no ev.uuid for this step).
+        authUuid: ev.uuid ?? ev.existingUuid,
+        isAuthorized: true,
+        readError: undefined,
         excelError: ev.excelError,
       });
       checkBatchCompletion();
@@ -963,6 +1066,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     firmwareDownloadProgress,
     excelStats,
     excelError,
+    archiveStatus,
+    archiveError,
+    lastArchivePath,
     // Computed
     canFlash,
     isOtpCapable,
@@ -974,6 +1080,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     canCancel,
     canRetry,
     canReadAll,
+    canArchive,
     filterActive,
     batchStartTime,
     batchEndTime,
@@ -993,6 +1100,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     cancelAll,
     readPort,
     readAll,
+    archiveBatch,
     blockPort,
     addBlockedPort,
     removeBlockedPort,

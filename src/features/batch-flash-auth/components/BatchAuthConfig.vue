@@ -118,7 +118,22 @@ async function browseExcel() {
             <strong>{{ store.excelStats.invalid }}</strong>
           </span>
           <span
-            v-if="store.excelStats.remaining === 0"
+            v-if="
+              store.excelStats.remaining === 0 &&
+              store.excelStats.used + store.excelStats.inProgress > 0
+            "
+            class="flex items-center gap-1 font-medium"
+            :style="{ color: 'var(--ty-accent)' }"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'triangle-exclamation']"
+              class="size-3 shrink-0"
+              aria-hidden="true"
+            />
+            {{ t("batchFlashAuth.config.recoveryOnly") }}
+          </span>
+          <span
+            v-else-if="store.excelStats.remaining === 0"
             class="flex items-center gap-1 font-medium"
             :style="{ color: 'var(--ty-accent)' }"
           >
