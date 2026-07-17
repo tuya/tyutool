@@ -15,6 +15,16 @@ export const OTP_CAPABLE_CHIPS = ["t5ai"] as const;
 
 export type BatchOpMode = "auth-only" | "flash-then-auth";
 
+/** Sentinel error strings from Rust Excel commands → i18n keys. Unknown
+ *  errors fall through and are shown verbatim. */
+export const EXCEL_ERROR_CODES: Record<string, string> = {
+  "excel.fileNotFound": "batchFlashAuth.errors.excel.fileNotFound",
+  "excel.notXlsxFormat": "batchFlashAuth.errors.excel.notXlsxFormat",
+  "excel.locked": "batchFlashAuth.errors.excel.locked",
+  "excel.changedWhileRunning":
+    "batchFlashAuth.errors.excel.changedWhileRunning",
+};
+
 export type BatchSlotStatus =
   | "idle"
   | "reading"

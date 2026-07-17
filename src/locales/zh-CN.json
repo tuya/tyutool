@@ -686,7 +686,9 @@
     "errors": {
       "excel": {
         "fileNotFound": "文件不存在",
-        "notXlsxFormat": "请选择 .xlsx 格式文件"
+        "notXlsxFormat": "请选择 .xlsx 格式文件",
+        "locked": "Excel 文件被其他程序占用，请关闭后重试",
+        "changedWhileRunning": "任务运行中，无法切换 Excel 文件"
       }
     },
     "status": {

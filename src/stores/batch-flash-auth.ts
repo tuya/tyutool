@@ -8,6 +8,7 @@ import { rLog } from "@/utils/log";
 import {
   BATCH_FLASH_CAPABLE_CHIPS,
   OTP_CAPABLE_CHIPS,
+  EXCEL_ERROR_CODES,
   type BatchSlotState,
   type BatchSlotStatus,
   type CumulativeStats,
@@ -192,6 +193,13 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!isTauriRuntime()) return;
     const { invoke } = await import("@tauri-apps/api/core");
     const all: Array<{ path: string }> = await invoke("list_serial_ports_cmd");
+    // Windows reassigns COM numbers when an adapter is re-plugged; drop
+    // non-active slots whose port no longer exists so stale numbers don't
+    // accumulate alongside the new ones.
+    const present = new Set(all.map((p) => p.path));
+    slots.value = slots.value.filter(
+      (s) => ACTIVE_STATUSES.includes(s.status) || present.has(s.port),
+    );
     const filtered = applyPortFilter(
       all.map((p) => p.path),
       filterConfig.value.blockedPorts,
@@ -219,10 +227,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } catch (e) {
       excelStats.value = null;
       const raw = String(e);
-      const EXCEL_ERROR_CODES: Record<string, string> = {
-        "excel.fileNotFound": "batchFlashAuth.errors.excel.fileNotFound",
-        "excel.notXlsxFormat": "batchFlashAuth.errors.excel.notXlsxFormat",
-      };
       excelError.value = EXCEL_ERROR_CODES[raw] ?? raw;
     }
   }
@@ -311,6 +315,19 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   // ── Flash actions ─────────────────────────────────────────────────────────
+
+  /** batch_auth_start rejected before any slot ran (e.g. Excel file locked):
+   *  fail the just-started ports so nothing hangs in reading_mac. */
+  function failPortsOnStartError(ports: string[], e: unknown) {
+    const raw = String(e);
+    const msg = EXCEL_ERROR_CODES[raw] ? t(EXCEL_ERROR_CODES[raw]) : raw;
+    rLog.error(`[batch-auth] batch_auth_start rejected: ${raw}`);
+    for (const port of ports) {
+      updateSlot(port, { status: "failed", error: msg, currentPhase: "" });
+    }
+    checkBatchCompletion();
+  }
+
   async function startAuth() {
     if (!canStart.value) return;
     if (!isTauriRuntime()) return;
@@ -368,7 +385,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
     };
-    await invoke("batch_auth_start", { config, ports: idlePorts });
+    try {
+      await invoke("batch_auth_start", { config, ports: idlePorts });
+    } catch (e) {
+      failPortsOnStartError(idlePorts, e);
+    }
   }
 
   async function startBatch() {
@@ -432,7 +453,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
     };
-    await invoke("batch_auth_start", { config, ports: [port] });
+    try {
+      await invoke("batch_auth_start", { config, ports: [port] });
+    } catch (e) {
+      failPortsOnStartError([port], e);
+    }
   }
 
   async function cancelPort(port: string) {

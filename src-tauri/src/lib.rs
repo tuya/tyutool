@@ -55,7 +55,36 @@ struct BatchFlashState {
 
 struct BatchAuthState {
     slots: StdMutex<HashMap<String, BatchSlot>>,
-    allocator: StdMutex<Option<std::sync::Arc<batch_auth::ExcelRowAllocator>>>,
+    session: Arc<StdMutex<AllocatorSession>>,
+}
+
+/// Excel allocator + count of slot threads using it, guarded by ONE mutex so
+/// acquire (batch_auth_start) and release (last SlotSessionGuard drop) can
+/// never interleave. Invariant: `alloc.is_some() ⇒ active > 0` — the file
+/// lock is held exactly while slots run, so the sheet can be edited between
+/// batches and every new batch re-reads it from disk.
+struct AllocatorSession {
+    alloc: Option<std::sync::Arc<batch_auth::ExcelRowAllocator>>,
+    active: usize,
+}
+
+/// Decrements the session's active count when a slot thread exits (any path,
+/// including early returns and panics); the last one out releases the file
+/// lock and drops the allocator.
+struct SlotSessionGuard(Arc<StdMutex<AllocatorSession>>);
+
+impl Drop for SlotSessionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut session) = self.0.lock() {
+            session.active = session.active.saturating_sub(1);
+            if session.active == 0 {
+                if let Some(alloc) = session.alloc.take() {
+                    alloc.release_lock();
+                    log::info!("[batch-auth] last slot finished; excel session closed");
+                }
+            }
+        }
+    }
 }
 
 /// Bridges an in-progress `run_authorize` blocking thread with the frontend's
@@ -691,21 +720,6 @@ fn batch_auth_start(
         config.conflict_policy,
     );
 
-    let allocator = {
-        let path = std::path::Path::new(&config.excel_path);
-        let mut alloc_guard = state.allocator.lock().map_err(|e| e.to_string())?;
-        // Reuse existing allocator only when the Excel path is unchanged.
-        // If the user picks a different file, reload so confirm_row writes to the correct file.
-        let reuse = alloc_guard.as_ref().map_or(false, |a| a.path_matches(path));
-        if reuse {
-            alloc_guard.as_ref().unwrap().clone()
-        } else {
-            let alloc = std::sync::Arc::new(batch_auth::ExcelRowAllocator::load(path)?);
-            *alloc_guard = Some(alloc.clone());
-            alloc
-        }
-    };
-
     // Phase 1: cancel all old slots simultaneously, collect their join receivers.
     let mut old_join_rxs: Vec<(String, std::sync::mpsc::Receiver<()>)> = Vec::new();
     for port in &ports {
@@ -735,6 +749,32 @@ fn batch_auth_start(
         }
     }
 
+    // Acquire the Excel session AFTER the old slots are fully joined (their
+    // guards decrement the counter) and with nothing fallible left before
+    // spawn (an increment must never leak). Single lock over {alloc, active}.
+    let allocator = {
+        let path = std::path::Path::new(&config.excel_path);
+        let mut session = state.session.lock().map_err(|e| e.to_string())?;
+        let alloc = match &session.alloc {
+            // Slots are still running: the file has been locked the whole
+            // time, so the in-memory state cannot be stale — reuse it.
+            Some(a) if a.path_matches(path) => a.clone(),
+            // Running slots write to the OLD file; swapping allocators
+            // mid-run would corrupt the release invariant. Refuse.
+            Some(_) => return Err("excel.changedWhileRunning".into()),
+            // Idle: fresh locked load, picking up any manual edits made
+            // since the previous batch. Fails fast with "excel.locked" if
+            // another program holds the file open for writing.
+            None => {
+                let a = std::sync::Arc::new(batch_auth::ExcelRowAllocator::load_locked(path)?);
+                session.alloc = Some(a.clone());
+                a
+            }
+        };
+        session.active += ports.len();
+        alloc
+    };
+
     // Phase 3: spawn threads — auth code allocation happens lazily inside each thread,
     // after reading the device's existing auth status.
     for port in ports {
@@ -745,8 +785,15 @@ fn batch_auth_start(
         let port_clone = port.clone();
         let config_clone = config.clone();
         let alloc_clone = allocator.clone();
+        let session_clone = state.session.clone();
 
         let handle = std::thread::spawn(move || {
+            // Must be the first statement: every exit path (early returns,
+            // panics) has to decrement the session count.
+            let _session_guard = SlotSessionGuard(session_clone);
+            // Last Excel write failure for this slot; attached to the final
+            // progress emit so the operator sees the sheet was NOT updated.
+            let excel_err: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
             log::info!(
                 "[batch-auth] slot begin  port={port_clone} chip={}",
                 config_clone.chip_id
@@ -830,6 +877,7 @@ fn batch_auth_start(
             // update_row: translate BatchAuthRowUpdate → RowStatus + step_name, then write to Excel
             let alloc_update = alloc_clone.clone();
             let port_for_update = port_clone.clone();
+            let excel_err_update = excel_err.clone();
             let update_row =
                 move |row_idx: usize, mac: &str, update: tyutool_core::BatchAuthRowUpdate| {
                     use crate::batch_auth::RowStatus;
@@ -860,6 +908,9 @@ fn batch_auth_start(
                         error.as_deref(),
                     ) {
                         log::error!("[batch-auth] excel-update-failed  port={port_for_update} row={row_idx} err={e}");
+                        if let Ok(mut slot) = excel_err_update.lock() {
+                            *slot = Some(e);
+                        }
                     }
                 };
 
@@ -890,20 +941,27 @@ fn batch_auth_start(
                 },
             );
 
+            // Attach the captured Excel write failure (if any) to a final
+            // emit — the frontend renders it as a per-slot warning.
+            let emit_final = |mut payload: serde_json::Value| {
+                if let Some(e) = excel_err.lock().ok().and_then(|g| g.clone()) {
+                    payload["excelError"] = serde_json::Value::String(e);
+                }
+                let _ = app_clone.emit("batch-auth-progress", payload);
+            };
+
             match result {
                 // Done — state already written to Excel by update_row(Done)
                 Ok(tyutool_core::BatchAuthSlotResult::Done { mac }) => {
                     log::info!("[batch-auth] slot done  port={port_clone} mac={mac}");
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
+                    emit_final(
                         serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
                     );
                 }
                 // AlreadyDone — state already written to Excel by update_row(Done) in authorize.rs
                 Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { mac }) => {
                     log::info!("[batch-auth] slot already-done  port={port_clone} mac={mac}");
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
+                    emit_final(
                         serde_json::json!({ "port": port_clone, "step": "done", "mac": mac }),
                     );
                 }
@@ -922,9 +980,11 @@ fn batch_auth_start(
                     log::info!("[batch-auth] slot skipped  port={port_clone} mac={mac} existing_uuid={existing_uuid}");
                     if let Err(e) = alloc_clone.confirm_existing_uuid(&existing_uuid, &mac) {
                         log::error!("[batch-auth] excel-confirm-skipped-failed  port={port_clone} existing_uuid={existing_uuid} err={e}");
+                        if let Ok(mut slot) = excel_err.lock() {
+                            *slot = Some(e);
+                        }
                     }
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
+                    emit_final(
                         serde_json::json!({ "port": port_clone, "step": "skipped", "mac": mac, "existingUuid": existing_uuid }),
                     );
                 }
@@ -939,8 +999,7 @@ fn batch_auth_start(
                 // CancelledAfterWrite — state already written to Excel by update_row(AuthWritten)
                 Ok(tyutool_core::BatchAuthSlotResult::CancelledAfterWrite { mac, uuid }) => {
                     log::warn!("[batch-auth] slot cancelled AFTER auth_write  port={port_clone} mac={mac} uuid={uuid}");
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
+                    emit_final(
                         serde_json::json!({ "port": port_clone, "step": "cancelled_after_write", "mac": mac, "uuid": uuid }),
                     );
                 }
@@ -955,8 +1014,7 @@ fn batch_auth_start(
                 // Err — state already written by update_row(StepFailed) inside authorize.rs
                 Err(e) => {
                     log::warn!("[batch-auth] slot failed  port={port_clone} error={e}");
-                    let _ = app_clone.emit(
-                        "batch-auth-progress",
+                    emit_final(
                         serde_json::json!({ "port": port_clone, "step": "failed", "error": e.to_string() }),
                     );
                 }
@@ -2787,7 +2845,10 @@ pub fn run() {
         })
         .manage(BatchAuthState {
             slots: StdMutex::new(HashMap::new()),
-            allocator: StdMutex::new(None),
+            session: Arc::new(StdMutex::new(AllocatorSession {
+                alloc: None,
+                active: 0,
+            })),
         })
         .manage(ConfirmState {
             sender: Arc::new(StdMutex::new(None)),

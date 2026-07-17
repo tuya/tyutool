@@ -84,6 +84,51 @@ struct AllocatorState {
     header_raw: Vec<String>,
     rows: Vec<RowData>,
     backed_up: bool,
+    /// Persistent write handle held for the duration of a batch run. On
+    /// Windows it denies other writers (Excel/WPS can only open read-only)
+    /// while readers keep working. `None` for plain (validation) loads.
+    lock_handle: Option<std::fs::File>,
+}
+
+#[cfg(windows)]
+const FILE_SHARE_READ: u32 = 0x1;
+#[cfg(windows)]
+const FILE_SHARE_DELETE: u32 = 0x4;
+
+fn open_lock_handle_io(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true).write(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Share read + delete, deny write: validation reads stay functional,
+        // Excel/WPS cannot grab a write handle, and our own tmp+rename save
+        // (which needs delete sharing on the target) is not blocked by us.
+        opts.share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE);
+    }
+    opts.open(path)
+}
+
+/// Copy via read+write. `std::fs::copy` (CopyFileExW on Windows) opens the
+/// source denying write sharing, which conflicts with our own held write
+/// handle; a plain read open shares everything and works under the lock.
+fn copy_file_shared(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let bytes = std::fs::read(src)?;
+    std::fs::write(dst, bytes)
+}
+
+/// Retry a fallible fs op a few times: transient read handles (antivirus,
+/// search indexers) can briefly block rename/open on Windows.
+fn retry_briefly<T, E>(mut op: impl FnMut() -> Result<T, E>) -> Result<T, E> {
+    let mut last = op();
+    for _ in 0..4 {
+        if last.is_ok() {
+            return last;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        last = op();
+    }
+    last
 }
 
 pub struct ExcelRowAllocator {
@@ -96,6 +141,35 @@ impl ExcelRowAllocator {
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {
+        Self::load_inner(path, None)
+    }
+
+    /// Like [`Self::load`], but first acquires a persistent write handle that
+    /// is held until [`Self::release_lock`] (or drop). If another program
+    /// (Excel/WPS) has the file open for writing, fails fast with
+    /// `"excel.locked"`. Used only by batch runs; validation keeps the plain
+    /// read-only `load`.
+    pub fn load_locked(path: &Path) -> Result<Self, String> {
+        // Lock before parsing so the content we read cannot change afterwards
+        // (calamine's read-only open coexists with our handle).
+        let lock = open_lock_handle_io(path).map_err(|e| {
+            log::warn!("[batch-auth] excel lock open failed: {e}");
+            "excel.locked".to_string()
+        })?;
+        log::info!("[batch-auth] excel lock acquired: {}", path.display());
+        Self::load_inner(path, Some(lock))
+    }
+
+    /// Release the write lock (no-op for plain loads or if already released).
+    pub fn release_lock(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.lock_handle.take().is_some() {
+                log::info!("[batch-auth] excel lock released: {}", state.path.display());
+            }
+        }
+    }
+
+    fn load_inner(path: &Path, lock_handle: Option<std::fs::File>) -> Result<Self, String> {
         let mut wb =
             open_workbook_auto(path).map_err(|e| format!("Cannot open Excel file: {e}"))?;
 
@@ -241,6 +315,7 @@ impl ExcelRowAllocator {
                 header_raw: header_strings,
                 rows,
                 backed_up: false,
+                lock_handle,
             }),
         })
     }
@@ -332,31 +407,28 @@ impl ExcelRowAllocator {
         step_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<(), String> {
-        {
-            let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
 
-            if !state.backed_up {
-                let bak = state.path.with_extension("xlsx.bak");
-                if !bak.exists() {
-                    std::fs::copy(&state.path, &bak).ok();
-                }
-                state.backed_up = true;
+        if !state.backed_up {
+            let bak = state.path.with_extension("xlsx.bak");
+            if !bak.exists() {
+                copy_file_shared(&state.path, &bak).ok();
             }
-
-            if let Some(row) = state.rows.get_mut(row_idx) {
-                row.status = status;
-                if row.mac.is_none() || row.mac.as_deref() == Some("") {
-                    row.mac = Some(mac.to_string());
-                }
-                row.timestamp = Some(utc_now_iso8601());
-                if let Some(s) = step_name {
-                    row.step = Some(s.to_string());
-                }
-                row.last_error = error.map(|e| e.to_string());
-            }
+            state.backed_up = true;
         }
-        let state = self.state.lock().unwrap();
-        save_workbook(&state)
+
+        if let Some(row) = state.rows.get_mut(row_idx) {
+            row.status = status;
+            if row.mac.is_none() || row.mac.as_deref() == Some("") {
+                row.mac = Some(mac.to_string());
+            }
+            row.timestamp = Some(utc_now_iso8601());
+            if let Some(s) = step_name {
+                row.step = Some(s.to_string());
+            }
+            row.last_error = error.map(|e| e.to_string());
+        }
+        save_workbook(&mut state)
     }
 }
 
@@ -417,7 +489,7 @@ fn is_leap(y: i32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
-fn save_workbook(state: &AllocatorState) -> Result<(), String> {
+fn save_workbook(state: &mut AllocatorState) -> Result<(), String> {
     let h = &state.header;
 
     let mut next_col = h.total_cols;
@@ -528,12 +600,36 @@ fn save_workbook(state: &AllocatorState) -> Result<(), String> {
     // once, in update_row_state), `.xlsx.prev.bak` = last successful save.
     if state.path.exists() {
         let prev = state.path.with_extension("xlsx.prev.bak");
-        if let Err(e) = std::fs::copy(&state.path, &prev) {
+        if let Err(e) = copy_file_shared(&state.path, &prev) {
             log::warn!("[batch-auth] prev-snapshot backup failed: {e}");
         }
     }
 
-    std::fs::rename(&tmp, &state.path).map_err(|e| {
+    // The lock handle must not be held across the rename: even when the
+    // replace succeeds, the old handle would keep protecting the unlinked
+    // pre-save file instead of the new one. Drop, rename, reacquire.
+    let had_lock = state.lock_handle.take().is_some();
+
+    let renamed = retry_briefly(|| std::fs::rename(&tmp, &state.path));
+
+    // Reacquire regardless of the rename outcome so the remaining rows stay
+    // protected for the rest of the batch. A miss self-heals on the next
+    // save (take() on None is a no-op, reopen is retried here again).
+    if had_lock {
+        match retry_briefly(|| open_lock_handle_io(&state.path)) {
+            Ok(f) => state.lock_handle = Some(f),
+            Err(e) => {
+                log::error!("[batch-auth] excel re-lock failed after save: {e}");
+                if renamed.is_ok() {
+                    return Err(format!(
+                        "Excel saved, but re-locking it failed (close the program using the file): {e}"
+                    ));
+                }
+            }
+        }
+    }
+
+    renamed.map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("Failed to commit Excel: {e}")
     })
@@ -941,5 +1037,110 @@ mod tests {
         // Main file is valid and reloadable after the atomic rename.
         let reloaded = ExcelRowAllocator::load(&path).unwrap();
         assert_eq!(reloaded.stats().used, 1);
+    }
+
+    fn lock_fixture(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        let path = dir.path().join("auth.xlsx");
+        write_xlsx(
+            &path,
+            &["UUID", "AUTHKEY"],
+            &[row(&[&vu("uuid-a"), &vk("key-a")])],
+        );
+        path
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn load_locked_fails_when_file_held_without_write_share() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = lock_fixture(&dir);
+        // Simulate Excel: hold the file open denying write sharing.
+        let _excel = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        assert!(matches!(
+            ExcelRowAllocator::load_locked(&path),
+            Err(e) if e == "excel.locked"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn load_locked_blocks_second_locked_load_until_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = lock_fixture(&dir);
+        let first = ExcelRowAllocator::load_locked(&path).unwrap();
+        assert!(matches!(
+            ExcelRowAllocator::load_locked(&path),
+            Err(e) if e == "excel.locked"
+        ));
+        drop(first);
+        assert!(ExcelRowAllocator::load_locked(&path).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn plain_load_succeeds_while_locked() {
+        // validate_excel_cmd must keep working during an active batch.
+        let dir = tempfile::tempdir().unwrap();
+        let path = lock_fixture(&dir);
+        let _locked = ExcelRowAllocator::load_locked(&path).unwrap();
+        let plain = ExcelRowAllocator::load(&path).unwrap();
+        assert_eq!(plain.stats().total, 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn save_under_lock_keeps_lock_and_writes_backups() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = lock_fixture(&dir);
+        let alloc = ExcelRowAllocator::load_locked(&path).unwrap();
+        let r = alloc.allocate_row().unwrap();
+        alloc
+            .update_row_state(
+                r.row_idx,
+                "AA:BB",
+                RowStatus::MacRead,
+                Some("mac_read"),
+                None,
+            )
+            .unwrap();
+        alloc
+            .update_row_state(
+                r.row_idx,
+                "AA:BB",
+                RowStatus::AuthVerified,
+                Some("auth_verified"),
+                None,
+            )
+            .unwrap();
+        // Backups written via the share-compatible copy despite the lock.
+        assert!(path.with_extension("xlsx.bak").exists());
+        assert!(path.with_extension("xlsx.prev.bak").exists());
+        assert!(!path.with_extension("xlsx.tmp").exists());
+        // Lock survived the drop→rename→reopen cycle in save_workbook.
+        assert!(matches!(
+            ExcelRowAllocator::load_locked(&path),
+            Err(e) if e == "excel.locked"
+        ));
+        // Read path still sees persisted state.
+        let reloaded = ExcelRowAllocator::load(&path).unwrap();
+        assert_eq!(reloaded.stats().used, 1);
+    }
+
+    #[test]
+    fn release_lock_allows_relock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = lock_fixture(&dir);
+        let first = ExcelRowAllocator::load_locked(&path).unwrap();
+        first.release_lock();
+        // Release is idempotent and frees the file for a new locked load
+        // even while the first allocator is still alive.
+        first.release_lock();
+        let second = ExcelRowAllocator::load_locked(&path).unwrap();
+        assert_eq!(second.stats().total, 1);
     }
 }
