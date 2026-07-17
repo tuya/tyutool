@@ -26,7 +26,7 @@ below, replace the placeholder block with a real `figure.shot` (see
 | `serial-debug-send-bar.png` | Serial Debug | `/serial-debug` send bar | ASCII mode, history open | — |
 | `settings-update.png` | Settings | `/settings` | Update center banner | — |
 | `settings-diagnostics.png` | Settings | `/settings` | Diagnostics section, log level visible | — |
-| `batch-overview.png` | Batch Auth | `/toolbox/batch-flash-auth` | Several slots, mixed statuses | — |
+| `batch-overview.png` ✓ | Batch Auth | `/toolbox/batch-flash-auth` | Several slots, mixed statuses | Captured; wired into operator page (zh + en) |
 | `batch-config.png` | Batch Auth | config panel | Chip=esp32, firmware=Default | Collapsed dashboard ok |
 | `batch-dashboard.png` | Batch Auth | dashboard | Mid-batch, donuts populated | — |
 | `batch-slot-row.png` | Batch Auth | slot list | One row mid-flash, one done | Show status badges |

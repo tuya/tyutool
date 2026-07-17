@@ -39,15 +39,29 @@
         <span class="title">只能在桌面应用里用</span>
         这项功能依赖电脑硬件能力，<strong>只能在桌面版 tyutool 里使用</strong>，网页版不可用。
       </div>
+      <figure class="shot">
+        <img src="../assets/images/batch-overview.png" alt="批量烧录授权页总览：配置区、仪表盘、工具栏与端口列表" loading="lazy">
+        <figcaption>批量烧录授权页总览：左侧配置区（芯片 / 波特率 / 固件 / 授权表）、顶部仪表盘（烧录与授权累计统计）、工具栏，以及下方端口列表。</figcaption>
+      </figure>
 
       <h2 id="prepare">2. 开始前要准备什么</h2>
       <ul>
-        <li><strong>桌面版 tyutool</strong>：确保装的是桌面应用，不是网页版。</li>
-        <li><strong>授权码 Excel 表（<code>.xlsx</code>）</strong>：这是从涂鸦<strong>购买</strong>来的授权码。表格至少要有两列：<strong>UUID</strong> 和 <strong>AuthKey</strong>（列名不区分大小写）。其余列 tyutool 会自动补充状态、MAC、时间等。</li>
-        <li><strong>设备 + 串口线</strong>：把要处理的设备用 USB 转串口线接到电脑，每台设备占一个串口。</li>
+        <li><strong>桌面版 tyutool</strong>：本功能只能在桌面应用里用，网页版不可用。请按你的系统下载安装（当前最新版 v3.2.1，点一下即下载）：
+          <ul>
+            <li><strong>Windows（x64，安装包）</strong>：<a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_windows_x86_64_nsis_3.2.1.exe">tyutool-gui_windows_x86_64_nsis_3.2.1.exe</a></li>
+            <li><strong>macOS（通用，安装包）</strong>：<a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_macos_universal_dmg_3.2.1.dmg">tyutool-gui_macos_universal_dmg_3.2.1.dmg</a></li>
+            <li><strong>Linux（x64，AppImage）</strong>：<a href="https://github.com/tuya/tyutool/releases/download/v3.2.1/tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage">tyutool-gui_linux_x86_64_appimage_3.2.1.AppImage</a>（下载后 <code>chmod +x</code> 再运行）</li>
+          </ul>
+        </li>
+        <li><strong>授权码 Excel 表（<code>.xlsx</code>）</strong>：这是从涂鸦<strong>购买</strong>来的授权码（获取：<a href="https://tuyaopen.ai/zh/pricing">https://tuyaopen.ai/zh/pricing</a>）。表格至少要有两列：<strong>UUID</strong> 和 <strong>AuthKey</strong>（列名不区分大小写）。其余列 tyutool 会自动补充状态、MAC、时间等。</li>
+        <li><strong>设备 + 串口线</strong>：把要处理的设备用 USB 转串口线接到电脑，每台设备占一个串口。<strong>注意（T5/T5AI）</strong>：设备上有两个串口——<strong>烧录/授权口</strong>和<strong>日志口</strong>；烧录与授权走的是<strong>同一个烧录/授权口</strong>，请务必接到这个口，<strong>不要接到日志口</strong>，否则烧录和授权都会失败。</li>
         <li><strong>串口驱动</strong>：装好 USB 转串口芯片的驱动（CH340 / CP2102 / FT232 等），否则电脑看不到串口。</li>
         <li><strong>要烧录的固件</strong>（可选）：如果这一步还要刷固件，准备好固件文件（<code>.bin</code>），或使用 tyutool 提供的官方授权固件下载。</li>
       </ul>
+      <div class="callout note">
+        <span class="title">保持最新</span>
+        装好后如果出了新版本，<strong>推荐用应用内的“检查更新”进行升级，使用最新版本。</strong>
+      </div>
       <div class="callout warn">
         <span class="title">授权码很贵重</span>
         UUID 和 AuthKey 是花钱买来的凭据，一码对应一台设备。请妥善保管 Excel 文件，不要泄露到聊天、截图里。
@@ -55,6 +69,10 @@
 
       <h2 id="first-visit">3. 第一次进入</h2>
       <p>第一次打开批量授权页时，会弹出一个<strong>免责声明对话框</strong>，提醒你这功能涉及不可逆的操作。确认你理解后点继续即可进入页面。如果勾选了<strong>“不再提示”</strong>，下次就不会再弹；点<strong>取消</strong>会退回工具箱，不进入页面。</p>
+      <p><strong>想让它重新出现？</strong>"不再提示"的勾选状态存在应用本地存储里，key 为 <code>tyutool-batch-auth-disclaimer-v1</code>。清除它即可让对话框再次弹出：</p>
+      <ul>
+        <li><strong>桌面端（Tauri）</strong>：在应用窗口按 <kbd>F12</kbd> 打开开发者工具，切到 <strong>Application</strong> → <strong>Local Storage</strong>，删掉 <code>tyutool-batch-auth-disclaimer-v1</code> 这一项，然后刷新页面。</li>
+      </ul>
 
       <h2 id="steps">4. 一次完整操作怎么走</h2>
       <ol class="steps">
@@ -96,6 +114,15 @@
       </ul>
 
       <h2 id="troubleshoot">6. 出错了怎么办</h2>
+
+      <h3>应用打不开 / 白屏</h3>
+      <ul>
+        <li><strong>Linux 下打开是白屏或空白窗口</strong>（虚拟机里尤其常见）：WebKit2GTK 的 GPU 合成失败所致。启动前设一个环境变量再运行：
+          <pre><code>export WEBKIT_DISABLE_COMPOSITING_MODE=1
+./tyutool-gui_linux_x86_64_appimage_*.AppImage</code></pre>
+        </li>
+        <li><strong>macOS 提示“无法验证开发者”</strong>：tyutool 的安装包没有 Apple 签名，这是正常的。打开<strong>系统设置 → 隐私与安全性 → 仍要打开</strong>；或在访达里按住 Control 点 <code>tyutool.app</code> → <strong>打开</strong>。</li>
+      </ul>
 
       <h3>端口没出现 / 打不开</h3>
       <ul>
