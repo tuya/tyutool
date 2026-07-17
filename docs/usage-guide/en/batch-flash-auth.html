@@ -26,162 +26,24 @@
   <div class="layout">
     <main class="content">
       <h1>Batch Flash &amp; Auth</h1>
-      <p class="lead">This page is the complete reference for the <code>/batch</code> page: <strong>parallel flash + authorize</strong> across multiple USB-serial ports, with auth codes driven by an <code>.xlsx</code> spreadsheet. This is the most complex feature in tyutool and involves irreversible eFuse operations — please read the <strong>Safety callouts</strong> in section 9.</p>
+      <p class="lead">Plug multiple devices into your computer's serial ports and <strong>flash firmware + write auth codes in parallel</strong>, driven by an <code>.xlsx</code> spreadsheet. This is the most complex feature in tyutool and involves irreversible eFuse operations.</p>
 
-      <h2 id="when-to-use">1. When to use</h2>
-      <p>When you need to <strong>process many devices at once</strong> — plugging multiple boards into multiple USB-serial ports, flashing firmware in parallel and writing auth codes — the Batch Flash &amp; Auth page is built for exactly that. Auth codes are read row-by-row from an Excel spreadsheet (<code>.xlsx</code>), and each idle port is assigned a device to authorize.</p>
-      <ul>
-        <li><strong>Parallel multi-port</strong>: every <strong>non-blocked</strong> port can act as a slot in the batch.</li>
-        <li><strong>Spreadsheet-driven auth</strong>: auth codes aren't typed by hand — they come from an <code>.xlsx</code>, validated up front for total / used / in-progress / remaining before start.</li>
-        <li><strong>Tauri-only</strong>: in web mode the page <strong>early-returns</strong> and offers no batch capability at all.</li>
-      </ul>
-      <figure class="shot todo">
-        <figcaption>Batch Flash &amp; Auth overview: config area, dashboard, toolbar, slot list</figcaption>
-        <!-- capture: batch-overview.png -->
-      </figure>
-      <div class="callout note">
-        <span class="title">Not available on the web</span>
-        Serial scanning, parallel flashing and eFuse operations all depend on Tauri's system capabilities and are <strong>only available in the desktop app</strong>. On the web, entering this page early-returns and no batch controls are shown.
+      <p>This feature serves two very different audiences, and we provide two separate guides. Pick the one that matches who you are:</p>
+
+      <div class="features">
+        <a href="batch-auth-developer.html">
+          <h3>I'm a firmware developer</h3>
+          <p>What UART commands must my firmware implement to be batch-authorizable? Full protocol contract and a self-test checklist.</p>
+        </a>
+        <a href="batch-auth-operator.html">
+          <h3>I'm a flashing operator</h3>
+          <p>How to prepare, how to operate, and what to do when something breaks. Operations only, no technical details.</p>
+        </a>
       </div>
 
-      <h2 id="disclaimer">2. Disclaimer</h2>
-      <p>Because batch authorization can trigger <strong>irreversible</strong> eFuse burns, this page shows a disclaimer dialog on <strong>first visit</strong>:</p>
-      <ul>
-        <li><strong>First-visit dialog</strong>: explains the risks of batch authorization (especially that OTP writes are irreversible) and requires you to acknowledge before continuing.</li>
-        <li><strong>Don't show again</strong>: checking this persists the choice to <code>localStorage</code> so the dialog doesn't reappear.</li>
-        <li><strong>Cancel returns to <code>/toolbox</code></strong>: pressing cancel on the disclaimer sends you back to the toolbox instead of entering the batch page.</li>
-      </ul>
-      <div class="callout warn">
-        <span class="title">Read the disclaimer carefully</span>
-        The disclaimer isn't a formality — once you pick OTP storage mode, credentials are <strong>burned into eFuse once and cannot be undone</strong>. Make sure you understand every risk in section 9 before checking "don't show again".
-      </div>
-
-      <h2 id="shared-config">3. Shared config</h2>
-      <p>The shared config area applies <strong>uniformly to all slots</strong> — chip, baud rates, and firmware source:</p>
-      <ul>
-        <li><strong>Chip</strong>: options are limited to <code>esp32</code>, <code>t5ai</code>, <code>other</code>. Only <code>esp32</code> and <code>t5ai</code> are <strong>flash-capable</strong> (they have a flash plugin); <code>other</code> is auth-only and cannot be flashed.</li>
-        <li><strong>Flash baud</strong> and <strong>Auth baud</strong>: separate baud rates for the firmware-flash phase and the authorization phase.</li>
-        <li><strong>Flash firmware toggle</strong>: available only for <strong>flash-capable</strong> chips (<code>esp32</code> / <code>t5ai</code>). When on, each port flashes firmware before authorizing; when off, auth only. Two firmware sources:
-          <ul>
-            <li><strong>Local</strong>: browse for a local <code>.bin</code> file.</li>
-            <li><strong>Default</strong>: download from the online <code>auth-firmware.json</code> manifest — the manifest is filtered by the selected chip, with a <strong>version dropdown</strong> and a <strong>download progress</strong> indicator.</li>
-          </ul>
-        </li>
-      </ul>
-      <figure class="shot todo">
-        <figcaption>Shared config: chip selector, flash/auth baud, firmware source (local/default)</figcaption>
-        <!-- capture: batch-config.png -->
-      </figure>
-      <div class="callout tip">
-        <span class="title">The chip decides what's possible</span>
-        <code>esp32</code> and <code>t5ai</code> can flash + authorize; <code>other</code> can only authorize. When you switch chips, the firmware-related controls auto-enable or disable based on the chip's capability.
-      </div>
-
-      <h2 id="auth-config">4. Auth config</h2>
-      <p>The auth config area centers on the <strong>auth-code spreadsheet</strong> and the <strong>storage mode</strong>:</p>
-      <ul>
-        <li><strong>Excel spreadsheet (<code>.xlsx</code>)</strong>: selecting the auth-code sheet triggers validation immediately, showing <strong>total / used / in-progress / remaining</strong>. If <strong>remaining = 0</strong> or the file is invalid, the <strong>Start button is disabled</strong>.</li>
-        <li><strong>Conflict policy</strong>: what to do when the target device already has auth — <code>Skip</code> or <code>Overwrite</code>.</li>
-        <li><strong>Storage mode</strong>: available only for <strong>T5AI</strong> — <code>KV</code> (key-value region, rewritable) or <code>OTP</code> (one-time region, write-once). Choosing <code>OTP</code> shows an <strong>irreversibility warning</strong>.</li>
-      </ul>
       <div class="callout danger">
-        <span class="title">Danger: OTP writes are irreversible</span>
-        When storage mode is <code>OTP</code>, credentials are <strong>burned into the chip eFuse once</strong> at the end of authorization. The firmware treats the OTP region as <strong>write-once</strong> — once populated it refuses further writes, and the region can never be erased, modified, or rewritten by any means. In a batch scenario, one wrong config (chip, firmware, or auth codes) <strong>cascades to ruin the whole batch</strong>. Only use OTP for a batch after you are fully certain everything is correct.
-      </div>
-
-      <h2 id="dashboard">5. Dashboard</h2>
-      <p>The dashboard is a <strong>sticky panel</strong> that summarizes the whole batch in real time:</p>
-      <ul>
-        <li><strong>Flash cumulative stats</strong>: a donut + total / success / fail counts, with a <strong>reset</strong> button (resets the cumulative counter without affecting the current batch).</li>
-        <li><strong>Auth cumulative stats</strong>: same structure as flash — donut + total / success / fail + reset.</li>
-        <li><strong>Current-batch stats</strong>: shows the batch's <strong>active / done / failed</strong> counts plus a <strong>live elapsed timer</strong> (time since the batch started).</li>
-        <li><strong>Completion banner</strong>: shown when the batch ends, classified as <code>all-skipped</code> / <code>all-success</code> / <code>all-failed</code> / <code>partial</code>; dismissable.</li>
-      </ul>
-      <figure class="shot todo">
-        <figcaption>Dashboard: flash/auth cumulative stats (donuts), current-batch stats, completion banner</figcaption>
-        <!-- capture: batch-dashboard.png -->
-      </figure>
-
-      <h2 id="toolbar">6. Toolbar</h2>
-      <p>The toolbar provides batch operations across all slots:</p>
-      <ul>
-        <li><strong>Auto-assign</strong>: adds every <strong>non-blocked</strong> port as a slot in one click.</li>
-        <li><strong>Filter</strong>: opens the port-filter modal to choose which ports participate; the button's <strong>badge</strong> shows the current <strong>blocked-port count</strong>.</li>
-        <li><strong>Read All</strong>: runs a read-only MAC / auth probe on <strong>non-active</strong> slots (writes nothing).</li>
-        <li><strong>Cancel</strong>: cancels the in-progress operation.</li>
-        <li><strong>Retry</strong>: retries slots in the <code>failed</code> or <code>no_code</code> state.</li>
-        <li><strong>Start</strong>: starts the batch; when <strong>idle ports &gt; 8</strong> a <strong>confirmation dialog</strong> appears, to avoid accidentally launching a large number of ports.</li>
-      </ul>
-      <div class="callout note">
-        <span class="title">Hard prerequisites for Start</span>
-        The Start button stays disabled when <strong>remaining auth codes = 0</strong>, the auth sheet is <strong>invalid</strong>, or no ports can be assigned.
-      </div>
-
-      <h2 id="slot-row">7. Per-port slot row</h2>
-      <p>Each port in the batch occupies one slot row showing its full status:</p>
-      <ul>
-        <li><strong>Port name</strong> and a colored <strong>status badge</strong>; status values are listed below.</li>
-        <li><strong>Progress bar</strong>: shown only during the flash phase, advancing per phase.</li>
-        <li><strong>MAC</strong> and <strong>UUID</strong>: displayed once read.</li>
-        <li><strong>Error message</strong>: shown on failure; <strong>click the error</strong> to open a detail dialog with <strong>copy</strong> support.</li>
-        <li><strong>Per-row actions</strong>: <strong>Read</strong>; an active row can be <strong>Cancel</strong>ed; a failed row can be <strong>Retry</strong>ed.</li>
-        <li><strong>Right-click</strong>: a context menu offers <strong>Block port</strong>.</li>
-      </ul>
-      <p>Slot status badge values:</p>
-      <table>
-        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
-        <tbody>
-          <tr><td><code>idle</code></td><td>Idle — not started, or finished and back to ready.</td></tr>
-          <tr><td><code>reading</code></td><td>Reading (MAC / auth probe).</td></tr>
-          <tr><td><code>flashing</code></td><td>Flashing firmware.</td></tr>
-          <tr><td><code>reading_mac</code></td><td>Reading MAC.</td></tr>
-          <tr><td><code>authorizing</code></td><td>Writing / verifying auth.</td></tr>
-          <tr><td><code>done</code></td><td>Slot complete (flash + auth both succeeded).</td></tr>
-          <tr><td><code>failed</code></td><td>Some step failed.</td></tr>
-          <tr><td><code>skipped</code></td><td>Skipped due to conflict policy.</td></tr>
-          <tr><td><code>no_code</code></td><td>No auth code available to assign.</td></tr>
-        </tbody>
-      </table>
-      <figure class="shot todo">
-        <figcaption>Slot row: status badge, progress bar, MAC/UUID, per-row actions, context menu</figcaption>
-        <!-- capture: batch-slot-row.png -->
-      </figure>
-      <div class="callout danger">
-        <span class="title">Danger: cancelledAfterWrite devices must be physically quarantined</span>
-        If a port is cancelled <strong>after the auth write may have already landed</strong>, that slot is flagged <code>cancelledAfterWrite</code> and shows a <strong>physical-quarantine danger badge</strong>. The auth write <strong>may have completed before the cancel took effect</strong>, leaving the device's state undetermined. Such devices <strong>must be physically quarantined</strong> — do not return them to the good-device pool or re-run them through the batch; verify their auth status individually before deciding how to handle them.
-      </div>
-
-      <h2 id="operation-modes">8. Operation modes</h2>
-      <p>Based on chip capability and config, each port enters one of two modes:</p>
-      <ul>
-        <li><strong><code>flash-then-auth</code></strong>: enabled when the chip is <strong>flash-capable</strong> + the <strong>flash firmware toggle is on</strong> + a <strong>firmware path is set</strong>. The full per-port flow is: <strong>flash firmware → read MAC → read auth → write auth → verify</strong>.</li>
-        <li><strong><code>auth-only</code></strong>: when those conditions aren't met (e.g. chip is <code>other</code>, or the firmware toggle is off). The per-port flow is: <strong>read MAC → read auth → write auth → verify</strong>.</li>
-      </ul>
-      <p>Progress for every phase is streamed live to the frontend over event channels:</p>
-      <ul>
-        <li><code>batch-flash-progress</code> — batch flash progress.</li>
-        <li><code>batch-auth-progress</code> — batch auth-write progress.</li>
-        <li><code>batch-auth-read-progress</code> — batch auth-read progress.</li>
-        <li><code>auth-firmware-download-progress</code> — default firmware download progress.</li>
-      </ul>
-      <div class="callout tip">
-        <span class="title">The mode is decided per port, automatically</span>
-        You don't choose the mode manually — tyutool looks at the chip, firmware toggle, and firmware path in the shared config and automatically decides <code>flash-then-auth</code> vs <code>auth-only</code> for each port.
-      </div>
-
-      <h2 id="safety">9. Safety callouts</h2>
-      <p>Batch Flash &amp; Auth is the <strong>only feature in tyutool that triggers irreversible hardware operations</strong>. Keep these two ironclad rules in mind:</p>
-      <div class="callout danger">
-        <span class="title">Rule one: OTP writes are irreversible</span>
-        With storage mode set to <code>OTP</code>, every device <strong>burns its eFuse once</strong> after authorization. The firmware treats the OTP region as <strong>write-once</strong> — once populated it can never be erased, modified, or rewritten by any means. In a batch, one wrong config ruins the whole batch.
-      </div>
-      <div class="callout danger">
-        <span class="title">Rule two: cancelledAfterWrite devices must be physically quarantined</span>
-        If a port is cancelled <strong>after the auth write may have landed</strong>, the slot is flagged <code>cancelledAfterWrite</code> and shows a <strong>physical-quarantine danger badge</strong> — the auth write may have completed before the cancel, leaving the device's state undetermined. Such devices <strong>must be physically quarantined</strong>; do not return them to the good-device pool or re-run them through the batch. Verify their auth status individually before disposition.
-      </div>
-      <div class="callout warn">
-        <span class="title">Pre-batch checklist</span>
-        Before starting a batch, confirm each item: the chip is correct, the firmware source and version are right, the auth sheet is validated with enough remaining codes, and the conflict policy is as intended. If you're using OTP storage mode, validate the <strong>full flow on a single device first</strong> before committing the whole batch.
+        <span class="title">The single most important safety note</span>
+        If you select <strong>OTP</strong> storage mode (T5AI only), credentials are <strong>burned into the chip once and can never be erased or modified</strong> — one wrong setting ruins the whole batch. Always validate on a single device before going to batch. See <a href="batch-auth-operator.html#safety">Operator Guide · Safety</a>.
       </div>
 
       <nav class="pager">
