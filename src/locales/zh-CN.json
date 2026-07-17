@@ -629,6 +629,7 @@
       "excelInProgress": "占用中",
       "excelRemaining": "剩余",
       "excelExhausted": "授权码已全部使用，请补充 Excel",
+      "recoveryOnly": "剩余 0：仅表中已登记的设备可恢复/重试，新设备将报“无码”",
       "excelInvalid": "无效行（UUID/AuthKey 长度错误）：",
       "sourceLocal": "本地文件",
       "sourceDefault": "默认授权固件",
@@ -747,6 +748,13 @@
       "allSuccess": "本次批次完成：{count} 台全部成功",
       "allFailed": "本次批次全部失败，请检查连接后重试",
       "partial": "本次批次完成：{done} 成功，{failed} 失败，可点击「重试失败」"
+    },
+    "archive": {
+      "button": "归档",
+      "archiving": "归档中…",
+      "hint": "把授权表副本（全量台账）、固件、日志和明细导出到档案文件夹；一份授权表跑完归档一次即可",
+      "done": "已归档到：{path}",
+      "failed": "归档失败：{error}"
     },
     "disclaimer": {
       "title": "⚠️ 使用前须知",

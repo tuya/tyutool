@@ -629,6 +629,7 @@
       "excelInProgress": "Occupied",
       "excelRemaining": "Remaining",
       "excelExhausted": "All auth codes used — please add more to the Excel",
+      "recoveryOnly": "Remaining 0: only devices already recorded in the sheet can be recovered/retried; new devices will report no_code",
       "excelInvalid": "Invalid rows (bad UUID/AuthKey length):",
       "sourceLocal": "Local File",
       "sourceDefault": "Default Auth Firmware",
@@ -747,6 +748,13 @@
       "allSuccess": "Batch complete: all {count} succeeded",
       "allFailed": "Batch failed entirely — check connections and retry",
       "partial": "Batch complete: {done} succeeded, {failed} failed — click Retry Failed"
+    },
+    "archive": {
+      "button": "Archive",
+      "archiving": "Archiving…",
+      "hint": "Export the auth-sheet copy (the full ledger), firmware, logs and details into an archive folder; archive once per finished auth sheet",
+      "done": "Archived to: {path}",
+      "failed": "Archive failed: {error}"
     },
     "disclaimer": {
       "title": "⚠️ Important Notice Before Use",
