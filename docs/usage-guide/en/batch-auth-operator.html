@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch Auth · Operator Guide · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>try{var t=localStorage.getItem("tyutool-docs-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+  <script src="../assets/theme.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+    <div class="bar">
+      <a class="brand" href="index.html">tyutool · Usage Guide</a>
+      <button class="icon-btn theme-toggle" type="button" data-mode="system" aria-label="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </button>
+      <span class="lang"><a href="batch-auth-operator.html" aria-current="true">English</a><a href="../zh/batch-auth-operator.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <main class="content">
+      <h1>Batch Auth · Operator Guide</h1>
+      <p class="lead">This page is for <strong>operators using tyutool to batch flash and authorize</strong>: how to prepare, how to operate, and what to do when something breaks. No technical background required.</p>
+
+      <div class="callout note">
+        <span class="title">Wrong page?</span>
+        If you are a <strong>firmware developer</strong> (you need to know what your firmware must implement to be batch-authorizable), see <a href="batch-auth-developer.html">Batch Auth · Firmware Developer Guide</a>.
+      </div>
+
+      <h2 id="what-it-does">1. What this tool does</h2>
+      <p>It processes <strong>many devices at once</strong> — plug multiple devices into your computer's serial ports, click one button, and tyutool <strong>simultaneously</strong> flashes firmware and writes the credentials each device needs to connect to the cloud. You don't type the credentials by hand; they're read row-by-row from an Excel spreadsheet.</p>
+      <div class="callout note">
+        <span class="title">Desktop app only</span>
+        This feature relies on system hardware capabilities and is <strong>only available in the desktop tyutool app</strong>, not on the web.
+      </div>
+
+      <h2 id="prepare">2. What to prepare beforehand</h2>
+      <ul>
+        <li><strong>The desktop tyutool app</strong>: make sure you're running the desktop application, not the web version.</li>
+        <li><strong>An auth-code Excel sheet (<code>.xlsx</code>)</strong>: these are credentials <strong>purchased</strong> from Tuya. The sheet needs at least two columns: <strong>UUID</strong> and <strong>AuthKey</strong> (column names are case-insensitive). tyutool fills in the other columns (status, MAC, timestamp, etc.) automatically.</li>
+        <li><strong>Devices + serial cables</strong>: connect each device to the computer via a USB-to-serial adapter; each device occupies one serial port.</li>
+        <li><strong>Serial drivers</strong>: install the driver for your USB-to-serial chip (CH340 / CP2102 / FT232, etc.), otherwise the computer won't see the port.</li>
+        <li><strong>The firmware to flash</strong> (optional): if this step also flashes firmware, have the <code>.bin</code> file ready, or use the official auth firmware that tyutool can download.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">Auth codes are valuable</span>
+        UUID and AuthKey are paid credentials, one code per device. Keep the Excel file safe and never leak it in chats or screenshots.
+      </div>
+
+      <h2 id="first-visit">3. First time you enter</h2>
+      <p>The first time you open the batch auth page, a <strong>disclaimer dialog</strong> appears reminding you that this feature performs irreversible operations. Acknowledge it to continue. Checking <strong>"don't show again"</strong> suppresses it next time; clicking <strong>Cancel</strong> returns you to the toolbox without entering the page.</p>
+
+      <h2 id="steps">4. How a full run works</h2>
+      <ol class="steps">
+        <li><strong>Pick the chip</strong>: choose your device's chip (e.g. <code>esp32</code>, <code>t5ai</code>; pick <code>other</code> for auth-only without flashing).</li>
+        <li><strong>Set baud rates</strong>: set the flash baud and the auth baud separately; leave defaults if unsure.</li>
+        <li><strong>Pick firmware</strong> (only if flashing): turn on "flash firmware", choose a local <code>.bin</code>, or use "default" to download the official auth firmware (filtered by chip, with a version dropdown and download progress).</li>
+        <li><strong>Pick the auth-code Excel sheet</strong>: selecting it immediately shows <strong>total / used / in-progress / remaining</strong>. Confirm <strong>"remaining" is greater than 0</strong> — otherwise the Start button stays disabled.</li>
+        <li><strong>Set the conflict policy</strong>: <strong>Skip</strong> or <strong>Overwrite</strong> when a device already has auth.</li>
+        <li><strong>(T5AI only) Pick the storage mode</strong>: <code>KV</code> (rewritable) or <code>OTP</code> (write-once, irreversible — see <a href="#safety">Safety</a>).</li>
+        <li><strong>Auto-assign ports</strong>: click "Auto-assign" to add all available serial ports as slots.</li>
+        <li><strong>Start</strong>: click "Start" to begin the batch. If there are many idle ports (&gt; 8), a confirmation dialog appears to avoid accidental launches.</li>
+        <li><strong>Watch the dashboard</strong>: track the cumulative flash/auth stats and the current batch progress in real time; a completion banner appears at the end (all-success / all-failed / partial / all-skipped).</li>
+        <li><strong>Check the results</strong>: inspect each port's status row by row; for failures, click the error to see details and <strong>retry</strong>.</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">Want to peek at the devices first?</span>
+        Click <strong>"Read All"</strong> on the toolbar to run a read-only probe (read MAC, read existing auth) on non-active slots — <strong>it writes nothing</strong>, great for a pre-batch check.
+      </div>
+
+      <h2 id="read-results">5. Reading the results</h2>
+      <p>Each port in the batch occupies one row showing:</p>
+      <ul>
+        <li><strong>A status badge</strong> (colored) telling you the row's current state. Common statuses:</li>
+      </ul>
+      <table>
+        <thead><tr><th>Status</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td><code>done</code></td><td>This device flashed and authorized successfully — it's a good unit.</td></tr>
+          <tr><td><code>failed</code></td><td>A step errored. Click the error message for details; you can <strong>retry</strong>.</td></tr>
+          <tr><td><code>skipped</code></td><td>This device already had auth; skipped per your "skip" policy.</td></tr>
+          <tr><td><code>no_code</code></td><td>Auth codes ran out; no code was assigned to this device.</td></tr>
+          <tr><td>Others (processing)</td><td>Anything showing "reading / flashing / authorizing" is <strong>still processing</strong>; just wait for it to finish.</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><strong>Progress bar</strong>: shown during the flash phase, advancing per phase.</li>
+        <li><strong>MAC / UUID</strong>: shown on the row once read.</li>
+        <li><strong>Error message</strong>: shown on failure; click it for details and <strong>copy</strong> support, handy when reporting an issue.</li>
+      </ul>
+
+      <h2 id="troubleshoot">6. What to do when something breaks</h2>
+
+      <h3>Port doesn't appear / won't open</h3>
+      <ul>
+        <li>Try a different USB cable or USB port (many issues are cable or contact related).</li>
+        <li>Make sure the serial-chip driver is installed (CH340 / CP2102 / FT232).</li>
+        <li><strong>Close other programs using the serial port</strong> (other serial-debug tools, Arduino IDE, etc.) — they may be holding it.</li>
+        <li>More troubleshooting in <a href="faq.html#ports">FAQ · Connections / Ports</a>.</li>
+      </ul>
+
+      <h3>All failures / lots of failures</h3>
+      <ul>
+        <li><strong>Get it working on a single device first</strong>, then commit to the whole batch.</li>
+        <li><strong>Lower the baud rate</strong> (e.g. down to <code>115200</code>) — packet loss at high baud causes failures to spike.</li>
+        <li>Insufficient power also causes batch failures — check USB power, use external power if needed.</li>
+      </ul>
+
+      <h3>Excel errors (locked / invalid)</h3>
+      <ul>
+        <li>"File locked": <strong>close Excel / WPS</strong> first, then reselect the sheet. During a batch run tyutool locks the file to prevent conflicts.</li>
+        <li>"Invalid sheet": check the sheet really has <strong>UUID</strong> and <strong>AuthKey</strong> columns with the correct lengths.</li>
+      </ul>
+
+      <h3>Need more detailed logs / to report an issue</h3>
+      <p>Failure details are in each row's error dialog; for deeper troubleshooting, follow <a href="faq.html#logs-feedback">FAQ · How to report a bug</a> to export logs.</p>
+
+      <h2 id="safety">7. Safety</h2>
+      <p>Batch authorization is the <strong>only feature in tyutool that performs irreversible hardware operations</strong>. Keep these two rules in mind:</p>
+      <div class="callout danger">
+        <span class="title">Rule one: OTP mode is write-once and irreversible</span>
+        If you select <code>OTP</code> storage mode (T5AI only), credentials are <strong>burned into the chip once</strong> and <strong>can never be erased or modified</strong>. One wrong setting (wrong chip, wrong firmware, wrong codes) ruins the whole batch. So: <strong>before using OTP, run the full flow end-to-end on a single device to validate it; only commit the whole batch once confirmed correct.</strong>
+      </div>
+      <div class="callout danger">
+        <span class="title">Rule two: devices showing the "cancelled-after-write" danger badge must be set aside</span>
+        If a device is cancelled <strong>after the auth write may have already landed</strong>, it shows a <strong>physical-quarantine danger badge</strong> — meaning the auth may already have been written and the device's state is uncertain. Such devices <strong>must not be treated as good units</strong> and must not be re-run through the batch directly; <strong>set them aside and verify each one individually</strong> before deciding what to do.
+      </div>
+      <div class="callout warn">
+        <span class="title">Pre-batch checklist</span>
+        Before starting the batch, confirm each item: the chip is correct, the firmware version is correct, the auth sheet is validated with enough "remaining", and the conflict policy is as intended; if using OTP, validate on a single device first.
+      </div>
+
+      <nav class="pager">
+        <a href="batch-flash-auth.html">← Batch Flash &amp; Auth overview</a>
+        <a href="settings.html">Settings →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>

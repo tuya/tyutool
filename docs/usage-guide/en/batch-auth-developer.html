@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch Auth · Firmware Developer Guide · tyutool Usage Guide</title>
+  <link rel="stylesheet" href="../assets/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>try{var t=localStorage.getItem("tyutool-docs-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+  <script src="../assets/theme.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+    <div class="bar">
+      <a class="brand" href="index.html">tyutool · Usage Guide</a>
+      <button class="icon-btn theme-toggle" type="button" data-mode="system" aria-label="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </button>
+      <span class="lang"><a href="batch-auth-developer.html" aria-current="true">English</a><a href="../zh/batch-auth-developer.html">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <main class="content">
+      <h1>Batch Auth · Firmware Developer Guide</h1>
+      <p class="lead">This page is for <strong>firmware developers</strong>: to make your firmware batch-authorizable by tyutool, it must implement a set of TuyaOpen UART CLI commands. Below is the full protocol contract and a <strong>self-test checklist</strong> — passing the self-test means your firmware is ready for batch authorization.</p>
+
+      <div class="callout note">
+        <span class="title">Wrong page?</span>
+        If you are an <strong>operator using the app to flash and authorize</strong> (you just want to know which buttons to press and what to do when something breaks), see the <a href="batch-auth-operator.html">Batch Auth · Operator Guide</a> — no protocol details there.
+      </div>
+
+      <h2 id="protocol-overview">1. The protocol: text CLI, not binary frames</h2>
+      <p>tyutool's authorization protocol is the <strong>TuyaOpen interactive shell text-command exchange</strong> — plain ASCII, each command terminated with <code>\r\n</code>, no frame headers / checksums / opcodes. It is <strong>completely independent</strong> from the Beken BootROM binary protocol used for flashing firmware. The authorization phase talks to <strong>the CLI shell running on the booted device</strong>.</p>
+      <ul>
+        <li><strong>Baud</strong>: <code>115200</code> 8N1 by default (overridable per-batch via the "auth baud" config).</li>
+        <li><strong>Interaction</strong>: after boot the device presents a <code>tuya&gt;</code> prompt; tyutool sends commands one by one and reads the echo to judge the result.</li>
+        <li><strong>Authoritative source</strong>: TuyaOpen's <code>tuya_authorize.c</code> — the easiest path is to build on TuyaOpen, which already implements every command on this page.</li>
+      </ul>
+      <div class="callout tip">
+        <span class="title">Fastest path</span>
+        If your firmware is built on TuyaOpen, the auth CLI is already included and you don't need to implement it. This page is mainly for developers of <strong>self-developed or ported firmware</strong> who must implement this CLI themselves.
+      </div>
+
+      <h2 id="command-table">2. Commands the firmware must implement</h2>
+      <p>The table lists <strong>every command</strong> tyutool sends during the auth flow, and the content the firmware must echo back. Command names are lowercase and case-sensitive. <code>&lt;uuid&gt;</code> / <code>&lt;authkey&gt;</code> are the actual credentials; <code>&lt;n&gt;</code> is the storage-mode argument (see <a href="#storage-modes">section 4</a>).</p>
+      <table>
+        <thead><tr><th>Command (<code>\r\n</code>-terminated)</th><th>Purpose</th><th>Required firmware echo</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>sys_log_enable off</code></td>
+            <td>Capability probe + disable logging</td>
+            <td>New firmware: <code>OK: log disabled</code>; old firmware: <code>No command</code> or just returns to the <code>tuya&gt;</code> prompt</td>
+          </tr>
+          <tr>
+            <td><code>sys_version</code></td>
+            <td>Read firmware version</td>
+            <td>A line like <code>project.version x.y.z</code></td>
+          </tr>
+          <tr>
+            <td><code>read_mac</code></td>
+            <td>Read the device MAC</td>
+            <td>Like <code>XX:XX:XX:XX:XX:FF</code> (6 colon-separated hex parts; a 7-part form <code>LABEL:XX:...:FF</code> with a non-hex label prefix is also accepted)</td>
+          </tr>
+          <tr>
+            <td><code>auth-read</code><br>or <code>auth-read &lt;n&gt;</code></td>
+            <td>Read current auth (UUID + AuthKey)</td>
+            <td><strong>Authorized</strong>: two consecutive lines <code>&lt;uuid&gt;</code> and <code>&lt;authkey&gt;</code>, then the prompt;<br><strong>Empty / unauthorized</strong>: <code>Authorization read failure.</code></td>
+          </tr>
+          <tr>
+            <td><code>auth &lt;uuid&gt; &lt;authkey&gt;</code><br>or <code>auth &lt;uuid&gt; &lt;authkey&gt; &lt;n&gt;</code></td>
+            <td>Write auth</td>
+            <td><strong>Bad length</strong>: <code>uuid length must be 20/16, authkey length must be 32</code> (and no write is performed);<br><strong>OTP write success</strong>: <code>Authorization write to OTP Succeeds.</code>;<br><strong>OTP write failure</strong>: <code>Authorization write to OTP failure.</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout note">
+        <span class="title">Echo convention</span>
+        The firmware should <strong>echo each received command line</strong> — tyutool filters out the echo of its own command and only inspects the real output that follows. Log lines (shaped like <code>[MM-DD HH:MM:SS ...]</code>) and ANSI escapes are stripped automatically; no special handling is needed for them.
+      </div>
+
+      <h2 id="credential-rules">3. Credential length rules</h2>
+      <p>The firmware validates lengths before performing an <code>auth</code> write, and tyutool applies the same rule at Excel-ingest time to <strong>pre-filter</strong> illegal rows (such rows are never burned):</p>
+      <table>
+        <thead><tr><th>Field</th><th>Valid length</th><th>When invalid</th></tr></thead>
+        <tbody>
+          <tr><td><strong>UUID</strong></td><td>exactly <strong>16</strong> or <strong>20</strong> characters</td><td>firmware echoes the length error, tyutool reports failure</td></tr>
+          <tr><td><strong>AuthKey</strong></td><td>exactly <strong>32</strong> characters</td><td>same as above</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li>Placeholder UUID on un-authorized devices is <code>uuidxxxxxxxxxxxxxxxx</code>.</li>
+        <li>Valid UUID chars: alphanumeric plus <code>-</code> <code>_</code> <code>.</code>; valid AuthKey chars: any ASCII graphic character.</li>
+      </ul>
+
+      <h2 id="storage-modes">4. KV vs OTP at the protocol level</h2>
+      <p>Storage mode is distinguished <strong>solely by a trailing numeric argument <code>&lt;n&gt;</code></strong>: KV omits it, OTP appends <code>1</code>.</p>
+      <table>
+        <thead><tr><th>Mode</th><th>Read command</th><th>Write command</th></tr></thead>
+        <tbody>
+          <tr><td><strong>KV</strong> (key-value region, rewritable)</td><td><code>auth-read</code></td><td><code>auth &lt;uuid&gt; &lt;authkey&gt;</code></td></tr>
+          <tr><td><strong>OTP</strong> (one-time eFuse, write-once and irreversible)</td><td><code>auth-read 1</code></td><td><code>auth &lt;uuid&gt; &lt;authkey&gt; 1</code></td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><strong>OTP is exposed only for T5AI</strong>; every other chip always uses KV.</li>
+        <li><strong>OTP burns are slow</strong>: there is a long silent gap between the command echo and the response (eFuse burning). tyutool uses a <strong>60 s total timeout + 30 s idle window</strong> for OTP writes, and a 30 s idle window for OTP reads.</li>
+        <li><strong>Failed OTP writes are retried</strong>: a failed write leaves the OTP block empty (write-once semantics: the block is only rejected once populated), so up to <strong>3 attempts</strong> cannot corrupt already-written data.</li>
+        <li><strong>Reading an empty OTP</strong> block echoes <code>Authorization read failure.</code>, which tyutool treats as "unauthorized", not an error.</li>
+      </ul>
+      <div class="callout danger">
+        <span class="title">OTP writes are write-once and irreversible</span>
+        Once the OTP block is written non-empty, the firmware <strong>refuses any further write</strong>, and the region can never be erased or modified. During development, <strong>always validate the full flow in KV mode first</strong>, and only switch to OTP after everything is confirmed correct.
+      </div>
+
+      <h2 id="mac-rules">5. MAC validation rules</h2>
+      <ul>
+        <li>The MAC echoed by <code>read_mac</code> must be a valid device MAC.</li>
+        <li>The <strong>factory-default MAC</strong> for T5/T5AI is <code>C8:47:8C:00:00:18</code>, meaning the device's MAC region has not yet been personalized — reading it makes tyutool <strong>abort authorization for that device</strong>. Ensure the firmware returns the personalized real MAC.</li>
+      </ul>
+
+      <h2 id="self-test">6. Self-test checklist (pass this before going to batch)</h2>
+      <p>The core requirement you care about: during firmware development you must <strong>manually send these commands over a serial terminal and confirm they pass</strong> before using the batch feature. With any serial tool (minicom / picocom / a serial-debugging app) at <strong>115200 8N1</strong>, connect to the device and send each command in order, verifying the echo. Checking off every item means the firmware is ready for batch authorization:</p>
+      <ol class="steps">
+        <li>☐ After power-on the device shows a <code>tuya&gt;</code> prompt (sending two bare <code>\r\n</code> wakes the shell).</li>
+        <li>☐ Send <code>sys_log_enable off</code> → receive <code>OK: log disabled</code> (or, on old firmware, <code>No command</code> / return to the prompt).</li>
+        <li>☐ Send <code>sys_version</code> → receive a line <code>project.version x.y.z</code>.</li>
+        <li>☐ Send <code>read_mac</code> → receive a valid <code>XX:XX:XX:XX:XX:FF</code> (and not <code>C8:47:8C:00:00:18</code>).</li>
+        <li>☐ Send <code>auth-read</code> on an <strong>unauthorized</strong> device → receive <code>Authorization read failure.</code></li>
+        <li>☐ Send <code>auth &lt;a valid uuid + authkey&gt;</code> (UUID 16 or 20 chars, AuthKey 32 chars), then <code>auth-read</code> again → read back the <strong>same</strong> UUID and AuthKey.</li>
+        <li>☐ Send <code>auth &lt;too-short-uuid&gt; &lt;key&gt;</code> → receive <code>uuid length must be 20/16, authkey length must be 32</code> and the existing auth is <strong>not</strong> changed.</li>
+        <li>☐ (T5AI + OTP path only) Send <code>auth &lt;uuid&gt; &lt;authkey&gt; 1</code> → receive <code>Authorization write to OTP Succeeds.</code>; then <code>auth-read 1</code> reads it back.</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">Where to get test credentials</span>
+        Use <strong>genuinely purchased real credentials</strong> for self-testing. If you only want to verify the protocol handshake, you can repeatedly erase and rewrite the same set in KV mode; because OTP is write-once, validate it last.
+      </div>
+
+      <h2 id="integration-paths">7. Two integration paths</h2>
+      <ul>
+        <li>
+          <strong>Path A (recommended): firmware carries its own auth capability</strong> — build on TuyaOpen (or implement the CLI above), so your production firmware itself responds to the auth commands. At batch time use <code>auth-only</code> mode; tyutool talks directly to the shell inside your firmware.
+        </li>
+        <li>
+          <strong>Path B: temporarily flash the official auth-firmware</strong> — if your production firmware does <strong>not</strong> implement this CLI, you can flash tyutool's provided <code>auth-firmware</code> (<code>.bin</code> per chip under <code>assets/auth-firmware/</code>) to authorize, <strong>then let a later production step flash your production firmware</strong>. This is the batch <code>flash-then-auth</code> mode. Note: the auth-firmware is itself a TuyaOpen firmware implementing this very contract.
+        </li>
+      </ul>
+
+      <nav class="pager">
+        <a href="batch-flash-auth.html">← Batch Flash &amp; Auth overview</a>
+        <a href="cli.html">CLI →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — firmware flashing tool for Tuya-class IoT devices</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>

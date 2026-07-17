@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>批量授权 · 操作员指南 · tyutool 使用指南</title>
+  <link rel="stylesheet" href="../assets/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>try{var t=localStorage.getItem("tyutool-docs-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+  <script src="../assets/theme.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+    <div class="bar">
+      <a class="brand" href="index.html">tyutool · 使用指南</a>
+      <button class="icon-btn theme-toggle" type="button" data-mode="system" aria-label="切换主题">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </button>
+      <span class="lang"><a href="../en/batch-auth-operator.html">English</a><a href="batch-auth-operator.html" aria-current="true">中文</a></span>
+    </div>
+  </header>
+  <div class="layout">
+    <main class="content">
+      <h1>批量授权 · 操作员指南</h1>
+      <p class="lead">本页写给<strong>使用 tyutool 进行批量烧录授权的操作员</strong>：怎么准备、怎么操作、出了问题怎么办。不需要任何技术背景。</p>
+
+      <div class="callout note">
+        <span class="title">走错页了？</span>
+        如果你是<strong>固件开发者</strong>（需要知道固件要实现哪些功能才能被批量授权），请看 <a href="batch-auth-developer.html">批量授权 · 固件开发者必读</a>。
+      </div>
+
+      <h2 id="what-it-does">1. 这个工具做什么</h2>
+      <p>把很多台设备<strong>一次性</strong>处理完——只要把多块设备插到电脑的多个串口上，点一下按钮，tyutool 就会<strong>同时</strong>给它们烧录固件并写入上网所需的授权码。授权码不是你手动敲的，而是从一份 Excel 表格里自动一行行读取。</p>
+      <div class="callout note">
+        <span class="title">只能在桌面应用里用</span>
+        这项功能依赖电脑硬件能力，<strong>只能在桌面版 tyutool 里使用</strong>，网页版不可用。
+      </div>
+
+      <h2 id="prepare">2. 开始前要准备什么</h2>
+      <ul>
+        <li><strong>桌面版 tyutool</strong>：确保装的是桌面应用，不是网页版。</li>
+        <li><strong>授权码 Excel 表（<code>.xlsx</code>）</strong>：这是从涂鸦<strong>购买</strong>来的授权码。表格至少要有两列：<strong>UUID</strong> 和 <strong>AuthKey</strong>（列名不区分大小写）。其余列 tyutool 会自动补充状态、MAC、时间等。</li>
+        <li><strong>设备 + 串口线</strong>：把要处理的设备用 USB 转串口线接到电脑，每台设备占一个串口。</li>
+        <li><strong>串口驱动</strong>：装好 USB 转串口芯片的驱动（CH340 / CP2102 / FT232 等），否则电脑看不到串口。</li>
+        <li><strong>要烧录的固件</strong>（可选）：如果这一步还要刷固件，准备好固件文件（<code>.bin</code>），或使用 tyutool 提供的官方授权固件下载。</li>
+      </ul>
+      <div class="callout warn">
+        <span class="title">授权码很贵重</span>
+        UUID 和 AuthKey 是花钱买来的凭据，一码对应一台设备。请妥善保管 Excel 文件，不要泄露到聊天、截图里。
+      </div>
+
+      <h2 id="first-visit">3. 第一次进入</h2>
+      <p>第一次打开批量授权页时，会弹出一个<strong>免责声明对话框</strong>，提醒你这功能涉及不可逆的操作。确认你理解后点继续即可进入页面。如果勾选了<strong>“不再提示”</strong>，下次就不会再弹；点<strong>取消</strong>会退回工具箱，不进入页面。</p>
+
+      <h2 id="steps">4. 一次完整操作怎么走</h2>
+      <ol class="steps">
+        <li><strong>选芯片型号</strong>：按你设备的芯片选（例如 <code>esp32</code>、<code>t5ai</code>；如果只授权不烧录可选 <code>other</code>）。</li>
+        <li><strong>设波特率</strong>：烧录波特率和授权波特率分别设置；不确定就用默认值。</li>
+        <li><strong>选固件</strong>（仅当需要烧录时）：开关打开“烧录固件”，选本地 <code>.bin</code>，或用“默认”从官方下载授权固件（按芯片过滤、可选版本、显示下载进度）。</li>
+        <li><strong>选授权码 Excel 表</strong>：选中后界面立即显示 <strong>总数 / 已用 / 进行中 / 剩余</strong>。确认<strong>“剩余”大于 0</strong>——否则启动按钮会保持禁用。</li>
+        <li><strong>设置冲突策略</strong>：遇到已带授权的设备是<strong>跳过</strong>还是<strong>覆盖</strong>。</li>
+        <li><strong>（仅 T5AI）选存储模式</strong>：<code>KV</code>（可重写）或 <code>OTP</code>（写一次不可逆，详见 <a href="#safety">安全须知</a>）。</li>
+        <li><strong>自动分配端口</strong>：点“自动分配”，把所有可用串口加为处理插槽。</li>
+        <li><strong>启动</strong>：点“启动”开始整批处理。空闲端口较多（&gt; 8）时会弹确认框，避免误启动。</li>
+        <li><strong>看仪表盘等完成</strong>：实时看烧录/授权的累计统计、当前批次进度；整批结束会有完成横幅（全部成功 / 全部失败 / 部分成功 / 全部跳过）。</li>
+        <li><strong>核对结果</strong>：逐行检查每个端口的状态，失败的可以点错误看详情并<strong>重试</strong>。</li>
+      </ol>
+      <div class="callout tip">
+        <span class="title">想先探一下设备现状？</span>
+        点工具栏的<strong>“全部读取”</strong>，会对非活动插槽做只读探测（读 MAC、读现有授权），<strong>不写入任何内容</strong>，适合批量前摸底。
+      </div>
+
+      <h2 id="read-results">5. 看懂结果</h2>
+      <p>每个参与处理的端口占一行，你会看到这几样东西：</p>
+      <ul>
+        <li><strong>状态徽标</strong>（带颜色）：告诉你这行当前是什么情况。常见状态如下：</li>
+      </ul>
+      <table>
+        <thead><tr><th>状态</th><th>什么意思</th></tr></thead>
+        <tbody>
+          <tr><td><code>done</code>（完成）</td><td>这台设备烧录和授权都成功了，是好品。</td></tr>
+          <tr><td><code>failed</code>（失败）</td><td>某一步出错了。点错误信息看详情，可以<strong>重试</strong>。</td></tr>
+          <tr><td><code>skipped</code>（跳过）</td><td>这台设备已经有授权，按你设的“跳过”策略跳过了。</td></tr>
+          <tr><td><code>no_code</code>（无码）</td><td>授权码用完了，没分到码给这台设备。</td></tr>
+          <tr><td>其他（处理中）</td><td>显示“正在读取/正在烧录/正在授权”等都属于<strong>还在处理</strong>，等它跑完即可。</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><strong>进度条</strong>：烧录阶段会显示分阶段进度。</li>
+        <li><strong>MAC / UUID</strong>：读取到后会显示在这行。</li>
+        <li><strong>错误信息</strong>：失败时显示；点开可看详情并<strong>复制</strong>，方便报问题。</li>
+      </ul>
+
+      <h2 id="troubleshoot">6. 出错了怎么办</h2>
+
+      <h3>端口没出现 / 打不开</h3>
+      <ul>
+        <li>换一根 USB 线、换一个 USB 口（很多问题是线材或接触不良）。</li>
+        <li>确认串口芯片驱动已装好（CH340 / CP2102 / FT232）。</li>
+        <li><strong>关掉其他正在用串口的程序</strong>（其他串口调试软件、Arduino IDE 等），它们可能占着端口。</li>
+        <li>更多排查见 <a href="faq.html#ports">常见问题 · 连接/端口</a>。</li>
+      </ul>
+
+      <h3>全部失败 / 大量失败</h3>
+      <ul>
+        <li><strong>先用单台设备试通</strong>，确认整个流程跑通，再投入整批。</li>
+        <li><strong>把波特率调低</strong>（例如降到 <code>115200</code>），高波特率下丢包会让失败激增。</li>
+        <li>供电不足也会导致批量失败——检查 USB 口供电，必要时换外接供电。</li>
+      </ul>
+
+      <h3>Excel 报错（被占用 / 无效）</h3>
+      <ul>
+        <li>提示“文件被占用”：先<strong>关掉 Excel / WPS</strong>再重新选表。批量运行期间 tyutool 会锁住文件防止冲突。</li>
+        <li>提示表无效：检查表里是否确实有 <strong>UUID</strong> 和 <strong>AuthKey</strong> 两列，且 UUID/AuthKey 长度正确。</li>
+      </ul>
+
+      <h3>想看更详细的日志 / 报问题</h3>
+      <p>失败的详细信息在每行的错误对话框里；如果需要更深入排查，参考 <a href="faq.html#logs-feedback">常见问题 · 如何反馈 bug</a> 导出日志。</p>
+
+      <h2 id="safety">7. 安全须知</h2>
+      <p>批量授权是 tyutool 里<strong>唯一会触发不可逆硬件操作</strong>的功能。请记住下面两条：</p>
+      <div class="callout danger">
+        <span class="title">铁律一：OTP 模式写一次不可逆</span>
+        如果存储模式选了 <code>OTP</code>（仅 T5AI 可选），授权码会<strong>一次性烧进芯片</strong>，<strong>永远无法擦除或修改</strong>。一旦配错（芯片型号错、固件错、授权码错），整批设备都会被毁掉。所以：<strong>用 OTP 之前，务必先用一台设备把整个流程完整跑通验证，确认无误后再批量。</strong>
+      </div>
+      <div class="callout danger">
+        <span class="title">铁律二：出现“已写入后取消”危险徽标的设备必须单独放一边</span>
+        如果某台设备在<strong>授权可能已经写入之后</strong>才被取消，它会显示一个<strong>物理隔离危险徽标</strong>——意思是授权可能已经写进去了，设备状态不确定。这种设备<strong>不能当成好品</strong>，也不要直接重新跑批量，必须<strong>单独拿出来核实</strong>清楚后再决定怎么处理。
+      </div>
+      <div class="callout warn">
+        <span class="title">批量前的检查清单</span>
+        启动整批前，逐项确认：芯片型号对、固件版本对、授权表已校验且“剩余”够、冲突策略符合预期；用 OTP 的话务必先单台验证。
+      </div>
+
+      <nav class="pager">
+        <a href="batch-flash-auth.html">← 批量烧录授权总览</a>
+        <a href="settings.html">设置 →</a>
+      </nav>
+    </main>
+  </div>
+  <footer class="site-footer"><div class="inner">
+    <span>tyutool — 涂鸦类 IoT 设备固件烧录工具</span>
+    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+  </div></footer>
+</body>
+</html>
