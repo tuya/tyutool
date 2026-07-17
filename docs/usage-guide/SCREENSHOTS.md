@@ -27,13 +27,16 @@ below, replace the placeholder block with a real `figure.shot` (see
 | `settings-update.png` | Settings | `/settings` | Update center banner | — |
 | `settings-diagnostics.png` | Settings | `/settings` | Diagnostics section, log level visible | — |
 | `batch-overview.png` ✓ | Batch Auth | `/toolbox/batch-flash-auth` | Several slots, mixed statuses | Captured; wired into operator page (zh + en) |
-| `batch-config.png` | Batch Auth | config panel | Chip=esp32, firmware=Default | Collapsed dashboard ok |
-| `batch-dashboard.png` | Batch Auth | dashboard | Mid-batch, donuts populated | — |
-| `batch-slot-row.png` | Batch Auth | slot list | One row mid-flash, one done | Show status badges |
+| `batch-config.png` ✓ | Batch Auth (operator page, Phase one) | config panel | Chip=esp32, firmware=Default, conflict policy visible | Captured with ①–⑥ callouts; wired into operator page (zh + en). Has WeCom watermark — recapture clean if needed |
+| `batch-sheet-stats.png` ✓ | Batch Auth (operator page, Phase one) | config panel, auth sheet selected | Stats strip showing Total/Used/Occupied/Remaining | Captured with ①–③ callouts; wired into operator page (zh + en). Shows the pre-recovery "exhausted" hint — recapture after the recovery-mode build ships |
+| `batch-port-slots.png` ✓ | Batch Auth (operator page, Phase two) | slot list after Auto-assign | Several idle slots listed, Start button enabled | Captured with ①–⑦ toolbar callouts; wired into operator page (zh + en). Has WeCom watermark |
+| `batch-dashboard.png` ✓ | Batch Auth (operator page, Phase three) | dashboard | Batch finished: donuts populated, completion banner + Archive button visible | Captured (finished-state variant instead of mid-run); wired into operator page (zh + en). Has WeCom watermark |
+| ~~`batch-slot-row.png`~~ | Batch Auth (operator page, Reading the results) | — | — | Dropped: mixed-badge state too hard to stage; batch-overview.png and batch-dashboard.png cover it. Placeholder removed |
+| ~~`batch-error-dialog.png`~~ | Batch Auth (operator page, Quick fixes) | — | — | Dropped: staging a failure on demand is impractical; the text describes the dialog. Placeholder removed |
 | `batch-otp-warning.png` ✓ | Batch Auth | storage mode selector | T5AI, OTP selected, warning visible | Captured; wired into operator page Safety section (zh + en) |
 | `cli-terminal.png` | CLI | terminal | Successful `write`, rich mode | Optional |
 
-That is 18 rows, including the optional `cli-terminal.png`.
+That is 21 rows, including the optional `cli-terminal.png`.
 
 ## Capture guidance
 

@@ -149,6 +149,24 @@
         </li>
       </ul>
 
+      <h2 id="handoff">8. Before handing off to production: the operator config sheet</h2>
+      <p>Once the firmware passes the self-test, don't just toss a bin at the production line. Write down <strong>every item below explicitly</strong> for the operator — they will verify each row against the <a href="batch-auth-operator.html#handoff">handoff sheet on the operator page</a>, and one missing item can misconfigure the whole batch:</p>
+      <ul>
+        <li><strong>Chip</strong> (e.g. <code>esp32</code> / <code>t5ai</code>; <code>other</code> for auth-only).</li>
+        <li><strong>Operation mode</strong>: path A (auth-only, production firmware carries the auth CLI) or path B (flash-then-auth with the auth-firmware) — this maps to the operator UI's "flash firmware" switch.</li>
+        <li><strong>Firmware file name + version</strong>; for path B, note which official auth-firmware version to use.</li>
+        <li><strong>Both baud rates</strong>: flash baud (per-chip recommendation) and auth baud (= the firmware shell's baud, usually <code>115200</code>).</li>
+        <li><strong>Storage mode</strong>: <code>KV</code> or <code>OTP</code>. <strong>Flag OTP prominently</strong> and require a single-device validation before the batch.</li>
+        <li><strong>Conflict policy</strong>: Skip or Overwrite (OTP forces Skip).</li>
+        <li><strong>Wiring notes</strong>: where the flash/auth port is (T5/T5AI: never the log port) — ideally with a photo.</li>
+        <li><strong>MAC uniqueness guarantee</strong>: state at which production step each device's MAC is personalized and how it is kept <strong>globally unique and non-repeating</strong>. tyutool does not check MACs for conflicts across devices, and auth codes are bound to MACs — duplicate MACs make different devices share the same auth code, and those devices cannot be recognized correctly on the Tuya platform. The operator cannot verify this on their own; it must be guaranteed on the firmware / production side.</li>
+        <li><strong>Special notes</strong>: handling of non-personalized default-MAC devices, power requirements, known gotchas.</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">Why these five minutes are worth it</span>
+        Misconfigured batch auth is extremely expensive (a wrong OTP setting = a ruined batch). The handoff sheet lets the operator execute from a spec instead of guessing, and lets later investigations reconstruct the agreement against the <a href="batch-auth-operator.html#archive">batch archive</a>.
+      </div>
+
       <nav class="pager">
         <a href="batch-flash-auth.html">← Batch Flash &amp; Auth overview</a>
         <a href="cli.html">CLI →</a>

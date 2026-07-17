@@ -149,6 +149,24 @@
         </li>
       </ul>
 
+      <h2 id="handoff">8. 交付批量生产前：给操作员的配置交接单</h2>
+      <p>固件自测通过后，别只丢一个 bin 给产线。请把下面每一项<strong>逐项写清楚</strong>交给操作员——操作员会按<a href="batch-auth-operator.html#handoff">操作员页的配置交接单</a>逐行核对，缺一项就可能配错整批：</p>
+      <ul>
+        <li><strong>芯片型号</strong>（如 <code>esp32</code> / <code>t5ai</code>；只授权不烧录写 <code>other</code>）。</li>
+        <li><strong>操作模式</strong>：路径 A（auth-only，生产固件自带授权 CLI）还是路径 B（flash-then-auth，先烧 auth-firmware）——对应操作员界面的"烧录固件"开关。</li>
+        <li><strong>固件文件名 + 版本</strong>；路径 B 注明用官方 auth-firmware 的哪个版本。</li>
+        <li><strong>两个波特率</strong>：烧录波特率（按芯片推荐值）和授权波特率（= 固件 shell 波特率，通常 <code>115200</code>）。</li>
+        <li><strong>存储模式</strong>：<code>KV</code> 还是 <code>OTP</code>。<strong>选 OTP 必须显著标注</strong>，并注明"先单台验证再批量"。</li>
+        <li><strong>冲突策略</strong>：跳过还是覆盖（OTP 只能跳过）。</li>
+        <li><strong>接线说明</strong>：烧录/授权口的位置（T5/T5AI 切勿接日志口），最好配一张接线照片。</li>
+        <li><strong>MAC 唯一性保障</strong>：说明每台设备的 MAC 在哪个环节个性化、如何保证<strong>全球唯一、互不重复</strong>。tyutool 不校验 MAC 是否与其他设备冲突，而授权码与 MAC 绑定——重复的 MAC 会让不同设备共用同一个授权码，设备在涂鸦平台将无法正常识别。这是操作员无法自行验证的项，必须由固件/产线侧保证。</li>
+        <li><strong>特殊事项</strong>：默认 MAC 未个性化设备的处理、供电要求、已知的坑。</li>
+      </ul>
+      <div class="callout note">
+        <span class="title">为什么值得花这五分钟</span>
+        批量授权的错误配置成本极高（OTP 配错 = 整批报废）。交接单让操作员"照单执行"而不是"凭经验猜"，也让事后排查时能对着<a href="batch-auth-operator.html#archive">批次档案</a>还原当时的约定。
+      </div>
+
       <nav class="pager">
         <a href="batch-flash-auth.html">← 批量烧录授权总览</a>
         <a href="cli.html">命令行 →</a>

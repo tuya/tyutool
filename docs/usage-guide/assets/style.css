@@ -159,6 +159,16 @@ th{font-weight:600;color:var(--vp-text-2);background:var(--vp-bg-soft)}
 /* ─── ordered steps ─────────────────────────────────────────── */
 ol.steps{margin:16px 0;padding-left:24px;line-height:28px}
 ol.steps > li{margin:10px 0}
+ul.plain{margin:16px 0;padding-left:0;list-style:none;line-height:28px}
+ul.plain > li{margin:8px 0}
+
+/* ─── flow bar ──────────────────────────────────────────────── */
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:24px 0;font-size:14px;font-weight:500}
+.flow a{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 7px;border:1px solid var(--vp-border);border-radius:999px;background:var(--vp-bg-soft);color:var(--vp-text-1);text-decoration:none;transition:border-color .25s,color .25s}
+.flow a:hover{border-color:var(--vp-brand-1);color:var(--vp-brand-1)}
+.flow a.plain{padding:6px 14px}
+.flow .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--vp-brand-1);color:#fff;font-size:12px;font-weight:600}
+.flow .sep{color:var(--vp-text-3)}
 
 /* ─── figures / diagrams ────────────────────────────────────── */
 figure.shot{margin:18px 0;text-align:center}
