@@ -105,6 +105,19 @@ async function browseExcel() {
             <strong>{{ store.excelStats.remaining }}</strong>
           </span>
           <span
+            v-if="store.excelStats.invalid > 0"
+            class="flex items-center gap-1 font-medium"
+            :style="{ color: 'var(--ty-danger)' }"
+          >
+            <FontAwesomeIcon
+              :icon="['fas', 'triangle-exclamation']"
+              class="size-3 shrink-0"
+              aria-hidden="true"
+            />
+            {{ t("batchFlashAuth.config.excelInvalid") }}
+            <strong>{{ store.excelStats.invalid }}</strong>
+          </span>
+          <span
             v-if="store.excelStats.remaining === 0"
             class="flex items-center gap-1 font-medium"
             :style="{ color: 'var(--ty-accent)' }"
@@ -136,19 +149,33 @@ async function browseExcel() {
               />
               {{ t("batchFlashAuth.config.skip") }}
             </label>
-            <label class="flex cursor-pointer items-center gap-1">
+            <label
+              class="flex items-center gap-1"
+              :class="
+                store.authConfig.authStorage === 'otp'
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'cursor-pointer'
+              "
+              :title="
+                store.authConfig.authStorage === 'otp'
+                  ? t('batchFlashAuth.config.otpForcesSkip')
+                  : ''
+              "
+            >
               <input
                 type="radio"
                 v-model="store.authConfig.conflictPolicy"
                 value="overwrite"
-                :disabled="store.isBusy"
+                :disabled="
+                  store.isBusy || store.authConfig.authStorage === 'otp'
+                "
               />
               {{ t("batchFlashAuth.config.overwrite") }}
             </label>
           </div>
-          <!-- Storage mode group (T5AI only) -->
+          <!-- Storage mode group (OTP-capable chips only) -->
           <div
-            v-if="store.chipId === 't5ai'"
+            v-if="store.isOtpCapable"
             class="ml-auto flex shrink-0 items-center gap-4"
           >
             <span>{{ t("batchFlashAuth.config.storageMode") }}：</span>
@@ -174,9 +201,7 @@ async function browseExcel() {
         </div>
         <!-- OTP irreversibility warning -->
         <div
-          v-if="
-            store.chipId === 't5ai' && store.authConfig.authStorage === 'otp'
-          "
+          v-if="store.isOtpCapable && store.authConfig.authStorage === 'otp'"
           class="flex items-start gap-1.5 rounded-lg border border-[var(--ty-warning,#f59e0b)] bg-[color-mix(in_srgb,var(--ty-warning,#f59e0b)_10%,transparent)] px-2.5 py-2 text-xs"
           :style="{ color: 'var(--ty-warning, #f59e0b)' }"
         >

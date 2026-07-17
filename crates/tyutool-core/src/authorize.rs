@@ -198,7 +198,8 @@ impl Default for AuthTiming {
 
 // ── Firmware version detection ────────────────────────────────────────────
 
-/// Parsed CLI version string from `version` command response.
+/// Parsed firmware version, from the `project.version` line of the
+/// `sys_version` command response.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CliVersion(u32, u32, u32);
 
@@ -273,6 +274,27 @@ fn invalid_auth_read_response() -> FlashError {
     FlashError::Plugin(
         "auth-read returned invalid UUID/AuthKey characters (possible garbled serial data)".into(),
     )
+}
+
+/// Firmware-accepted credential lengths (`tuya_authorize.c`: `UUID_LENGTH=20`,
+/// `UUID_LENGTH_16=16`, `AUTHKEY_LENGTH=32`). A malformed UUID/AuthKey is
+/// rejected by the device *before* any OTP burn, but the rejection still
+/// consumes an allocated code and produces a confusing "no response" verify
+/// failure — so we validate up front and fail with an explicit message.
+fn validate_credentials(uuid: &str, authkey: &str) -> Result<(), FlashError> {
+    let ul = uuid.chars().count();
+    if ul != 16 && ul != 20 {
+        return Err(FlashError::Plugin(format!(
+            "invalid UUID length {ul} (firmware requires 16 or 20 characters)"
+        )));
+    }
+    let kl = authkey.chars().count();
+    if kl != 32 {
+        return Err(FlashError::Plugin(format!(
+            "invalid AuthKey length {kl} (firmware requires 32 characters)"
+        )));
+    }
+    Ok(())
 }
 
 // ── Serial I/O abstraction ──────────────────────────────────────────────────
@@ -739,6 +761,20 @@ impl<T: AuthIo> AuthSession<T> {
         let lines = self.read_response_timed(AUTH_WRITE_TIMEOUT, idle);
         log::debug!("[serial] auth-write response={:?}", lines);
 
+        // The firmware echoes an argument-validation error and performs no write
+        // when the UUID/AuthKey length is wrong (or the storage/mac argument is
+        // malformed). Detect it explicitly — otherwise the missing success/failure
+        // line falls through to a confusing "verify: no response" further down.
+        for line in &lines {
+            let lower = line.to_lowercase();
+            if lower.contains("length must be") || lower.contains("storage must be") {
+                return Err(FlashError::Plugin(format!(
+                    "device rejected auth command: {}",
+                    line.trim()
+                )));
+            }
+        }
+
         if storage != AuthStorage::Kv {
             let mut saw_success = false;
             let mut failure_line: Option<String> = None;
@@ -835,7 +871,7 @@ impl<T: AuthIo> AuthSession<T> {
                     return Err(FlashError::Cancelled);
                 }
                 if is_new {
-                    let _ = self.send_cmd("version");
+                    let _ = self.send_cmd("sys_version");
                     let vlines = self.read_response();
                     let version = vlines.iter().find_map(|l| parse_cli_version(l));
                     let kind = match version {
@@ -912,19 +948,24 @@ fn parse_mac_from_str(s: &str) -> Option<String> {
     })
 }
 
-/// Parse "CLI version: X.Y.Z" from a single response line.
+/// Parse the firmware `project.version` line printed by `sys_version`, e.g.
+/// `"project.version   1.2.3"` → `CliVersion(1, 2, 3)`. Tolerates a leading
+/// `v` and a non-numeric suffix on the patch segment (`1.2.3-rc1`).
 fn parse_cli_version(line: &str) -> Option<CliVersion> {
     let lower = strip_ansi(line).to_lowercase();
-    let rest = lower.strip_prefix("cli version:")?.trim().to_string();
-    let parts: Vec<&str> = rest.splitn(3, '.').collect();
-    if parts.len() == 3 {
-        let major = parts[0].trim().parse().ok()?;
-        let minor = parts[1].trim().parse().ok()?;
-        let patch = parts[2].trim().parse().ok()?;
-        Some(CliVersion(major, minor, patch))
-    } else {
-        None
-    }
+    let rest = lower.strip_prefix("project.version")?.trim();
+    let rest = rest.strip_prefix('v').unwrap_or(rest);
+    let mut nums = rest.split('.');
+    let major = nums.next()?.trim().parse().ok()?;
+    let minor = nums.next()?.trim().parse().ok()?;
+    // Patch may carry a suffix like "3-rc1"; take the leading digit run.
+    let patch_tok = nums.next()?.trim();
+    let digits: String = patch_tok
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let patch = digits.parse().ok()?;
+    Some(CliVersion(major, minor, patch))
 }
 
 // ── Batch auth types ──────────────────────────────────────────────────────
@@ -1070,7 +1111,10 @@ where
             FirmwareKind::New(_) => {
                 // ── New firmware: 2 retries / 200ms to absorb single-frame noise ──
                 log::info!("flash.log.auth.readDeviceAuth");
-                let storage = job.authorize_storage.unwrap_or_default();
+                // Single-device authorize is KV-only. OTP is exclusively a
+                // batch-flow feature (T5AI), so ignore any storage the caller
+                // may have set and never burn OTP from this path.
+                let storage = AuthStorage::Kv;
                 let existing_auth = sess.auth_read_precheck(
                     storage,
                     2,
@@ -1183,7 +1227,10 @@ where
 
                 // Optional read: skip write if device already matches
                 log::info!("flash.log.auth.readDeviceAuth");
-                let storage = job.authorize_storage.unwrap_or_default();
+                // Single-device authorize is KV-only. OTP is exclusively a
+                // batch-flow feature (T5AI), so ignore any storage the caller
+                // may have set and never burn OTP from this path.
+                let storage = AuthStorage::Kv;
                 let existing_auth = sess.auth_read_precheck(
                     storage,
                     5,
@@ -1457,6 +1504,23 @@ where
             // ── 8. Bind MAC to row immediately ───────────────────────────
             update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
 
+            // ── 8b. Validate credential lengths before any device write ──
+            // Belt-and-suspenders: allocation already skips malformed rows, but a
+            // MAC-matched row whose Excel was edited to an invalid value could still
+            // arrive here. Fail before the (irreversible) OTP burn is attempted.
+            if let Err(e) = validate_credentials(&uuid, &authkey) {
+                log::warn!("[batch-auth] invalid credentials  port={port} mac={mac}: {e}");
+                update_row(
+                    row_idx,
+                    &mac,
+                    BatchAuthRowUpdate::StepFailed {
+                        step: "auth_write",
+                        error: e.to_string(),
+                    },
+                );
+                return Err(e);
+            }
+
             // ── 9. Write auth ────────────────────────────────────────────
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
@@ -1492,39 +1556,47 @@ where
                     }
                 }
                 if let Some(e) = last_err {
-                    // 诊断性 auth-read：确认 OTP 当前状态，帮助区分硬件故障和写入状态
+                    // Diagnostic auth-read: a successful OTP burn whose "…Succeeds."
+                    // line was lost to serial noise is indistinguishable from a real
+                    // failure. If the device now holds exactly the target UUID *and*
+                    // AuthKey, the burn actually succeeded — treat it as success
+                    // rather than discarding a correctly-authorized device.
                     let diag = sess.auth_read(config.auth_storage);
-                    match &diag {
-                        Ok(Some((u, _k))) if u == &uuid => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed but OTP already contains target credentials  port={port} mac={mac}"
-                            );
+                    let confirmed =
+                        matches!(&diag, Ok(Some((u, k))) if u == &uuid && k == &authkey);
+                    if confirmed {
+                        log::warn!(
+                            "[batch-auth] auth-write reported error but device already holds target credentials — treating as success  port={port} mac={mac}"
+                        );
+                        // fall through to the normal AuthWritten → verify → Done flow
+                    } else {
+                        match &diag {
+                            Ok(Some((u, _k))) => {
+                                log::warn!(
+                                    "[batch-auth] auth-write failed, storage has different content  port={port} mac={mac} otp_uuid={u}"
+                                );
+                            }
+                            Ok(None) => {
+                                log::warn!(
+                                    "[batch-auth] auth-write failed, post-fail auth-read: no response  port={port} mac={mac}"
+                                );
+                            }
+                            Err(err) => {
+                                log::warn!(
+                                    "[batch-auth] auth-write failed, post-fail auth-read invalid  port={port} mac={mac} err={err}"
+                                );
+                            }
                         }
-                        Ok(Some((u, _k))) => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed, OTP has different content  port={port} mac={mac} otp_uuid={u}"
-                            );
-                        }
-                        Ok(None) => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed, post-fail auth-read: no response  port={port} mac={mac}"
-                            );
-                        }
-                        Err(err) => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed, post-fail auth-read invalid  port={port} mac={mac} err={err}"
-                            );
-                        }
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "auth_write",
+                                error: e.to_string(),
+                            },
+                        );
+                        return Err(e);
                     }
-                    update_row(
-                        row_idx,
-                        &mac,
-                        BatchAuthRowUpdate::StepFailed {
-                            step: "auth_write",
-                            error: e.to_string(),
-                        },
-                    );
-                    return Err(e);
                 }
             }
             if cancel.load(Ordering::Relaxed) {
@@ -1693,6 +1765,20 @@ where
             // ── 8. Bind MAC to row immediately ───────────────────────────
             update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
 
+            // ── 8b. Validate credential lengths before any device write ──
+            if let Err(e) = validate_credentials(&uuid, &authkey) {
+                log::warn!("[batch-auth] invalid credentials (old fw)  port={port} mac={mac}: {e}");
+                update_row(
+                    row_idx,
+                    &mac,
+                    BatchAuthRowUpdate::StepFailed {
+                        step: "auth_write",
+                        error: e.to_string(),
+                    },
+                );
+                return Err(e);
+            }
+
             // ── 9. Write auth ────────────────────────────────────────────
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
@@ -1728,38 +1814,44 @@ where
                     }
                 }
                 if let Some(e) = last_err {
+                    // See the new-firmware path: a lost success line is
+                    // indistinguishable from a real failure, so confirm via read.
                     let diag = sess.auth_read(config.auth_storage);
-                    match &diag {
-                        Ok(Some((u, _k))) if u == &uuid => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed but OTP already contains target credentials (old fw)  port={port} mac={mac}"
-                            );
+                    let confirmed =
+                        matches!(&diag, Ok(Some((u, k))) if u == &uuid && k == &authkey);
+                    if confirmed {
+                        log::warn!(
+                            "[batch-auth] auth-write reported error but device already holds target credentials — treating as success (old fw)  port={port} mac={mac}"
+                        );
+                        // fall through to the normal AuthWritten → verify → Done flow
+                    } else {
+                        match &diag {
+                            Ok(Some((u, _k))) => {
+                                log::warn!(
+                                    "[batch-auth] auth-write failed, storage has different content (old fw)  port={port} mac={mac} otp_uuid={u}"
+                                );
+                            }
+                            Ok(None) => {
+                                log::warn!(
+                                    "[batch-auth] auth-write failed, post-fail auth-read: no response (old fw)  port={port} mac={mac}"
+                                );
+                            }
+                            Err(err) => {
+                                log::warn!(
+                                    "[batch-auth] auth-write failed, post-fail auth-read invalid (old fw)  port={port} mac={mac} err={err}"
+                                );
+                            }
                         }
-                        Ok(Some((u, _k))) => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed, OTP has different content (old fw)  port={port} mac={mac} otp_uuid={u}"
-                            );
-                        }
-                        Ok(None) => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed, post-fail auth-read: no response (old fw)  port={port} mac={mac}"
-                            );
-                        }
-                        Err(err) => {
-                            log::warn!(
-                                "[batch-auth] auth-write failed, post-fail auth-read invalid (old fw)  port={port} mac={mac} err={err}"
-                            );
-                        }
+                        update_row(
+                            row_idx,
+                            &mac,
+                            BatchAuthRowUpdate::StepFailed {
+                                step: "auth_write",
+                                error: e.to_string(),
+                            },
+                        );
+                        return Err(e);
                     }
-                    update_row(
-                        row_idx,
-                        &mac,
-                        BatchAuthRowUpdate::StepFailed {
-                            step: "auth_write",
-                            error: e.to_string(),
-                        },
-                    );
-                    return Err(e);
                 }
             }
             if cancel.load(Ordering::Relaxed) {
@@ -2179,7 +2271,7 @@ mod tests {
         let mut io = MockAuthIo::new();
         io.add_response("OK: log disabled\r\n"); // detect_firmware: sys_log_enable off
         io.add_response(""); // wake_shell clear_input
-        io.add_response("CLI version: 1.0.0\r\n"); // version
+        io.add_response("project.version   1.0.0\r\n"); // sys_version
         io.add_response("auth-read\r\nï¿½bad\r\nï¿½key\r\n"); // precheck auth-read
         io.add_response(""); // precheck retry: still no valid auth
         io.add_response("Authorization write succeeds.\r\n"); // auth_write
@@ -2267,6 +2359,38 @@ mod tests {
             Duration::from_millis(200),
         );
         assert!(sess.port.sent_str().contains("auth myuuid mykey\r\n"));
+    }
+
+    #[test]
+    fn validate_credentials_accepts_expected_lengths() {
+        let key = "k".repeat(32);
+        assert!(validate_credentials(&"u".repeat(20), &key).is_ok());
+        assert!(validate_credentials(&"u".repeat(16), &key).is_ok());
+    }
+
+    #[test]
+    fn validate_credentials_rejects_bad_lengths() {
+        let key = "k".repeat(32);
+        assert!(validate_credentials(&"u".repeat(19), &key).is_err());
+        assert!(validate_credentials(&"u".repeat(21), &key).is_err());
+        assert!(validate_credentials(&"u".repeat(20), &"k".repeat(31)).is_err());
+        assert!(validate_credentials(&"u".repeat(20), &"k".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn auth_write_rejects_firmware_length_echo() {
+        let mut mock = MockAuthIo::new();
+        mock.add_response(
+            "auth bad key\r\nuuid length must be 20/16, authkey length must be 32\r\ntuya>\r\n",
+        );
+        let mut sess = session(mock);
+        let r = sess.auth_write(
+            "bad",
+            &"k".repeat(32),
+            AuthStorage::Kv,
+            Duration::from_millis(50),
+        );
+        assert!(r.is_err(), "firmware length echo must surface as an error");
     }
 
     // ── command sequencing: drain → reset → wake → read ────────────────
@@ -2377,8 +2501,8 @@ mod tests {
         io.add_response("OK: log disabled\r\n");
         // Response 1: wake_shell clear_input → empty
         io.add_response("");
-        // Response 2: version command
-        io.add_response("CLI version: 1.0.0\r\n");
+        // Response 2: sys_version command
+        io.add_response("project.version   1.0.0\r\n");
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
@@ -2388,7 +2512,7 @@ mod tests {
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::New(CliVersion(1, 0, 0)));
         assert!(sess.port.sent_str().contains("sys_log_enable off\r\n"));
-        assert!(sess.port.sent_str().contains("version\r\n"));
+        assert!(sess.port.sent_str().contains("sys_version\r\n"));
     }
 
     #[test]
@@ -2406,8 +2530,8 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::Old);
-        // version command must NOT be sent for old firmware
-        assert!(!sess.port.sent_str().contains("version\r\n"));
+        // sys_version command must NOT be sent for old firmware
+        assert!(!sess.port.sent_str().contains("sys_version\r\n"));
     }
 
     #[test]
@@ -2430,14 +2554,20 @@ mod tests {
     #[test]
     fn parse_cli_version_parses_correctly() {
         assert_eq!(
-            parse_cli_version("CLI version: 1.0.0"),
+            parse_cli_version("project.version   1.0.0"),
             Some(CliVersion(1, 0, 0))
         );
         assert_eq!(
-            parse_cli_version("\x1b[32mCLI version: 2.3.4\x1b[0m"),
+            parse_cli_version("\x1b[32mproject.version   2.3.4\x1b[0m"),
             Some(CliVersion(2, 3, 4))
         );
+        // Tolerates a leading 'v' and a non-numeric patch suffix.
+        assert_eq!(
+            parse_cli_version("project.version   v1.2.3-rc1"),
+            Some(CliVersion(1, 2, 3))
+        );
         assert_eq!(parse_cli_version("unknown"), None);
+        assert_eq!(parse_cli_version("CLI version: 1.0.0"), None);
     }
 
     /// 新固件 — 写授权，无冲突，写入并验证成功
@@ -2448,8 +2578,8 @@ mod tests {
         // detect_firmware: sys_log_enable off → OK, wake_shell, version
         io.add_response("OK: log disabled\r\n"); // sys_log_enable off
         io.add_response(""); // wake_shell clear_input
-        io.add_response("CLI version: 1.0.0\r\n"); // version
-                                                   // auth_read (check existing) → None (device fresh)
+        io.add_response("project.version   1.0.0\r\n"); // sys_version
+                                                        // auth_read (check existing) → None (device fresh)
         io.add_response("");
         // auth_write response
         io.add_response("Authorization write succeeds.\r\n");
@@ -2526,7 +2656,7 @@ mod tests {
         let mut io = MockAuthIo::new();
         io.add_response("OK: log disabled\r\n");
         io.add_response("");
-        io.add_response("CLI version: 1.0.0\r\n");
+        io.add_response("project.version   1.0.0\r\n");
         // auth_read → existing different credentials
         io.add_response("existinguuid1234567\r\nexistingkey12345678901234567890\r\n");
 
