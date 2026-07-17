@@ -154,6 +154,10 @@
         <span class="title">铁律一：OTP 模式写一次不可逆</span>
         如果存储模式选了 <code>OTP</code>（仅 T5AI 可选），授权码会<strong>一次性烧进芯片</strong>，<strong>永远无法擦除或修改</strong>。一旦配错（芯片型号错、固件错、授权码错），整批设备都会被毁掉。所以：<strong>用 OTP 之前，务必先用一台设备把整个流程完整跑通验证，确认无误后再批量。</strong>
       </div>
+      <figure class="shot">
+        <img src="../assets/images/batch-otp-warning.png" alt="选择 OTP 存储模式时弹出的不可逆警告" loading="lazy">
+        <figcaption>选择 <code>OTP</code> 存储模式时界面会明确提示：写入后不可撤销。请务必先单台验证。</figcaption>
+      </figure>
       <div class="callout danger">
         <span class="title">铁律二：出现“已写入后取消”危险徽标的设备必须单独放一边</span>
         如果某台设备在<strong>授权可能已经写入之后</strong>才被取消，它会显示一个<strong>物理隔离危险徽标</strong>——意思是授权可能已经写进去了，设备状态不确定。这种设备<strong>不能当成好品</strong>，也不要直接重新跑批量，必须<strong>单独拿出来核实</strong>清楚后再决定怎么处理。

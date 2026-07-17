@@ -154,6 +154,10 @@
         <span class="title">Rule one: OTP mode is write-once and irreversible</span>
         If you select <code>OTP</code> storage mode (T5AI only), credentials are <strong>burned into the chip once</strong> and <strong>can never be erased or modified</strong>. One wrong setting (wrong chip, wrong firmware, wrong codes) ruins the whole batch. So: <strong>before using OTP, run the full flow end-to-end on a single device to validate it; only commit the whole batch once confirmed correct.</strong>
       </div>
+      <figure class="shot">
+        <img src="../assets/images/batch-otp-warning.png" alt="Irreversibility warning shown when selecting OTP storage mode" loading="lazy">
+        <figcaption>Selecting <code>OTP</code> storage mode shows an explicit warning that the write cannot be undone. Always validate on a single device first.</figcaption>
+      </figure>
       <div class="callout danger">
         <span class="title">Rule two: devices showing the "cancelled-after-write" danger badge must be set aside</span>
         If a device is cancelled <strong>after the auth write may have already landed</strong>, it shows a <strong>physical-quarantine danger badge</strong> — meaning the auth may already have been written and the device's state is uncertain. Such devices <strong>must not be treated as good units</strong> and must not be re-run through the batch directly; <strong>set them aside and verify each one individually</strong> before deciding what to do.

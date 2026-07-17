@@ -30,6 +30,7 @@ below, replace the placeholder block with a real `figure.shot` (see
 | `batch-config.png` | Batch Auth | config panel | Chip=esp32, firmware=Default | Collapsed dashboard ok |
 | `batch-dashboard.png` | Batch Auth | dashboard | Mid-batch, donuts populated | — |
 | `batch-slot-row.png` | Batch Auth | slot list | One row mid-flash, one done | Show status badges |
+| `batch-otp-warning.png` ✓ | Batch Auth | storage mode selector | T5AI, OTP selected, warning visible | Captured; wired into operator page Safety section (zh + en) |
 | `cli-terminal.png` | CLI | terminal | Successful `write`, rich mode | Optional |
 
 That is 18 rows, including the optional `cli-terminal.png`.
