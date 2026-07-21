@@ -72,5 +72,6 @@ git tag -d v3.0.14
 ## 范围说明
 
 - Beta：`workflow_dispatch` 仅构建产物自测，不创建 Release。
-- Gitee：当前仅同步 `latest.json`。
+- Gitee：当前仅同步 `latest.json`，且推送的是与 GitHub Release 完全相同的一份文件（不再单独生成 Gitee 版本）。
+- `latest.json` 每个条目含三个下载地址：`url`（GitHub）、`url_gitee`（Gitee，产物未同步前不可用）、`url_tuya`（Tuya OSS，由外部 tuyaopen-oss-publish 流水线上传产物）。客户端更新逻辑仅使用 `url`；镜像字段供外部系统读取。
 - `latest.json` 的更新说明为中英双语同一文本块，不按应用语言切换。

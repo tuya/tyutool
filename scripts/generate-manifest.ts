@@ -11,16 +11,24 @@ import { findFilesUnderArtifacts } from './lib/artifacts-glob.js';
 const VERSION = process.env.VERSION;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const TAG = process.env.TAG;
-const MANIFEST_BASE_URL = process.env.MANIFEST_BASE_URL?.replace(/\/$/, '');
 
 if (!VERSION || !GITHUB_REPO || !TAG) {
   console.error('ERROR: VERSION, GITHUB_REPO, and TAG must be set.');
   process.exit(1);
 }
 
-const BASE_URL =
-  MANIFEST_BASE_URL ??
-  `https://github.com/${GITHUB_REPO}/releases/download/${TAG}`;
+const BASE_URL = `https://github.com/${GITHUB_REPO}/releases/download/${TAG}`;
+const GITEE_BASE_URL = `https://gitee.com/tuya-open/tyutool/releases/download/${TAG}`;
+// "pruduct" is the actual key spelling on the Tuya OSS bucket — do not fix.
+const TUYA_BASE_URL = `https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/${TAG}`;
+
+function mirrorUrls(filename: string): { url: string; url_gitee: string; url_tuya: string } {
+  return {
+    url: `${BASE_URL}/${filename}`,
+    url_gitee: `${GITEE_BASE_URL}/${filename}`,
+    url_tuya: `${TUYA_BASE_URL}/${filename}`,
+  };
+}
 
 function sha256File(path: string): string {
   const h = createHash('sha256');
@@ -41,7 +49,10 @@ const GUI_PLATFORM_PATTERNS: Record<string, [string, string][]> = {
   'windows-x86_64': [[`tyutool-gui_windows_x86_64_nsis_${VERSION}.exe`, 'windows-x86_64']],
 };
 
-const platforms: Record<string, { url: string; signature: string }> = {};
+const platforms: Record<
+  string,
+  { url: string; url_gitee: string; url_tuya: string; signature: string }
+> = {};
 
 for (const [platformKey, patterns] of Object.entries(GUI_PLATFORM_PATTERNS)) {
   for (const [filename] of patterns) {
@@ -51,7 +62,7 @@ for (const [platformKey, patterns] of Object.entries(GUI_PLATFORM_PATTERNS)) {
     if (assetMatches.length > 0 && existsSync(sigPath)) {
       const signature = readSig(sigPath);
       platforms[platformKey] = {
-        url: `${BASE_URL}/${filename}`,
+        ...mirrorUrls(filename),
         signature,
       };
     } else {
@@ -70,14 +81,17 @@ const CLI_PATTERNS: Record<string, string> = {
   'windows-x86_64': `tyutool-cli_windows_x86_64_${VERSION}.zip`,
 };
 
-const cli: Record<string, { url: string; sha256: string }> = {};
+const cli: Record<
+  string,
+  { url: string; url_gitee: string; url_tuya: string; sha256: string }
+> = {};
 
 for (const [platformKey, filename] of Object.entries(CLI_PATTERNS)) {
   const matches = findFilesUnderArtifacts(filename);
   if (matches.length > 0) {
     const path = matches[0];
     cli[platformKey] = {
-      url: `${BASE_URL}/${filename}`,
+      ...mirrorUrls(filename),
       sha256: sha256File(path),
     };
   }
@@ -91,14 +105,12 @@ const PORTABLE_PATTERNS: Record<string, string> = {
   'windows-x86_64': `tyutool-gui_windows_x86_64_portable_${VERSION}.zip`,
 };
 
-const portable: Record<string, { url: string }> = {};
+const portable: Record<string, { url: string; url_gitee: string; url_tuya: string }> = {};
 
 for (const [platformKey, filename] of Object.entries(PORTABLE_PATTERNS)) {
   const matches = findFilesUnderArtifacts(filename);
   if (matches.length > 0) {
-    portable[platformKey] = {
-      url: `${BASE_URL}/${filename}`,
-    };
+    portable[platformKey] = mirrorUrls(filename);
   }
 }
 
@@ -119,16 +131,12 @@ const manifest = {
   portable,
 };
 
-// The Gitee sync step regenerates the manifest without artifacts present and
-// sets SKIP_COMPLETENESS_CHECK=1 to opt out; the primary GitHub path never sets it.
-if (process.env.SKIP_COMPLETENESS_CHECK !== '1') {
-  const completenessErrors = assertManifestComplete(manifest);
-  if (completenessErrors.length > 0) {
-    console.error('ERROR: latest.json 不完整，缺少平台条目：');
-    for (const e of completenessErrors) console.error(`  - ${e}`);
-    console.error('（某些平台的产物或 .sig 在 artifacts/ 中缺失，见上方 WARN）');
-    process.exit(1);
-  }
+const completenessErrors = assertManifestComplete(manifest);
+if (completenessErrors.length > 0) {
+  console.error('ERROR: latest.json 不完整，缺少平台条目：');
+  for (const e of completenessErrors) console.error(`  - ${e}`);
+  console.error('（某些平台的产物或 .sig 在 artifacts/ 中缺失，见上方 WARN）');
+  process.exit(1);
 }
 
 writeFileSync('latest.json', `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');

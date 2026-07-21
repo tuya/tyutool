@@ -370,8 +370,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-    outputs:
-      notes: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v6
 
@@ -434,6 +432,14 @@ jobs:
           RELEASE_NOTES: ${{ steps.notes.outputs.body }}
         run: pnpm exec tsx scripts/generate-manifest.ts
 
+      # Shared with sync-gitee: the exact same file is pushed to Gitee unmodified.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: latest-json
+          path: latest.json
+          if-no-files-found: error
+          retention-days: 1
+
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
@@ -466,7 +472,7 @@ jobs:
   # Optional repo variable: GITEE_TARGET_COMMITISH. Script: scripts/sync-gitee-release.sh
   sync-gitee:
     name: Sync to Gitee
-    needs: [publish, prepare, create-release]
+    needs: [publish]
     runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/')
     continue-on-error: true
@@ -489,46 +495,12 @@ jobs:
       #   if: steps.gate.outputs.skip != 'true'
       #   with: { path: artifacts/ }
 
-      - uses: pnpm/action-setup@v5
+      # Reuse the manifest built in create-release: Gitee gets the identical file
+      # (multi-mirror url/url_gitee/url_tuya fields), no separate regeneration.
+      - uses: actions/download-artifact@v8
         if: steps.gate.outputs.skip != 'true'
         with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        if: steps.gate.outputs.skip != 'true'
-        with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Install dependencies
-        if: steps.gate.outputs.skip != 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Gitee latest.json
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          GITHUB_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-          RELEASE_NOTES: ${{ needs.create-release.outputs.notes }}
-          GITEE_USER: ${{ secrets.GITEE_USER }}
-          GITEE_REPO: ${{ secrets.GITEE_REPO }}
-          SKIP_COMPLETENESS_CHECK: "1"
-        run: |
-          set -euo pipefail
-          if [[ "${GITEE_REPO}" == */* ]]; then
-            GO="${GITEE_REPO%%/*}"
-            GR="${GITEE_REPO#*/}"
-          else
-            GO="${GITEE_USER}"
-            GR="${GITEE_REPO}"
-          fi
-          if [[ -z "${GO}" || -z "${GR}" ]]; then
-            echo "::error::Invalid Gitee coordinates: use GITEE_USER + repo-only GITEE_REPO, or set GITEE_REPO to owner/repo."
-            exit 1
-          fi
-          export MANIFEST_BASE_URL="https://gitee.com/${GO}/${GR}/releases/download/${TAG}"
-          pnpm exec tsx scripts/generate-manifest.ts
+          name: latest-json
 
       - name: Flatten assets for Gitee upload
         if: steps.gate.outputs.skip != 'true'
