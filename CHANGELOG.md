@@ -2,6 +2,20 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.3] - 2026-07-21
+
+### 新功能
+
+- `release`：`latest.json` 的每个下载条目新增 `url_gitee`（Gitee 镜像）与 `url_tuya`（Tuya OSS 镜像）字段，供外部系统按镜像源获取产物；应用内更新逻辑不变，仍使用 `url`
+- `release`：同步到 Gitee 的 `latest.json` 现在与 GitHub Release 上的完全一致，不再单独生成 Gitee 专属版本
+
+---
+
+### Features
+
+- `release`: Each download entry in `latest.json` now carries `url_gitee` (Gitee mirror) and `url_tuya` (Tuya OSS mirror) fields so external systems can fetch artifacts from a mirror; in-app updaters are unchanged and keep using `url`
+- `release`: The `latest.json` synced to Gitee is now byte-identical to the one on the GitHub Release instead of a separately generated Gitee-specific variant
+
 ## [3.2.2] - 2026-07-17
 
 ### 新功能
