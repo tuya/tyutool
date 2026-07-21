@@ -204,11 +204,14 @@ describe("slot state machine", () => {
     expect(store.cumulativeStats.flash.fail).toBe(1);
   });
 
-  it("handleFlashProgress done/ok clears a stale readError from a prior probe", () => {
+  it("handleFlashProgress done/ok clears stale probe leftovers", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.slots[0].status = "flashing";
     store.slots[0].readError = "read MAC failed";
+    store.slots[0].mac = "AABBCCDDEE00";
+    store.slots[0].authUuid = "uuid-old";
+    store.slots[0].isAuthorized = true;
     store.batchStartTime = Date.now();
     store.handleFlashProgress({
       port: "COM3",
@@ -216,13 +219,37 @@ describe("slot state machine", () => {
     });
     expect(store.slots[0].status).toBe("done");
     expect(store.slots[0].readError).toBeUndefined();
+    expect(store.slots[0].mac).toBeUndefined();
+    expect(store.slots[0].authUuid).toBeUndefined();
+    expect(store.slots[0].isAuthorized).toBeUndefined();
   });
 
-  it("handleAuthProgress no_code clears a stale readError from a prior probe", () => {
+  it("handleFlashProgress done/err clears stale probe leftovers", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.slots[0].mac = "AABBCCDDEE00";
+    store.slots[0].authUuid = "uuid-old";
+    store.batchStartTime = Date.now();
+    store.handleFlashProgress({
+      port: "COM3",
+      event: {
+        kind: "done",
+        result: { err: { message: "timeout", elapsed_secs: 5 } },
+      },
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].mac).toBeUndefined();
+    expect(store.slots[0].authUuid).toBeUndefined();
+  });
+
+  it("handleAuthProgress no_code clears stale readError and credentials", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
     store.slots[0].status = "authorizing";
     store.slots[0].readError = "read MAC failed";
+    store.slots[0].authUuid = "uuid-old";
+    store.slots[0].isAuthorized = true;
     store.handleAuthProgress({
       port: "COM3",
       step: "no_code",
@@ -230,6 +257,41 @@ describe("slot state machine", () => {
     });
     expect(store.slots[0].status).toBe("no_code");
     expect(store.slots[0].readError).toBeUndefined();
+    expect(store.slots[0].authUuid).toBeUndefined();
+    expect(store.slots[0].isAuthorized).toBeUndefined();
+  });
+
+  it("handleAuthProgress failed clears stale credentials from a prior run", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.slots[0].authUuid = "uuid-old";
+    store.slots[0].isAuthorized = true;
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "failed",
+      error: "verify failed",
+      mac: "AABBCCDDEEFF",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].authUuid).toBeUndefined();
+    expect(store.slots[0].isAuthorized).toBeUndefined();
+  });
+
+  it("handleAuthProgress default_mac clears stale credentials from a prior run", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.slots[0].authUuid = "uuid-old";
+    store.slots[0].isAuthorized = true;
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "default_mac",
+      mac: "FFFFFFFFFFFF",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].authUuid).toBeUndefined();
+    expect(store.slots[0].isAuthorized).toBeUndefined();
   });
 
   it("handleFlashProgress done/cancelled resets slot to idle without incrementing cumulative", () => {

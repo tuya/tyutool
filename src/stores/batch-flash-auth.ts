@@ -369,6 +369,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     archiveError.value = "";
     lastArchivePath.value = "";
 
+    // A new batch means a new device on the port — clear the previous run's
+    // outcome flags, including the quarantine flag (the quarantined device is
+    // expected to have been physically removed by now). Leaving it set would
+    // mislabel the next device on the port and poison the archive CSV.
     for (const slot of slots.value.filter(
       (s) => !ACTIVE_STATUSES.includes(s.status),
     )) {
@@ -378,6 +382,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         currentPhase: "",
         error: undefined,
         excelError: undefined,
+        cancelledAfterWrite: undefined,
       });
     }
 
@@ -392,6 +397,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         currentPhase: "reading_mac",
         error: undefined,
         excelError: undefined,
+        cancelledAfterWrite: undefined,
       });
     }
 
@@ -631,19 +637,30 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       updateSlot(port, { currentPhase: normalizePhase(e.phase) });
     } else if (e.kind === "done") {
       const r = e.result;
+      // Flash-only runs never read the device identity, so a terminal outcome
+      // must drop probe leftovers (readError, mac, credentials) — they belong
+      // to whatever device was on the port when the probe ran, not to this one.
       if ("ok" in r) {
         updateSlot(port, {
           status: "done",
           progress: 100,
           currentPhase: "",
-          // A fresh successful flash supersedes any stale "read failed" flag
-          // left by a pre-batch read probe (e.g. device was in download mode).
           readError: undefined,
+          mac: undefined,
+          authUuid: undefined,
+          isAuthorized: undefined,
         });
         cumulativeStats.value.flash.total++;
         cumulativeStats.value.flash.success++;
       } else if ("err" in r) {
-        updateSlot(port, { status: "failed", error: r.err.message });
+        updateSlot(port, {
+          status: "failed",
+          error: r.err.message,
+          readError: undefined,
+          mac: undefined,
+          authUuid: undefined,
+          isAuthorized: undefined,
+        });
         cumulativeStats.value.flash.total++;
         cumulativeStats.value.flash.fail++;
       } else {
@@ -691,6 +708,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: ev.error ?? "Unknown auth error",
         excelError: ev.excelError,
         mac: ev.mac,
+        // This outcome supersedes credential info from a prior run/probe —
+        // a stale uuid would otherwise leak into the archive CSV.
+        authUuid: ev.uuid,
+        isAuthorized: undefined,
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.fail++;
@@ -704,6 +725,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: undefined,
         excelError: undefined,
         readError: undefined,
+        // The event carries no credential info; drop values from a prior run.
+        authUuid: undefined,
+        isAuthorized: undefined,
       });
       checkBatchCompletion();
     } else if (step === "skipped") {
@@ -752,6 +776,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         currentPhase: "",
         mac: ev.mac,
         error: t("batchFlashAuth.defaultMacError"),
+        // Factory-default MAC means the device identity is unknown; drop
+        // credential info from a prior run.
+        authUuid: undefined,
+        isAuthorized: undefined,
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.fail++;
