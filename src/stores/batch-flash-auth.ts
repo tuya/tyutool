@@ -632,7 +632,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } else if (e.kind === "done") {
       const r = e.result;
       if ("ok" in r) {
-        updateSlot(port, { status: "done", progress: 100, currentPhase: "" });
+        updateSlot(port, {
+          status: "done",
+          progress: 100,
+          currentPhase: "",
+          // A fresh successful flash supersedes any stale "read failed" flag
+          // left by a pre-batch read probe (e.g. device was in download mode).
+          readError: undefined,
+        });
         cumulativeStats.value.flash.total++;
         cumulativeStats.value.flash.success++;
       } else if ("err" in r) {
@@ -696,6 +703,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         mac: ev.mac,
         error: undefined,
         excelError: undefined,
+        readError: undefined,
       });
       checkBatchCompletion();
     } else if (step === "skipped") {

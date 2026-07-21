@@ -204,6 +204,34 @@ describe("slot state machine", () => {
     expect(store.cumulativeStats.flash.fail).toBe(1);
   });
 
+  it("handleFlashProgress done/ok clears a stale readError from a prior probe", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.slots[0].readError = "read MAC failed";
+    store.batchStartTime = Date.now();
+    store.handleFlashProgress({
+      port: "COM3",
+      event: { kind: "done", result: { ok: { elapsed_secs: 10 } } },
+    });
+    expect(store.slots[0].status).toBe("done");
+    expect(store.slots[0].readError).toBeUndefined();
+  });
+
+  it("handleAuthProgress no_code clears a stale readError from a prior probe", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.slots[0].readError = "read MAC failed";
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "no_code",
+      mac: "AABBCCDDEEFF",
+    });
+    expect(store.slots[0].status).toBe("no_code");
+    expect(store.slots[0].readError).toBeUndefined();
+  });
+
   it("handleFlashProgress done/cancelled resets slot to idle without incrementing cumulative", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
