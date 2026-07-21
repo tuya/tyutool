@@ -23,8 +23,9 @@ struct LatestJson {
 
 const GITHUB_LATEST_JSON: &str =
     "https://github.com/tuya/tyutool/releases/latest/download/latest.json";
-const GITEE_LATEST_JSON: &str =
-    "https://gitee.com/tuya-open/tyutool/releases/download/latest/latest.json";
+// Mainland-China manifest: same as latest.json but every url points at the Tuya OSS mirror.
+const TUYA_RELEASE_JSON: &str =
+    "https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json";
 
 // ─── Current version (injected at compile time via Cargo) ─────────────────────
 
@@ -184,17 +185,17 @@ fn replace_self(new_binary: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Run the update command.
 /// - `check_only`: only check version, don't download
-/// - `source`: optional source override ("github" or "gitee")
+/// - `source`: optional source override ("github" or "tuya")
 pub fn run_update(
     check_only: bool,
     source: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Determine source URL(s) to try
     let urls: Vec<&str> = match source.as_deref() {
-        Some("gitee") => vec![GITEE_LATEST_JSON],
-        Some("github") | None => vec![GITHUB_LATEST_JSON, GITEE_LATEST_JSON],
+        Some("tuya") => vec![TUYA_RELEASE_JSON],
+        Some("github") | None => vec![GITHUB_LATEST_JSON, TUYA_RELEASE_JSON],
         Some(s) => {
-            return Err(format!("Unknown source '{}'. Use 'github' or 'gitee'.", s).into());
+            return Err(format!("Unknown source '{}'. Use 'github' or 'tuya'.", s).into());
         }
     };
 

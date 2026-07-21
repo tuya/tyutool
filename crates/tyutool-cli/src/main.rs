@@ -116,7 +116,7 @@ enum Commands {
         /// Only check version, do not download
         #[arg(long)]
         check: bool,
-        /// Update source: github (default) or gitee
+        /// Update source: github (default) or tuya (Tuya OSS, mainland China)
         #[arg(long)]
         source: Option<String>,
     },

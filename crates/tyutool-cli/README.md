@@ -53,8 +53,8 @@ tyutool update --check
 # Update from GitHub (default)
 tyutool update
 
-# Update from Gitee mirror
-tyutool update --source gitee
+# Update from Tuya OSS mirror (mainland China)
+tyutool update --source tuya
 ```
 
 ## Building
@@ -88,7 +88,7 @@ tyutool-cli/
 ├── Cargo.toml
 └── src/
     ├── main.rs     # CLI argument parsing (clap) + job execution
-    └── update.rs   # Self-update logic (GitHub/Gitee releases)
+    └── update.rs   # Self-update logic (GitHub / Tuya OSS releases)
 ```
 
 ## Dependencies

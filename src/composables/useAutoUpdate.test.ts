@@ -18,7 +18,7 @@ const isNewerVersionMock = vi.fn();
 vi.mock("@/features/settings/update-sources", () => ({
   UPDATE_SOURCES: [
     { id: "github", labelKey: "settings.update.sourceGithub", url: "github" },
-    { id: "gitee", labelKey: "settings.update.sourceGitee", url: "gitee" },
+    { id: "tuya", labelKey: "settings.update.sourceTuya", url: "tuya" },
   ],
   fetchLatestJson: fetchLatestJsonMock,
   isNewerVersion: isNewerVersionMock,

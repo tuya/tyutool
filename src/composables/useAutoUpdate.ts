@@ -84,7 +84,7 @@ async function checkForUpdate(settings = useSettingsStore()): Promise<void> {
       "[Update] Manual update install (portable or deb/rpm), toast will use releases-page flow",
     );
   }
-  // Try sources in order (GitHub first, then Gitee).
+  // Try sources in order (GitHub first, then Tuya OSS for mainland China).
   // If a source succeeds (whether update found or not), stop.
   // Only fall through to the next source on network/fetch failure.
   for (const source of UPDATE_SOURCES) {

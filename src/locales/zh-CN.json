@@ -130,6 +130,7 @@
       "toastAction": "前往设置",
       "toastClose": "关闭",
       "sourceGithub": "GitHub Releases",
+      "sourceTuya": "Tuya OSS",
       "sourceGitee": "Gitee Releases",
       "portableHint": "当前安装方式不支持应用内更新，请到发行页下载与系统匹配的安装包（如 .deb / 便携版等）。",
       "portableDownload": "打开发行页",
