@@ -73,7 +73,7 @@ git tag -d v3.0.14
 ## 范围说明
 
 - Beta：`workflow_dispatch` 仅构建产物自测，不创建 Release。
-- 双 manifest 分区域更新：`latest.json` 的 `url` 指向 GitHub（海外）；`release.json` 是其大陆版——内容相同但每个 `url` 替换为对应的 `url_tuya`（Tuya OSS 镜像）。两个文件都由 CI 生成并挂载到 GitHub Release；`verify-release` 校验 `release.json` 恰为 `latest.json` 的 url_tuya 变换。
+- 双 manifest 分区域更新：每个条目含 `url`、`url_github`、`url_tuya` 三个字段。`latest.json` 的 `url` 等于 `url_github`（海外入口）；`release.json` 是其大陆版——内容相同但 `url` 等于 `url_tuya`（Tuya OSS 镜像）。两个文件都由 CI 生成并挂载到 GitHub Release；`verify-release` 校验 `release.json` 恰为 `latest.json` 的 url_tuya 变换。
 - Tuya OSS：产物与 `release.json` 由外部 tuyaopen-oss-publish 流水线搬运；`release.json` 会被同步到固定入口 `.../pruduct/tyutool/latest/release.json`，作为大陆的更新检查端点（GUI updater 端点与 CLI `--source tuya` 都指向它）。GitHub 发版到 OSS 同步完成之间，大陆入口短暂停留在旧版本。
-- 客户端更新逻辑只使用 `url` 字段；`url_tuya` 字段供外部系统读取。Gitee 镜像已下线，不再生成 `url_gitee`。
+- 客户端更新逻辑只使用 `url` 字段；`url_github` / `url_tuya` 镜像字段供外部系统读取。Gitee 镜像已下线，不再生成 `url_gitee`。
 - manifest 的更新说明为中英双语同一文本块，不按应用语言切换。

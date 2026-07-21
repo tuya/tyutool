@@ -21,9 +21,12 @@ const BASE_URL = `https://github.com/${GITHUB_REPO}/releases/download/${TAG}`;
 // "pruduct" is the actual key spelling on the Tuya OSS bucket — do not fix.
 const TUYA_BASE_URL = `https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/${TAG}`;
 
-function mirrorUrls(filename: string): { url: string; url_tuya: string } {
+// Every entry carries the mirror fields url_github + url_tuya, plus the active `url`:
+// latest.json has url === url_github; release.json (mainland China) has url === url_tuya.
+function mirrorUrls(filename: string): { url: string; url_github: string; url_tuya: string } {
   return {
     url: `${BASE_URL}/${filename}`,
+    url_github: `${BASE_URL}/${filename}`,
     url_tuya: `${TUYA_BASE_URL}/${filename}`,
   };
 }
@@ -47,7 +50,10 @@ const GUI_PLATFORM_PATTERNS: Record<string, [string, string][]> = {
   'windows-x86_64': [[`tyutool-gui_windows_x86_64_nsis_${VERSION}.exe`, 'windows-x86_64']],
 };
 
-const platforms: Record<string, { url: string; url_tuya: string; signature: string }> = {};
+const platforms: Record<
+  string,
+  { url: string; url_github: string; url_tuya: string; signature: string }
+> = {};
 
 for (const [platformKey, patterns] of Object.entries(GUI_PLATFORM_PATTERNS)) {
   for (const [filename] of patterns) {
@@ -76,7 +82,10 @@ const CLI_PATTERNS: Record<string, string> = {
   'windows-x86_64': `tyutool-cli_windows_x86_64_${VERSION}.zip`,
 };
 
-const cli: Record<string, { url: string; url_tuya: string; sha256: string }> = {};
+const cli: Record<
+  string,
+  { url: string; url_github: string; url_tuya: string; sha256: string }
+> = {};
 
 for (const [platformKey, filename] of Object.entries(CLI_PATTERNS)) {
   const matches = findFilesUnderArtifacts(filename);
@@ -97,7 +106,7 @@ const PORTABLE_PATTERNS: Record<string, string> = {
   'windows-x86_64': `tyutool-gui_windows_x86_64_portable_${VERSION}.zip`,
 };
 
-const portable: Record<string, { url: string; url_tuya: string }> = {};
+const portable: Record<string, { url: string; url_github: string; url_tuya: string }> = {};
 
 for (const [platformKey, filename] of Object.entries(PORTABLE_PATTERNS)) {
   const matches = findFilesUnderArtifacts(filename);
