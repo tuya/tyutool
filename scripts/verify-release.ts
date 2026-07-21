@@ -6,7 +6,12 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-import { checkAssetCompleteness, validateManifest, type Manifest } from './lib/release-check.js';
+import {
+  checkAssetCompleteness,
+  toChinaManifest,
+  validateManifest,
+  type Manifest,
+} from './lib/release-check.js';
 
 const TAG = process.env.TAG;
 const VERSION = process.env.VERSION;
@@ -32,6 +37,23 @@ const errors = [
   ...checkAssetCompleteness(VERSION, assetSet),
   ...validateManifest(manifest, VERSION, assetSet),
 ];
+
+// release.json must exist and be the mainland-China variant of latest.json
+// (every entry's url replaced by its url_tuya).
+if (!assetSet.has('release.json')) {
+  errors.push('缺少 release.json（latest.json 的大陆版，url 指向 Tuya OSS）');
+} else {
+  gh(['release', 'download', TAG, '--pattern', 'release.json', '--clobber']);
+  const releaseManifest = JSON.parse(readFileSync('release.json', 'utf-8')) as Manifest;
+  try {
+    const expected = JSON.stringify(toChinaManifest(manifest));
+    if (JSON.stringify(releaseManifest) !== expected) {
+      errors.push('release.json 与 latest.json 的大陆版变换结果不一致');
+    }
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
+  }
+}
 
 if (errors.length > 0) {
   console.error(`\n✗ ${TAG} 校验失败，Release 保留为草稿：`);

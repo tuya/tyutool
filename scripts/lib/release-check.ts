@@ -86,6 +86,30 @@ export function validateManifest(m: Manifest, version: string, assetBasenames: S
   return errs;
 }
 
+/** Build the mainland-China manifest (release.json): identical to latest.json except every
+ *  entry's `url` is replaced by its `url_tuya` (Tuya OSS mirror). Throws if any entry lacks
+ *  `url_tuya`, so a broken manifest fails the release instead of silently keeping GitHub urls. */
+export function toChinaManifest<M extends Pick<Manifest, 'platforms' | 'cli' | 'portable'>>(
+  m: M,
+): M {
+  const swap = <E extends { url: string; url_tuya?: string }>(
+    grp: string,
+    entries: Record<string, E>,
+  ): Record<string, E> =>
+    Object.fromEntries(
+      Object.entries(entries).map(([k, e]) => {
+        if (!e.url_tuya) throw new Error(`${grp}[${k}] 缺少 url_tuya，无法生成大陆版 manifest`);
+        return [k, { ...e, url: e.url_tuya }];
+      }),
+    );
+  return {
+    ...m,
+    platforms: swap('platforms', m.platforms),
+    cli: swap('cli', m.cli),
+    portable: swap('portable', m.portable),
+  };
+}
+
 export function assertManifestComplete(m: Pick<Manifest, 'platforms' | 'cli' | 'portable'>): string[] {
   const errs: string[] = [];
   for (const grp of ['platforms', 'cli', 'portable'] as const) {

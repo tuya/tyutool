@@ -64,14 +64,16 @@ gh release delete v3.0.14 --cleanup-tag --yes
 git tag -d v3.0.14
 ```
 
-- 若要让更新器回退到上一版本：把上一版的 `latest.json` 重新作为"最新"发布
-  （在上一版 Release 上 `gh release upload <prev-tag> latest.json --clobber`，或重发上一版），
-  使更新器读到旧版本号、不再提示升级。
+- 若要让更新器回退到上一版本：把上一版的 `latest.json` 与 `release.json` 重新作为"最新"发布
+  （在上一版 Release 上 `gh release upload <prev-tag> latest.json release.json --clobber`，或重发上一版），
+  使更新器读到旧版本号、不再提示升级。注意 Tuya OSS 固定入口
+  （`.../pruduct/tyutool/latest/release.json`）由外部流水线同步，回滚需同步处理。
 - 已被用户下载/安装的安装包无法收回；撤回只能阻止尚未升级的用户继续装到问题版本。
 
 ## 范围说明
 
 - Beta：`workflow_dispatch` 仅构建产物自测，不创建 Release。
-- Gitee：当前仅同步 `latest.json`，且推送的是与 GitHub Release 完全相同的一份文件（不再单独生成 Gitee 版本）。
-- `latest.json` 每个条目含三个下载地址：`url`（GitHub）、`url_gitee`（Gitee，产物未同步前不可用）、`url_tuya`（Tuya OSS，由外部 tuyaopen-oss-publish 流水线上传产物）。客户端更新逻辑仅使用 `url`；镜像字段供外部系统读取。
-- `latest.json` 的更新说明为中英双语同一文本块，不按应用语言切换。
+- 双 manifest 分区域更新：`latest.json` 的 `url` 指向 GitHub（海外）；`release.json` 是其大陆版——内容相同但每个 `url` 替换为对应的 `url_tuya`（Tuya OSS 镜像）。两个文件都由 CI 生成并挂载到 GitHub Release；`verify-release` 校验 `release.json` 恰为 `latest.json` 的 url_tuya 变换。
+- Tuya OSS：产物与 `release.json` 由外部 tuyaopen-oss-publish 流水线搬运；`release.json` 会被同步到固定入口 `.../pruduct/tyutool/latest/release.json`，作为大陆的更新检查端点（GUI updater 端点与 CLI `--source tuya` 都指向它）。GitHub 发版到 OSS 同步完成之间，大陆入口短暂停留在旧版本。
+- 客户端更新逻辑只使用 `url` 字段；`url_tuya` 字段供外部系统读取。Gitee 镜像已下线，不再生成 `url_gitee`。
+- manifest 的更新说明为中英双语同一文本块，不按应用语言切换。

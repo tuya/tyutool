@@ -432,18 +432,14 @@ jobs:
           RELEASE_NOTES: ${{ steps.notes.outputs.body }}
         run: pnpm exec tsx scripts/generate-manifest.ts
 
-      # Shared with sync-gitee: the exact same file is pushed to Gitee unmodified.
-      - uses: actions/upload-artifact@v7
-        with:
-          name: latest-json
-          path: latest.json
-          if-no-files-found: error
-          retention-days: 1
-
+      # latest.json: url → GitHub. release.json: mainland-China variant (url → Tuya OSS);
+      # the external tuyaopen-oss-publish pipeline copies it to .../tyutool/latest/release.json.
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          files: latest.json
+          files: |
+            latest.json
+            release.json
 
   # ── Verify draft release, then publish ──────────────────────────────────────
   publish:
@@ -466,68 +462,3 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: pnpm exec tsx scripts/verify-release.ts
-
-  # ── Sync to Gitee (non-blocking) ────────────────────────────────────────────
-  # Requires repo secrets: GITEE_TOKEN, GITEE_USER (namespace), GITEE_REPO (path or owner/repo).
-  # Optional repo variable: GITEE_TARGET_COMMITISH. Script: scripts/sync-gitee-release.sh
-  sync-gitee:
-    name: Sync to Gitee
-    needs: [publish]
-    runs-on: self-hosted
-    if: startsWith(github.ref, 'refs/tags/')
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-
-      - id: gate
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          if [[ -z "${GITEE_TOKEN}" ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::GITEE_TOKEN not set — skipping Gitee sync."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Temporarily disabled: network latency and Gitee storage constraints — only latest.json is pushed for now
-      # - uses: actions/download-artifact@v8
-      #   if: steps.gate.outputs.skip != 'true'
-      #   with: { path: artifacts/ }
-
-      # Reuse the manifest built in create-release: Gitee gets the identical file
-      # (multi-mirror url/url_gitee/url_tuya fields), no separate regeneration.
-      - uses: actions/download-artifact@v8
-        if: steps.gate.outputs.skip != 'true'
-        with:
-          name: latest-json
-
-      - name: Flatten assets for Gitee upload
-        if: steps.gate.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p gitee-assets
-          # Temporarily disabled: network latency and Gitee storage constraints — only latest.json is pushed for now
-          # declare -A seen
-          # while IFS= read -r -d '' fpath; do
-          #   fname="$(basename "$fpath")"
-          #   if [[ -n "${seen[$fname]:-}" ]]; then
-          #     echo "::error::Duplicate release asset name '${fname}' from '${seen[$fname]}' and '${fpath}'."
-          #     exit 1
-          #   fi
-          #   seen[$fname]="$fpath"
-          #   cp "$fpath" "gitee-assets/$fname"
-          # done < <(find artifacts/ -type f -print0)
-          cp -f latest.json gitee-assets/
-          ls -lh gitee-assets/
-
-      - name: Sync release to Gitee
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_USER: ${{ secrets.GITEE_USER }}
-          GITEE_REPO: ${{ secrets.GITEE_REPO }}
-          TAG: ${{ github.ref_name }}
-          GITEE_ASSETS_DIR: ${{ github.workspace }}/gitee-assets
-          GITEE_TARGET_COMMITISH: ${{ vars.GITEE_TARGET_COMMITISH }}
-        run: bash scripts/sync-gitee-release.sh
