@@ -135,7 +135,7 @@ describe("deriveUpdateSourceAction", () => {
 
   it("falls back to the selected source release page for non-primary sources", () => {
     const result = deriveUpdateSourceAction({
-      source: makeSourceState("available", { id: "gitee" }),
+      source: makeSourceState("available", { id: "tuya" }),
       summaryKind: "available",
       isTauri: true,
       installTypeReady: true,

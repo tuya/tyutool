@@ -130,6 +130,7 @@
       "toastAction": "Open Settings",
       "toastClose": "Close",
       "sourceGithub": "GitHub Releases",
+      "sourceTuya": "Tuya OSS",
       "sourceGitee": "Gitee Releases",
       "portableHint": "This installation does not support in-app updates. Download a matching package from the releases page.",
       "portableDownload": "Open Releases Page",

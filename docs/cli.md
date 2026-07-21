@@ -154,13 +154,13 @@ tyutool authorize -p /dev/ttyUSB0 -d esp32 --uuid abc123 --authkey def456
 ### `update` — Self-update binary
 
 ```
-tyutool update [--check] [--source <github|gitee>]
+tyutool update [--check] [--source <github|tuya>]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--check` | Only check version, do not download |
-| `--source` | Update source (`github` default, `gitee` for China) |
+| `--source` | Update source (`github` default, `tuya` = Tuya OSS for mainland China) |
 
 ---
 

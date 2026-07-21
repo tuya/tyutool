@@ -27,7 +27,7 @@ const { t, locale } = useI18n();
 type SourceState = UpdateDialogSourceState;
 
 function makeSourceState(
-  source: { id: "github" | "gitee"; labelKey: string },
+  source: { id: "github" | "tuya"; labelKey: string },
   status: UpdateDialogSourceStatus = "idle",
 ): SourceState {
   return {

@@ -8,7 +8,7 @@ export type UpdateDialogSourceStatus =
   | "failed";
 
 export interface UpdateDialogSourceState {
-  id: "github" | "gitee";
+  id: "github" | "tuya";
   labelKey: string;
   status: UpdateDialogSourceStatus;
   version: string;

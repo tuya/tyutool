@@ -31,7 +31,7 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFBQzlBMjA2QkU0NUE1OTcKUldTWHBVVytCcUxKcW9XN2ZFUkxiMkFTNlhJSmVkakRpOUxjbGwyMUhicXB2MTFQcTVHNlQ3cUEK",
       "endpoints": [
         "https://github.com/tuya/tyutool/releases/latest/download/latest.json",
-        "https://gitee.com/tuya-open/tyutool/releases/download/latest/latest.json"
+        "https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json"
       ]
     }
   },

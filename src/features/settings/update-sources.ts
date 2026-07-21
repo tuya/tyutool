@@ -24,12 +24,14 @@ export interface LatestJson {
 }
 
 export interface UpdateSource {
-  id: "github" | "gitee";
+  id: "github" | "tuya";
   labelKey: string;
   url: string;
   releasePageUrl: string;
 }
 
+// The Tuya OSS manifest (release.json) is the mainland-China variant of latest.json:
+// same content, but every url points at the Tuya OSS mirror instead of GitHub.
 export const UPDATE_SOURCES: UpdateSource[] = [
   {
     id: "github",
@@ -38,10 +40,10 @@ export const UPDATE_SOURCES: UpdateSource[] = [
     releasePageUrl: "https://github.com/tuya/tyutool/releases/latest",
   },
   {
-    id: "gitee",
-    labelKey: "settings.update.sourceGitee",
-    url: "https://gitee.com/tuya-open/tyutool/releases/download/latest/latest.json",
-    releasePageUrl: "https://gitee.com/tuya-open/tyutool/releases",
+    id: "tuya",
+    labelKey: "settings.update.sourceTuya",
+    url: "https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json",
+    releasePageUrl: "https://github.com/tuya/tyutool/releases/latest",
   },
 ];
 
