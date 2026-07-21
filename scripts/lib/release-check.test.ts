@@ -3,6 +3,7 @@ import {
   assertManifestComplete,
   checkAssetCompleteness,
   expectedAssetNames,
+  toChinaManifest,
   validateManifest,
   type Manifest,
 } from './release-check.js';
@@ -84,6 +85,41 @@ describe('validateManifest', () => {
     const m = fullManifest();
     m.cli['linux-x86_64'].url = `${BASE}/ghost-file.tar.gz`;
     expect(validateManifest(m, V, assets()).some((e) => e.includes('ghost-file'))).toBe(true);
+  });
+});
+
+describe('toChinaManifest', () => {
+  const TUYA = 'https://oss.example.com/tyutool/v3.0.14';
+  function mirroredManifest(): Manifest {
+    const m = fullManifest();
+    for (const grp of [m.platforms, m.cli, m.portable]) {
+      for (const entry of Object.values(grp)) {
+        (entry as { url_tuya?: string }).url_tuya = `${TUYA}/${entry.url.split('/').pop()}`;
+      }
+    }
+    return m;
+  }
+  it('replaces every url with its url_tuya and keeps other fields', () => {
+    const china = toChinaManifest(mirroredManifest());
+    expect(china.version).toBe(V);
+    for (const grp of [china.platforms, china.cli, china.portable]) {
+      for (const entry of Object.values(grp)) {
+        expect(entry.url.startsWith(TUYA)).toBe(true);
+        expect(entry.url).toBe((entry as { url_tuya?: string }).url_tuya);
+      }
+    }
+    expect(china.platforms['linux-x86_64'].signature).toBe('sig');
+    expect(china.cli['linux-x86_64'].sha256).toBe('abc');
+  });
+  it('does not mutate the input manifest', () => {
+    const m = mirroredManifest();
+    toChinaManifest(m);
+    expect(m.platforms['linux-x86_64'].url.startsWith('https://github.com/')).toBe(true);
+  });
+  it('throws when an entry lacks url_tuya', () => {
+    const m = mirroredManifest();
+    delete (m.cli['windows-x86_64'] as { url_tuya?: string }).url_tuya;
+    expect(() => toChinaManifest(m)).toThrow(/url_tuya/);
   });
 });
 

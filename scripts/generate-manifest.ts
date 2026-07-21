@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
-import { assertManifestComplete } from './lib/release-check.js';
+import { assertManifestComplete, toChinaManifest } from './lib/release-check.js';
 import { findFilesUnderArtifacts } from './lib/artifacts-glob.js';
 
 const VERSION = process.env.VERSION;
@@ -18,14 +18,12 @@ if (!VERSION || !GITHUB_REPO || !TAG) {
 }
 
 const BASE_URL = `https://github.com/${GITHUB_REPO}/releases/download/${TAG}`;
-const GITEE_BASE_URL = `https://gitee.com/tuya-open/tyutool/releases/download/${TAG}`;
 // "pruduct" is the actual key spelling on the Tuya OSS bucket — do not fix.
 const TUYA_BASE_URL = `https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/${TAG}`;
 
-function mirrorUrls(filename: string): { url: string; url_gitee: string; url_tuya: string } {
+function mirrorUrls(filename: string): { url: string; url_tuya: string } {
   return {
     url: `${BASE_URL}/${filename}`,
-    url_gitee: `${GITEE_BASE_URL}/${filename}`,
     url_tuya: `${TUYA_BASE_URL}/${filename}`,
   };
 }
@@ -49,10 +47,7 @@ const GUI_PLATFORM_PATTERNS: Record<string, [string, string][]> = {
   'windows-x86_64': [[`tyutool-gui_windows_x86_64_nsis_${VERSION}.exe`, 'windows-x86_64']],
 };
 
-const platforms: Record<
-  string,
-  { url: string; url_gitee: string; url_tuya: string; signature: string }
-> = {};
+const platforms: Record<string, { url: string; url_tuya: string; signature: string }> = {};
 
 for (const [platformKey, patterns] of Object.entries(GUI_PLATFORM_PATTERNS)) {
   for (const [filename] of patterns) {
@@ -81,10 +76,7 @@ const CLI_PATTERNS: Record<string, string> = {
   'windows-x86_64': `tyutool-cli_windows_x86_64_${VERSION}.zip`,
 };
 
-const cli: Record<
-  string,
-  { url: string; url_gitee: string; url_tuya: string; sha256: string }
-> = {};
+const cli: Record<string, { url: string; url_tuya: string; sha256: string }> = {};
 
 for (const [platformKey, filename] of Object.entries(CLI_PATTERNS)) {
   const matches = findFilesUnderArtifacts(filename);
@@ -105,7 +97,7 @@ const PORTABLE_PATTERNS: Record<string, string> = {
   'windows-x86_64': `tyutool-gui_windows_x86_64_portable_${VERSION}.zip`,
 };
 
-const portable: Record<string, { url: string; url_gitee: string; url_tuya: string }> = {};
+const portable: Record<string, { url: string; url_tuya: string }> = {};
 
 for (const [platformKey, filename] of Object.entries(PORTABLE_PATTERNS)) {
   const matches = findFilesUnderArtifacts(filename);
@@ -139,9 +131,13 @@ if (completenessErrors.length > 0) {
   process.exit(1);
 }
 
+// latest.json: url → GitHub (overseas). release.json: mainland-China variant with url →
+// Tuya OSS; the external tuyaopen-oss-publish pipeline copies it verbatim to the fixed
+// endpoint .../pruduct/tyutool/latest/release.json. Both must be attached to the release.
 writeFileSync('latest.json', `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+writeFileSync('release.json', `${JSON.stringify(toChinaManifest(manifest), null, 2)}\n`, 'utf-8');
 
-console.log(`Generated latest.json for v${VERSION}`);
+console.log(`Generated latest.json + release.json for v${VERSION}`);
 console.log(`  GUI platforms: ${Object.keys(platforms).join(', ')}`);
 console.log(`  CLI platforms: ${Object.keys(cli).join(', ')}`);
 console.log(`  Portable:      ${Object.keys(portable).join(', ')}`);
