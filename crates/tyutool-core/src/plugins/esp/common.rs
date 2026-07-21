@@ -286,6 +286,22 @@ pub(crate) fn run_esp(
         FlashMode::Authorize => unreachable!("Authorize is handled in run_job before plugin.run"),
     }
 
+    // espflash only applies the ResetAfterOperation when asked explicitly (its
+    // CLI calls this after every operation). Without it the chip stays in the
+    // ROM bootloader once the port closes, so a follow-up step that talks to
+    // the application firmware — e.g. batch authorize right after flashing —
+    // fails until someone power-cycles the board. HardReset toggles EN only
+    // (GPIO0 untouched), so the freshly flashed firmware boots normally.
+    log::info!("Resetting ESP device to exit download mode");
+    if let Err(e) = flasher.connection().reset_after(true, def.chip) {
+        log::warn!("ESP reset after operation failed: {e}");
+        progress(FlashEvent::Warning {
+            message: "could not reset the device after the operation; \
+                      power-cycle or reset it manually before authorizing"
+                .to_string(),
+        });
+    }
+
     log::info!("ESP plugin completed successfully");
     Ok(())
 }
