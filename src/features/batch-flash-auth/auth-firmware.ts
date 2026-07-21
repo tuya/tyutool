@@ -1,11 +1,19 @@
 import { isTauriRuntime } from "@/runtime";
-import type { UpdateSource } from "@/features/settings/update-sources";
 import type { AuthFirmwareEntry, AuthFirmwareManifest } from "./types";
 import { rLog } from "@/utils/log";
 
+/** Same shape as the app-update `UpdateSource`, but auth firmware keeps its own
+ *  source set (GitHub + Gitee) independent of the app-update sources. */
+export interface AuthFirmwareSource {
+  id: "github" | "gitee";
+  labelKey: string;
+  url: string;
+  releasePageUrl: string;
+}
+
 /** Manifest sources for the designated `auth-firmware` release.
- *  GitHub first, Gitee as fallback — mirrors the update-source resolution. */
-export const AUTH_FIRMWARE_SOURCES: UpdateSource[] = [
+ *  GitHub first, Gitee as fallback. */
+export const AUTH_FIRMWARE_SOURCES: AuthFirmwareSource[] = [
   {
     id: "github",
     labelKey: "settings.update.sourceGithub",
