@@ -94,18 +94,22 @@ describe('toChinaManifest', () => {
     const m = fullManifest();
     for (const grp of [m.platforms, m.cli, m.portable]) {
       for (const entry of Object.values(grp)) {
-        (entry as { url_tuya?: string }).url_tuya = `${TUYA}/${entry.url.split('/').pop()}`;
+        const mirrors = entry as { url_github?: string; url_tuya?: string };
+        mirrors.url_github = entry.url;
+        mirrors.url_tuya = `${TUYA}/${entry.url.split('/').pop()}`;
       }
     }
     return m;
   }
-  it('replaces every url with its url_tuya and keeps other fields', () => {
+  it('replaces every url with its url_tuya and keeps mirror/other fields', () => {
     const china = toChinaManifest(mirroredManifest());
     expect(china.version).toBe(V);
     for (const grp of [china.platforms, china.cli, china.portable]) {
       for (const entry of Object.values(grp)) {
+        const mirrors = entry as { url_github?: string; url_tuya?: string };
         expect(entry.url.startsWith(TUYA)).toBe(true);
-        expect(entry.url).toBe((entry as { url_tuya?: string }).url_tuya);
+        expect(entry.url).toBe(mirrors.url_tuya);
+        expect(mirrors.url_github?.startsWith('https://github.com/')).toBe(true);
       }
     }
     expect(china.platforms['linux-x86_64'].signature).toBe('sig');

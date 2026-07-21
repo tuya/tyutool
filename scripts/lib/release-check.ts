@@ -87,8 +87,9 @@ export function validateManifest(m: Manifest, version: string, assetBasenames: S
 }
 
 /** Build the mainland-China manifest (release.json): identical to latest.json except every
- *  entry's `url` is replaced by its `url_tuya` (Tuya OSS mirror). Throws if any entry lacks
- *  `url_tuya`, so a broken manifest fails the release instead of silently keeping GitHub urls. */
+ *  entry's `url` is replaced by its `url_tuya` (Tuya OSS mirror); the url_github/url_tuya
+ *  mirror fields themselves are kept unchanged. Throws if any entry lacks `url_tuya`, so a
+ *  broken manifest fails the release instead of silently keeping GitHub urls. */
 export function toChinaManifest<M extends Pick<Manifest, 'platforms' | 'cli' | 'portable'>>(
   m: M,
 ): M {
