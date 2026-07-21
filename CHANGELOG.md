@@ -2,6 +2,38 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.4] - 2026-07-21
+
+### 新功能
+
+- `update`：应用内更新与 CLI 自更新的国内镜像源由 Gitee 迁移至 Tuya OSS；发布产物新增大陆版清单 `release.json`（下载地址指向 Tuya OSS），CLI 对应参数改为 `--source tuya`
+- `release`：`latest.json` 与 `release.json` 的镜像字段调整为 `url_github` 与 `url_tuya`（移除 `url_gitee`）
+- `batch-auth`：内置 T5AI 授权固件更新至 1.1.1
+- `docs`：使用指南「固件烧录」页新增各标签页截图与波特率选择提示
+
+### 问题修复
+
+- `esp`：烧录/擦除/读取完成后自动硬复位设备退出下载模式，修复烧录后立即批量授权失败、需手动重新上电的问题
+- `gui`：espflash 的日志级别上限设为 INFO，避免协议帧十六进制转储刷爆会话日志（单次烧录约 10 MB）
+- `batch-auth`：新批次开始时清除上一轮残留的隔离标记；烧录/授权的终态不再残留上一台设备的 MAC、读取错误与授权凭证信息，避免污染界面状态与归档 CSV
+- `batch-auth`：授权固件源类型与应用更新源解耦，应用更新源的调整不再影响授权固件下载
+
+---
+
+### Features
+
+- `update`: The mainland-China mirror for in-app updates and CLI self-update moved from Gitee to Tuya OSS; releases now ship a China manifest `release.json` (download urls point at Tuya OSS), and the CLI flag is now `--source tuya`
+- `release`: Mirror fields in `latest.json` and `release.json` are now `url_github` and `url_tuya` (`url_gitee` removed)
+- `batch-auth`: Bundled T5AI auth firmware updated to 1.1.1
+- `docs`: The usage-guide flash page gains per-tab screenshots and a baud-rate tip
+
+### Bug Fixes
+
+- `esp`: Hard-reset the device after flash/erase/read to exit download mode, fixing batch authorize failing right after flashing until a manual power-cycle
+- `gui`: Cap espflash log output at INFO so protocol-frame hex dumps (~10 MB per flash) no longer flood the session log
+- `batch-auth`: Starting a new batch clears the previous run's quarantine flag, and flash/auth terminal states no longer keep the previous device's MAC, read error, or credential info — preventing stale data in the UI and the archive CSV
+- `batch-auth`: Auth-firmware sources are decoupled from the app-update sources, so update-source changes no longer affect auth-firmware downloads
+
 ## [3.2.3] - 2026-07-21
 
 ### 新功能
