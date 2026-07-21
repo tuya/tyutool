@@ -35,9 +35,9 @@
         <li><strong>左侧/中部操作卡片</strong>：四个标签 —— Flash（烧录）、Erase（擦除）、Read（读取）、Authorize（授权）。</li>
         <li><strong>右侧进度与日志</strong>：实时显示当前操作的分阶段进度和滚动日志。</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-connection-bar.png" alt="顶部连接栏：串口选择、波特率、芯片型号、状态点" loading="lazy">
         <figcaption>顶部连接栏：串口选择、波特率、芯片型号、状态点</figcaption>
-        <!-- capture: flash-connection-bar.png -->
       </figure>
 
       <h2 id="connection">2. 连接栏</h2>
@@ -77,6 +77,10 @@
         首次启动 tyutool 时默认选中 <code>t5ai</code>。旧版的 <code>t5</code> / <code>T5</code> 是 <code>t5ai</code> 的别名，会被自动归一化为 <code>t5ai</code>。
       </div>
       <div class="callout tip">
+        <span class="title">烧录波特率可以调吗？</span>
+        烧录波特率可以在芯片默认值的基础上适当调高——波特率越高，烧录越快；但超过一定上限后，受串口信号质量影响，可能出现烧录失败。通常不建议超过 <code>2000000</code>。
+      </div>
+      <div class="callout tip">
         <span class="title">关于擦除对齐</span>
         所有芯片在擦除时都要求 <strong>4 KiB 对齐</strong>（起止地址必须是 <code>0x1000</code> 的整数倍）；仅授权专用的 <code>other</code> 芯片豁免——它没有可烧录的 flash。这一点在下方 <a href="#erase">擦除标签</a>会再次提及。
       </div>
@@ -94,9 +98,9 @@
         <li>为某一段选择固件文件后，结束地址会<strong>自动计算</strong>为 <code>start + 文件大小</code>。</li>
       </ul>
       <p>只有当<strong>所有段都已填入固件路径</strong>时，Flash 按钮才会启用；任一段缺少路径时按钮保持禁用。</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-flash-tab.png" alt="Flash 标签：多段表格、起始/结束地址、Flash 按钮" loading="lazy">
         <figcaption>Flash 标签：多段表格、起始/结束地址、Flash 按钮</figcaption>
-        <!-- capture: flash-flash-tab.png -->
       </figure>
       <div class="callout tip">
         <span class="title">多段烧录的典型场景</span>
@@ -123,9 +127,9 @@
         <span class="title">危险：擦除会破坏数据</span>
         擦除会把目标区域清空为 <code>0xFF</code>，<strong>不可撤销</strong>。整片擦除尤其会清空射频校准（RF cal），可能导致设备刷完后<strong>无法连网</strong>。重要内容请先用 <a href="#read">Read 标签</a>备份。
       </div>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-erase-tab.png" alt="Erase 标签：起止地址、对齐校验、高级预设" loading="lazy">
         <figcaption>Erase 标签：起止地址、对齐校验、高级预设</figcaption>
-        <!-- capture: flash-erase-tab.png -->
       </figure>
 
       <h2 id="read">6. Read 标签 — 读取</h2>
@@ -136,9 +140,9 @@
         <li><strong>结束地址</strong>：默认取该芯片的<strong>完整 flash 容量</strong>（见<a href="#chip">芯片表</a>），即默认做整片读取。</li>
       </ul>
       <p>如果目标文件<strong>已存在</strong>，会弹出对话框让你选择：<strong>覆盖（Overwrite）</strong> 还是 <strong>追加时间戳（Append-timestamp）</strong>（即文件名后自动加上时间后缀，避免覆盖旧文件）。</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-read-tab.png" alt="Read 标签：保存目录、文件名、起止地址" loading="lazy">
         <figcaption>Read 标签：保存目录、文件名、起止地址</figcaption>
-        <!-- capture: flash-read-tab.png -->
       </figure>
 
       <h2 id="authorize">7. Authorize 标签 — 授权</h2>
@@ -157,9 +161,9 @@
         <span class="title">凭据请妥善保管</span>
         UUID 与 AuthKey 是从涂鸦<strong>购买</strong>的凭据，写入伪造或重复的值会导致设备无法上线甚至污染设备池。请勿在截图、日志、聊天中泄露凭据。此外，<code>other</code> 芯片<strong>仅支持授权</strong>，没有 flash 插件，无法烧录。
       </div>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-authorize-tab.png" alt="Authorize 标签：UUID/AuthKey 掩码输入、读取授权与授权按钮" loading="lazy">
         <figcaption>Authorize 标签：UUID/AuthKey 掩码输入、读取授权与授权按钮</figcaption>
-        <!-- capture: flash-authorize-tab.png -->
       </figure>
 
       <h2 id="progress">8. 进度与日志</h2>
@@ -168,9 +172,9 @@
         <li><strong>分阶段进度条</strong>：按操作阶段（phase）显示进度，每个阶段有自己的<strong>主题色</strong>、当前<strong>百分比</strong>；对于无法预估进度的阶段会显示<strong>不确定（indeterminate）</strong>状态。</li>
         <li><strong>日志面板</strong>：滚动显示操作日志，提供 <strong>锁定自动滚动（lock auto-scroll）</strong>、<strong>清空（clear）</strong>、<strong>复制（copy）</strong> 三个控件。</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-progress-log.png" alt="右侧进度条与日志面板（分阶段进度 + 日志控件）" loading="lazy">
         <figcaption>右侧进度条与日志面板（分阶段进度 + 日志控件）</figcaption>
-        <!-- capture: flash-progress-log.png -->
       </figure>
 
       <h2 id="port-ownership">9. 端口占用</h2>

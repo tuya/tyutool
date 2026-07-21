@@ -35,9 +35,9 @@
         <li><strong>Left/center operations card</strong>: four tabs — Flash, Erase, Read, Authorize.</li>
         <li><strong>Right-side progress &amp; log</strong>: live per-phase progress and a scrolling log.</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-connection-bar.png" alt="Top connection bar: serial port, baud, chip selector, status dot" loading="lazy">
         <figcaption>Top connection bar: serial port, baud, chip selector, status dot</figcaption>
-        <!-- capture: flash-connection-bar.png -->
       </figure>
 
       <h2 id="connection">2. Connection bar</h2>
@@ -77,6 +77,10 @@
         On first launch tyutool defaults to <code>t5ai</code>. The legacy <code>t5</code> / <code>T5</code> ids are aliases of <code>t5ai</code> and are normalized to <code>t5ai</code> automatically.
       </div>
       <div class="callout tip">
+        <span class="title">Can I change the flash baud rate?</span>
+        You can raise the flash baud rate above each chip's default — the higher the baud, the faster the flash. Past a certain point, though, signal quality on the serial line drops and flashing may start to fail. As a rule of thumb, do not exceed <code>2000000</code>.
+      </div>
+      <div class="callout tip">
         <span class="title">On erase alignment</span>
         Every chip requires <strong>4 KiB erase alignment</strong> (start and end addresses must be multiples of <code>0x1000</code>); the auth-only <code>other</code> chip is exempt — it has no flash to erase. This comes up again in the <a href="#erase">Erase tab</a> below.
       </div>
@@ -94,9 +98,9 @@
         <li>When you pick a firmware file for a segment, its end is <strong>auto-computed</strong> as <code>start + file size</code>.</li>
       </ul>
       <p>The Flash button is only enabled when <strong>every segment has a firmware path</strong>; if any segment lacks a path, the button stays disabled.</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-flash-tab.png" alt="Flash tab: multi-segment table, start/end addresses, Flash button" loading="lazy">
         <figcaption>Flash tab: multi-segment table, start/end addresses, Flash button</figcaption>
-        <!-- capture: flash-flash-tab.png -->
       </figure>
       <div class="callout tip">
         <span class="title">Typical multi-segment use case</span>
@@ -123,9 +127,9 @@
         <span class="title">Danger: erasing destroys data</span>
         Erasing clears the target region to <code>0xFF</code> and is <strong>irreversible</strong>. A full-chip erase in particular wipes RF calibration, which can leave the device <strong>unable to connect to the network</strong> afterwards. Back up anything important with the <a href="#read">Read tab</a> first.
       </div>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-erase-tab.png" alt="Erase tab: start/end addresses, alignment validation, advanced presets" loading="lazy">
         <figcaption>Erase tab: start/end addresses, alignment validation, advanced presets</figcaption>
-        <!-- capture: flash-erase-tab.png -->
       </figure>
 
       <h2 id="read">6. Read tab</h2>
@@ -136,9 +140,9 @@
         <li><strong>End address</strong>: defaults to the chip's <strong>full flash size</strong> (see the <a href="#chip">chip table</a>), i.e. a full-chip read by default.</li>
       </ul>
       <p>If the target file <strong>already exists</strong>, a dialog asks you to choose: <strong>Overwrite</strong> or <strong>Append-timestamp</strong> (appends a timestamp suffix to the filename so the old file is not clobbered).</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-read-tab.png" alt="Read tab: save directory, filename, start/end addresses" loading="lazy">
         <figcaption>Read tab: save directory, filename, start/end addresses</figcaption>
-        <!-- capture: flash-read-tab.png -->
       </figure>
 
       <h2 id="authorize">7. Authorize tab</h2>
@@ -157,9 +161,9 @@
         <span class="title">Keep credentials private</span>
         UUID and AuthKey are credentials <strong>purchased</strong> from Tuya; writing forged or duplicate values stops the device from going online and can pollute the device pool. Never leak credentials in screenshots, logs, or chats. Also note: the <code>other</code> chip is <strong>auth-only</strong> — it has no flash plugin and cannot be flashed.
       </div>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-authorize-tab.png" alt="Authorize tab: masked UUID/AuthKey inputs, Read Auth and Authorize buttons" loading="lazy">
         <figcaption>Authorize tab: masked UUID/AuthKey inputs, Read Auth and Authorize buttons</figcaption>
-        <!-- capture: flash-authorize-tab.png -->
       </figure>
 
       <h2 id="progress">8. Progress &amp; log</h2>
@@ -168,9 +172,9 @@
         <li><strong>Per-phase progress bar</strong>: shows progress per operation phase (phase); each phase has its own <strong>theme color</strong> and current <strong>percentage</strong>; phases with no predictable progress show an <strong>indeterminate</strong> state.</li>
         <li><strong>Log panel</strong>: a scrolling log with three controls — <strong>lock auto-scroll</strong>, <strong>clear</strong>, and <strong>copy</strong>.</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/flash-progress-log.png" alt="Right-side progress bar and log panel (per-phase progress + log controls)" loading="lazy">
         <figcaption>Right-side progress bar and log panel (per-phase progress + log controls)</figcaption>
-        <!-- capture: flash-progress-log.png -->
       </figure>
 
       <h2 id="port-ownership">9. Port ownership</h2>
