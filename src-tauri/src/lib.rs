@@ -2941,6 +2941,10 @@ pub fn run() {
                 .rotation_strategy(RotationStrategy::KeepAll)
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(log::LevelFilter::Debug)
+                // espflash dumps every protocol command's full payload as hex at DEBUG
+                // (~10 MB per ESP flash), drowning the session log. Cap it at INFO;
+                // use the CLI with --verbose to capture ESP protocol frames instead.
+                .level_for("espflash", log::LevelFilter::Info)
                 .build(),
         )
         .plugin(tauri_plugin_store::Builder::default().build())
