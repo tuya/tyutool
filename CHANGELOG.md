@@ -2,6 +2,26 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.5] - 2026-07-22
+
+### 新功能
+
+- `batch-auth`：配置面板新增「授权」开关，关闭后批次仅烧录固件——不占用授权表 Excel，跳过授权与烧录后等待启动步骤，适用于只需烧录的产线场景
+
+### 问题修复
+
+- `esp`：烧录完成后通过串口协议触发 RTC 看门狗软复位，修复 TX/RX 直连治具（未接 DTR/RTS）上设备停留在下载模式、随后批量授权读不到数据的问题；原生 USB 端口与已接线的硬复位路径行为不变
+
+---
+
+### Features
+
+- `batch-auth`: The config panel gains an Authorize on/off toggle — with it off, a batch flashes firmware only: no auth-sheet Excel is locked, and the auth step and post-flash boot wait are skipped, for flash-only production lines
+
+### Bug Fixes
+
+- `esp`: After flashing, the device is soft-reset by arming the RTC watchdog over the serial protocol itself, fixing TX/RX-only fixtures (no DTR/RTS wiring) where the chip stayed in download mode and the following batch authorize read nothing; native-USB ports and wired hard-reset paths are unchanged
+
 ## [3.2.4] - 2026-07-21
 
 ### 新功能
