@@ -6,10 +6,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use espflash::command::{Command, CommandType};
 use espflash::connection::{Connection, ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::Flasher;
-use espflash::target::ProgressCallbacks;
+use espflash::target::{Chip, ProgressCallbacks};
 use serialport::UsbPortInfo;
 
 use crate::error::FlashError;
@@ -139,6 +138,15 @@ const USB_SERIAL_JTAG_PID: u16 = 0x1001;
 /// UART-bridge adapters (CP210x/CH340, etc.) keep `DefaultReset` — their vid and
 /// port names don't match, so existing ESP32/C3/S3-over-bridge setups are
 /// unaffected.
+/// True when the port is the chip's native USB peripheral (USB-Serial/JTAG or
+/// USB-OTG) rather than an external UART bridge.
+fn is_native_usb(port_name: &str, info: &UsbPortInfo) -> bool {
+    info.pid == USB_SERIAL_JTAG_PID
+        || info.vid == ESPRESSIF_VID
+        || port_name.contains("usbmodem")
+        || port_name.contains("ttyACM")
+}
+
 fn choose_before_reset(port_name: &str, info: &UsbPortInfo) -> ResetBeforeOperation {
     // pid already flags USB-Serial-JTAG: espflash's DefaultReset resolves to the
     // correct sequence on its own — nothing to override.
@@ -214,6 +222,7 @@ pub(crate) fn run_esp(
     log::info!("Opening port {}", job.port);
 
     let port_info = usb_port_info(&job.port);
+    let native_usb = is_native_usb(&job.port, &port_info);
     let before_reset = choose_before_reset(&job.port, &port_info);
     log::info!(
         "ESP connect: reset strategy {:?} (vid={:#06x}, pid={:#06x})",
@@ -227,10 +236,16 @@ pub(crate) fn run_esp(
         .open_native()
         .map_err(|e| FlashError::Plugin(format!("cannot open port {}: {e}", job.port)))?;
 
+    // NoResetNoStub: espflash applies the ResetAfterOperation on its own at the
+    // end of write_bins_to_flash (Esp32Target::finish → reset_after). With
+    // HardReset that fires an RTS reset immediately after the last write and
+    // kills the flasher stub before the RTC-watchdog soft reset below can talk
+    // to it. NoResetNoStub makes that internal call a no-op (stub stays alive);
+    // the resets we actually want run explicitly at the end of run_esp.
     let conn = Connection::new(
         serial,
         port_info,
-        ResetAfterOperation::HardReset,
+        ResetAfterOperation::NoResetNoStub,
         before_reset,
         115_200,
     );
@@ -292,32 +307,40 @@ pub(crate) fn run_esp(
     // modules fall into ROM download mode by themselves, so flashing works),
     // and there the RTS pulse is electrically a no-op: the chip stays in the
     // silent flasher stub and batch authorize gets zero bytes forever.
-    // `RunUserCode` is a protocol-level soft reset — the stub jumps to the
-    // freshly flashed firmware over the serial protocol itself, independent of
-    // any control-line wiring. Errors are non-fatal: the hard reset still runs.
-    // The short sleeps let the stub settle after the last flash command and
-    // give the second-stage bootloader a head start before the hard reset
-    // (or the port close/reopen of a follow-up authorize slot) hits.
-    log::info!("Soft-resetting ESP device (RunUserCode) to exit the flasher stub");
-    std::thread::sleep(Duration::from_millis(100));
-    let soft_reset = flasher
-        .connection()
-        .with_timeout(CommandType::RunUserCode.timeout(), |conn| {
-            conn.command(Command::RunUserCode)
-        });
-    if let Err(e) = soft_reset {
-        log::warn!("ESP RunUserCode soft reset failed: {e}");
+    // Arming the RTC watchdog via WriteReg forces a genuine full chip reset
+    // over the serial protocol itself, independent of control-line wiring.
+    // (The stub's RunUserCode (0xD3) is not an option: only the ESP8266 stub
+    // implements it — on ESP32-family stubs it times out and the chip stays
+    // in the stub; verified on hardware.) Errors are non-fatal: the hard
+    // reset still runs. The sleeps let the stub settle after the last flash
+    // command and give the watchdog (~15 ms) plus the second-stage bootloader
+    // a head start before the hard reset (or the port close/reopen of a
+    // follow-up authorize slot) hits.
+    // Skipped on native-USB ports (USB-Serial/JTAG / USB-OTG): the hard reset
+    // below works there without any external wiring, and a WDT reset can make
+    // the port re-enumerate mid-sequence (esptool disables watchdog reset on
+    // the C6 for exactly this).
+    if native_usb {
+        log::info!("Native USB port; skipping RTC watchdog soft reset");
+    } else {
+        log::info!("Soft-resetting ESP device via RTC watchdog to exit the flasher stub");
+        std::thread::sleep(Duration::from_millis(100));
+        if let Err(e) = soft_reset_via_wdt(&mut flasher, def.chip) {
+            log::warn!("ESP RTC watchdog soft reset failed: {e}");
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
-    std::thread::sleep(Duration::from_millis(200));
 
-    // espflash only applies the ResetAfterOperation when asked explicitly (its
-    // CLI calls this after every operation). Without it the chip stays in the
-    // ROM bootloader once the port closes, so a follow-up step that talks to
-    // the application firmware — e.g. batch authorize right after flashing —
-    // fails until someone power-cycles the board. HardReset toggles EN only
-    // (GPIO0 untouched), so the freshly flashed firmware boots normally.
+    // Explicit hard reset (Connection::reset → reset_after_flash, which also
+    // handles native USB-Serial/JTAG ports via the pid). Without it the chip
+    // stays in the ROM bootloader once the port closes, so a follow-up step
+    // that talks to the application firmware — e.g. batch authorize right
+    // after flashing — fails until someone power-cycles the board. It toggles
+    // EN only (GPIO0 untouched), so the freshly flashed firmware boots
+    // normally. Unconditional because the connection's ResetAfterOperation is
+    // NoResetNoStub (see Connection::new above).
     log::info!("Resetting ESP device to exit download mode");
-    if let Err(e) = flasher.connection().reset_after(true, def.chip) {
+    if let Err(e) = flasher.connection().reset() {
         log::warn!("ESP reset after operation failed: {e}");
         progress(FlashEvent::Warning {
             message: "could not reset the device after the operation; \
@@ -328,6 +351,49 @@ pub(crate) fn run_esp(
 
     log::info!("ESP plugin completed successfully");
     Ok(())
+}
+
+// ── Soft reset ───────────────────────────────────────────────────────────────
+
+/// RTC watchdog write-protection key (identical across ESP32 chip families).
+const WDT_WKEY: u32 = 0x50D8_3AA1;
+
+/// Arm the RTC watchdog over the serial protocol so the chip performs a full
+/// reset without touching DTR/RTS. espflash ships WDT register tables only for
+/// C3/S2/S3/P4 (`Chip::rtc_wdt_reset`); ESP32 and C6 are driven manually with
+/// register addresses taken from the ESP-IDF SoC headers.
+fn soft_reset_via_wdt(flasher: &mut Flasher, chip: Chip) -> Result<(), espflash::Error> {
+    let conn = flasher.connection();
+    match chip {
+        // soc/esp32/register/soc/rtc_cntl_reg.h (DR_REG_RTCCNTL_BASE 0x3FF48000).
+        // config0: en(31) | stg0=4 (RESET_RTC: full chip reset, 28..30)
+        //          | cpu_reset_length=7 (14..16) | sys_reset_length=7 (11..13)
+        Chip::Esp32 => {
+            const WDTCONFIG0: u32 = 0x3FF4_808C;
+            const WDTCONFIG1: u32 = 0x3FF4_8090;
+            const WDTWPROTECT: u32 = 0x3FF4_80A4;
+            const CONFIG0: u32 = (1 << 31) | (4 << 28) | (7 << 14) | (7 << 11);
+            conn.write_reg(WDTWPROTECT, WDT_WKEY, None)?;
+            conn.write_reg(WDTCONFIG1, 2000, None)?; // stage0 timeout, slow-clk cycles (~15 ms)
+            conn.write_reg(WDTCONFIG0, CONFIG0, None)?;
+            conn.write_reg(WDTWPROTECT, 0, None)
+        }
+        // soc/esp32c6/register/soc/lp_wdt_reg.h (DR_REG_LP_WDT_BASE 0x600B1C00).
+        // Same config0 layout as C3: en(31) | stg0=5 (28..30) | chip_reset_en(8)
+        // | chip_reset_width=1 (0..7) — flag values as used by espflash/esptool.
+        Chip::Esp32c6 => {
+            const CONFIG0: u32 = 0x600B_1C00;
+            const CONFIG1: u32 = 0x600B_1C04;
+            const WPROTECT: u32 = 0x600B_1C18;
+            const FLAGS: u32 = (1 << 31) | (5 << 28) | (1 << 8) | (1 << 2);
+            conn.write_reg(WPROTECT, WDT_WKEY, None)?;
+            conn.write_reg(CONFIG1, 2000, None)?;
+            conn.write_reg(CONFIG0, FLAGS, None)?;
+            conn.write_reg(WPROTECT, 0, None)
+        }
+        // espflash has WDT register tables for the remaining supported chips.
+        _ => chip.rtc_wdt_reset(conn),
+    }
 }
 
 // ── Flash mode ───────────────────────────────────────────────────────────────
@@ -695,6 +761,21 @@ mod tests {
             choose_before_reset("/dev/cu.usbmodem5B5E1349761", &info),
             ResetBeforeOperation::UsbReset
         ));
+    }
+
+    #[test]
+    fn uart_bridge_is_not_native_usb() {
+        // CP210x bridge on a COM port — the WDT soft reset must run here.
+        let info = usb_info(0x10c4, 0xea60);
+        assert!(!is_native_usb("COM53", &info));
+    }
+
+    #[test]
+    fn usb_serial_jtag_is_native_usb() {
+        let info = usb_info(ESPRESSIF_VID, USB_SERIAL_JTAG_PID);
+        assert!(is_native_usb("COM7", &info));
+        // macOS CDC name without usable vid/pid also counts as native USB.
+        assert!(is_native_usb("/dev/cu.usbmodem1234", &usb_info(0, 0)));
     }
 
     #[test]
