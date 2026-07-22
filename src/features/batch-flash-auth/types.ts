@@ -13,7 +13,7 @@ export const BATCH_FLASH_CAPABLE_CHIPS = ["esp32", "t5ai"] as const;
  *  Only these expose the OTP option; for any other chip the tool writes KV. */
 export const OTP_CAPABLE_CHIPS = ["t5ai"] as const;
 
-export type BatchOpMode = "auth-only" | "flash-then-auth";
+export type BatchOpMode = "auth-only" | "flash-then-auth" | "flash-only";
 
 /** Sentinel error strings from Rust Excel commands → i18n keys. Unknown
  *  errors fall through and are shown verbatim. */
@@ -126,6 +126,8 @@ export interface BatchAuthStartConfig {
   conflictPolicy: "skip" | "overwrite";
   /** Auth storage destination. Only T5AI supports "otp"; defaults to "kv". */
   authStorage?: "kv" | "otp";
+  /** false ⇒ flash-only batch: Rust skips the Excel session and the auth step. */
+  authorizeEnabled: boolean;
 }
 
 // Mirrors src_tauri::batch_auth::ExcelStats

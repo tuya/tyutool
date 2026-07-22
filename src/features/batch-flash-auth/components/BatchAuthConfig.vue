@@ -1,11 +1,26 @@
 <!-- src/features/batch-flash/components/BatchAuthConfig.vue -->
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
+import TySwitch from "@/components/TySwitch.vue";
 
 const { t, te } = useI18n();
 const store = useBatchFlashAuthStore();
+
+// Turning authorization OFF requires firmware flashing to be on (otherwise
+// the batch would do nothing); turning it back ON is always allowed.
+const authorizeToggleDisabled = computed(
+  () =>
+    store.isBusy ||
+    (store.authorizeEnabled && !(store.canFlash && store.flashFirmware)),
+);
+
+function toggleAuthorize() {
+  if (authorizeToggleDisabled.value) return;
+  store.authorizeEnabled = !store.authorizeEnabled;
+}
 
 async function browseExcel() {
   if (!isTauriRuntime()) return;
@@ -24,10 +39,39 @@ async function browseExcel() {
     class="rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-4 py-3"
     style="border-left: 3px solid var(--ty-accent)"
   >
-    <h3 class="mb-3 text-sm font-semibold text-[var(--ty-text)]">
-      {{ t("batchFlashAuth.config.authTitle") }}
-    </h3>
-    <div class="flex flex-col gap-3">
+    <div class="mb-3 flex items-center justify-between gap-3">
+      <h3 class="text-sm font-semibold text-[var(--ty-text)]">
+        {{ t("batchFlashAuth.config.authTitle") }}
+      </h3>
+      <div
+        class="inline-flex items-center gap-2"
+        :title="
+          store.authorizeEnabled && !(store.canFlash && store.flashFirmware)
+            ? t('batchFlashAuth.config.authorizeNeedsFlash')
+            : ''
+        "
+      >
+        <TySwitch
+          :model-value="store.authorizeEnabled"
+          :disabled="authorizeToggleDisabled"
+          size="sm"
+          :aria-label="t('batchFlashAuth.config.authTitle')"
+          @update:model-value="toggleAuthorize"
+        />
+        <span class="text-xs leading-none">{{
+          store.authorizeEnabled
+            ? t("batchFlashAuth.config.authorizeOn")
+            : t("batchFlashAuth.config.authorizeOff")
+        }}</span>
+      </div>
+    </div>
+    <p
+      v-if="!store.authorizeEnabled"
+      class="text-xs text-[var(--ty-text-muted)]"
+    >
+      {{ t("batchFlashAuth.config.authorizeDisabledHint") }}
+    </p>
+    <div v-else class="flex flex-col gap-3">
       <!-- Excel file -->
       <div class="flex flex-col gap-1">
         <label class="text-xs text-[var(--ty-text-muted)]">{{
