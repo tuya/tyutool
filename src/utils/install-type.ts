@@ -48,7 +48,7 @@ export function canUseInAppUpdater(
 
 /**
  * Returns flags derived from `get_install_type` (cached).
- * `manualOnly` enables the same UX as portable: no plugin-updater download/install, releases-page flow.
+ * `manualOnly` enables the same UX as portable: no in-app download/install, releases-page flow.
  */
 export async function getManualUpdateFlags(): Promise<ManualUpdateFlags> {
   const raw = await resolveInstallType();
