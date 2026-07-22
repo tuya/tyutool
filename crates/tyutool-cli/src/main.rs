@@ -12,6 +12,7 @@ use tyutool_core::{
     FlashMode,
 };
 
+mod monitor;
 mod reporter;
 use reporter::CliReporter;
 mod serve;
@@ -126,7 +127,23 @@ enum Commands {
         #[arg(long, default_value_t = 9527)]
         port: u16,
     },
-    /// TuyaOpen device authorization via UART shell (auth-read / auth write)
+    /// Live serial monitor — stream device output to the terminal (Ctrl+] or Ctrl+C to quit)
+    Monitor {
+        /// Serial port (default: first available)
+        #[arg(short = 'p', long = "port")]
+        port: Option<String>,
+        /// Uart baud rate (default: chip-specific monitor baud; 115200 without -d)
+        #[arg(short = 'b', long = "baud")]
+        baud: Option<u32>,
+        /// Chip type — selects the default monitor baud (t5ai: 460800, others: 115200)
+        #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
+        device: Option<String>,
+        /// Append received data to this file
+        #[arg(short = 'l', long = "log")]
+        log: Option<String>,
+    },
+    /// TuyaOpen device authorization via UART shell (auth-read / auth write, KV storage only)
+    #[command(visible_alias = "auth")]
     Authorize {
         /// Serial port (default: first available)
         #[arg(short = 'p', long = "port")]
@@ -187,6 +204,15 @@ fn default_baud(device: &str) -> u32 {
         "ln882h" => 115200,
         "esp32" | "esp32c3" | "esp32c6" | "esp32p4" | "esp32s3" => 460800,
         _ => 921600,
+    }
+}
+
+// Matches TuyaOpen `cli_monitor.py` `_CHIP_MONITOR_BAUDRATE`: T5/T5AI monitor
+// at 460800, every other chip (and no `-d`) at 115200.
+fn monitor_default_baud(device: Option<&str>) -> u32 {
+    match device.map(|d| d.to_ascii_lowercase()).as_deref() {
+        Some("t5ai") => 460800,
+        _ => 115200,
     }
 }
 
@@ -506,6 +532,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("[cli] update check={} source={:?}", check, source);
             update::run_update(check, source)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+        }
+        Commands::Monitor {
+            port,
+            baud,
+            device,
+            log,
+        } => {
+            let port = match port {
+                Some(p) => p,
+                None => choose_port()?,
+            };
+            let baud = baud.unwrap_or_else(|| monitor_default_baud(device.as_deref()));
+            log::info!("[cli] monitor port={} baud={} log={:?}", port, baud, log);
+            monitor::run_monitor(&port, baud, log.as_deref(), &cancel)?;
         }
         Commands::Serve { port } => {
             log::info!("[cli] serve on port {}", port);
@@ -836,6 +876,55 @@ mod tests {
         assert_eq!(default_baud("esp32s3"), 460800);
         assert_eq!(default_baud("bk7231n"), 921600);
         assert_eq!(default_baud("t5ai"), 921600);
+    }
+
+    #[test]
+    fn monitor_default_baud_per_chip() {
+        assert_eq!(monitor_default_baud(Some("t5ai")), 460800);
+        assert_eq!(monitor_default_baud(Some("T5AI")), 460800);
+        assert_eq!(monitor_default_baud(Some("bk7231n")), 115200);
+        assert_eq!(monitor_default_baud(Some("esp32")), 115200);
+        assert_eq!(monitor_default_baud(None), 115200);
+    }
+
+    #[test]
+    fn monitor_command_parses_flags() {
+        let cli = Cli::try_parse_from([
+            "tyutool", "monitor", "-p", "COM3", "-b", "115200", "-l", "dev.log",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Monitor {
+                port, baud, log, ..
+            } => {
+                assert_eq!(port.as_deref(), Some("COM3"));
+                assert_eq!(baud, Some(115200));
+                assert_eq!(log.as_deref(), Some("dev.log"));
+            }
+            _ => panic!("expected Commands::Monitor"),
+        }
+    }
+
+    #[test]
+    fn auth_is_an_alias_for_authorize() {
+        let cli = Cli::try_parse_from([
+            "tyutool",
+            "auth",
+            "-p",
+            "COM3",
+            "--uuid",
+            "u",
+            "--authkey",
+            "k",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Authorize { uuid, authkey, .. } => {
+                assert_eq!(uuid.as_deref(), Some("u"));
+                assert_eq!(authkey.as_deref(), Some("k"));
+            }
+            _ => panic!("expected Commands::Authorize via alias"),
+        }
     }
 
     #[test]

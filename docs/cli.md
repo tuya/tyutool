@@ -123,10 +123,48 @@ tyutool reset [-p <PORT>] [-d <DEVICE>]
 
 ---
 
-### `authorize` — TuyaOpen device authorization
+### `monitor` — Live serial monitor
+
+```
+tyutool monitor [-p <PORT>] [-b <BAUD>] [-d <DEVICE>] [-l <FILE>]
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--port` | `-p` | Serial port | auto-detect |
+| `--baud` | `-b` | UART baud rate | chip-specific monitor baud (see below) |
+| `--device` | `-d` | Chip name — selects the default monitor baud | none |
+| `--log` | `-l` | Append received data to this file | off |
+
+Streams raw device output to stdout. On an interactive terminal, keystrokes
+are forwarded to the device as you type (the device echoes them), so the
+TuyaOpen interactive shell (`tuya>`) can be driven from the monitor. Quit with
+`Ctrl+]` (miniterm-compatible) or `Ctrl+C`.
+
+When stdin is not a terminal (pipe/CI), input is forwarded line-by-line
+terminated with `\r\n` instead, and `Ctrl+C` is the only quit key.
+
+The default monitor baud rate is **460800** for `t5ai` (alias `t5`) and
+**115200** for every other chip or when `-d` is omitted. Note this differs from
+the flash baud defaults used by `write`/`read`/`erase`.
+
+If the device is unplugged while monitoring, the monitor reports the
+disconnect and exits cleanly (exit code `0`).
+
+**Examples:**
+```bash
+tyutool monitor                          # auto-detect port, 115200 baud
+tyutool monitor -p /dev/ttyUSB0 -d t5ai  # T5AI default baud (460800)
+tyutool monitor -p COM3 -l device.log    # tee received data to a file
+```
+
+---
+
+### `authorize` (alias: `auth`) — TuyaOpen device authorization
 
 ```
 tyutool authorize [-p <PORT>] [-d <DEVICE>] [--uuid <UUID>] [--authkey <AUTHKEY>]
+tyutool auth      [-p <PORT>] [-d <DEVICE>] [--uuid <UUID>] [--authkey <AUTHKEY>]
 ```
 
 | Flag | Description |
@@ -137,6 +175,8 @@ tyutool authorize [-p <PORT>] [-d <DEVICE>] [--uuid <UUID>] [--authkey <AUTHKEY>
 | `--authkey` | AuthKey to write (omit to read only) |
 
 To write authorization you must pass **both** `--uuid` and `--authkey`. Passing only one is rejected with an error. Passing neither performs a read-only `auth-read`.
+
+Credentials are always stored in **KV storage** — this command never burns OTP/eFuse. (OTP storage is exclusively a batch-flow feature in the GUI.)
 
 **Read current auth state:**
 ```bash
@@ -251,4 +291,4 @@ Flash OK  3.2s
 
 Exit code `0` on success, non-zero on failure or cancellation.
 
-**Cancellation:** during `write`, `read`, `erase`, or `authorize`, pressing `Ctrl+C` sets a cancellation flag so the job unwinds gracefully (closes the serial port and reports `Cancelled`) instead of the process being killed mid-transfer.
+**Cancellation:** during `write`, `read`, `erase`, or `authorize`, pressing `Ctrl+C` sets a cancellation flag so the job unwinds gracefully (closes the serial port and reports `Cancelled`) instead of the process being killed mid-transfer. For `monitor`, `Ctrl+]` or `Ctrl+C` is the normal way to quit and exits with code `0`.

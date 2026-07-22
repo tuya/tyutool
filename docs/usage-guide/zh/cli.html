@@ -58,7 +58,7 @@
       <p><strong>端口选择</strong>（带 <code>-p/--port</code> 的命令）：省略 <code>-p</code> 时，若只有<strong>一个</strong>可用端口，会自动使用它；若存在<strong>多个</strong>端口，在交互式终端上会提示你选择一个，而在非交互环境（CI、管道）下命令会报错并要求你显式传 <code>-p</code>。</p>
 
       <h2 id="subcommands">4. 子命令</h2>
-      <p>下列 10 个子命令按字母/逻辑顺序给出。每个子命令含：用法行（<code>&lt;pre&gt;</code>）、参数表（<code>&lt;table&gt;</code>）、示例（<code>&lt;pre&gt;</code>）。参数与默认值与 <code>docs/cli.md</code> 完全一致。</p>
+      <p>下列 11 个子命令按字母/逻辑顺序给出。每个子命令含：用法行（<code>&lt;pre&gt;</code>）、参数表（<code>&lt;table&gt;</code>）、示例（<code>&lt;pre&gt;</code>）。参数与默认值与 <code>docs/cli.md</code> 完全一致。</p>
 
       <h3 id="cmd-write"><code>write</code> — 烧录固件到设备</h3>
       <pre>tyutool write -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [--end &lt;END&gt;]</pre>
@@ -139,8 +139,31 @@
 
       <hr>
 
-      <h3 id="cmd-authorize"><code>authorize</code> — TuyaOpen 设备授权</h3>
-      <pre>tyutool authorize [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]</pre>
+      <h3 id="cmd-monitor"><code>monitor</code> — 实时串口监视</h3>
+      <pre>tyutool monitor [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-d &lt;DEVICE&gt;] [-l &lt;FILE&gt;]</pre>
+      <table>
+        <thead><tr><th>参数</th><th>简写</th><th>说明</th><th>默认值</th></tr></thead>
+        <tbody>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>串口</td><td>自动检测</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART 波特率</td><td>按芯片而定的监视波特率（见下文）</td></tr>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>芯片名——决定默认监视波特率</td><td>无</td></tr>
+          <tr><td><code>--log</code></td><td><code>-l</code></td><td>把接收到的数据追加写入该文件</td><td>关闭</td></tr>
+        </tbody>
+      </table>
+      <p>将设备原始输出实时透传到 stdout。在交互式终端上，键入的按键会即时转发给设备（由设备回显），因此可以直接在监视器里操作 TuyaOpen 交互 shell（<code>tuya&gt;</code>）。按 <code>Ctrl+]</code>（与 miniterm 一致）或 <code>Ctrl+C</code> 退出。</p>
+      <p>当 stdin 不是终端（管道/CI）时，输入改为按行转发（行尾补 <code>\r\n</code>），此时只能用 <code>Ctrl+C</code> 退出。</p>
+      <p>默认监视波特率：<code>t5ai</code>（别名 <code>t5</code>）为 <strong>460800</strong>，其他芯片或省略 <code>-d</code> 时为 <strong>115200</strong>。注意这与 <code>write</code>/<code>read</code>/<code>erase</code> 使用的烧录波特率默认值不同。</p>
+      <p>监视过程中设备被拔出时，监视器会报告断连并正常退出（退出码 <code>0</code>）。</p>
+      <p><strong>示例：</strong></p>
+      <pre>tyutool monitor                          # 自动检测端口，115200 波特率
+tyutool monitor -p /dev/ttyUSB0 -d t5ai  # T5AI 默认波特率（460800）
+tyutool monitor -p COM3 -l device.log    # 同时把接收数据写入文件</pre>
+
+      <hr>
+
+      <h3 id="cmd-authorize"><code>authorize</code>（别名：<code>auth</code>）— TuyaOpen 设备授权</h3>
+      <pre>tyutool authorize [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]
+tyutool auth      [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]</pre>
       <table>
         <thead><tr><th>参数</th><th>说明</th></tr></thead>
         <tbody>
@@ -151,6 +174,7 @@
         </tbody>
       </table>
       <p>写入授权时必须<strong>同时</strong>传 <code>--uuid</code> 和 <code>--authkey</code>。只传其中一个会被拒绝并报错。两者都不传则执行只读的 <code>auth-read</code>。</p>
+      <p>凭据始终写入 <strong>KV 存储</strong>——该命令绝不会烧写 OTP/eFuse。（OTP 存储仅在 GUI 的批量流程中提供。）</p>
       <p><strong>读取当前授权状态：</strong></p>
       <pre>tyutool authorize -p /dev/ttyUSB0
 tyutool authorize -p /dev/ttyUSB0 -d esp32</pre>
@@ -235,7 +259,7 @@ Flash OK  3.2s</pre>
       <p>成功退出码为 <code>0</code>，失败或取消时为非零。</p>
       <div class="callout note">
         <span class="title">取消（Cancellation）</span>
-        在 <code>write</code>、<code>read</code>、<code>erase</code> 或 <code>authorize</code> 期间按 <code>Ctrl+C</code>，会设置一个取消标志，使任务<strong>优雅退出</strong>（关闭串口并报告 <code>Cancelled</code>），而不是在传输中途把进程杀掉。
+        在 <code>write</code>、<code>read</code>、<code>erase</code> 或 <code>authorize</code> 期间按 <code>Ctrl+C</code>，会设置一个取消标志，使任务<strong>优雅退出</strong>（关闭串口并报告 <code>Cancelled</code>），而不是在传输中途把进程杀掉。对 <code>monitor</code> 而言，<code>Ctrl+]</code> 或 <code>Ctrl+C</code> 是正常的退出方式，退出码为 <code>0</code>。
       </div>
 
       <h2 id="developer-reference">7. 开发者参考</h2>

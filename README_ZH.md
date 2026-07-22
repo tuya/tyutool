@@ -114,6 +114,16 @@ tyutool authorize -p /dev/ttyUSB0 --uuid <UUID> --authkey <AUTHKEY>
 tyutool reset -p /dev/ttyUSB0 -d bk7231n
 ```
 
+### 串口监视
+
+```bash
+# 实时查看设备输出（按 Ctrl+] 或 Ctrl+C 退出）
+tyutool monitor -p /dev/ttyUSB0
+
+# T5AI 默认监视波特率（460800），同时把输出写入文件
+tyutool monitor -p /dev/ttyUSB0 -d t5ai -l device.log
+```
+
 ### 自升级
 
 ```bash

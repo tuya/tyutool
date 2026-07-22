@@ -58,7 +58,7 @@
       <p><strong>Port selection</strong> (commands that take <code>-p/--port</code>): when <code>-p</code> is omitted, a <strong>single</strong> available port is used automatically. If <strong>multiple</strong> ports are present, you are prompted to choose one on an interactive terminal; in a non-interactive context (CI, pipe) the command errors and asks you to pass <code>-p</code> explicitly.</p>
 
       <h2 id="subcommands">4. Subcommands</h2>
-      <p>The 10 subcommands below are listed in logical order. Each has: a usage line (<code>&lt;pre&gt;</code>), a flag table (<code>&lt;table&gt;</code>), and an example (<code>&lt;pre&gt;</code>). Flags and defaults are identical to <code>docs/cli.md</code>.</p>
+      <p>The 11 subcommands below are listed in logical order. Each has: a usage line (<code>&lt;pre&gt;</code>), a flag table (<code>&lt;table&gt;</code>), and an example (<code>&lt;pre&gt;</code>). Flags and defaults are identical to <code>docs/cli.md</code>.</p>
 
       <h3 id="cmd-write"><code>write</code> — Flash firmware to device</h3>
       <pre>tyutool write -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [--end &lt;END&gt;]</pre>
@@ -139,8 +139,31 @@
 
       <hr>
 
-      <h3 id="cmd-authorize"><code>authorize</code> — TuyaOpen device authorization</h3>
-      <pre>tyutool authorize [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]</pre>
+      <h3 id="cmd-monitor"><code>monitor</code> — Live serial monitor</h3>
+      <pre>tyutool monitor [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-d &lt;DEVICE&gt;] [-l &lt;FILE&gt;]</pre>
+      <table>
+        <thead><tr><th>Flag</th><th>Short</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>--port</code></td><td><code>-p</code></td><td>Serial port</td><td>auto-detect</td></tr>
+          <tr><td><code>--baud</code></td><td><code>-b</code></td><td>UART baud rate</td><td>chip-specific monitor baud (see below)</td></tr>
+          <tr><td><code>--device</code></td><td><code>-d</code></td><td>Chip name — selects the default monitor baud</td><td>none</td></tr>
+          <tr><td><code>--log</code></td><td><code>-l</code></td><td>Append received data to this file</td><td>off</td></tr>
+        </tbody>
+      </table>
+      <p>Streams raw device output to stdout. On an interactive terminal, keystrokes are forwarded to the device as you type (the device echoes them), so the TuyaOpen interactive shell (<code>tuya&gt;</code>) can be driven from the monitor. Quit with <code>Ctrl+]</code> (miniterm-compatible) or <code>Ctrl+C</code>.</p>
+      <p>When stdin is not a terminal (pipe/CI), input is forwarded line-by-line terminated with <code>\r\n</code> instead, and <code>Ctrl+C</code> is the only quit key.</p>
+      <p>The default monitor baud rate is <strong>460800</strong> for <code>t5ai</code> (alias <code>t5</code>) and <strong>115200</strong> for every other chip or when <code>-d</code> is omitted. Note this differs from the flash baud defaults used by <code>write</code>/<code>read</code>/<code>erase</code>.</p>
+      <p>If the device is unplugged while monitoring, the monitor reports the disconnect and exits cleanly (exit code <code>0</code>).</p>
+      <p><strong>Examples:</strong></p>
+      <pre>tyutool monitor                          # auto-detect port, 115200 baud
+tyutool monitor -p /dev/ttyUSB0 -d t5ai  # T5AI default baud (460800)
+tyutool monitor -p COM3 -l device.log    # tee received data to a file</pre>
+
+      <hr>
+
+      <h3 id="cmd-authorize"><code>authorize</code> (alias: <code>auth</code>) — TuyaOpen device authorization</h3>
+      <pre>tyutool authorize [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]
+tyutool auth      [-p &lt;PORT&gt;] [-d &lt;DEVICE&gt;] [--uuid &lt;UUID&gt;] [--authkey &lt;AUTHKEY&gt;]</pre>
       <table>
         <thead><tr><th>Flag</th><th>Description</th></tr></thead>
         <tbody>
@@ -151,6 +174,7 @@
         </tbody>
       </table>
       <p>To write authorization you must pass <strong>both</strong> <code>--uuid</code> and <code>--authkey</code>. Passing only one is rejected with an error. Passing neither performs a read-only <code>auth-read</code>.</p>
+      <p>Credentials are always stored in <strong>KV storage</strong> — this command never burns OTP/eFuse. (OTP storage is exclusively a batch-flow feature in the GUI.)</p>
       <p><strong>Read current auth state:</strong></p>
       <pre>tyutool authorize -p /dev/ttyUSB0
 tyutool authorize -p /dev/ttyUSB0 -d esp32</pre>
@@ -235,7 +259,7 @@ Flash OK  3.2s</pre>
       <p>Exit code <code>0</code> on success, non-zero on failure or cancellation.</p>
       <div class="callout note">
         <span class="title">Cancellation</span>
-        During <code>write</code>, <code>read</code>, <code>erase</code>, or <code>authorize</code>, pressing <code>Ctrl+C</code> sets a cancellation flag so the job <strong>unwinds gracefully</strong> (closes the serial port and reports <code>Cancelled</code>) instead of the process being killed mid-transfer.
+        During <code>write</code>, <code>read</code>, <code>erase</code>, or <code>authorize</code>, pressing <code>Ctrl+C</code> sets a cancellation flag so the job <strong>unwinds gracefully</strong> (closes the serial port and reports <code>Cancelled</code>) instead of the process being killed mid-transfer. For <code>monitor</code>, <code>Ctrl+]</code> or <code>Ctrl+C</code> is the normal way to quit and exits with code <code>0</code>.
       </div>
 
       <h2 id="developer-reference">7. Developer reference</h2>

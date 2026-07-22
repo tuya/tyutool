@@ -114,6 +114,16 @@ tyutool authorize -p /dev/ttyUSB0 --uuid <UUID> --authkey <AUTHKEY>
 tyutool reset -p /dev/ttyUSB0 -d bk7231n
 ```
 
+### Serial monitor
+
+```bash
+# Stream device output (quit with Ctrl+] or Ctrl+C)
+tyutool monitor -p /dev/ttyUSB0
+
+# T5AI default monitor baud (460800), tee output to a file
+tyutool monitor -p /dev/ttyUSB0 -d t5ai -l device.log
+```
+
 ### Self-update
 
 ```bash
