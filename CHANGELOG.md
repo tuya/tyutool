@@ -2,6 +2,20 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.6] - 2026-07-22
+
+### 新功能
+
+- `cli`：新增 `monitor` 命令——实时串口监视器，设备输出直达终端；交互终端下按键实时转发到设备，可直接驱动 TuyaOpen 交互 shell（`tuya>`）；支持 `-l` 将接收数据同步记录到文件；`Ctrl+]`（兼容 miniterm）或 `Ctrl+C` 退出；`t5ai` 默认波特率 460800，其余芯片 115200
+- `cli`：`authorize` 新增别名 `auth`；文档明确授权凭证始终写入 KV 存储，不会烧写 OTP/eFuse
+
+---
+
+### Features
+
+- `cli`: New `monitor` command — a live serial monitor streaming raw device output to the terminal; on interactive terminals keystrokes are forwarded to the device, so the TuyaOpen interactive shell (`tuya>`) can be driven directly; `-l` tees received data to a file; quit with `Ctrl+]` (miniterm-compatible) or `Ctrl+C`; default baud is 460800 for `t5ai` and 115200 for other chips
+- `cli`: `authorize` gains the visible alias `auth`; docs clarify that credentials are always stored in KV storage — this command never burns OTP/eFuse
+
 ## [3.2.5] - 2026-07-22
 
 ### 新功能
