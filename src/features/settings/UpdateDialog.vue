@@ -9,6 +9,7 @@ import {
   fetchLatestJson,
   isNewerVersion,
 } from "./update-sources";
+import { updateCheck, updateDownload, updateInstall } from "./in-app-updater";
 import {
   deriveUpdateSourceAction,
   deriveUpdateSummaryState,
@@ -54,10 +55,6 @@ const downloadingSource = ref("");
 const downloadingVersion = ref("");
 const installing = ref(false);
 
-let pendingUpdate: Awaited<
-  ReturnType<typeof import("@tauri-apps/plugin-updater").check>
-> = null;
-
 const manualUpdateOnly = ref(false);
 const debRpmInstall = ref(false);
 const installTypeReady = ref(false);
@@ -80,7 +77,6 @@ function resetState(): void {
   downloadingSource.value = "";
   downloadingVersion.value = "";
   installing.value = false;
-  pendingUpdate = null;
   installTypeReady.value = false;
   manualUpdateOnly.value = false;
   debRpmInstall.value = false;
@@ -269,7 +265,6 @@ function sourceActionKind(source: SourceState): UpdateSourceActionKind {
     installTypeReady: installTypeReady.value,
     manualUpdateOnly: manualUpdateOnly.value,
     inAppUpdateSupported: inAppUpdateSupported.value,
-    primaryAvailableSourceId: primaryAvailableSource.value?.id ?? null,
   });
 }
 
@@ -351,30 +346,25 @@ async function startDownload(sourceState: SourceState): Promise<void> {
     await info(
       `[Update] startDownload: source=${sourceState.id}, version=${sourceState.version}`,
     );
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
+    const update = await updateCheck(sourceState.id);
     await info(
-      `[Update] check() returned: available=${update?.available}, version=${update?.version}, currentVersion=${update?.currentVersion}`,
+      `[Update] update_check returned: available=${update.available}, version=${update.version}, currentVersion=${update.currentVersion}`,
     );
-    if (update) {
+    if (update.available) {
       await info(
         `[Update] update details: date=${update.date}, body=${update.body?.substring(0, 200)}`,
       );
-    }
-    if (!update?.available) {
-      await info("[Update] no update available from plugin-updater");
+    } else {
+      await info("[Update] no update available from update_check");
       downloading.value = false;
       return;
     }
 
-    await update.download((event) => {
+    await updateDownload((event) => {
       if (event.event === "Started") {
-        totalBytes.value =
-          (event.data as { contentLength?: number }).contentLength ?? 0;
+        totalBytes.value = event.data.contentLength ?? 0;
       } else if (event.event === "Progress") {
-        downloadedBytes.value += (
-          event.data as { chunkLength: number }
-        ).chunkLength;
+        downloadedBytes.value += event.data.chunkLength;
         if (totalBytes.value > 0) {
           downloadPercent.value = Math.round(
             (downloadedBytes.value / totalBytes.value) * 100,
@@ -385,7 +375,6 @@ async function startDownload(sourceState: SourceState): Promise<void> {
       }
     });
 
-    pendingUpdate = update;
     downloading.value = false;
     downloadReady.value = true;
     downloadPercent.value = 100;
@@ -407,9 +396,9 @@ async function restartNow(): Promise<void> {
 
   try {
     await info("[Update] restartNow: starting install...");
-    if (pendingUpdate) {
-      await pendingUpdate.install();
-      pendingUpdate = null;
+    if (downloadReady.value) {
+      await updateInstall();
+      downloadReady.value = false;
     }
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();

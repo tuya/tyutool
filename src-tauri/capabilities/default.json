@@ -17,9 +17,6 @@
     "store:allow-set",
     "store:allow-save",
     "store:allow-load",
-    "updater:allow-check",
-    "updater:allow-download",
-    "updater:allow-install",
     "process:allow-exit",
     "process:allow-restart",
     "log:default"

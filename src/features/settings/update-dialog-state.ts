@@ -137,7 +137,6 @@ export function deriveUpdateSourceAction(input: {
   installTypeReady: boolean;
   manualUpdateOnly: boolean;
   inAppUpdateSupported: boolean;
-  primaryAvailableSourceId: UpdateDialogSourceState["id"] | null;
 }): UpdateSourceActionKind {
   const {
     source,
@@ -146,7 +145,6 @@ export function deriveUpdateSourceAction(input: {
     installTypeReady,
     manualUpdateOnly,
     inAppUpdateSupported,
-    primaryAvailableSourceId,
   } = input;
 
   if (
@@ -162,7 +160,9 @@ export function deriveUpdateSourceAction(input: {
     return "manual";
   }
 
-  if (inAppUpdateSupported && primaryAvailableSourceId === source.id) {
+  // Installed builds in-app update from whichever source the user picked
+  // (update_check honors the source's endpoint Rust-side).
+  if (inAppUpdateSupported) {
     return "download";
   }
 

@@ -58,6 +58,17 @@ struct BatchAuthState {
     session: Arc<StdMutex<AllocatorSession>>,
 }
 
+/// In-app update staged by `update_check`, downloaded by `update_download`,
+/// consumed by `update_install`.
+struct UpdateState {
+    pending: StdMutex<Option<PendingUpdate>>,
+}
+
+struct PendingUpdate {
+    update: tauri_plugin_updater::Update,
+    bytes: Option<Vec<u8>>,
+}
+
 /// Excel allocator + count of slot threads using it, guarded by ONE mutex so
 /// acquire (batch_auth_start) and release (last SlotSessionGuard drop) can
 /// never interleave. Invariant: `alloc.is_some() ⇒ active > 0` — the file
@@ -1756,6 +1767,186 @@ async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, String> {
     Ok(body)
 }
 
+/// Update-manifest endpoint per source id.
+/// Mirrors UPDATE_SOURCES in src/features/settings/update-sources.ts — keep in sync.
+fn update_endpoint(source: &str) -> Option<&'static str> {
+    match source {
+        "github" => Some("https://github.com/tuya/tyutool/releases/latest/download/latest.json"),
+        // "pruduct" is the actual key spelling on the Tuya OSS bucket — do not fix.
+        "tuya" => Some(
+            "https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json",
+        ),
+        _ => None,
+    }
+}
+
+// Mirrored by UpdateCheckReply in src/features/settings/in-app-updater.ts
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckReply {
+    available: bool,
+    version: String,
+    current_version: String,
+    date: Option<String>,
+    body: Option<String>,
+}
+
+// Mirrored by UpdateDownloadEvent in src/features/settings/in-app-updater.ts
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data", rename_all_fields = "camelCase")]
+enum UpdateDownloadEvent {
+    Started { content_length: Option<u64> },
+    Progress { chunk_length: usize },
+    Finished,
+}
+
+/// Check for an update against the manifest endpoint of the given source
+/// ("github" or "tuya"), staging the result for `update_download`. Unlike the
+/// plugin's JS `check()`, which always walks the static endpoint list in
+/// tauri.conf.json (GitHub first), this honors the source the user picked.
+#[tauri::command]
+async fn update_check(
+    app: AppHandle,
+    state: State<'_, UpdateState>,
+    source: String,
+) -> Result<UpdateCheckReply, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let endpoint =
+        update_endpoint(&source).ok_or_else(|| format!("unknown update source: {}", source))?;
+    log::info!(
+        "[Update] update_check: source={}, endpoint={}",
+        source,
+        endpoint
+    );
+    let url = endpoint.parse::<tauri::Url>().map_err(|e| e.to_string())?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| {
+        log::warn!("[Update] update_check failed for source={}: {}", source, e);
+        e.to_string()
+    })?;
+    match update {
+        Some(update) => {
+            log::info!(
+                "[Update] update_check: available={} -> {} (source={}, download_url={})",
+                update.current_version,
+                update.version,
+                source,
+                update.download_url
+            );
+            let reply = UpdateCheckReply {
+                available: true,
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                date: update.date.map(|d| d.to_string()),
+                body: update.body.clone(),
+            };
+            *state.pending.lock().unwrap() = Some(PendingUpdate {
+                update,
+                bytes: None,
+            });
+            Ok(reply)
+        }
+        None => {
+            log::info!(
+                "[Update] update_check: already up to date (source={})",
+                source
+            );
+            *state.pending.lock().unwrap() = None;
+            Ok(UpdateCheckReply {
+                available: false,
+                version: String::new(),
+                current_version: app.package_info().version.to_string(),
+                date: None,
+                body: None,
+            })
+        }
+    }
+}
+
+/// Download the update staged by `update_check`, emitting
+/// `update-download-progress` events, and hold the bytes for `update_install`.
+#[tauri::command]
+async fn update_download(app: AppHandle, state: State<'_, UpdateState>) -> Result<(), String> {
+    let update = state
+        .pending
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|p| p.update.clone())
+        .ok_or("no pending update; call update_check first")?;
+
+    log::info!(
+        "[Update] update_download: starting, url={}",
+        update.download_url
+    );
+    let mut started = false;
+    let bytes = update
+        .download(
+            |chunk_length, content_length| {
+                if !started {
+                    started = true;
+                    let _ = app.emit(
+                        "update-download-progress",
+                        UpdateDownloadEvent::Started { content_length },
+                    );
+                }
+                let _ = app.emit(
+                    "update-download-progress",
+                    UpdateDownloadEvent::Progress { chunk_length },
+                );
+            },
+            || {
+                let _ = app.emit("update-download-progress", UpdateDownloadEvent::Finished);
+            },
+        )
+        .await
+        .map_err(|e| {
+            log::error!("[Update] update_download failed: {}", e);
+            e.to_string()
+        })?;
+    log::info!("[Update] update_download: downloaded {} bytes", bytes.len());
+    match state.pending.lock().unwrap().as_mut() {
+        Some(pending) => {
+            pending.bytes = Some(bytes);
+            Ok(())
+        }
+        None => Err("pending update was cleared during download".to_string()),
+    }
+}
+
+/// Install the update downloaded by `update_download`. On Windows this launches
+/// the installer and exits; the frontend relaunches via plugin-process after.
+/// The staged update is kept on failure (e.g. UAC denied) so install can be retried.
+#[tauri::command]
+async fn update_install(state: State<'_, UpdateState>) -> Result<(), String> {
+    let pending = state
+        .pending
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("no pending update; call update_check first")?;
+    let Some(bytes) = pending.bytes.as_ref() else {
+        *state.pending.lock().unwrap() = Some(pending);
+        return Err("update not downloaded; call update_download first".to_string());
+    };
+    log::info!("[Update] update_install: installing {} bytes", bytes.len());
+    match pending.update.install(bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            log::error!("[Update] update_install failed: {}", e);
+            let msg = e.to_string();
+            *state.pending.lock().unwrap() = Some(pending);
+            Err(msg)
+        }
+    }
+}
+
 /// Hex-encoded SHA-256 of the given bytes (lowercase).
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
@@ -3053,6 +3244,9 @@ pub fn run() {
         .manage(ConfirmState {
             sender: Arc::new(StdMutex::new(None)),
         })
+        .manage(UpdateState {
+            pending: StdMutex::new(None),
+        })
         .setup(|app| {
             let version = app.package_info().version.to_string();
             let install_type = detect_install_type();
@@ -3087,6 +3281,9 @@ pub fn run() {
             check_port_available_cmd,
             check_file_exists,
             fetch_url,
+            update_check,
+            update_download,
+            update_install,
             download_auth_firmware,
             get_install_type,
             set_log_level,
