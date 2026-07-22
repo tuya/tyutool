@@ -37,6 +37,33 @@ type CachedLineBase = {
   lastRendered?: CachedRenderedLine;
 };
 
+// Theme-aware fallback colors for RX lines whose ESP-IDF/Tuya level prefix
+// (`E (...)`, `W (...)`, ...) carries no ANSI foreground color (issue #110).
+const LEVEL_PREFIX_RE = /^([EWIDV]) \(/;
+const LEVEL_FALLBACK_FG: Record<string, string> = {
+  E: "var(--ty-danger)",
+  W: "var(--ty-accent)",
+  I: "var(--ty-success)",
+  D: "var(--ty-primary)",
+  V: "var(--ty-text-muted)",
+};
+
+function applyLevelFallback(
+  line: DebugLogLine,
+  plainText: string,
+  spans: AnsiSpan[],
+): AnsiSpan[] {
+  if (line.direction !== "rx") return spans;
+  if (spans.some((span) => span.style.fg)) return spans;
+  const match = LEVEL_PREFIX_RE.exec(plainText);
+  if (!match) return spans;
+  const fg = LEVEL_FALLBACK_FG[match[1]];
+  return spans.map((span) => ({
+    text: span.text,
+    style: { ...span.style, fg },
+  }));
+}
+
 function splitByKeyword(
   text: string,
   searchQuery: string,
@@ -137,7 +164,7 @@ export class SerialDebugLogLineRenderer {
     existing = {
       plainText,
       lowerPlainText: plainText.toLowerCase(),
-      ansiSpans: parseAnsi(line.text),
+      ansiSpans: applyLevelFallback(line, plainText, parseAnsi(line.text)),
       plainSpans: [{ text: plainText, style: {} }],
     };
     this.baseByLineId.set(line.id, existing);
