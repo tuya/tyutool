@@ -19,7 +19,7 @@ export type UpdateDownloadEvent =
   | { event: "Progress"; data: { chunkLength: number } }
   | { event: "Finished" };
 
-export const UPDATE_DOWNLOAD_EVENT = "update-download-progress";
+const UPDATE_DOWNLOAD_EVENT = "update-download-progress";
 
 /** Check for an update against the manifest endpoint of the given source,
  *  staging the result Rust-side for {@link updateDownload}. */

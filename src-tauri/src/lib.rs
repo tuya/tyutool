@@ -1768,7 +1768,8 @@ async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, String> {
 }
 
 /// Update-manifest endpoint per source id.
-/// Mirrors UPDATE_SOURCES in src/features/settings/update-sources.ts — keep in sync.
+/// Mirrors UPDATE_SOURCES in src/features/settings/update-sources.ts and the
+/// fallback `plugins.updater.endpoints` list in tauri.conf.json — keep in sync.
 fn update_endpoint(source: &str) -> Option<&'static str> {
     match source {
         "github" => Some("https://github.com/tuya/tyutool/releases/latest/download/latest.json"),
@@ -3551,6 +3552,23 @@ mod tests {
         )
         .unwrap();
         assert!(!cfg.authorize_enabled);
+    }
+
+    #[test]
+    fn update_endpoint_maps_known_sources_and_rejects_unknown() {
+        assert_eq!(
+            update_endpoint("github"),
+            Some("https://github.com/tuya/tyutool/releases/latest/download/latest.json")
+        );
+        // "pruduct" is the actual key spelling on the Tuya OSS bucket — do not fix.
+        assert_eq!(
+            update_endpoint("tuya"),
+            Some(
+                "https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json"
+            )
+        );
+        assert_eq!(update_endpoint("gitee"), None);
+        assert_eq!(update_endpoint(""), None);
     }
 }
 
