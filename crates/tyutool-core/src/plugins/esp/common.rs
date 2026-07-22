@@ -6,6 +6,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use espflash::command::{Command, CommandType};
 use espflash::connection::{Connection, ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::Flasher;
 use espflash::target::ProgressCallbacks;
@@ -285,6 +286,29 @@ pub(crate) fn run_esp(
         FlashMode::Read => run_read(job, &mut flasher, cancel, progress)?,
         FlashMode::Authorize => unreachable!("Authorize is handled in run_job before plugin.run"),
     }
+
+    // The RTS hard reset below only works when the adapter's DTR/RTS lines are
+    // wired to EN/IO0. Production fixtures often connect TX/RX only (blank
+    // modules fall into ROM download mode by themselves, so flashing works),
+    // and there the RTS pulse is electrically a no-op: the chip stays in the
+    // silent flasher stub and batch authorize gets zero bytes forever.
+    // `RunUserCode` is a protocol-level soft reset — the stub jumps to the
+    // freshly flashed firmware over the serial protocol itself, independent of
+    // any control-line wiring. Errors are non-fatal: the hard reset still runs.
+    // The short sleeps let the stub settle after the last flash command and
+    // give the second-stage bootloader a head start before the hard reset
+    // (or the port close/reopen of a follow-up authorize slot) hits.
+    log::info!("Soft-resetting ESP device (RunUserCode) to exit the flasher stub");
+    std::thread::sleep(Duration::from_millis(100));
+    let soft_reset = flasher
+        .connection()
+        .with_timeout(CommandType::RunUserCode.timeout(), |conn| {
+            conn.command(Command::RunUserCode)
+        });
+    if let Err(e) = soft_reset {
+        log::warn!("ESP RunUserCode soft reset failed: {e}");
+    }
+    std::thread::sleep(Duration::from_millis(200));
 
     // espflash only applies the ResetAfterOperation when asked explicitly (its
     // CLI calls this after every operation). Without it the chip stays in the
