@@ -127,13 +127,12 @@ describe("deriveUpdateSourceAction", () => {
       installTypeReady: true,
       manualUpdateOnly: false,
       inAppUpdateSupported: true,
-      primaryAvailableSourceId: "github",
     });
 
     expect(result).toBe("download");
   });
 
-  it("falls back to the selected source release page for non-primary sources", () => {
+  it("uses in-app download for a non-primary available source on installed builds", () => {
     const result = deriveUpdateSourceAction({
       source: makeSourceState("available", { id: "tuya" }),
       summaryKind: "available",
@@ -141,10 +140,9 @@ describe("deriveUpdateSourceAction", () => {
       installTypeReady: true,
       manualUpdateOnly: false,
       inAppUpdateSupported: true,
-      primaryAvailableSourceId: "github",
     });
 
-    expect(result).toBe("manual");
+    expect(result).toBe("download");
   });
 
   it("uses the source release page when the install type only supports manual updates", () => {
@@ -155,7 +153,6 @@ describe("deriveUpdateSourceAction", () => {
       installTypeReady: true,
       manualUpdateOnly: true,
       inAppUpdateSupported: false,
-      primaryAvailableSourceId: "github",
     });
 
     expect(result).toBe("manual");
@@ -169,7 +166,6 @@ describe("deriveUpdateSourceAction", () => {
       installTypeReady: true,
       manualUpdateOnly: false,
       inAppUpdateSupported: true,
-      primaryAvailableSourceId: "github",
     });
 
     expect(result).toBe("none");
