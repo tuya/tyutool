@@ -615,6 +615,10 @@
       "browse": "浏览",
       "noFile": "未选择文件",
       "authTitle": "批量授权配置",
+      "authorizeOn": "开启",
+      "authorizeOff": "关闭",
+      "authorizeDisabledHint": "已关闭批量授权，本批次仅烧录固件，不写入授权。",
+      "authorizeNeedsFlash": "需先开启固件烧录才能关闭授权",
       "excelFile": "授权表 (.xlsx)",
       "noExcel": "未选择授权表",
       "conflictPolicy": "遇到已授权设备",
@@ -654,6 +658,7 @@
       "autoAssignHint": "扫描并添加可用串口",
       "noFailedPorts": "暂无失败端口",
       "selectExcelFirst": "请先选择授权表",
+      "selectFirmwareFirst": "请先选择固件文件",
       "noIdlePorts": "暂无空闲串口",
       "batchInProgress": "批次进行中",
       "excelExhausted": "授权码已全部使用，请补充 Excel 后重试",
@@ -740,6 +745,7 @@
     "dialog": {
       "confirmAuthOnly": "确认批量授权",
       "confirmFlashThenAuth": "确认批量烧录",
+      "confirmFlashOnly": "确认批量烧录（不授权）",
       "aboutToOperate": "即将对 {count} 个端口并行操作",
       "firmwareLine": "固件：{path}",
       "excelLine": "授权表：{path}"

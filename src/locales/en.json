@@ -615,6 +615,10 @@
       "browse": "Browse",
       "noFile": "No file selected",
       "authTitle": "Batch Auth Config",
+      "authorizeOn": "On",
+      "authorizeOff": "Off",
+      "authorizeDisabledHint": "Batch authorization is off; this batch will only flash firmware, no auth is written.",
+      "authorizeNeedsFlash": "Enable firmware flashing first to turn authorization off",
       "excelFile": "Auth Table (.xlsx)",
       "noExcel": "No auth table selected",
       "conflictPolicy": "Already-authorized device",
@@ -654,6 +658,7 @@
       "autoAssignHint": "Scan and add available ports",
       "noFailedPorts": "No failed ports",
       "selectExcelFirst": "Select an auth table first",
+      "selectFirmwareFirst": "Select a firmware file first",
       "noIdlePorts": "No idle ports",
       "batchInProgress": "Batch in progress",
       "excelExhausted": "Auth codes exhausted — please add more to the Excel and retry",
@@ -740,6 +745,7 @@
     "dialog": {
       "confirmAuthOnly": "Confirm Batch Authorization",
       "confirmFlashThenAuth": "Confirm Batch Flash",
+      "confirmFlashOnly": "Confirm Batch Flash (No Auth)",
       "aboutToOperate": "About to operate on {count} ports in parallel",
       "firmwareLine": "Firmware: {path}",
       "excelLine": "Auth table: {path}"

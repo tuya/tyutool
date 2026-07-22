@@ -1562,3 +1562,167 @@ describe("loadPersistedData — legacy lockOtpAfterAuth key does not leak in", (
     ).toBeUndefined();
   });
 });
+
+describe("authorizeEnabled — flash-only mode", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  function flashOnlyStore() {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "esp32";
+    store.firmwarePath = "/fw.bin";
+    store.authorizeEnabled = false;
+    return store;
+  }
+
+  it("opMode is flash-only when authorization is disabled", () => {
+    const store = flashOnlyStore();
+    expect(store.opMode).toBe("flash-only");
+  });
+
+  it("inputsValid requires firmware instead of excel in flash-only mode", () => {
+    const store = flashOnlyStore();
+    expect(store.inputsValid).toBe(true);
+    store.firmwarePath = "";
+    expect(store.inputsValid).toBe(false);
+  });
+
+  it("canStart ignores excel state in flash-only mode", () => {
+    const store = flashOnlyStore();
+    store.addPorts(["COM3"]);
+    // no excelPath, no excelStats — would block an auth batch
+    expect(store.canStart).toBe(true);
+  });
+
+  it("canStart is false in flash-only mode without a firmware", () => {
+    const store = flashOnlyStore();
+    store.addPorts(["COM3"]);
+    store.firmwarePath = "";
+    expect(store.canStart).toBe(false);
+  });
+
+  it("re-enables authorization when firmware flashing is turned off", async () => {
+    const store = flashOnlyStore();
+    store.flashFirmware = false;
+    await nextTick();
+    expect(store.authorizeEnabled).toBe(true);
+  });
+
+  it("re-enables authorization when switching to a chip without a flash plugin", async () => {
+    const store = flashOnlyStore();
+    store.chipId = "other";
+    await nextTick();
+    expect(store.authorizeEnabled).toBe(true);
+  });
+
+  it("flashing done event is terminal: slot done, flash counter incremented, auth untouched", () => {
+    const store = flashOnlyStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "flashing",
+      event: { kind: "done", result: { ok: null } },
+    });
+    expect(store.slots[0].status).toBe("done");
+    expect(store.slots[0].progress).toBe(100);
+    expect(store.cumulativeStats.flash).toEqual({
+      total: 1,
+      success: 1,
+      fail: 0,
+    });
+    expect(store.cumulativeStats.auth.total).toBe(0);
+  });
+
+  it("flashing done event drops probe leftovers (mac/uuid belong to the probed device)", () => {
+    const store = flashOnlyStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].mac = "aabbcc";
+    store.slots[0].authUuid = "stale-uuid";
+    store.slots[0].isAuthorized = true;
+    store.slots[0].status = "flashing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "flashing",
+      event: { kind: "done", result: { ok: null } },
+    });
+    expect(store.slots[0].mac).toBeUndefined();
+    expect(store.slots[0].authUuid).toBeUndefined();
+    expect(store.slots[0].isAuthorized).toBeUndefined();
+  });
+
+  it("failed step counts against flash stats, not auth stats", () => {
+    const store = flashOnlyStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.batchStartTime = Date.now();
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "failed",
+      error: "handshake timeout",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.cumulativeStats.flash).toEqual({
+      total: 1,
+      success: 0,
+      fail: 1,
+    });
+    expect(store.cumulativeStats.auth.total).toBe(0);
+  });
+
+  it("flashing done event still transitions to reading_mac when authorization is enabled", () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "esp32";
+    store.firmwarePath = "/fw.bin";
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "flashing";
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "flashing",
+      event: { kind: "done", result: { ok: null } },
+    });
+    expect(store.slots[0].status).toBe("reading_mac");
+    expect(store.cumulativeStats.flash.total).toBe(0);
+  });
+});
+
+describe("startAuth — flash-only in Tauri mode", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  it("passes authorizeEnabled=false and marks slots flashing without excel checks", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const store = useStore();
+    store.addPorts(["COM3"]);
+    store.chipId = "esp32";
+    store.firmwarePath = "/path/to/fw.bin";
+    store.authorizeEnabled = false;
+
+    await store.startBatch();
+
+    expect(store.slots[0].status).toBe("flashing");
+    expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
+      ports: ["COM3"],
+      config: expect.objectContaining({
+        authorizeEnabled: false,
+        firmwarePath: "/path/to/fw.bin",
+      }),
+    });
+  });
+});

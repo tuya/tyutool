@@ -1,6 +1,6 @@
 <!-- src/features/batch-flash/components/BatchFlashToolbar.vue -->
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 import BatchFlashAuthPortFilterModal from "./BatchFlashAuthPortFilterModal.vue";
@@ -10,18 +10,41 @@ const { t } = useI18n();
 const store = useBatchFlashAuthStore();
 const filterOpen = ref(false);
 
+/** Why the Start button is disabled (tooltip); undefined when it is enabled. */
+const startDisabledHint = computed(() => {
+  if (store.canStart) return undefined;
+  if (store.isBusy) return t("batchFlashAuth.toolbar.batchInProgress");
+  if (store.opMode === "flash-only") {
+    if (!store.firmwarePath)
+      return t("batchFlashAuth.toolbar.selectFirmwareFirst");
+    return t("batchFlashAuth.toolbar.noIdlePorts");
+  }
+  if (!store.authConfig.excelPath)
+    return t("batchFlashAuth.toolbar.selectExcelFirst");
+  if (store.excelError) return t("batchFlashAuth.toolbar.excelInvalid");
+  if (
+    store.excelStats &&
+    store.excelStats.remaining +
+      store.excelStats.used +
+      store.excelStats.inProgress ===
+      0
+  )
+    return t("batchFlashAuth.toolbar.excelExhausted");
+  return t("batchFlashAuth.toolbar.noIdlePorts");
+});
+
 async function handleStart() {
   const idleCount = store.slots.length - store.currentStats.active;
   if (idleCount > 8) {
     const parts: string[] = [
       t("batchFlashAuth.dialog.aboutToOperate", { count: idleCount }),
     ];
-    if (store.opMode === "flash-then-auth" && store.firmwarePath) {
+    if (store.opMode !== "auth-only" && store.firmwarePath) {
       parts.push(
         t("batchFlashAuth.dialog.firmwareLine", { path: store.firmwarePath }),
       );
     }
-    if (store.authConfig.excelPath) {
+    if (store.opMode !== "flash-only" && store.authConfig.excelPath) {
       parts.push(
         t("batchFlashAuth.dialog.excelLine", {
           path: store.authConfig.excelPath,
@@ -32,7 +55,9 @@ async function handleStart() {
       title:
         store.opMode === "auth-only"
           ? t("batchFlashAuth.dialog.confirmAuthOnly")
-          : t("batchFlashAuth.dialog.confirmFlashThenAuth"),
+          : store.opMode === "flash-only"
+            ? t("batchFlashAuth.dialog.confirmFlashOnly")
+            : t("batchFlashAuth.dialog.confirmFlashThenAuth"),
       message: parts.join("\n"),
       kind: "warning",
     });
@@ -127,23 +152,7 @@ async function handleAutoAssign() {
         type="button"
         class="ty-btn-primary-solid text-sm"
         :disabled="!store.canStart"
-        :title="
-          !store.canStart
-            ? store.isBusy
-              ? t('batchFlashAuth.toolbar.batchInProgress')
-              : !store.authConfig.excelPath
-                ? t('batchFlashAuth.toolbar.selectExcelFirst')
-                : store.excelError
-                  ? t('batchFlashAuth.toolbar.excelInvalid')
-                  : store.excelStats &&
-                      store.excelStats.remaining +
-                        store.excelStats.used +
-                        store.excelStats.inProgress ===
-                        0
-                    ? t('batchFlashAuth.toolbar.excelExhausted')
-                    : t('batchFlashAuth.toolbar.noIdlePorts')
-            : undefined
-        "
+        :title="startDisabledHint"
         @click="handleStart"
       >
         <FontAwesomeIcon :icon="['fas', 'play']" class="mr-1 size-3" />

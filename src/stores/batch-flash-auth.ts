@@ -72,6 +72,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const firmwarePath = ref<string>("");
   const localFirmwarePath = ref<string>("");
   const flashFirmware = ref<boolean>(true);
+  const authorizeEnabled = ref<boolean>(true);
   const firmwareSource = ref<BatchFirmwareSource>("local");
   const selectedDefaultVersion = ref<string>("");
   const defaultFirmwareEntries = ref<AuthFirmwareEntry[]>([]);
@@ -111,11 +112,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     (OTP_CAPABLE_CHIPS as readonly string[]).includes(chipId.value),
   );
 
-  const opMode = computed<BatchOpMode>(() =>
-    canFlash.value && flashFirmware.value && !!firmwarePath.value
+  const opMode = computed<BatchOpMode>(() => {
+    if (!authorizeEnabled.value) return "flash-only";
+    return canFlash.value && flashFirmware.value && !!firmwarePath.value
       ? "flash-then-auth"
-      : "auth-only",
-  );
+      : "auth-only";
+  });
 
   const currentStats = computed(() => ({
     active: slots.value.filter((s) => ACTIVE_STATUSES.includes(s.status))
@@ -125,14 +127,19 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     skipped: slots.value.filter((s) => s.status === "skipped").length,
   }));
 
-  const inputsValid = computed(() => !!authConfig.value.excelPath);
+  const inputsValid = computed(() =>
+    authorizeEnabled.value
+      ? !!authConfig.value.excelPath
+      : canFlash.value && flashFirmware.value && !!firmwarePath.value,
+  );
 
   const isBusy = computed(() => currentStats.value.active > 0);
-  const canStart = computed(
-    () =>
-      !isBusy.value &&
-      slots.value.length > 0 &&
-      inputsValid.value &&
+  const canStart = computed(() => {
+    if (isBusy.value || slots.value.length === 0 || !inputsValid.value)
+      return false;
+    // Flash-only batch: the Excel sheet is not used, so its checks don't apply.
+    if (!authorizeEnabled.value) return true;
+    return (
       !excelError.value &&
       excelStats.value !== null &&
       // Only NEW devices need an Available row ("remaining"). Devices already
@@ -144,8 +151,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelStats.value.remaining +
         excelStats.value.inProgress +
         excelStats.value.used >
-        0,
-  );
+        0
+    );
+  });
   const canCancel = computed(() => isBusy.value);
   const canRetry = computed(() =>
     slots.value.some(
@@ -155,14 +163,15 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     ),
   );
   const canReadAll = computed(() => !isBusy.value && slots.value.length > 0);
-  /** Archiving needs a finished batch (results to record) and the Excel path
-   *  (the sheet copy is the core of the archive). */
+  /** Archiving needs a finished batch (results to record) and — when
+   *  authorization ran — the Excel path (the sheet copy is the core of the
+   *  archive). A flash-only batch has no sheet to copy. */
   const canArchive = computed(
     () =>
       !isBusy.value &&
       batchEndTime.value !== null &&
       slots.value.length > 0 &&
-      !!authConfig.value.excelPath,
+      (!authorizeEnabled.value || !!authConfig.value.excelPath),
   );
   const filterActive = computed(
     () => filterConfig.value.blockedPorts.length > 0,
@@ -392,9 +401,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     currentBatchPorts.value = idlePorts;
     for (const port of idlePorts) {
       updateSlot(port, {
-        status: "reading_mac",
+        // Flash-only slots never read a MAC; show them as flashing right away.
+        status: authorizeEnabled.value ? "reading_mac" : "flashing",
         progress: 0,
-        currentPhase: "reading_mac",
+        currentPhase: authorizeEnabled.value ? "reading_mac" : "",
         error: undefined,
         excelError: undefined,
         cancelledAfterWrite: undefined,
@@ -424,6 +434,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
+      authorizeEnabled: authorizeEnabled.value,
     };
     try {
       await invoke("batch_auth_start", { config, ports: idlePorts });
@@ -492,6 +503,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
+      authorizeEnabled: authorizeEnabled.value,
     };
     try {
       await invoke("batch_auth_start", { config, ports: [port] });
@@ -592,13 +604,14 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         now,
       );
       const slotsCsv = buildSlotsCsv(slots.value, currentBatchPorts.value);
-      const fw =
-        opMode.value === "flash-then-auth" ? firmwarePath.value : undefined;
+      const fw = opMode.value !== "auth-only" ? firmwarePath.value : undefined;
       const { invoke } = await import("@tauri-apps/api/core");
       const path = await invoke<string>("archive_batch_cmd", {
         destDir: dir,
         folderName,
-        excelPath: authConfig.value.excelPath,
+        // Flash-only batches never touch the sheet; don't archive a copy.
+        excelPath:
+          opMode.value === "flash-only" ? "" : authConfig.value.excelPath,
         firmwarePath: fw,
         summaryJson: JSON.stringify(summary),
         slotsCsv,
@@ -713,8 +726,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         authUuid: ev.uuid,
         isAuthorized: undefined,
       });
-      cumulativeStats.value.auth.total++;
-      cumulativeStats.value.auth.fail++;
+      // In a flash-only batch the only failure source is the flash step.
+      const failStats = authorizeEnabled.value
+        ? cumulativeStats.value.auth
+        : cumulativeStats.value.flash;
+      failStats.total++;
+      failStats.fail++;
       scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "no_code") {
@@ -795,12 +812,32 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
           currentPhase: normalizePhase(e.phase),
         });
       } else if (e.kind === "done" && "ok" in e.result) {
-        // Flash sub-step completed; transition to auth phase while waiting for auth events.
-        updateSlot(port, {
-          status: "reading_mac",
-          progress: 0,
-          currentPhase: "reading_mac",
-        });
+        if (authorizeEnabled.value) {
+          // Flash sub-step completed; transition to auth phase while waiting for auth events.
+          updateSlot(port, {
+            status: "reading_mac",
+            progress: 0,
+            currentPhase: "reading_mac",
+          });
+        } else {
+          // Flash-only batch: the flash result is the terminal outcome. The
+          // device identity is never read, so drop probe leftovers (mac,
+          // credentials) — they belong to whatever device was on the port
+          // when the probe ran, not to this one.
+          updateSlot(port, {
+            status: "done",
+            progress: 100,
+            currentPhase: "",
+            readError: undefined,
+            mac: undefined,
+            authUuid: undefined,
+            isAuthorized: undefined,
+          });
+          cumulativeStats.value.flash.total++;
+          cumulativeStats.value.flash.success++;
+          scheduleSaveStats();
+          checkBatchCompletion();
+        }
       }
       // err/cancelled: the subsequent auth 'failed'/'skipped' step handles final state.
     }
@@ -946,6 +983,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       baudRate.value = sharedConfig.baudRate;
       authBaudRate.value = sharedConfig.authBaudRate;
       flashFirmware.value = sharedConfig.flashFirmware ?? true;
+      authorizeEnabled.value = sharedConfig.authorizeEnabled ?? true;
     } else {
       // First run: apply manifest defaults for the initial chip.
       const m = chipManifest(chipId.value);
@@ -984,6 +1022,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       baudRate: baudRate.value,
       authBaudRate: authBaudRate.value,
       flashFirmware: flashFirmware.value,
+      authorizeEnabled: authorizeEnabled.value,
     });
   }
 
@@ -1044,9 +1083,18 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   watch(authConfig, () => void saveAuthConfig(), { deep: true });
   watch(
-    [chipId, baudRate, authBaudRate, flashFirmware],
+    [chipId, baudRate, authBaudRate, flashFirmware, authorizeEnabled],
     () => void saveSharedConfig(),
   );
+
+  // Authorization can only be turned off for a flash-only batch, which needs
+  // firmware flashing to be possible and enabled ("at least one of flash/auth
+  // must run"). Re-enable it when either precondition disappears.
+  watch([canFlash, flashFirmware], () => {
+    if (!authorizeEnabled.value && (!canFlash.value || !flashFirmware.value)) {
+      authorizeEnabled.value = true;
+    }
+  });
 
   // OTP is write-once — a device that already holds different credentials can
   // never be overwritten, so "Overwrite" is meaningless for OTP. Force Skip.
@@ -1090,6 +1138,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     authBaudRate,
     firmwarePath,
     flashFirmware,
+    authorizeEnabled,
     authConfig,
     filterConfig,
     cumulativeStats,

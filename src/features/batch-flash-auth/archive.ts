@@ -76,7 +76,7 @@ export function buildBatchArchiveSummary(
       blockedPorts: input.blockedPorts,
     },
     firmware:
-      input.opMode === "flash-then-auth"
+      input.opMode !== "auth-only"
         ? {
             source: input.firmwareSource,
             version: input.firmwareVersion || null,

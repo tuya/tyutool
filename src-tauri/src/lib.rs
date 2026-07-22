@@ -518,6 +518,13 @@ struct BatchAuthStartConfig {
     excel_path: String,
     conflict_policy: String,
     auth_storage: Option<String>,
+    /// false ⇒ flash-only batch: skip the Excel session and the auth step.
+    #[serde(default = "default_authorize_enabled")]
+    authorize_enabled: bool,
+}
+
+fn default_authorize_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -710,14 +717,20 @@ fn batch_auth_start(
         _ => tyutool_core::AuthStorage::Kv,
     };
 
+    // A flash-only batch (authorization off) with no firmware would do nothing.
+    if !config.authorize_enabled && config.firmware_path.as_deref().is_none_or(|p| p.is_empty()) {
+        return Err("authorization disabled and no firmware to flash".into());
+    }
+
     log::info!(
-        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} storage={:?} conflict={}",
+        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} storage={:?} conflict={} authorize={}",
         config.chip_id,
         config.excel_path,
         config.firmware_path.as_deref().unwrap_or("(none)"),
         ports.len(),
         auth_storage,
         config.conflict_policy,
+        config.authorize_enabled,
     );
 
     // Phase 1: cancel all old slots simultaneously, collect their join receivers.
@@ -752,7 +765,10 @@ fn batch_auth_start(
     // Acquire the Excel session AFTER the old slots are fully joined (their
     // guards decrement the counter) and with nothing fallible left before
     // spawn (an increment must never leak). Single lock over {alloc, active}.
-    let allocator = {
+    // A flash-only batch never touches the sheet: no session, no file lock.
+    let allocator = if !config.authorize_enabled {
+        None
+    } else {
         let path = std::path::Path::new(&config.excel_path);
         let mut session = state.session.lock().map_err(|e| e.to_string())?;
         let alloc = match &session.alloc {
@@ -772,7 +788,7 @@ fn batch_auth_start(
             }
         };
         session.active += ports.len();
-        alloc
+        Some(alloc)
     };
 
     // Phase 3: spawn threads — auth code allocation happens lazily inside each thread,
@@ -789,8 +805,11 @@ fn batch_auth_start(
 
         let handle = std::thread::spawn(move || {
             // Must be the first statement: every exit path (early returns,
-            // panics) has to decrement the session count.
-            let _session_guard = SlotSessionGuard(session_clone);
+            // panics) has to decrement the session count. Flash-only batches
+            // never incremented it, so they get no guard.
+            let _session_guard = alloc_clone
+                .is_some()
+                .then(|| SlotSessionGuard(session_clone));
             // Last Excel write failure for this slot; attached to the final
             // progress emit so the operator sees the sheet was NOT updated.
             let excel_err: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
@@ -835,7 +854,43 @@ fn batch_auth_start(
                             }),
                         );
                     });
-                    if flash_result.is_err() || cancel_clone.load(Ordering::Relaxed) {
+                    if !config_clone.authorize_enabled {
+                        // Flash-only: a user cancel is not a failure — mirror
+                        // the auth pipeline's "cancelled" step so the slot
+                        // returns to idle without polluting the cumulative
+                        // stats. On Ok, a late cancel changes nothing: the
+                        // run_job Done event forwarded above is already the
+                        // terminal signal, so emitting a second outcome here
+                        // would double-count the slot.
+                        match flash_result {
+                            Err(tyutool_core::FlashError::Cancelled) => {
+                                log::info!("[batch-auth] flash cancelled  port={port_clone}");
+                                let _ = app_clone.emit(
+                                    "batch-auth-progress",
+                                    serde_json::json!({
+                                        "port": port_clone,
+                                        "step": "cancelled"
+                                    }),
+                                );
+                                return;
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[batch-auth] flash failed  port={port_clone} error={e}"
+                                );
+                                let _ = app_clone.emit(
+                                    "batch-auth-progress",
+                                    serde_json::json!({
+                                        "port": port_clone,
+                                        "step": "failed",
+                                        "error": e.to_string()
+                                    }),
+                                );
+                                return;
+                            }
+                            Ok(()) => {}
+                        }
+                    } else if flash_result.is_err() || cancel_clone.load(Ordering::Relaxed) {
                         let error = flash_result
                             .err()
                             .map(|e| e.to_string())
@@ -852,19 +907,29 @@ fn batch_auth_start(
                         return;
                     }
                     log::info!("[batch-auth] flash done  port={port_clone}");
-                    // Wait for the device to boot naturally after flash before the auth
-                    // slot issues a hardware reset. Non-fatal: times out after 3 s max.
-                    tyutool_core::wait_after_firmware_flash(
-                        &port_clone,
-                        config_clone.auth_baud_rate,
-                        &config_clone.chip_id,
-                        &cancel_clone,
-                    );
-                    if cancel_clone.load(Ordering::Relaxed) {
-                        return;
+                    if config_clone.authorize_enabled {
+                        // Wait for the device to boot naturally after flash before the auth
+                        // slot issues a hardware reset. Non-fatal: times out after 3 s max.
+                        tyutool_core::wait_after_firmware_flash(
+                            &port_clone,
+                            config_clone.auth_baud_rate,
+                            &config_clone.chip_id,
+                            &cancel_clone,
+                        );
+                        if cancel_clone.load(Ordering::Relaxed) {
+                            return;
+                        }
                     }
                 }
             }
+
+            // Flash-only batch: run_job's Done event (forwarded above under
+            // step "flashing") is the terminal signal for the frontend —
+            // nothing to authorize, no Excel to update.
+            let Some(alloc_clone) = alloc_clone else {
+                log::info!("[batch-auth] slot done (flash-only)  port={port_clone}");
+                return;
+            };
 
             // find_by_mac: look up Excel row by device MAC address
             let alloc_find = alloc_clone.clone();
@@ -2681,7 +2746,7 @@ fn validate_archive_folder_name(name: &str) -> Result<(), String> {
 /// added by the caller.
 fn write_batch_archive(
     dest: &std::path::Path,
-    excel_src: &std::path::Path,
+    excel_src: Option<&std::path::Path>,
     firmware_src: Option<&std::path::Path>,
     summary_json: &str,
     slots_csv: &str,
@@ -2689,10 +2754,14 @@ fn write_batch_archive(
 ) -> Result<(), String> {
     std::fs::create_dir_all(dest).map_err(|e| format!("create archive dir: {e}"))?;
 
-    let excel_name = excel_src
-        .file_name()
-        .ok_or_else(|| "invalid excel path".to_string())?;
-    std::fs::copy(excel_src, dest.join(excel_name)).map_err(|e| format!("copy auth sheet: {e}"))?;
+    // Flash-only batches never touch a sheet, so there is nothing to copy.
+    if let Some(excel_src) = excel_src {
+        let excel_name = excel_src
+            .file_name()
+            .ok_or_else(|| "invalid excel path".to_string())?;
+        std::fs::copy(excel_src, dest.join(excel_name))
+            .map_err(|e| format!("copy auth sheet: {e}"))?;
+    }
 
     let mut summary: serde_json::Value =
         serde_json::from_str(summary_json).map_err(|e| format!("invalid summary json: {e}"))?;
@@ -2752,7 +2821,9 @@ fn archive_batch_cmd(
     });
     write_batch_archive(
         &dest,
-        std::path::Path::new(&excel_path),
+        Some(excel_path.as_str())
+            .filter(|s| !s.is_empty())
+            .map(std::path::Path::new),
         firmware_path
             .as_deref()
             .filter(|s| !s.is_empty())
@@ -3196,7 +3267,7 @@ mod tests {
 
         write_batch_archive(
             &dest,
-            &excel,
+            Some(&excel),
             Some(&fw),
             r#"{"firmware":{"source":"local"},"batch":{}}"#,
             "port,status\r\nCOM3,done\r\n",
@@ -3233,7 +3304,7 @@ mod tests {
 
         write_batch_archive(
             &dest,
-            &excel,
+            Some(&excel),
             None,
             r#"{"firmware":null,"batch":{}}"#,
             "port,status\r\n",
@@ -3244,6 +3315,45 @@ mod tests {
         assert!(dest.join("codes.xlsx").exists());
         assert!(dest.join("batch-summary.json").exists());
         assert!(!dest.join("auth.bin").exists());
+    }
+
+    #[test]
+    fn write_batch_archive_without_excel_skips_sheet_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let fw = dir.path().join("auth.bin");
+        std::fs::write(&fw, b"abc").unwrap();
+        let dest = dir.path().join("archive");
+
+        write_batch_archive(
+            &dest,
+            None,
+            Some(&fw),
+            r#"{"firmware":{"source":"local"},"batch":{}}"#,
+            "port,status\r\n",
+            serde_json::json!({}),
+        )
+        .unwrap();
+
+        assert!(dest.join("auth.bin").exists());
+        assert!(dest.join("batch-summary.json").exists());
+        assert!(!dest.join("codes.xlsx").exists());
+    }
+
+    #[test]
+    fn batch_auth_start_config_defaults_authorize_enabled_to_true() {
+        let cfg: BatchAuthStartConfig = serde_json::from_str(
+            r#"{"chipId":"esp32","baudRate":921600,"authBaudRate":115200,
+                "excelPath":"codes.xlsx","conflictPolicy":"skip"}"#,
+        )
+        .unwrap();
+        assert!(cfg.authorize_enabled);
+
+        let cfg: BatchAuthStartConfig = serde_json::from_str(
+            r#"{"chipId":"esp32","baudRate":921600,"authBaudRate":115200,
+                "excelPath":"","conflictPolicy":"skip","authorizeEnabled":false}"#,
+        )
+        .unwrap();
+        assert!(!cfg.authorize_enabled);
     }
 }
 
