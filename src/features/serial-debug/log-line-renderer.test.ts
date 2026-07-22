@@ -1,9 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
+import type { AnsiSpan } from "./ansi-parse";
 import type { DebugLogLine } from "./types";
 
 const { parseAnsiMock, stripAnsiMock } = vi.hoisted(() => ({
-  parseAnsiMock: vi.fn((text: string) => [{ text, style: { fg: "#f00" } }]),
+  parseAnsiMock: vi.fn((text: string): AnsiSpan[] => [
+    { text, style: { fg: "#f00" } },
+  ]),
   stripAnsiMock: vi.fn((text: string) => text.replace(/\x1b\[[0-9;]*m/g, "")),
 }));
 
