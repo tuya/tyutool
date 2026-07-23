@@ -4,6 +4,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE.txt)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
+English | [简体中文](README_ZH.md)
+
 Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary.
 
 ## Supported Chips
