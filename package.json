@@ -51,7 +51,7 @@
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
     "@vitejs/plugin-vue": "^5.2.1",
-    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/coverage-v8": "^3.2.7",
     "daisyui": "^5.5.19",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
@@ -62,10 +62,10 @@
     "lefthook": "^2.1.4",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.2.2",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.1",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3",
-    "vitest": "^3.0.5",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7",
     "vue-eslint-parser": "^10.4.0",
     "vue-tsc": "^2.1.10"
   }
