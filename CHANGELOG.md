@@ -2,6 +2,26 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.7] - 2026-07-23
+
+### 新功能
+
+- `update`：应用内更新遵循所选更新源——「从此源更新」按钮现在会真正通过用户选择的源（GitHub / Tuya OSS）下载并安装更新，下载进度实时显示；安装失败（如 UAC 被拒）后已下载的更新会保留，可直接重试；便携版的手动更新流程保持不变
+
+### 问题修复
+
+- `serial-debug`：ESP32 等固件输出不带 ANSI 颜色、仅有 E/W/I/D/V 级别前缀的日志行，现在会按级别推断主题自适应的回退颜色，不再整屏同色；TX/系统行、Hex 视图与日志导出不受影响，关闭 ANSI 渲染时回退着色也随之关闭
+
+---
+
+### Features
+
+- `update`: In-app updates honor the selected update source — the "update from this source" button now downloads and installs through the source the user picked (GitHub / Tuya OSS), with live download progress; a downloaded update survives a failed install (e.g. UAC denied) so it can be retried; the portable manual-update flow is unchanged
+
+### Bug Fixes
+
+- `serial-debug`: RX log lines that carry only an ESP-IDF level prefix (E/W/I/D/V) with no ANSI color now get a theme-aware fallback color inferred from the level, instead of rendering all in the default color; TX/system lines, hex view, and log export are unchanged, and disabling ANSI rendering also disables the fallback
+
 ## [3.2.6] - 2026-07-22
 
 ### 新功能
