@@ -16,7 +16,7 @@
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/tuya/tyutool/releases/latest) 或 [Gitee 镜像](https://gitee.com/tuya-open/tyutool/releases) 获取最新版本。
+从 [GitHub Releases](https://github.com/tuya/tyutool/releases/latest) 获取最新版本。中国大陆用户可从 Tuya OSS 镜像获取最新 [`release.json`](https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json)，再按其中条目的 `url` 下载（参见[更新清单](#更新清单latestjson--releasejson)）。
 
 ### GUI 桌面版
 
@@ -150,8 +150,8 @@ tyutool update --check
 # 从 GitHub 升级（默认）
 tyutool update
 
-# 从 Gitee 镜像升级
-tyutool update --source gitee
+# 从 Tuya OSS 镜像升级（中国大陆）
+tyutool update --source tuya
 ```
 
 ### 详细日志

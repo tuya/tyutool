@@ -16,7 +16,7 @@ Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform de
 
 ## Download
 
-Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/releases/latest) or the [Gitee mirror](https://gitee.com/tuya-open/tyutool/releases).
+Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/releases/latest). In mainland China, fetch the latest [`release.json`](https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json) from the Tuya OSS mirror and download from each entry's `url` (see [Update Manifests](#update-manifests-latestjson--releasejson)).
 
 ### GUI
 
@@ -150,8 +150,8 @@ tyutool update --check
 # Update from GitHub (default)
 tyutool update
 
-# Update from Gitee mirror
-tyutool update --source gitee
+# Update from Tuya OSS mirror (mainland China)
+tyutool update --source tuya
 ```
 
 ### Verbose logging
