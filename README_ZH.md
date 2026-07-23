@@ -4,6 +4,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE.txt)
 [![Platform](https://img.shields.io/badge/平台-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/tuya/tyutool/releases/latest)
 
+[English](README.md) | 简体中文
+
 涂鸦 IoT 设备固件烧录工具，提供跨平台桌面 GUI（Tauri 2 + Vue 3）和独立命令行（CLI）两种使用方式。
 
 ## 支持芯片
