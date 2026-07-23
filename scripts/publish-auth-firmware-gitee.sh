@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Idempotently publish auth-firmware assets to a Gitee Release (API v5).
 #
-# Unlike scripts/sync-gitee-release.sh (which wipes all attachments and re-uploads),
-# this preserves immutable firmware:
+# Preserves immutable firmware:
 #   - <name>.bin    : skip if an attachment with the same name already exists, else upload.
 #   - auth-firmware.json : delete the old attachment (if any), then upload (overwrite).
 #

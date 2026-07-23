@@ -25,5 +25,7 @@ jobs:
 
       - name: Push to Gitee
         run: |
-          git push gitee --all --force
-          git push gitee --tags --force
+          # 真镜像：以 origin 为准同步全部分支和 tag，--prune 会删除 Gitee 上已不存在的分支/tag
+          git remote set-head origin -d || true  # 移除 origin/HEAD 符号引用，避免被当作 HEAD 分支推送
+          git push gitee "+refs/remotes/origin/*:refs/heads/*" --prune
+          git push gitee "+refs/tags/*:refs/tags/*" --prune
