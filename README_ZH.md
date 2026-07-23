@@ -61,6 +61,23 @@
 
 解压后直接运行 `tyutool_cli`（Windows 为 `tyutool_cli.exe`）。
 
+## 更新清单（latest.json / release.json）
+
+每次发版时 CI（`scripts/generate-manifest.ts`）会生成两个更新清单并挂载到 GitHub Release。二者内容相同——版本号、更新说明，以及 GUI 更新器（`platforms`）、CLI（`cli`）、便携版（`portable`）的各平台条目——区别仅在生效的 `url` 指向哪个镜像：
+
+| 清单 | 面向区域 | 生效 `url` | 更新检查端点 |
+|------|----------|------------|--------------|
+| `latest.json` | 海外 | GitHub Release 资源（`url` = `url_github`） | `https://github.com/tuya/tyutool/releases/latest/download/latest.json` |
+| `release.json` | 中国大陆 | Tuya OSS 镜像（`url` = `url_tuya`） | `https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json` |
+
+每个下载条目包含三个 URL 字段：
+
+- `url` — 客户端实际下载所用的地址；GUI 更新器和 CLI 自升级只读取此字段。
+- `url_github` — GitHub Release 资源地址（镜像字段，供外部系统读取）。
+- `url_tuya` — Tuya OSS 镜像地址（镜像字段，供外部系统读取）。
+
+`release.json` 与发布产物由外部流水线（tuyaopen-oss-publish）同步到 Tuya OSS 镜像；上表中的固定端点始终指向最新同步的版本。GitHub 发版到 OSS 同步完成之间，大陆端点会短暂停留在上一版本。
+
 ## CLI 使用说明
 
 ```
