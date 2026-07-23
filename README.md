@@ -76,7 +76,7 @@ Each download entry carries three URL fields:
 - `url_github` — the GitHub Release asset URL (mirror field, for external systems).
 - `url_tuya` — the Tuya OSS mirror URL (mirror field, for external systems).
 
-`release.json` and the release artifacts are copied to the Tuya OSS mirror by an external pipeline (tuyaopen-oss-publish); the fixed endpoint above always serves the latest synced version. Between a GitHub release and the OSS sync completing, the mainland endpoint briefly stays on the previous version.
+> **Note:** For scripted downloads of release artifacts, fetch the latest [`release.json`](https://github.com/tuya/tyutool/releases/latest/download/release.json) (`https://github.com/tuya/tyutool/releases/latest/download/release.json`) first, then pick the download URL from each entry by region: `url_tuya` for mainland China, `url_github` overseas.
 
 ## CLI Usage
 

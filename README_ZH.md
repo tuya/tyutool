@@ -76,7 +76,7 @@
 - `url_github` — GitHub Release 资源地址（镜像字段，供外部系统读取）。
 - `url_tuya` — Tuya OSS 镜像地址（镜像字段，供外部系统读取）。
 
-`release.json` 与发布产物由外部流水线（tuyaopen-oss-publish）同步到 Tuya OSS 镜像；上表中的固定端点始终指向最新同步的版本。GitHub 发版到 OSS 同步完成之间，大陆端点会短暂停留在上一版本。
+> **注意：** 如需通过脚本自动下载发布产物，推荐先获取最新的 [`release.json`](https://github.com/tuya/tyutool/releases/latest/download/release.json)（`https://github.com/tuya/tyutool/releases/latest/download/release.json`），再按所在地域从条目中选取下载地址：中国大陆推荐 `url_tuya`，海外推荐 `url_github`。
 
 ## CLI 使用说明
 
