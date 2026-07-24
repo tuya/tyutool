@@ -49,10 +49,6 @@
       <p>tyutool ships prebuilt installers for Windows, macOS, and Linux. Go to the README download table, pick the build for your operating system, and install it the usual way. The common per-platform gotchas are below (full details in the <a href="faq.html">FAQ</a>).</p>
 
       <div class="callout warn">
-        <span class="title">macOS Gatekeeper</span>
-        On first launch of an unsigned app, macOS blocks it as "cannot be verified." Run <code>xattr -dr com.apple.quarantine /path/to/tyutool.app</code> in a terminal to strip the quarantine flag, then launch. See the <a href="faq.html">FAQ</a>.
-      </div>
-      <div class="callout warn">
         <span class="title">macOS serial permission</span>
         macOS denies ordinary users access to serial devices by default. Add your user to the <code>dialout</code> group: <code>sudo dseditgroup -o edit -a $USER -t user dialout</code>, then <strong>log out and back in</strong> for it to take effect. See the <a href="faq.html">FAQ</a>.
       </div>

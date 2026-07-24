@@ -123,15 +123,6 @@ tyutool authorize -p &lt;port&gt; -d esp32   # read with chip-specific timing</p
 
       <h2 id="platform">4. Platform</h2>
 
-      <h3 id="macos-gatekeeper">Can't open on macOS / Gatekeeper block</h3>
-      <p><strong>Symptom:</strong> double-clicking tyutool.app shows "cannot be opened because the developer cannot be verified," or it's blocked by Gatekeeper.</p>
-      <p>The macOS build of tyutool is not Apple-notarized (this is expected). Pick either way to clear it:</p>
-      <ol class="steps">
-        <li><strong>GUI</strong>: in Finder, Control-click <code>tyutool.app</code> → <strong>Open</strong>, then click <strong>Open</strong> again in the dialog; or go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong> on the tyutool prompt.</li>
-        <li><strong>Command line</strong>: strip the extended attributes (quarantine flag):<pre>xattr -dr com.apple.quarantine /path/to/tyutool.app</pre> After that you can double-click to open normally.</li>
-      </ol>
-      <p>See the <a href="../../../README.md">README troubleshooting table</a>.</p>
-
       <h3 id="linux-blank-window">Linux blank / white window</h3>
       <p><strong>Symptom:</strong> on Linux (especially VMs / machines without a dedicated GPU) the window opens <strong>completely blank</strong>, or shows menus but no content.</p>
       <p>WebKit2GTK's compositing mode fails on some GPU drivers. Set an environment variable to disable compositing before launch:</p>

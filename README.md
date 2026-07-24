@@ -47,7 +47,6 @@ Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/r
 
 | Issue | Platform | Fix |
 |-------|----------|-----|
-| "cannot be opened because the developer cannot be verified" / Gatekeeper block | macOS | Builds are not Apple-signed — this is expected. **System Settings → Privacy & Security → Open Anyway**; or Control-click `tyutool.app` in Finder → **Open** |
 | No serial port listed | macOS | **System Settings → Privacy & Security → Accessories** (label varies by macOS version) |
 | Blank / white window (common in VMs) | Linux | WebKit2GTK GPU compositing failure. Set the environment variable before launching: `export WEBKIT_DISABLE_COMPOSITING_MODE=1`, then run `./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
