@@ -36,13 +36,13 @@
       <h2 id="prerequisites">Prerequisites</h2>
       <p>Before you start, confirm everything on this checklist is ready — flashing needs both hardware and software in place.</p>
       <ul>
-        <li><strong>A supported device</strong>: tyutool targets Tuya ecosystem IoT devices; the full list of supported chips is on the <a href="flash.html">Firmware Flash</a> page.</li>
+        <li><strong>A supported device</strong>: tyutool targets Tuya ecosystem IoT devices; the full list of supported chips is on the <a href="flash.html#chip">Firmware Flash</a> page.</li>
         <li><strong>A USB-serial adapter</strong>: wired correctly to the device's UART (TX/RX/GND, optionally power). Wiring must <strong>cross over</strong>: the PC side's TX goes to the device's RX, and vice versa.</li>
         <li><strong>The device in bootloader/download mode</strong>: how to enter it varies per device (button combos, bridging test pads, power sequencing).</li>
       </ul>
       <div class="callout warn">
         <span class="title">Note</span>
-        Wiring and entering download mode are <strong>device-specific</strong> — there is no universal procedure, so check your device's manual or the <a href="faq.html#port-not-listed">FAQ</a> first. tyutool <strong>cannot</strong> put a device into download mode for you; you must do it yourself. When the device is not in download mode, tyutool waits for a handshake and eventually times out. For the underlying concepts (UART / download mode / baud rate), see <a href="concepts.html">Concepts</a>.
+        Wiring and entering download mode are <strong>device-specific</strong> — there is no universal procedure, so check your device's manual or the <a href="faq.html#port-not-listed">FAQ</a> first. tyutool <strong>cannot</strong> put a device into download mode for you; you must do it yourself. When the device is not in download mode, tyutool waits for a handshake and eventually times out. For the underlying concepts (UART / download mode / baud rate), see <a href="concepts.html#serial">Concepts</a>.
       </div>
 
       <h2 id="download">Download &amp; install</h2>
