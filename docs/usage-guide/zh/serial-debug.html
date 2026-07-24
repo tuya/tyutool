@@ -26,10 +26,10 @@
   <div class="layout">
     <main class="content">
       <h1>串口调试</h1>
-      <p class="lead">本页是 <code>/serial-debug</code> 页面的完整参考：一个完整的串口终端 / 日志监视器，覆盖连接与 UART 配置、设备复位、ASCII / Hex 日志视图、发送栏、Hex 弹窗、关键词过滤标签，以及自动释放与自动保存。</p>
+      <p class="lead">本页是<strong>串口调试</strong>页的完整参考：一个完整的串口终端 / 日志监视器，覆盖连接与 UART 配置、设备复位、ASCII / Hex 日志视图、发送栏、Hex 弹窗、关键词过滤标签，以及自动释放与自动保存。</p>
 
       <h2 id="overview">1. 总览</h2>
-      <p><code>/serial-debug</code> 是一个<strong>完整的串口终端</strong>，既可以用来观察设备实时打印的日志，也可以向设备发送指令或数据。整个界面由顶部连接栏、中间的日志视图、底部的发送栏，以及右侧的过滤标签/设置区组成。</p>
+      <p>串口调试是一个<strong>完整的串口终端</strong>，既可以用来观察设备实时打印的日志，也可以向设备发送指令或数据。整个界面由顶部连接栏、中间的日志视图、底部的发送栏，以及右侧的过滤标签/设置区组成。</p>
       <p>页面带有一个<strong>保活（keep-alive）</strong>机制：当你从串口调试页跳到其他页面（例如去 <a href="flash.html">固件烧录</a>看一下进度）再回来时，后台的 RX 接收流不会中断，<strong>回来后仍能继续看到</strong>设备在这段时间打印的内容，不会因为切换页面而丢数据。</p>
       <figure class="shot todo">
         <figcaption>串口调试页总览：连接栏、日志视图、发送栏、过滤标签</figcaption>
