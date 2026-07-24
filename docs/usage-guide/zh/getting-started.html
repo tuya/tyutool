@@ -49,10 +49,6 @@
       <p>tyutool 为 Windows、macOS、Linux 提供预编译安装包。请到项目的 README 下载表，按你的操作系统选择对应版本，下载后照常规方式安装即可。各平台的常见坑点如下（完整说明见<a href="faq.html">常见问题</a>）。</p>
 
       <div class="callout warn">
-        <span class="title">macOS Gatekeeper</span>
-        首次打开未签名 App 时，系统会拦截「无法验证开发者」。可在终端执行 <code>xattr -dr com.apple.quarantine /path/to/tyutool.app</code> 移除隔离属性后再启动。详见 <a href="faq.html">常见问题</a>。
-      </div>
-      <div class="callout warn">
         <span class="title">macOS 串口权限</span>
         macOS 默认禁止普通用户访问串口设备。请把当前用户加入 <code>dialout</code> 组：<code>sudo dseditgroup -o edit -a $USER -t user dialout</code>，然后<strong>注销重新登录</strong>生效。详见 <a href="faq.html">常见问题</a>。
       </div>

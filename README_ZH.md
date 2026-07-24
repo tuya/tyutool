@@ -47,7 +47,6 @@
 
 | 问题 | 平台 | 处理方式 |
 |------|------|----------|
-| 「无法验证开发者」或被 Gatekeeper 拦截 | macOS | 安装包未做 Apple 代码签名，属正常安全策略。**系统设置 → 隐私与安全性 → 仍要打开**；或在 Finder 中右键 `tyutool.app` → **打开** |
 | 串口不出现 | macOS | **系统设置 → 隐私与安全性 → 配件**（或「允许配件连接」等，文案随系统版本而异） |
 | 窗口异常 / 空白（虚拟机常见） | Linux | WebKit2GTK GPU 合成失败所致，启动前设置环境变量：`export WEBKIT_DISABLE_COMPOSITING_MODE=1`，然后运行 `./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
