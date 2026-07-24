@@ -85,7 +85,7 @@
         <li>在列出的端口里选择你的适配器（如 <code>COM3</code> / <code>/dev/ttyUSB0</code> / <code>/dev/cu.SLAB_USBtoUART</code>）。</li>
         <li>留意旁边的<strong>状态点</strong>：绿色表示已连接并就绪；灰色或红色表示未连上或握手失败。</li>
       </ol>
-      <p>选好端口后，波特率与芯片型号会由 tyutool <strong>自动建议</strong>一个合理默认值，多数情况下可直接采用；需要调整时也可手动覆盖。</p>
+      <p>选好端口后，波特率与芯片型号会由 tyutool <strong>自动建议</strong>一个合理默认值（推荐值），多数情况下可直接采用。需要调整时也可手动覆盖：适当<strong>调高</strong>可加快烧录，但超出一定上限后会因信号质量下降而变得不稳定、甚至失败；<strong>调低</strong>则更慢但更稳。完整说明见 <a href="flash.html#flash">固件烧录</a>。</p>
 
       <figure class="shot">
         <img src="../assets/images/getting-started-connect.png" alt="Flash 页顶部连接栏——串口下拉框展开、显示已检测到的端口，波特率与芯片选项" loading="lazy">
