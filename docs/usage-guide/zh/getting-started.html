@@ -42,7 +42,7 @@
       </ul>
       <div class="callout warn">
         <span class="title">注意</span>
-        接线方式与进入下载模式的方法是<strong>设备相关</strong>的，没有通用步骤——请先查阅你的设备说明或<a href="faq.html">常见问题</a>。tyutool <strong>无法</strong>替你把设备切进下载模式，这一步必须由你手动完成；设备没进下载模式时，tyutool 会一直等待握手并最终超时。相关概念（UART / 下载模式 / 波特率）见<a href="concepts.html">基础概念</a>。
+        接线方式与进入下载模式的方法是<strong>设备相关</strong>的，没有通用步骤——请先查阅你的设备说明或<a href="faq.html#port-not-listed">常见问题</a>。tyutool <strong>无法</strong>替你把设备切进下载模式，这一步必须由你手动完成；设备没进下载模式时，tyutool 会一直等待握手并最终超时。相关概念（UART / 下载模式 / 波特率）见<a href="concepts.html">基础概念</a>。
       </div>
 
       <h2 id="download">下载与安装</h2>
@@ -50,11 +50,11 @@
 
       <div class="callout warn">
         <span class="title">macOS 串口权限</span>
-        macOS 默认禁止普通用户访问串口设备。请把当前用户加入 <code>dialout</code> 组：<code>sudo dseditgroup -o edit -a $USER -t user dialout</code>，然后<strong>注销重新登录</strong>生效。详见 <a href="faq.html">常见问题</a>。
+        macOS 默认禁止普通用户访问串口设备。请把当前用户加入 <code>dialout</code> 组：<code>sudo dseditgroup -o edit -a $USER -t user dialout</code>，然后<strong>注销重新登录</strong>生效。详见 <a href="faq.html#macos-serial-perm">常见问题</a>。
       </div>
       <div class="callout warn">
         <span class="title">Linux 白屏</span>
-        部分 Linux 桌面下，tyutool 启动后窗口空白不渲染。以 <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> 方式启动可绕过。详见 <a href="faq.html">常见问题</a>。
+        部分 Linux 桌面下，tyutool 启动后窗口空白不渲染。以 <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> 方式启动可绕过。详见 <a href="faq.html#linux-blank-window">常见问题</a>。
       </div>
       <div class="callout tip">
         <span class="title">小提示</span>
@@ -109,7 +109,7 @@
       <p>各步骤的进阶选项（地址微调、擦除策略、校验、保存日志等）请见<a href="flash.html">固件烧录</a>页。</p>
       <div class="callout danger">
         <span class="title">重要</span>
-        烧录期间<strong>切勿</strong>拔掉 USB 线或断电，否则可能写坏数据。万一烧录失败，先降到 <code>115200</code> 波特率重试；仍不行则参考<a href="faq.html">常见问题</a>。
+        烧录期间<strong>切勿</strong>拔掉 USB 线或断电，否则可能写坏数据。万一烧录失败，先降到 <code>115200</code> 波特率重试；仍不行则参考<a href="faq.html#flash-fails">常见问题</a>。
       </div>
 
       <h2 id="next-steps">下一步</h2>

@@ -42,7 +42,7 @@
       </ul>
       <div class="callout warn">
         <span class="title">Note</span>
-        Wiring and entering download mode are <strong>device-specific</strong> — there is no universal procedure, so check your device's manual or the <a href="faq.html">FAQ</a> first. tyutool <strong>cannot</strong> put a device into download mode for you; you must do it yourself. When the device is not in download mode, tyutool waits for a handshake and eventually times out. For the underlying concepts (UART / download mode / baud rate), see <a href="concepts.html">Concepts</a>.
+        Wiring and entering download mode are <strong>device-specific</strong> — there is no universal procedure, so check your device's manual or the <a href="faq.html#port-not-listed">FAQ</a> first. tyutool <strong>cannot</strong> put a device into download mode for you; you must do it yourself. When the device is not in download mode, tyutool waits for a handshake and eventually times out. For the underlying concepts (UART / download mode / baud rate), see <a href="concepts.html">Concepts</a>.
       </div>
 
       <h2 id="download">Download &amp; install</h2>
@@ -50,11 +50,11 @@
 
       <div class="callout warn">
         <span class="title">macOS serial permission</span>
-        macOS denies ordinary users access to serial devices by default. Add your user to the <code>dialout</code> group: <code>sudo dseditgroup -o edit -a $USER -t user dialout</code>, then <strong>log out and back in</strong> for it to take effect. See the <a href="faq.html">FAQ</a>.
+        macOS denies ordinary users access to serial devices by default. Add your user to the <code>dialout</code> group: <code>sudo dseditgroup -o edit -a $USER -t user dialout</code>, then <strong>log out and back in</strong> for it to take effect. See the <a href="faq.html#macos-serial-perm">FAQ</a>.
       </div>
       <div class="callout warn">
         <span class="title">Linux blank window</span>
-        On some Linux desktops the tyutool window comes up blank. Launch it as <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> to work around it. See the <a href="faq.html">FAQ</a>.
+        On some Linux desktops the tyutool window comes up blank. Launch it as <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> to work around it. See the <a href="faq.html#linux-blank-window">FAQ</a>.
       </div>
       <div class="callout tip">
         <span class="title">Tip</span>
@@ -109,7 +109,7 @@
       <p>For the advanced options behind each step (address tweaks, erase strategy, verification, saving logs), see the <a href="flash.html">Firmware Flash</a> page.</p>
       <div class="callout danger">
         <span class="title">Important</span>
-        While flashing, <strong>do not</strong> unplug the USB cable or cut power — doing so can corrupt the data. If a flash fails, first drop to <code>115200</code> baud and retry; if it still fails, see the <a href="faq.html">FAQ</a>.
+        While flashing, <strong>do not</strong> unplug the USB cable or cut power — doing so can corrupt the data. If a flash fails, first drop to <code>115200</code> baud and retry; if it still fails, see the <a href="faq.html#flash-fails">FAQ</a>.
       </div>
 
       <h2 id="next-steps">Next steps</h2>
