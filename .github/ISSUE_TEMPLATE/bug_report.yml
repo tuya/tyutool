@@ -23,6 +23,7 @@ body:
       options:
         - 桌面应用 GUI / Desktop app (GUI)
         - 命令行 CLI / Command line (CLI)
+        - 浏览器 + Bridge 常驻进程 / Browser + Bridge helper
     validations:
       required: true
   - type: input
@@ -64,6 +65,11 @@ body:
         强烈建议附上日志：把导出的 zip 直接拖到此输入框即可上传。
         GUI：设置 → 应用日志 → 导出日志并反馈；
         CLI：日志路径见启动时打印的 `log:` 行（每次运行生成独立文件，如 `~/.local/share/tyutool/tyutool-<时间戳>.log`）。
+        Bridge：无导出入口，请手动附上日志文件 —— 路径同样见启动时打印的 `bridge session log:` 行
+        （每次启动生成独立文件，如 `~/.local/share/tyutool-bridge/tyutool-bridge-<时间戳>.log`；
+        macOS 为 `~/Library/Application Support/tyutool-bridge/`，Windows 为 `%APPDATA%\tyutool-bridge\`）。
         Strongly recommended — drag the exported log zip into this box to upload it.
         GUI: Settings → Application Logs → Export Logs & Report Issue.
         CLI: the log path is printed in the startup banner (`log:` line).
+        Bridge: no export UI — attach the file by hand; its path is printed at startup
+        (`bridge session log:` line), one file per launch under the platform data dir.

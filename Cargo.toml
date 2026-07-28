@@ -1,3 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/tyutool-core", "crates/tyutool-cli", "src-tauri"]
+members = [
+    "crates/tyutool-core",
+    "crates/tyutool-cli",
+    "crates/tyutool-serve",
+    "crates/tyutool-bridge",
+    "src-tauri",
+]
