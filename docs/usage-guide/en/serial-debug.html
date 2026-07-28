@@ -31,9 +31,9 @@
       <h2 id="overview">1. Overview</h2>
       <p>Serial Debug is a <strong>full serial terminal</strong>: you can both watch the device's live log output and send commands or data to it. The layout is made up of the top connection bar, the central log view, the bottom send bar, and the filter-tabs / settings area on the side.</p>
       <p>The page has a <strong>keep-alive</strong> mechanism: when you navigate away from Serial Debug (say, to check <a href="flash.html">Firmware Flash</a> progress) and come back, the background RX stream keeps running, so you <strong>still see what the device printed</strong> while you were away — navigating between pages does not drop data.</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-overview.png" alt="Serial Debug overview: connection bar, log view, send bar, filter tabs" loading="lazy">
         <figcaption>Serial Debug overview: connection bar, log view, send bar, filter tabs</figcaption>
-        <!-- capture: serial-debug-overview.png -->
       </figure>
       <div class="callout note">
         <span class="title">Shares ports with Firmware Flash</span>
@@ -47,7 +47,7 @@
         <li><strong>Connect / Disconnect</strong>: manually open or close the link to the selected port.</li>
         <li><strong>Status indicator</strong>: shows whether the port is connected / disconnected / held by another page.</li>
       </ul>
-      <p>The common parameters (baud, etc.) are picked right on the connection bar; the <strong>advanced UART settings</strong> live in the <a href="settings.html">Settings</a> modal:</p>
+      <p>The common parameters (baud, etc.) are picked right on the connection bar; the <strong>advanced UART settings</strong> live in the <strong>Serial Port Settings</strong> modal on this page:</p>
       <table>
         <thead><tr><th>Parameter</th><th>Values</th><th>Notes</th></tr></thead>
         <tbody>
@@ -84,9 +84,9 @@
         <li><strong>Clear</strong>: wipes the currently visible buffer.</li>
         <li><strong>Export</strong>: saves the current log to a file.</li>
       </ul>
-      <figure class="shot todo">
-        <figcaption>Hex view: bytes per row, direction badges, timestamps</figcaption>
-        <!-- capture: serial-debug-hex-view.png -->
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-log-view.png" alt="Log view: direction badges, timestamps (the modal shown is Serial Port Settings)" loading="lazy">
+        <figcaption>Log view: direction badges, timestamps (the modal shown is Serial Port Settings)</figcaption>
       </figure>
       <div class="callout warn">
         <span class="title">Visible window caps at 3000 lines</span>
@@ -101,9 +101,9 @@
         <li><strong>Enter to send</strong>: press <kbd>Enter</kbd> to send the current input.</li>
         <li><strong>Send history</strong>: keeps up to <strong>20 entries</strong>; use <kbd>↑</kbd> / <kbd>↓</kbd> to flip through history without retyping.</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-send-bar.png" alt="Send bar: ASCII/Hex toggle, \r\n option, history dropdown" loading="lazy">
         <figcaption>Send bar: ASCII/Hex toggle, <code>\r\n</code> option, history dropdown</figcaption>
-        <!-- capture: serial-debug-send-bar.png -->
       </figure>
 
       <h2 id="hex-popup">6. Hex popup</h2>
@@ -123,13 +123,13 @@
         <li><strong>"Load older"</strong>: paginates in earlier matches when there are many.</li>
       </ul>
       <p>Filtering runs <strong>server-side over the whole session</strong>, not just over the current visible window — so even data that has aged out of the 3000-line viewport can still be recovered by a filter.</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-filter-tabs.png" alt="Filter tabs: keywords, 6-color badges, live counts, &quot;All&quot; tab" loading="lazy">
         <figcaption>Filter tabs: keywords, 6-color badges, live counts, "All" tab</figcaption>
-        <!-- capture: serial-debug-filter-tabs.png -->
       </figure>
 
       <h2 id="auto">8. Auto-release &amp; auto-save</h2>
-      <p>Both features are configured in <a href="settings.html">Settings</a> and make a long-running Serial Debug session more hands-off.</p>
+      <p>Both features make a long-running Serial Debug session more hands-off; <strong>auto-save</strong> can also be configured under <a href="settings.html#serial-logs">Settings · Serial logs</a>.</p>
       <h3>Auto-release</h3>
       <p>Auto-release solves <strong>port contention</strong>:</p>
       <ul>
@@ -156,7 +156,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — firmware flashing tool for Tuya ecosystem IoT devices</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

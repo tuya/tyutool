@@ -24,8 +24,9 @@ below, replace the placeholder block with a real `figure.shot` (see
 | `serial-debug-hex-view.png` | Serial Debug | `/serial-debug` Hex view | 16 bytes/row | — |
 | `serial-debug-filter-tabs.png` | Serial Debug | `/serial-debug` | 2 filter tabs with counts | — |
 | `serial-debug-send-bar.png` | Serial Debug | `/serial-debug` send bar | ASCII mode, history open | — |
-| `settings-update.png` | Settings | `/settings` | Update center banner | — |
-| `settings-diagnostics.png` | Settings | `/settings` | Diagnostics section, log level visible | — |
+| `settings-update.png` ✓ | Settings | `/settings` | Update center banner | Captured; wired into Settings page (zh + en) |
+| `settings-appearance.png` ✓ | Settings | `/settings` | Appearance section, theme & language visible | Captured; wired into Settings page (zh + en) |
+| `settings-diagnostics.png` ✓ | Settings | `/settings` | Diagnostics section, log level visible | Captured; wired into Settings page (zh + en) |
 | `batch-overview.png` ✓ | Batch Auth | `/toolbox/batch-flash-auth` | Several slots, mixed statuses | Captured; wired into operator page (zh + en) |
 | `batch-config.png` ✓ | Batch Auth (operator page, Phase one) | config panel | Chip=esp32, firmware=Default, conflict policy visible | Captured with ①–⑥ callouts; wired into operator page (zh + en). Has WeCom watermark — recapture clean if needed |
 | `batch-sheet-stats.png` ✓ | Batch Auth (operator page, Phase one) | config panel, auth sheet selected | Stats strip showing Total/Used/Occupied/Remaining | Captured with ①–③ callouts; wired into operator page (zh + en). Shows the pre-recovery "exhausted" hint — recapture after the recovery-mode build ships |

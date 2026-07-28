@@ -77,7 +77,7 @@
         首次启动 tyutool 时默认选中 <code>t5ai</code>。旧版的 <code>t5</code> / <code>T5</code> 是 <code>t5ai</code> 的别名，会被自动归一化为 <code>t5ai</code>。
       </div>
       <div class="callout tip">
-        <span class="title">烧录波特率可以调吗？</span>
+        <span class="title">烧录波特率调节</span>
         烧录波特率可以在芯片默认值的基础上适当调高——波特率越高，烧录越快；但超过一定上限后，受串口信号质量影响，可能出现烧录失败。通常不建议超过 <code>2000000</code>。
       </div>
       <div class="callout tip">
@@ -140,6 +140,10 @@
         <li><strong>结束地址</strong>：默认取该芯片的<strong>完整 flash 容量</strong>（见<a href="#chip">芯片表</a>），即默认做整片读取。</li>
       </ul>
       <p>如果目标文件<strong>已存在</strong>，会弹出对话框让你选择：<strong>覆盖（Overwrite）</strong> 还是 <strong>追加时间戳（Append-timestamp）</strong>（即文件名后自动加上时间后缀，避免覆盖旧文件）。</p>
+      <div class="callout note">
+        <span class="title">部分芯片不支持读取</span>
+        并非所有芯片都支持读取操作；对不支持的芯片执行读取时，tyutool 会给出明确提示。
+      </div>
       <figure class="shot">
         <img src="../assets/images/flash-read-tab.png" alt="Read 标签：保存目录、文件名、起止地址" loading="lazy">
         <figcaption>Read 标签：保存目录、文件名、起止地址</figcaption>
@@ -192,7 +196,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

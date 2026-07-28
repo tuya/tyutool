@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>批量授权 · 固件开发者必读 · tyutool 使用指南</title>
+  <title>批量授权 · 开发者指南 · tyutool 使用指南</title>
   <link rel="stylesheet" href="../assets/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,7 +25,7 @@
   </header>
   <div class="layout">
     <main class="content">
-      <h1>批量授权 · 固件开发者必读</h1>
+      <h1>批量授权 · 开发者指南</h1>
       <p class="lead">本页写给<strong>固件开发者</strong>：要让你的固件能被 tyutool 批量授权，固件必须实现一套 TuyaOpen UART CLI 命令。下面给出完整协议契约与<strong>自测清单</strong>——自测通过即代表固件已具备批量授权能力。</p>
 
       <div class="callout note">
@@ -33,7 +33,7 @@
         如果你是<strong>使用软件进行烧录授权的操作员</strong>（只想知道怎么点按钮、出问题怎么办），请看 <a href="batch-auth-operator.html">批量授权 · 操作员指南</a>，那里没有协议细节。
       </div>
 
-      <h2 id="protocol-overview">1. 协议本质：文本 CLI，不是二进制帧</h2>
+      <h2 id="protocol-overview">1. 协议本质</h2>
       <p>tyutool 的授权协议是<strong>TuyaOpen 交互式 shell 的文本命令</strong>——纯 ASCII、每条命令以 <code>\r\n</code> 结尾、没有帧头/校验和/操作码。这和烧录固件用的 Beken BootROM 二进制协议是<strong>两套完全独立</strong>的东西。授权阶段对话的对象是<strong>设备启动后运行的那个 CLI shell</strong>。</p>
       <ul>
         <li><strong>波特率</strong>：默认 <code>115200</code> 8N1（可被批量配置的“授权波特率”覆盖）。</li>
@@ -41,11 +41,33 @@
         <li><strong>权威来源</strong>：TuyaOpen 的 <code>tuya_authorize.c</code>——最省事的做法就是基于 TuyaOpen 开发，它已实现本页全部命令。</li>
       </ul>
       <div class="callout tip">
+        <span class="title">基于 TuyaOpen 时如何启用 CLI</span>
+        授权命令不是开机就有的，需要固件主动调用两个函数注册：
+        <ol>
+          <li><code>tal_cli_init()</code>（<code>src/tal_cli/</code>）—— 初始化 CLI 子系统，绑定到 <code>uart0</code>，呈现 <code>tuya&gt;</code> 提示符。若授权口不是 uart0，改用 <code>tal_cli_init_with_uart(uart_num)</code> 指定。</li>
+          <li><code>tuya_authorize_init()</code>（<code>src/tuya_cloud_service/authorize/tuya_authorize.c</code>）—— 内部调用 <code>tal_cli_cmd_register()</code> 把 <code>auth</code> / <code>auth-read</code> / <code>read_mac</code> 等命令注册进 CLI。</li>
+        </ol>
+        <p>两者在 <code>user_main()</code> 里成对调用即可，TuyaOpen 各官方 demo（如 <code>apps/tuya_cloud/switch_demo</code>）都是这个写法：</p>
+        <pre><code>void user_main(void)
+{
+    // ... tal_kv_init / tal_sw_timer_init / tal_workq_init 等
+
+#if !defined(PLATFORM_UBUNTU) || (PLATFORM_UBUNTU == 0)
+    tal_cli_init();          // 初始化 CLI（默认 uart0）
+    tuya_authorize_init();   // 注册 auth / auth-read / read_mac 命令
+    tuya_app_cli_init();     // 你的 App 自定义命令（可选）
+#endif
+
+    // ... tuya_iot_init(...) 等
+}</code></pre>
+        <p>自研/移植固件则需自行实现这套 CLI 壳：用 <code>tal_cli_cmd_register()</code> 注册同名命令并按本页契约回显即可，无需依赖整个 TuyaOpen。</p>
+      </div>
+      <div class="callout note">
         <span class="title">最快上手</span>
-        你的固件若基于 TuyaOpen 构建，授权 CLI 已自带，无需自己实现。本页主要面向<strong>自研或移植固件</strong>、需要自行实现这套 CLI 的开发者。
+        你的固件若基于 TuyaOpen 构建，按上面三行调用即可，授权 CLI 自动可用，无需自己实现命令。本页的命令表和自测清单主要面向<strong>自研或移植固件</strong>、需要自行实现这套 CLI 的开发者。
       </div>
 
-      <h2 id="command-table">2. 固件必须实现的命令</h2>
+      <h2 id="command-table">2. 必须实现的命令</h2>
       <p>下表是 tyutool 在授权流程中会发送的<strong>全部命令</strong>，以及固件必须回显的内容。命令名大小写敏感（小写），<code>&lt;uuid&gt;</code>/<code>&lt;authkey&gt;</code> 为实际凭据，<code>&lt;n&gt;</code> 是存储模式参数（见 <a href="#storage-modes">第 4 节</a>）。</p>
       <table>
         <thead><tr><th>命令（<code>\r\n</code> 结尾）</th><th>用途</th><th>固件必须回显的内容</th></tr></thead>
@@ -68,12 +90,12 @@
           <tr>
             <td><code>auth-read</code><br>或 <code>auth-read &lt;n&gt;</code></td>
             <td>读取当前授权（UUID + AuthKey）</td>
-            <td><strong>已授权</strong>：连续两行 <code>&lt;uuid&gt;</code> 与 <code>&lt;authkey&gt;</code>，随后提示符；<br><strong>空/未授权</strong>：<code>Authorization read failure.</code></td>
+            <td><strong>已授权</strong>：连续两行 <code>&lt;uuid&gt;</code> 与 <code>&lt;authkey&gt;</code>，随后提示符；<br><strong>空/未授权</strong>：<code>Authorization read failure.</code>；<br>部分未授权设备会回显占位 UUID <code>uuidxxxxxxxxxxxxxxxx</code>（配任意 key）而非 failure 串，tyutool 同样视作"未授权"。</td>
           </tr>
           <tr>
             <td><code>auth &lt;uuid&gt; &lt;authkey&gt;</code><br>或 <code>auth &lt;uuid&gt; &lt;authkey&gt; &lt;n&gt;</code></td>
             <td>写入授权</td>
-            <td><strong>长度非法</strong>：<code>uuid length must be 20/16, authkey length must be 32</code>（且不执行写入）；<br><strong>OTP 写入成功</strong>：<code>Authorization write to OTP Succeeds.</code>；<br><strong>OTP 写入失败</strong>：<code>Authorization write to OTP failure.</code></td>
+            <td><strong>长度非法</strong>：<code>uuid length must be 20/16, authkey length must be 32</code>（且不执行写入）；<br><strong>KV 写入成功</strong>：<code>Authorization write succeeds.</code>（部分固件版本写入后会重启、不打印该行，tyutool 对 KV 不依赖此回显判定结果，而是随后用 <code>auth-read</code> 回读校验）；<br><strong>OTP 写入成功</strong>：<code>Authorization write to OTP Succeeds.</code>；<br><strong>OTP 写入失败</strong>：<code>Authorization write to OTP failure.</code></td>
           </tr>
         </tbody>
       </table>
@@ -96,7 +118,7 @@
         <li>UUID 合法字符：字母数字及 <code>-</code> <code>_</code> <code>.</code>；AuthKey 合法字符：任意 ASCII 可见字符。</li>
       </ul>
 
-      <h2 id="storage-modes">4. KV 与 OTP 的协议差异</h2>
+      <h2 id="storage-modes">4. KV 与 OTP 的差异</h2>
       <p>存储模式只通过<strong>命令末尾追加一个数字参数 <code>&lt;n&gt;</code></strong> 来区分，KV 省略、OTP 追加 <code>1</code>：</p>
       <table>
         <thead><tr><th>模式</th><th>读命令</th><th>写命令</th></tr></thead>
@@ -118,19 +140,20 @@
 
       <h2 id="mac-rules">5. MAC 校验规则</h2>
       <ul>
-        <li><code>read_mac</code> 回显的 MAC 必须是有效的设备 MAC。</li>
+        <li><code>read_mac</code> 回显的 MAC 必须是有效的设备 MAC。格式要求：6 段冒号分隔的两位十六进制（<code>XX:XX:XX:XX:XX:XX</code>），大小写不敏感（tyutool 内部转大写）。允许带一个<strong>非十六进制</strong>的前缀标签，即 <code>LABEL:XX:XX:XX:XX:XX:XX</code> 共 7 段（第一段含非十六进制字符才会被剥离）。<strong>不识别</strong>横杠（<code>11-22-...</code>）、等号（<code>MAC=11:...</code>）、空格等分隔变体。</li>
         <li>T5/T5AI <strong>出厂默认 MAC</strong> <code>C8:47:8C:00:00:18</code> 表示设备 MAC 区尚未个性化——读到它 tyutool 会<strong>中止该设备授权</strong>。固件侧应保证读出来的是个性化后的真实 MAC。</li>
       </ul>
 
-      <h2 id="self-test">6. 自测清单（测试通过即可投入批量）</h2>
+      <h2 id="self-test">6. 自测清单</h2>
       <p>你强调的核心：固件开发过程中，需要<strong>自己通过串口手工输入命令测试通过</strong>，才能用批量功能。用任意串口工具（minicom / picocom / 串口调试助手），<strong>115200 8N1</strong> 连上设备，按顺序逐条发送并核对回显。全部勾选通过，即代表固件已具备批量授权能力：</p>
       <ol class="steps">
         <li>☐ 设备上电后出现 <code>tuya&gt;</code> 提示符（连发两个空 <code>\r\n</code> 能唤醒 shell）。</li>
         <li>☐ 发送 <code>sys_log_enable off</code>，收到 <code>OK: log disabled</code>（或旧固件的 <code>No command</code> / 回到提示符）。</li>
         <li>☐ 发送 <code>sys_version</code>，收到一行 <code>project.version x.y.z</code>。</li>
-        <li>☐ 发送 <code>read_mac</code>，收到有效的 <code>XX:XX:XX:XX:XX:FF</code>（且不是 <code>C8:47:8C:00:00:18</code>）。</li>
+        <li>☐ 发送 <code>read_mac</code>，收到有效的 <code>XX:XX:XX:XX:XX:FF</code>。</li>
         <li>☐ 发送 <code>auth-read</code>，在<strong>未授权</strong>设备上收到 <code>Authorization read failure.</code>。</li>
-        <li>☐ 发送 <code>auth &lt;一组合法 uuid+authkey&gt;</code>（UUID 16 或 20 字符、AuthKey 32 字符），写入后再次 <code>auth-read</code> 能读回<strong>相同的</strong> UUID 与 AuthKey。</li>
+        <li>☐ 发送 <code>auth &lt;一组合法 uuid+authkey&gt;</code>（UUID 16 或 20 字符、AuthKey 32 字符），写入后立即收到 <code>Authorization write succeeds.</code>（KV 模式）或 <code>Authorization write to OTP Succeeds.</code>（OTP 模式）。</li>
+        <li>☐ 承接上一步，写入完成后再次 <code>auth-read</code>（或 <code>auth-read 1</code>）能读回<strong>相同的</strong> UUID 与 AuthKey。</li>
         <li>☐ 发送 <code>auth &lt;过短的uuid&gt; &lt;key&gt;</code>，收到 <code>uuid length must be 20/16, authkey length must be 32</code> 且<strong>不</strong>改变已有授权。</li>
         <li>☐（仅 T5AI + OTP 路径）发送 <code>auth &lt;uuid&gt; &lt;authkey&gt; 1</code>，收到 <code>Authorization write to OTP Succeeds.</code>；再发 <code>auth-read 1</code> 能读回。</li>
       </ol>
@@ -139,7 +162,7 @@
         自测请用<strong>合法购得的真实凭据</strong>。若只想验证协议握手，可在 KV 模式下重复擦写同一组；OTP 模式因写一次不可逆，建议最后再验。
       </div>
 
-      <h2 id="integration-paths">7. 两条集成路径</h2>
+      <h2 id="integration-paths">7. 集成路径</h2>
       <ul>
         <li>
           <strong>路径 A（推荐）：固件自带授权能力</strong>——基于 TuyaOpen 开发（或自行实现上述 CLI），生产固件本身就能响应授权命令。批量时用 <code>auth-only</code> 模式，tyutool 直接和你固件里的 shell 对话。
@@ -149,7 +172,7 @@
         </li>
       </ul>
 
-      <h2 id="handoff">8. 交付批量生产前：给操作员的配置交接单</h2>
+      <h2 id="handoff">8. 配置交接单</h2>
       <p>固件自测通过后，别只丢一个 bin 给产线。请把下面每一项<strong>逐项写清楚</strong>交给操作员——操作员会按<a href="batch-auth-operator.html#handoff">操作员页的配置交接单</a>逐行核对，缺一项就可能配错整批：</p>
       <ul>
         <li><strong>芯片型号</strong>（如 <code>esp32</code> / <code>t5ai</code>；只授权不烧录写 <code>other</code>）。</li>
@@ -158,7 +181,7 @@
         <li><strong>两个波特率</strong>：烧录波特率（按芯片推荐值）和授权波特率（= 固件 shell 波特率，通常 <code>115200</code>）。</li>
         <li><strong>存储模式</strong>：<code>KV</code> 还是 <code>OTP</code>。<strong>选 OTP 必须显著标注</strong>，并注明"先单台验证再批量"。</li>
         <li><strong>冲突策略</strong>：跳过还是覆盖（OTP 只能跳过）。</li>
-        <li><strong>接线说明</strong>：烧录/授权口的位置（T5/T5AI 切勿接日志口），最好配一张接线照片。</li>
+        <li><strong>接线说明</strong>：烧录/授权口的位置（T5/T5AI 切勿接日志口），最好配一张接线照片。<strong>务必确认 RTS 已正确连接到芯片复位脚</strong>——tyutool 通过 RTS 脉冲硬件复位设备来启动检测流程，RTS 未接或接反会导致设备不按预期重启、被误判为旧固件或超时。</li>
         <li><strong>MAC 唯一性保障</strong>：说明每台设备的 MAC 在哪个环节个性化、如何保证<strong>全球唯一、互不重复</strong>。tyutool 不校验 MAC 是否与其他设备冲突，而授权码与 MAC 绑定——重复的 MAC 会让不同设备共用同一个授权码，设备在涂鸦平台将无法正常识别。这是操作员无法自行验证的项，必须由固件/产线侧保证。</li>
         <li><strong>特殊事项</strong>：默认 MAC 未个性化设备的处理、供电要求、已知的坑。</li>
       </ul>
@@ -175,7 +198,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>
