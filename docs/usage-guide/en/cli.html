@@ -32,8 +32,32 @@
       <p>Reach for the CLI when you need to <strong>script things, run batches in CI, or operate on headless servers</strong>, or simply when you <strong>prefer the terminal</strong> over a GUI. It shares the same <code>tyutool-core</code> flash logic as the desktop app, is feature-equivalent to the GUI, and can be driven directly by pipes, cron, and scripts.</p>
 
       <h2 id="install">2. Install</h2>
-      <p>Download the latest release binary from the GitHub Releases page. Place it on your <code>PATH</code>.</p>
-      <pre>Download the latest release binary → put it on your PATH</pre>
+      <p>Download the latest CLI binary from the <a href="https://github.com/tuya/tyutool/releases">GitHub Releases page</a>. Each release ships five prebuilt binaries:</p>
+      <table>
+        <thead><tr><th>Platform</th><th>Asset</th></tr></thead>
+        <tbody>
+          <tr><td>Linux x86_64</td><td><code>tyutool-cli_linux_x86_64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>Linux aarch64</td><td><code>tyutool-cli_linux_aarch64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>macOS x86_64 (Intel)</td><td><code>tyutool-cli_macos_x86_64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>macOS aarch64 (Apple silicon)</td><td><code>tyutool-cli_macos_aarch64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>Windows x86_64</td><td><code>tyutool-cli_windows_x86_64_&lt;ver&gt;.zip</code></td></tr>
+        </tbody>
+      </table>
+      <p><code>&lt;ver&gt;</code> is the release version (e.g. <code>3.2.7</code>). Each release also publishes a <code>latest.json</code> manifest whose <code>cli.&lt;platform&gt;.sha256</code> field gives the SHA-256 of the matching asset — verify it if your download channel is untrusted.</p>
+      <p>Extract the binary and put it on your <code>PATH</code>:</p>
+      <pre># Linux / macOS (tar.gz)
+tar -xzf tyutool-cli_linux_x86_64_*.tar.gz
+sudo mv tyutool_cli /usr/local/bin/tyutool
+chmod +x /usr/local/bin/tyutool
+
+# Windows (.zip): extract tyutool_cli.exe and add its folder to PATH</pre>
+      <p>Verify the install:</p>
+      <pre>tyutool --version    # prints the version banner
+tyutool list-ports   # lists detected serial ports</pre>
+      <div class="callout tip">
+        <span class="title">Self-update</span>
+        The CLI can self-update — run <code>tyutool update</code> to fetch and replace the binary in place.
+      </div>
 
       <h2 id="global-options">3. Global options</h2>
       <table>
@@ -189,7 +213,7 @@ tyutool authorize -p /dev/ttyUSB0 -d esp32</pre>
         <thead><tr><th>Flag</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>--check</code></td><td>Only check version, do not download.</td></tr>
-          <tr><td><code>--source</code></td><td>Update source (<code>github</code> default, <code>tuya</code> = Tuya OSS for mainland China).</td></tr>
+          <tr><td><code>--source</code></td><td>Update source: omit (or <code>github</code>) to try GitHub first and fall back to the Tuya OSS mirror; <code>tuya</code> to force the mainland-China mirror only.</td></tr>
         </tbody>
       </table>
 
@@ -243,7 +267,7 @@ tyutool completions powershell | Out-String | Invoke-Expression</pre>
       <p><strong>Rich mode</strong> (interactive TTY): spinner, progress bar with ANSI color, <code>✓</code> checkmarks.</p>
       <p><strong>Plain mode</strong> (CI / piped / redirected): fixed-width phase labels, 10%-step percent ticks on long phases, ASCII-only separators.</p>
       <p>Plain mode output example:</p>
-      <pre>tyutool v3.0.7  linux/x86_64
+      <pre>tyutool v3.2.7  linux/x86_64
 
 write  BK7231N  /dev/ttyUSB0  921600
   File   firmware.bin  1.8 MiB
@@ -265,7 +289,7 @@ Flash OK  3.2s</pre>
       <h2 id="developer-reference">7. Developer reference</h2>
       <div class="callout note">
         <span class="title">Authoritative markdown source</span>
-        The authoritative markdown source for this page lives at <a href="../../cli.md"><code>docs/cli.md</code></a> in the repository. Any CLI change <strong>must update <a href="../../cli.md"><code>docs/cli.md</code></a> first</strong> — this is an explicit rule in <code>AGENTS.md</code>: "<code>docs/cli.md</code> is the authoritative CLI reference. Any change to CLI commands must include a <code>docs/cli.md</code> update in the same commit or PR." PRs that modify <code>crates/tyutool-cli/src/main.rs</code> (command definitions) without updating <code>docs/cli.md</code> must not be merged. This HTML page is only a mirror rendering of that markdown; the markdown remains the source of truth.
+        The authoritative markdown source for this page lives at <a href="../../cli.md"><code>docs/cli.md</code></a> in the repository. Any CLI change <strong>must update <a href="../../cli.md"><code>docs/cli.md</code></a> first</strong> — this is an explicit rule in <code>AGENTS.md</code>: "<code>docs/cli.md</code> is the authoritative CLI reference. Any change to CLI commands must include a <code>docs/cli.md</code> update in the same commit or PR" (covering adding, removing, or renaming a subcommand or flag, and changing a default value or behavior). PRs that modify <code>crates/tyutool-cli/src/main.rs</code> (command definitions) without updating <code>docs/cli.md</code> must not be merged. This HTML page is only a mirror rendering of that markdown; the markdown remains the source of truth.
       </div>
 
       <nav class="pager">
@@ -276,7 +300,7 @@ Flash OK  3.2s</pre>
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — firmware flashing tool for Tuya ecosystem IoT devices</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

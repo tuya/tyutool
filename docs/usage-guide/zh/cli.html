@@ -32,8 +32,32 @@
       <p>当你需要<strong>脚本化、在 CI 里跑批、在无桌面的服务器上操作</strong>，或者你<strong>更习惯终端</strong>而不是 GUI 时，CLI 是最顺手的入口。它和桌面应用共享同一套 <code>tyutool-core</code> 烧录逻辑，能力与 GUI 对等，且可被管道、cron、脚本直接驱动。</p>
 
       <h2 id="install">2. 安装</h2>
-      <p>从 GitHub Releases 页面下载最新版本的发布二进制文件，并将其放到你的 <code>PATH</code> 中。</p>
-      <pre>下载最新 release 二进制 → 放到 PATH 上</pre>
+      <p>从 <a href="https://github.com/tuya/tyutool/releases">GitHub Releases 页面</a>下载最新的 CLI 二进制。每个 release 提供五个预编译包：</p>
+      <table>
+        <thead><tr><th>平台</th><th>资产文件名</th></tr></thead>
+        <tbody>
+          <tr><td>Linux x86_64</td><td><code>tyutool-cli_linux_x86_64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>Linux aarch64</td><td><code>tyutool-cli_linux_aarch64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>macOS x86_64（Intel）</td><td><code>tyutool-cli_macos_x86_64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>macOS aarch64（Apple 芯片）</td><td><code>tyutool-cli_macos_aarch64_&lt;ver&gt;.tar.gz</code></td></tr>
+          <tr><td>Windows x86_64</td><td><code>tyutool-cli_windows_x86_64_&lt;ver&gt;.zip</code></td></tr>
+        </tbody>
+      </table>
+      <p><code>&lt;ver&gt;</code> 是 release 版本号（如 <code>3.2.7</code>）。每个 release 还会发布一份 <code>latest.json</code> 清单，其中 <code>cli.&lt;platform&gt;.sha256</code> 字段是对应资产的 SHA-256——若下载渠道不可信，可据此校验。</p>
+      <p>解压后把二进制放到 <code>PATH</code> 上：</p>
+      <pre># Linux / macOS（tar.gz）
+tar -xzf tyutool-cli_linux_x86_64_*.tar.gz
+sudo mv tyutool_cli /usr/local/bin/tyutool
+chmod +x /usr/local/bin/tyutool
+
+# Windows（.zip）：解压出 tyutool_cli.exe，把所在目录加入 PATH</pre>
+      <p>验证安装：</p>
+      <pre>tyutool --version    # 打印版本横幅
+tyutool list-ports   # 列出检测到的串口</pre>
+      <div class="callout tip">
+        <span class="title">自更新</span>
+        CLI 支持自更新——运行 <code>tyutool update</code> 即可原地拉取并替换二进制。
+      </div>
 
       <h2 id="global-options">3. 全局选项</h2>
       <table>
@@ -58,7 +82,7 @@
       <p><strong>端口选择</strong>（带 <code>-p/--port</code> 的命令）：省略 <code>-p</code> 时，若只有<strong>一个</strong>可用端口，会自动使用它；若存在<strong>多个</strong>端口，在交互式终端上会提示你选择一个，而在非交互环境（CI、管道）下命令会报错并要求你显式传 <code>-p</code>。</p>
 
       <h2 id="subcommands">4. 子命令</h2>
-      <p>下列 11 个子命令按字母/逻辑顺序给出。每个子命令含：用法行（<code>&lt;pre&gt;</code>）、参数表（<code>&lt;table&gt;</code>）、示例（<code>&lt;pre&gt;</code>）。参数与默认值与 <code>docs/cli.md</code> 完全一致。</p>
+      <p>下列 11 个子命令按逻辑顺序给出。每个子命令含：用法行（<code>&lt;pre&gt;</code>）、参数表（<code>&lt;table&gt;</code>）、示例（<code>&lt;pre&gt;</code>）。参数与默认值与 <code>docs/cli.md</code> 完全一致。</p>
 
       <h3 id="cmd-write"><code>write</code> — 烧录固件到设备</h3>
       <pre>tyutool write -d &lt;DEVICE&gt; -f &lt;FILE&gt; [-p &lt;PORT&gt;] [-b &lt;BAUD&gt;] [-s &lt;START&gt;] [--end &lt;END&gt;]</pre>
@@ -189,7 +213,7 @@ tyutool authorize -p /dev/ttyUSB0 -d esp32</pre>
         <thead><tr><th>参数</th><th>说明</th></tr></thead>
         <tbody>
           <tr><td><code>--check</code></td><td>只检查版本，不下载。</td></tr>
-          <tr><td><code>--source</code></td><td>更新源（默认 <code>github</code>，国内用 <code>tuya</code>，即 Tuya OSS 镜像）。</td></tr>
+          <tr><td><code>--source</code></td><td>更新源：省略（或 <code>github</code>）时先试 GitHub、失败回退到 Tuya OSS 镜像；传 <code>tuya</code> 强制只走国内镜像。</td></tr>
         </tbody>
       </table>
 
@@ -238,12 +262,13 @@ tyutool completions powershell | Out-String | Invoke-Expression</pre>
         </tbody>
       </table>
       <p>芯片名大小写不敏感（<code>--device T5AI</code>、<code>--device t5AI</code> 与 <code>--device t5ai</code> 等价）。</p>
+      <p><strong>关于烧录波特率：</strong>表中是各芯片的<strong>默认</strong>值，<strong>调高</strong>更快但易失稳失败，<strong>调低</strong>更慢更稳。可用 <code>--baud</code>/<code>-b</code> 自行调整，多试几个值在速度与稳定性之间取得平衡。</p>
 
       <h2 id="output-modes">6. 输出模式</h2>
       <p><strong>Rich 模式</strong>（交互式 TTY）：spinner、带 ANSI 颜色的进度条、<code>✓</code> 对勾。</p>
       <p><strong>Plain 模式</strong>（CI / 管道 / 重定向）：固定宽度的阶段标签、长阶段每 10% 输出一个百分比刻度、仅 ASCII 的分隔符。</p>
       <p>Plain 模式输出示例：</p>
-      <pre>tyutool v3.0.7  linux/x86_64
+      <pre>tyutool v3.2.7  linux/x86_64
 
 write  BK7231N  /dev/ttyUSB0  921600
   File   firmware.bin  1.8 MiB
@@ -265,7 +290,7 @@ Flash OK  3.2s</pre>
       <h2 id="developer-reference">7. 开发者参考</h2>
       <div class="callout note">
         <span class="title">权威 markdown 源</span>
-        本页对应的 markdown 权威源文件位于仓库内的 <a href="../../cli.md"><code>docs/cli.md</code></a>。任何 CLI 变更都<strong>必须先更新 <a href="../../cli.md"><code>docs/cli.md</code></a></strong>——这是 <code>AGENTS.md</code> 里明确规定的规则：“<code>docs/cli.md</code> is the authoritative CLI reference. Any change to CLI commands must include a <code>docs/cli.md</code> update in the same commit or PR.” 修改 <code>crates/tyutool-cli/src/main.rs</code>（命令定义）却不更新 <code>docs/cli.md</code> 的 PR 不予合并。本 HTML 页面只是该 markdown 的镜像渲染，内容请以 markdown 为准。
+        本页对应的 markdown 权威源文件位于仓库内的 <a href="../../cli.md"><code>docs/cli.md</code></a>。任何 CLI 变更都<strong>必须先更新 <a href="../../cli.md"><code>docs/cli.md</code></a></strong>——这是 <code>AGENTS.md</code> 里明确规定的规则：“<code>docs/cli.md</code> is the authoritative CLI reference. Any change to CLI commands must include a <code>docs/cli.md</code> update in the same commit or PR”（含新增/删除/重命名子命令或参数、改默认值或行为）。修改 <code>crates/tyutool-cli/src/main.rs</code>（命令定义）却不更新 <code>docs/cli.md</code> 的 PR 不予合并。本 HTML 页面只是该 markdown 的镜像渲染，内容请以 markdown 为准。
       </div>
 
       <nav class="pager">
@@ -276,7 +301,7 @@ Flash OK  3.2s</pre>
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>
