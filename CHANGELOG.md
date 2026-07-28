@@ -2,6 +2,30 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.8] - 2026-07-28
+
+### 问题修复
+
+- `serial-debug`：修复过滤标签页翻页后整页重复显示同一条匹配内容的问题——归档行没有展示 id，导致渲染缓存整页命中同一条记录；同一问题也让 Ctrl+F 把过滤页的每一行都视作当前匹配项
+
+### 工程改进
+
+- `deps`：升级开发工具链依赖（vitest、vite、tsx、undici、brace-expansion），修复 11 项 Dependabot 安全告警；仅涉及开发依赖，随包发布的运行时依赖不受影响
+- `docs`：macOS 构建已完成 Apple 签名，README 与使用指南中过时的 Gatekeeper 绕过说明已移除；中国大陆下载与更新指引改为指向涂鸦 OSS 的 `release.json`，不再使用 Gitee；`docs/cli.md` 补充发布产物清单与安装、更新源说明；使用指南补齐实机截图并修正过时内容
+- `ci`：Gitee 代码镜像改为真实镜像（同步全部分支与标签，删除也会同步），`refactor/v3` 上的推送同样触发 CI
+
+---
+
+### Bug Fixes
+
+- `serial-debug`: Fix filter tabs rendering the same matched line for every row after paging — archive-backed lines carried no display id, so the whole page collided on a single render-cache entry; the same missing id also made Ctrl+F treat every row on a filter page as the current match
+
+### Engineering
+
+- `deps`: Bump dev-toolchain dependencies (vitest, vite, tsx, undici, brace-expansion) to clear 11 Dependabot alerts; dev-only — no shipped runtime dependency is affected
+- `docs`: macOS builds are Apple-signed now, so the obsolete Gatekeeper workarounds are gone from the README and usage guide; mainland download/update guidance points at Tuya OSS `release.json` instead of Gitee; `docs/cli.md` gains the release-asset list and spells out install/update sources; the usage guide gets real screenshots and stale content fixes
+- `ci`: The Gitee code sync is a true mirror now (all branches and tags, deletions included), and pushes to `refactor/v3` also trigger CI
+
 ## [3.2.7] - 2026-07-23
 
 ### 新功能
