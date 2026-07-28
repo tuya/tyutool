@@ -71,7 +71,29 @@ export interface SerialDebugFilterUpdatePayload {
   stats: SerialDebugFilterStats;
 }
 
+/**
+ * Mirrors `tyutool_core::serial_debug::SerialDebugLine` — one archive-backed
+ * line as returned by the paging commands. Archive lines are identified by
+ * `lineNo` (per session, starting at 1) and carry no display `id`; map them
+ * through `archiveLineToLogLine` before rendering.
+ */
+export interface SerialDebugLine {
+  lineNo: number;
+  tsMs: number;
+  direction: DebugLineDirection;
+  text: string;
+  rawBytes?: number[]; // Tauri/JSON deserializes Vec<u8> as a number[]
+}
+
 export interface SerialDebugFilterPage {
+  filterId: string;
+  totalMatches: number;
+  start: number;
+  items: SerialDebugLine[];
+}
+
+/** A filter page whose archive lines have been mapped to display lines. */
+export interface SerialDebugFilterLinePage {
   filterId: string;
   totalMatches: number;
   start: number;
@@ -81,5 +103,5 @@ export interface SerialDebugFilterPage {
 export interface SerialDebugSessionPage {
   totalLines: number;
   start: number;
-  items: DebugLogLine[];
+  items: SerialDebugLine[];
 }
