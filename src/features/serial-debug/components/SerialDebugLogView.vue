@@ -24,6 +24,7 @@ import { EXPORT_PAGE_SIZE } from "@/features/serial-debug/constants";
 import type {
   DebugLogLine,
   HexBytesPerRow,
+  SerialDebugLine,
 } from "@/features/serial-debug/types";
 import SerialDebugChipBar from "./SerialDebugChipBar.vue";
 
@@ -305,7 +306,7 @@ async function writeFile(
   URL.revokeObjectURL(url);
 }
 
-function formatExportLine(line: DebugLogLine): string {
+function formatExportLine(line: SerialDebugLine): string {
   const dir =
     line.direction === "tx" ? "TX " : line.direction === "rx" ? "RX " : "SYS";
   return `[${formatTs(line.tsMs)}] [${dir}] ${stripAnsi(line.text)}`;

@@ -24,6 +24,7 @@ import {
 } from "@/features/firmware-flash/constants";
 import { useFlashStore } from "@/stores/flash";
 import { parseHexInput } from "@/features/serial-debug/hex-format";
+import { archiveLineToLogLine } from "@/features/serial-debug/utils";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { wsTransport } from "@/transport/ws-transport";
 import type {
@@ -32,7 +33,7 @@ import type {
   DebugLogLine,
   HexBytesPerRow,
   SendMode,
-  SerialDebugFilterPage,
+  SerialDebugFilterLinePage,
   SerialDebugFilterStats,
   SerialDebugFilterUpdatePayload,
   WatchChip,
@@ -177,7 +178,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const showTimestamp = ref(true);
   const showDirBadge = ref(true);
   const filterStatsById = ref<Record<string, SerialDebugFilterStats>>({});
-  const filterPagesById = ref<Record<string, SerialDebugFilterPage>>({});
+  const filterPagesById = ref<Record<string, SerialDebugFilterLinePage>>({});
   const activeFilterLoading = ref(false);
   const activeFilterFullyLoaded = ref(false);
 
@@ -195,6 +196,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
 
   let nextLineId = 1;
+  // Display id per archive line number, so reloading a filter page keeps the
+  // ids of lines that are already on screen (the log renderers cache parsed
+  // lines by id). Reset on session clear, because archive line numbers restart.
+  let archiveLineIds = new Map<number, number>();
+  const MAX_ARCHIVE_LINE_IDS = 20000;
   const pending = {
     tx: createPendingBuffer(),
     rx: createPendingBuffer(),
@@ -445,6 +451,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       ]),
     );
     filterPagesById.value = {};
+    archiveLineIds = new Map();
     activeFilterLoading.value = false;
     activeFilterFullyLoaded.value = true;
     try {
@@ -816,12 +823,31 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
+  function archiveLineId(lineNo: number): number {
+    const existing = archiveLineIds.get(lineNo);
+    if (existing !== undefined) return existing;
+    // Drop the memo rather than let it grow with the session. Lines then get
+    // fresh ids (a one-off re-parse in the renderers); ids stay unique.
+    if (archiveLineIds.size >= MAX_ARCHIVE_LINE_IDS) archiveLineIds.clear();
+    const id = nextLineId++;
+    archiveLineIds.set(lineNo, id);
+    return id;
+  }
+
   async function loadFilterPage(
     filterId: string,
     start: number,
     limit: number,
-  ): Promise<SerialDebugFilterPage> {
-    return await transport.readFilterMatches(filterId, start, limit);
+  ): Promise<SerialDebugFilterLinePage> {
+    const page = await transport.readFilterMatches(filterId, start, limit);
+    return {
+      filterId: page.filterId,
+      totalMatches: page.totalMatches,
+      start: page.start,
+      items: page.items.map((line) =>
+        archiveLineToLogLine(line, archiveLineId(line.lineNo)),
+      ),
+    };
   }
 
   async function loadActiveFilterTail(): Promise<void> {

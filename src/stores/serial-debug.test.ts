@@ -27,6 +27,7 @@ function fakeTransport(): SerialDebugTransport & {
   emitChunkBatch: (chunks: DebugChunk[]) => void;
   emitDisconnect: (reason: string) => void;
   emitFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void;
+  setFilterPage: (filterId: string, page: SerialDebugFilterPage) => void;
   readFilterMatchesCalls: Array<{
     filterId: string;
     start?: number;
@@ -142,6 +143,10 @@ function fakeTransport(): SerialDebugTransport & {
     },
     emitFilterUpdated(payload) {
       filterListeners.forEach((l) => l(payload));
+    },
+    setFilterPage(filterId, page) {
+      const entry = filters.get(filterId);
+      if (entry) entry.page = page;
     },
   };
 }
@@ -681,6 +686,82 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(s.filterPagesById).toEqual({});
     expect(s.activeFilterLoading).toBe(false);
     expect(s.activeFilterFullyLoaded).toBe(true);
+  });
+
+  it("gives every archive line in a filter page its own display id", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERR", false);
+    const id = s.watchChips[0].id;
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 3,
+      start: 0,
+      items: [
+        { lineNo: 3, tsMs: 1000, direction: "rx", text: "ERR alpha" },
+        { lineNo: 9, tsMs: 1001, direction: "rx", text: "ERR beta" },
+        { lineNo: 17, tsMs: 1002, direction: "rx", text: "ERR gamma" },
+      ],
+    });
+
+    await s.setActiveChip(id);
+
+    const items = s.activeDisplayLines;
+    expect(items.map((line) => line.text)).toEqual([
+      "ERR alpha",
+      "ERR beta",
+      "ERR gamma",
+    ]);
+    // Distinct ids per line: the log renderers cache parsed lines by id, so
+    // colliding ids make one line render in place of the others (issue: a
+    // single filtered line shown repeatedly).
+    expect(new Set(items.map((line) => line.id)).size).toBe(3);
+    expect(items.every((line) => Number.isInteger(line.id))).toBe(true);
+  });
+
+  it("keeps display ids stable when the same filter page is reloaded", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERR", false);
+    const id = s.watchChips[0].id;
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 2,
+      start: 0,
+      items: [
+        { lineNo: 3, tsMs: 1000, direction: "rx", text: "ERR alpha" },
+        { lineNo: 9, tsMs: 1001, direction: "rx", text: "ERR beta" },
+      ],
+    });
+
+    await s.setActiveChip(id);
+    const firstIds = s.activeDisplayLines.map((line) => line.id);
+    await s.setActiveChip(id);
+    expect(s.activeDisplayLines.map((line) => line.id)).toEqual(firstIds);
+  });
+
+  it("does not reuse display ids for archive line numbers of a new session", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERR", false);
+    const id = s.watchChips[0].id;
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 1,
+      start: 0,
+      items: [{ lineNo: 1, tsMs: 1000, direction: "rx", text: "ERR old" }],
+    });
+    await s.setActiveChip(id);
+    const oldId = s.activeDisplayLines[0].id;
+
+    await s.clear();
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 1,
+      start: 0,
+      items: [{ lineNo: 1, tsMs: 2000, direction: "rx", text: "ERR new" }],
+    });
+    await s.setActiveChip(id);
+
+    expect(s.activeDisplayLines[0].text).toBe("ERR new");
+    expect(s.activeDisplayLines[0].id).not.toBe(oldId);
   });
 
   it("throttles active filter tail reloads for repeated live updates", async () => {
