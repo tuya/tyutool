@@ -1601,9 +1601,11 @@ impl DebugSession {
 enum SessionSlot {
     /// No session, no port claim.
     Idle,
-    /// No session either, but the last one ended in a device disconnect whose
-    /// frame has already gone out, and no close has been answered for it yet:
-    /// the next close is that session's close, and gets swallowed.
+    /// No session either, but the last one was taken over by a device
+    /// disconnect that owns its terminal frame, and no close has been answered
+    /// for it yet: the next close is that session's close, and gets swallowed.
+    /// Left behind by the very step that removes the session, so the swallow
+    /// covers the whole teardown — not only the time after the frame went out.
     EndedByDisconnect,
     /// Port claimed, backend open in flight.
     Opening {
@@ -1616,6 +1618,21 @@ enum SessionSlot {
         terminal: PendingTerminal,
     },
     Open(DebugSession),
+}
+
+impl SessionSlot {
+    /// The state a session leaves behind when `terminal` takes it over. A
+    /// disconnect owes the frame for that session, so the close already on its
+    /// way must be swallowed; a close is answering for itself and owes nothing.
+    ///
+    /// Used wherever the session leaves the slot, under the same lock, so there
+    /// is no window in which a close sees a plain `Idle` and answers.
+    fn vacated_by(terminal: &PendingTerminal) -> SessionSlot {
+        match terminal {
+            PendingTerminal::Closed => SessionSlot::Idle,
+            PendingTerminal::Disconnected { .. } => SessionSlot::EndedByDisconnect,
+        }
+    }
 }
 
 /// The terminal frame a close or a device disconnect still owes the client after
@@ -1647,9 +1664,9 @@ enum TakenSession {
     /// task does the shutting down, the releasing *and* the answering, so the
     /// caller must stay silent.
     Pending,
-    /// Nothing was open because a device disconnect ended the last session and
-    /// already reported it: the caller stays silent. The slot goes back to
-    /// `Idle`, so the *next* close is answered again.
+    /// Nothing was open because a device disconnect took over the last session
+    /// and owns its terminal frame: the caller stays silent. The slot goes back
+    /// to `Idle`, so the *next* close is answered again.
     AlreadyReported,
     /// Nothing was open.
     None,
@@ -1757,6 +1774,13 @@ impl ConnContext {
     /// connection already has a monitor open (or opening). A slot still holding
     /// the unanswered-close marker of a disconnected session counts as free —
     /// reopening right after `serial_debug_disconnected` is the main path.
+    ///
+    /// Dropping that pending one-shot here is correct, not a leak: a
+    /// `serial_debug_close` carries no session identity (see PROTOCOL.md
+    /// §serial_debug_close), so it always refers to the connection's *current*
+    /// session. Once a new session exists, any close targets that new session
+    /// and must be answered for it; the old session's acknowledgement is no
+    /// longer owed to anyone.
     fn begin_session(&self, port: &str) -> bool {
         let mut slot = self.lock_session();
         if !matches!(*slot, SessionSlot::Idle | SessionSlot::EndedByDisconnect) {
@@ -1772,8 +1796,12 @@ impl ConnContext {
     /// a device disconnect is waiting on this open, so the caller still owes it
     /// that frame once the unwinding is done.
     fn abandon_opening(&self) -> Option<PendingTerminal> {
-        match std::mem::replace(&mut *self.lock_session(), SessionSlot::Idle) {
-            SessionSlot::Aborting { terminal, .. } => Some(terminal),
+        let mut slot = self.lock_session();
+        match std::mem::replace(&mut *slot, SessionSlot::Idle) {
+            SessionSlot::Aborting { terminal, .. } => {
+                *slot = SessionSlot::vacated_by(&terminal);
+                Some(terminal)
+            }
             _ => None,
         }
     }
@@ -1788,10 +1816,13 @@ impl ConnContext {
                 *slot = SessionSlot::Open(session);
                 FinishedOpen::Published
             }
-            SessionSlot::Aborting { terminal, .. } => FinishedOpen::Discard {
-                session,
-                owed: Some(terminal),
-            },
+            SessionSlot::Aborting { terminal, .. } => {
+                *slot = SessionSlot::vacated_by(&terminal);
+                FinishedOpen::Discard {
+                    session,
+                    owed: Some(terminal),
+                }
+            }
             SessionSlot::Idle | SessionSlot::EndedByDisconnect => FinishedOpen::Discard {
                 session,
                 owed: None,
@@ -1816,7 +1847,14 @@ impl ConnContext {
     fn take_session(&self, terminal: PendingTerminal) -> TakenSession {
         let mut slot = self.lock_session();
         match std::mem::replace(&mut *slot, SessionSlot::Idle) {
-            SessionSlot::Open(session) => TakenSession::Open(session),
+            // The swallow marker is left behind here, in the same locked step
+            // that removes the session — the teardown that follows takes two
+            // thread joins and a port release, and a close landing in there must
+            // not find a bare `Idle` and answer for a session already claimed.
+            SessionSlot::Open(session) => {
+                *slot = SessionSlot::vacated_by(&terminal);
+                TakenSession::Open(session)
+            }
             SessionSlot::Opening { port } => {
                 *slot = SessionSlot::Aborting { port, terminal };
                 TakenSession::Pending
@@ -1834,27 +1872,13 @@ impl ConnContext {
                 };
                 TakenSession::Pending
             }
-            // The disconnect recorded here already answered for the session this
-            // caller is tearing down; replacing the state with `Idle` above is
-            // what keeps that swallow one-shot.
+            // The disconnect recorded here owns the terminal frame for the
+            // session this caller is tearing down; replacing the state with
+            // `Idle` above is what keeps that swallow one-shot — a client
+            // sending close twice must keep getting the documented
+            // `serial_debug_closed` rather than hang on a frame never sent.
             SessionSlot::EndedByDisconnect => TakenSession::AlreadyReported,
             SessionSlot::Idle => TakenSession::None,
-        }
-    }
-
-    /// Record that a `serial_debug_disconnected` frame just went out, so the
-    /// close that was already on its way does not report the same session a
-    /// second time.
-    ///
-    /// One-shot rather than sticky on purpose: it has to swallow the close it
-    /// raced, but a client sending close twice must keep getting the documented
-    /// `serial_debug_closed` instead of hanging on a frame that never comes.
-    /// Only an idle slot is armed — the frame invites an immediate reopen, and a
-    /// session started on the strength of it must not be shadowed.
-    fn note_disconnect_reported(&self) {
-        let mut slot = self.lock_session();
-        if matches!(*slot, SessionSlot::Idle) {
-            *slot = SessionSlot::EndedByDisconnect;
         }
     }
 }
@@ -2349,17 +2373,11 @@ fn finish_failed_open(
 /// has been unwound and the port is free again. Skipping it would leave a web
 /// client waiting for its `serial_debug_closed` forever.
 ///
-/// A `Disconnected` frame also arms the one-shot swallow, exactly as reporting a
-/// live session's disconnect does: the client's own close may still be on its
-/// way, and this session has now had its one terminal frame. An owed `Closed` is
-/// that close being answered here, so it must not arm anything.
+/// Sending only: the one-shot swallow an owed `Disconnected` needs was already
+/// left in the slot by the step that took the session over.
 fn send_owed_terminal(ctx: &ConnContext, owed: Option<PendingTerminal>) {
     if let Some(terminal) = owed {
-        let reported_disconnect = matches!(terminal, PendingTerminal::Disconnected { .. });
         ctx.send(&terminal.into_frame());
-        if reported_disconnect {
-            ctx.note_disconnect_reported();
-        }
     }
 }
 
@@ -2385,7 +2403,8 @@ async fn close_debug_session_task(ctx: Arc<ConnContext>) {
         // can release the port, so it answers once it has — answering here would
         // promise a port that is still held.
         TakenSession::Pending => return,
-        // A device disconnect ended this very session and already reported it;
+        // A device disconnect took this very session over and owns its terminal
+        // frame (already sent, or still on its way out of the teardown);
         // answering here would be the second terminal frame for one session,
         // which the wire contract rules out.
         TakenSession::AlreadyReported => return,
@@ -2421,16 +2440,13 @@ fn on_session_disconnect(
                 ctx.arbiter.release_session(&port, ctx.conn_id);
                 ctx.ports.publish_ownership();
                 ctx.send(&ServerFrame::SerialDebugDisconnected { reason });
-                // This session is now reported gone; a close already on its way
-                // for it must not be answered a second time.
-                ctx.note_disconnect_reported();
             });
         }
         // The open is still in flight: its task owns the teardown, and with it
         // the reporting — reporting from here would announce a free port while
         // the session about to materialize still holds it.
         TakenSession::Pending => {}
-        // An earlier disconnect already reported a session; nothing left to
+        // An earlier disconnect already took a session over; nothing left to
         // report here either.
         TakenSession::AlreadyReported => {}
         // The client closed first; that close already answered.

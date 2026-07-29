@@ -42,45 +42,77 @@ struct FakeBackend {
     cfgs: Arc<Mutex<Vec<DebugConfig>>>,
     hooks: Arc<Mutex<SessionHooks>>,
     closed: Arc<AtomicUsize>,
-    gate: OpenGate,
+    gate: Gate,
+    /// Shared with the handles this backend hands out, so a test can hold the
+    /// session teardown still.
+    close_gate: Arc<Gate>,
     /// When set, every open fails with it *after* passing the gate — a real
     /// backend does the same when the device vanished before it got there.
     open_failure: Option<JobError>,
 }
 
-/// Holds the *first* `open_debug_session` still, so a test can land a close or
-/// a device disconnect while an open is genuinely in flight — a real backend
-/// open blocks on the OS for a good while, and that window is exactly where the
-/// Opening/Aborting race lives.
+/// Holds a backend call still so a test can act while it is in flight, and can
+/// pin the outcome instead of racing for it. Used at the two blocking points
+/// that own a race window: `open_debug_session` (the Opening/Aborting window)
+/// and the session handle's `close` (the disconnect-teardown window, between
+/// the session leaving the slot and `serial_debug_disconnected` reaching the
+/// wire). Arms the *first* call only; later ones find `None` and pass straight
+/// through.
 #[derive(Default)]
-struct OpenGate {
-    /// Taken by the first open; later opens find `None` and return at once.
+struct Gate {
     release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
-    /// Announces that the open entered the backend and recorded its hooks.
+    /// Announces that the guarded call has entered the gate.
     started: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
 }
 
-/// Test-side end of an [`OpenGate`].
-struct OpenGateControl {
+impl Gate {
+    /// Build an armed gate plus its test-side control.
+    fn armed() -> (Self, GateControl) {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (started_tx, started_rx) = tokio::sync::mpsc::unbounded_channel();
+        (
+            Self {
+                release: Mutex::new(Some(release_rx)),
+                started: Mutex::new(Some(started_tx)),
+            },
+            GateControl {
+                release: release_tx,
+                started: started_rx,
+            },
+        )
+    }
+
+    /// Backend side: announce arrival, then block until released.
+    fn wait(&self) {
+        if let Some(started) = self.started.lock().expect("gate lock").take() {
+            let _ = started.send(());
+        }
+        if let Some(release) = self.release.lock().expect("gate lock").take() {
+            let _ = release.recv();
+        }
+    }
+}
+
+/// Test-side end of a [`Gate`].
+struct GateControl {
     release: std::sync::mpsc::Sender<()>,
     started: tokio::sync::mpsc::UnboundedReceiver<()>,
 }
 
-impl OpenGateControl {
-    /// Wait until the backend open is inside the gate (its chunk / disconnect
-    /// callbacks are already installed at that point).
-    async fn wait_open_started(&mut self) {
+impl GateControl {
+    /// Wait until the guarded call is inside the gate.
+    async fn wait_started(&mut self) {
         tokio::time::timeout(Duration::from_secs(2), self.started.recv())
             .await
-            .expect("backend open must start within 2s")
+            .expect("gated call must start within 2s")
             .expect("gate sender must stay alive");
     }
 
-    /// Let the blocked open finish.
+    /// Let the blocked call finish.
     fn release(&self) {
         self.release
             .send(())
-            .expect("gated open must still be waiting");
+            .expect("gated call must still be waiting");
     }
 }
 
@@ -99,7 +131,8 @@ impl FakeBackend {
             cfgs: Arc::clone(&cfgs),
             hooks: Arc::clone(&hooks),
             closed: Arc::clone(&closed),
-            gate: OpenGate::default(),
+            gate: Gate::default(),
+            close_gate: Arc::new(Gate::default()),
             open_failure: None,
         });
         (backend, cfgs, hooks, closed)
@@ -112,9 +145,25 @@ impl FakeBackend {
         Arc<Self>,
         Arc<Mutex<SessionHooks>>,
         Arc<AtomicUsize>,
-        OpenGateControl,
+        GateControl,
     ) {
         Self::gated_with(None)
+    }
+
+    /// Fake whose first session teardown (`DebugSessionHandle::close`) blocks
+    /// until released — the window a disconnect's terminal frame lives in.
+    fn close_gated() -> (Arc<Self>, Arc<Mutex<SessionHooks>>, GateControl) {
+        let (gate, control) = Gate::armed();
+        let hooks = Arc::new(Mutex::new(SessionHooks::default()));
+        let backend = Arc::new(Self {
+            cfgs: Arc::new(Mutex::new(Vec::new())),
+            hooks: Arc::clone(&hooks),
+            closed: Arc::new(AtomicUsize::new(0)),
+            gate: Gate::default(),
+            close_gate: Arc::new(gate),
+            open_failure: None,
+        });
+        (backend, hooks, control)
     }
 
     /// As [`FakeBackend::gated`], but the gated open ends in failure.
@@ -126,7 +175,7 @@ impl FakeBackend {
         Arc<Self>,
         Arc<Mutex<SessionHooks>>,
         Arc<AtomicUsize>,
-        OpenGateControl,
+        GateControl,
     ) {
         Self::gated_with(Some(JobError {
             error_code: error_code.to_string(),
@@ -141,40 +190,33 @@ impl FakeBackend {
         Arc<Self>,
         Arc<Mutex<SessionHooks>>,
         Arc<AtomicUsize>,
-        OpenGateControl,
+        GateControl,
     ) {
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let (started_tx, started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (gate, control) = Gate::armed();
         let hooks = Arc::new(Mutex::new(SessionHooks::default()));
         let closed = Arc::new(AtomicUsize::new(0));
         let backend = Arc::new(Self {
             cfgs: Arc::new(Mutex::new(Vec::new())),
             hooks: Arc::clone(&hooks),
             closed: Arc::clone(&closed),
-            gate: OpenGate {
-                release: Mutex::new(Some(release_rx)),
-                started: Mutex::new(Some(started_tx)),
-            },
+            gate,
+            close_gate: Arc::new(Gate::default()),
             open_failure,
         });
-        (
-            backend,
-            hooks,
-            closed,
-            OpenGateControl {
-                release: release_tx,
-                started: started_rx,
-            },
-        )
+        (backend, hooks, closed, control)
     }
 }
 
 struct FakeHandle {
     closed: Arc<AtomicUsize>,
+    gate: Arc<Gate>,
 }
 
 impl DebugSessionHandle for FakeHandle {
     fn close(self: Box<Self>) {
+        // Runs on the blocking pool, so holding still here is safe — and it is
+        // what lets a test occupy the teardown window deterministically.
+        self.gate.wait();
         self.closed.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -205,12 +247,7 @@ impl FlashBackend for FakeBackend {
             hooks.on_chunk = Some(on_chunk);
             hooks.on_disconnect = Some(on_disconnect);
         }
-        if let Some(started) = self.gate.started.lock().expect("gate lock").take() {
-            let _ = started.send(());
-        }
-        if let Some(release) = self.gate.release.lock().expect("gate lock").take() {
-            let _ = release.recv();
-        }
+        self.gate.wait();
         if let Some(failure) = &self.open_failure {
             return Err(JobError {
                 error_code: failure.error_code.clone(),
@@ -219,6 +256,7 @@ impl FlashBackend for FakeBackend {
         }
         Ok(Box::new(FakeHandle {
             closed: Arc::clone(&self.closed),
+            gate: Arc::clone(&self.close_gate),
         }))
     }
 
@@ -566,7 +604,7 @@ async fn close_during_an_in_flight_open_answers_once_after_the_port_is_released(
     let mut ws = connect_ready(&addr).await;
 
     send_json(&mut ws, open_frame("/dev/tty.fakeA")).await;
-    gate.wait_open_started().await;
+    gate.wait_started().await;
 
     // The close lands while the backend open is still inside the gate.
     send_json(&mut ws, serde_json::json!({ "type": "serial_debug_close" })).await;
@@ -605,7 +643,7 @@ async fn device_disconnect_during_an_in_flight_open_answers_once_after_the_port_
     let mut ws = connect_ready(&addr).await;
 
     send_json(&mut ws, open_frame("/dev/tty.fakeA")).await;
-    gate.wait_open_started().await;
+    gate.wait_started().await;
 
     // The board goes away before its own open finished.
     emit_disconnect(&hooks, "device_removed");
@@ -634,6 +672,53 @@ async fn device_disconnect_during_an_in_flight_open_answers_once_after_the_port_
     assert_eq!(
         reopened["type"], "serial_debug_opened",
         "reopening right after serial_debug_disconnected must succeed: {reopened}"
+    );
+}
+
+#[tokio::test]
+async fn a_close_arriving_while_the_disconnect_teardown_runs_is_swallowed() {
+    let (backend, hooks, mut teardown) = FakeBackend::close_gated();
+    let addr = start_server(backend).await;
+    let mut ws = connect_ready(&addr).await;
+
+    send_json(&mut ws, open_frame("/dev/tty.fakeA")).await;
+    next_frame_of_type(&mut ws, "serial_debug_opened").await;
+
+    // The device disconnects. Its teardown takes the session out of the slot
+    // and then blocks in the handle close — precisely the window between "the
+    // session is gone from the slot" and "serial_debug_disconnected is on the
+    // wire". Held open by a gate rather than by luck, so this pins the window
+    // instead of racing for it.
+    emit_disconnect(&hooks, "device_removed");
+    teardown.wait_started().await;
+
+    // The user hits stop inside that window.
+    send_json(&mut ws, serde_json::json!({ "type": "serial_debug_close" })).await;
+    tokio::time::sleep(SETTLE).await;
+    assert_no_serial_debug_frames(
+        &mut ws,
+        QUIET_WINDOW,
+        "a close inside the disconnect teardown window must not be answered",
+    )
+    .await;
+
+    teardown.release();
+
+    let terminal = next_serial_debug_frame(&mut ws).await;
+    assert_eq!(terminal["type"], "serial_debug_disconnected", "{terminal}");
+    assert_no_serial_debug_frames(
+        &mut ws,
+        QUIET_WINDOW,
+        "the swallowed close must not add a second terminal frame",
+    )
+    .await;
+
+    // One-shot here as well: the next close is a fresh teardown and is answered.
+    send_json(&mut ws, serde_json::json!({ "type": "serial_debug_close" })).await;
+    let idempotent = next_serial_debug_frame(&mut ws).await;
+    assert_eq!(
+        idempotent["type"], "serial_debug_closed",
+        "a close with nothing open must still be answered: {idempotent}"
     );
 }
 
@@ -684,7 +769,7 @@ async fn a_disconnect_reported_by_a_failed_open_also_answers_the_pending_close()
     let mut ws = connect_ready(&addr).await;
 
     send_json(&mut ws, open_frame("/dev/tty.fakeA")).await;
-    gate.wait_open_started().await;
+    gate.wait_started().await;
 
     // The device vanishes while the open is still in flight, and the open then
     // fails because of it: the client gets its open answer plus the disconnect.
@@ -729,7 +814,7 @@ async fn a_close_waiting_on_a_failed_open_is_answered_after_the_failure() {
     let mut ws = connect_ready(&addr).await;
 
     send_json(&mut ws, open_frame("/dev/tty.fakeA")).await;
-    gate.wait_open_started().await;
+    gate.wait_started().await;
 
     send_json(&mut ws, serde_json::json!({ "type": "serial_debug_close" })).await;
     tokio::time::sleep(SETTLE).await;
@@ -772,7 +857,7 @@ async fn close_racing_a_disconnect_during_an_in_flight_open_yields_exactly_one_t
     let mut ws = connect_ready(&addr).await;
 
     send_json(&mut ws, open_frame("/dev/tty.fakeA")).await;
-    gate.wait_open_started().await;
+    gate.wait_started().await;
 
     // User closes the tab's monitor at the same moment the board is unplugged,
     // both while the open is still in flight. Whichever wins, the client must
