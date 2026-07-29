@@ -14,6 +14,20 @@
 //! whose flash or authorization job just succeeded on it.
 //! B6 scope: runtime stats (connections / devices) published on a watch
 //! channel for the resident tray shell.
+//! B7 scope: local-transport hardening — `Origin` is a browser-supplied header
+//! and therefore no defence against a native local process, so the dangerous
+//! operations (`run_job` / `run_auth`) sit behind a human confirmation and that
+//! one click is persisted as an Origin-bound token which a later connection
+//! presents as `?token=` on the handshake (a token the store does not recognize
+//! only downgrades the connection, it never refuses it); grants live in
+//! `{config_dir}/tyutool-bridge/grants.json` (0600), never expire, and are
+//! cleared by revoking. The gate re-checks that token against the store on
+//! every dangerous operation rather than trusting a handshake-time verdict, so
+//! revoking takes a connection's privilege away immediately instead of only for
+//! the connections that come after it. Defence in depth on top of that click: at most one
+//! dangerous operation runs process-wide at a time (confirmation dialog
+//! included), and every one of them leaves exactly one audit line. Everything
+//! low-risk (hello / ports / serial monitor) stays open so "插线即就绪" survives.
 
 pub mod status;
 
@@ -105,13 +119,59 @@ pub struct FlashJobSpec {
 
 /// One authorization-write job handed to the execution backend
 /// (credentials already validated as non-empty by the bridge).
-#[derive(Debug, Clone)]
+///
+/// `Debug` is hand-written (see the impl below): a derive would print `uuid` and
+/// `auth_key` in full.
+#[derive(Clone)]
 pub struct AuthJobSpec {
     pub chip_id: String,
     pub port: String,
     pub baud_rate: u32,
     pub uuid: String,
     pub auth_key: String,
+}
+
+/// A secret rendered for `Debug`: presence and length only.
+///
+/// Not a prefix, not a hash — an authorization uuid is short enough that any
+/// leading fragment narrows it usefully, and a log line only ever needs to
+/// answer "was a credential there at all, and did it look empty?".
+struct Redacted<'a>(&'a str);
+
+impl std::fmt::Debug for Redacted<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            f.write_str("<empty>")
+        } else {
+            write!(f, "<redacted len={}>", self.0.len())
+        }
+    }
+}
+
+/// A base64 payload rendered for `Debug`: its size only.
+///
+/// A firmware image is multi-MB of base64; dumping it into a log line is a
+/// denial of service against whoever has to read that log.
+struct Base64Len(usize);
+
+impl std::fmt::Debug for Base64Len {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<base64 len={}>", self.0)
+    }
+}
+
+/// Hand-written so no future `{spec:?}` can leak a credential — the same
+/// compile-time guarantee [`ConfirmRequest`] gets by carrying no secret at all.
+impl std::fmt::Debug for AuthJobSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthJobSpec")
+            .field("chip_id", &self.chip_id)
+            .field("port", &self.port)
+            .field("baud_rate", &self.baud_rate)
+            .field("uuid", &Redacted(&self.uuid))
+            .field("auth_key", &Redacted(&self.auth_key))
+            .finish()
+    }
 }
 
 /// Terminal failure from the execution backend; carried into `job_result`.
@@ -183,6 +243,713 @@ pub trait FlashBackend: Send + Sync {
 
     /// OS-level availability probe for a port the bridge does not hold.
     fn probe_port(&self, port: &str) -> PortProbe;
+}
+
+// ── Local-transport hardening (B7) ───────────────────────────────────────────
+//
+// The trust anchor is the *user's click*, not a token: `Origin` is a header the
+// browser is forced to add, so any native local process can present an
+// allowlisted one and complete the handshake. A token merely persists one human
+// confirmation so the user is not asked again.
+
+/// An operation that can damage the device, so it needs a human confirmation:
+/// flashing overwrites the firmware, authorizing overwrites a code that cannot
+/// be restored (PRD: 覆盖不可撤销).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DangerousOp {
+    Flash,
+    Authorize,
+}
+
+impl DangerousOp {
+    /// Stable label for logs and audit lines.
+    fn as_str(self) -> &'static str {
+        match self {
+            DangerousOp::Flash => "flash",
+            DangerousOp::Authorize => "authorize",
+        }
+    }
+}
+
+/// What the confirmation UI has to show the user before they can consent.
+#[derive(Debug, Clone)]
+pub struct ConfirmRequest {
+    pub op: DangerousOp,
+    /// The allowlisted `Origin` of the asking connection.
+    pub origin: String,
+    pub chip_id: String,
+    pub port: String,
+    /// Decoded firmware size for [`DangerousOp::Flash`], `None` for an
+    /// authorization write (which carries no image) and for a firmware payload
+    /// whose base64 is malformed.
+    pub firmware_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmDecision {
+    Approve,
+    Reject,
+}
+
+/// Answer channel handed to the confirmation UI; callable exactly once, from
+/// any thread.
+pub type ConfirmResponder = Box<dyn FnOnce(ConfirmDecision) + Send>;
+
+/// Human-in-the-loop gate. Implementations must NOT block the caller: the
+/// decision arrives through `respond`, callable from any thread.
+pub trait AuthPrompt: Send + Sync {
+    fn request(&self, request: ConfirmRequest, respond: ConfirmResponder);
+}
+
+/// One persisted confirmation: the user said yes once, and this is the receipt.
+///
+/// `Debug` is hand-written (see the impl below) for the same reason
+/// [`AuthJobSpec`]'s is: `token` is a bearer credential — presenting it is
+/// enough to write a device — so a derive would let one `log::debug!("{grant:?}")`
+/// or a `Vec<Grant>` interpolated into an error message dump it whole.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Grant {
+    pub token: String,
+    pub origin: String,
+    pub granted_at_ms: u64,
+}
+
+impl std::fmt::Debug for Grant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Grant")
+            // Deliberately [`Redacted`] and not [`redact_token`]: the
+            // fingerprint's leading characters exist so two *audit* lines can be
+            // correlated, and a Debug rendering has no such need — so it takes
+            // the strict form.
+            .field("token", &Redacted(&self.token))
+            .field("origin", &self.origin)
+            .field("granted_at_ms", &self.granted_at_ms)
+            .finish()
+    }
+}
+
+/// Whether a connection may lean on a grant persisted by an earlier session.
+///
+/// The distinction exists because one `grants.json` is shared by every run mode:
+/// a grant records that **a human confirmed this at a keyboard**, and that
+/// consent must not silently extend into a session where no human is present.
+/// `--headless` without `--allow-unattended-writes` therefore runs with
+/// [`GrantPolicy::Ignore`] — the existence of an explicit opt-in switch is
+/// itself the statement that unattended operation has to be declared, so the
+/// safe default wins over the convenience of skipping a dialog nobody can see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantPolicy {
+    /// A `?token=` the store still grants for this Origin authorizes dangerous
+    /// operations without a dialog. The attended default.
+    Honour,
+    /// Persisted grants are ignored entirely; only a confirmation clicked *in
+    /// this connection* authorizes anything.
+    Ignore,
+}
+
+/// Where issued grants live. Injectable so the production process can persist
+/// them while tests keep them in memory.
+pub trait TokenStore: Send + Sync {
+    fn is_granted(&self, token: &str, origin: &str) -> bool;
+    fn insert(&self, grant: Grant);
+    /// Drop every stored grant and report how many there were, which is the
+    /// `grants=<n>` of the [`audit_revoke_all`] line — only the store can count
+    /// them, and a revocation that is not auditable is not much of a control.
+    fn revoke_all(&self) -> usize;
+}
+
+/// Library default: grants live for the lifetime of the process only.
+#[derive(Default)]
+pub struct MemoryTokenStore {
+    grants: Mutex<Vec<Grant>>,
+}
+
+impl MemoryTokenStore {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Grant>> {
+        self.grants
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+impl TokenStore for MemoryTokenStore {
+    fn is_granted(&self, token: &str, origin: &str) -> bool {
+        self.lock()
+            .iter()
+            .any(|grant| grant.token == token && grant.origin == origin)
+    }
+
+    fn insert(&self, grant: Grant) {
+        self.lock().push(grant);
+    }
+
+    fn revoke_all(&self) -> usize {
+        let mut grants = self.lock();
+        let count = grants.len();
+        grants.clear();
+        count
+    }
+}
+
+/// On-disk grant file layout version. Bump only on a breaking change; an
+/// unrecognized version is treated exactly like a corrupt file (start empty).
+const GRANT_FILE_VERSION: u32 = 1;
+
+/// Wire mirror of [`Grant`], deliberately private: the on-disk JSON layout is
+/// this crate's business, so it must be free to move without serde derives (and
+/// therefore a serialized representation) leaking onto the public API type.
+#[derive(Serialize, Deserialize)]
+struct WireGrant {
+    token: String,
+    origin: String,
+    granted_at_ms: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct GrantFile {
+    version: u32,
+    grants: Vec<WireGrant>,
+}
+
+/// Persistent [`TokenStore`]: JSON at `{config_dir}/tyutool-bridge/grants.json`,
+/// mode 0600 on unix.
+///
+/// It exists so a reboot does not cost the user another confirmation. Grants
+/// carry **no expiry on purpose** — revocation ("撤销所有授权") is the mechanism;
+/// a clock would only re-ask the user on a schedule nobody chose.
+///
+/// Reads are served from the in-memory copy: `is_granted` sits on the WS
+/// handshake path *and* on the gate of every dangerous operation
+/// (`ConnContext::is_authorized` re-checks the presented token there), so it
+/// must never touch the disk. Writes go through to the file.
+pub struct FileTokenStore {
+    path: std::path::PathBuf,
+    grants: Mutex<Vec<Grant>>,
+}
+
+impl FileTokenStore {
+    /// Production location: `{config_dir}/tyutool-bridge/grants.json`.
+    ///
+    /// The *config* dir, not the data dir the session logs live in: a grant is
+    /// user configuration ("this origin may flash"), not a diagnostic artefact.
+    pub fn open() -> anyhow::Result<Self> {
+        let dir = dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("no platform config directory"))?
+            .join("tyutool-bridge");
+        Self::open_at(&dir.join("grants.json"))
+    }
+
+    /// Load (or start) the grant file at `path`, creating missing parents.
+    ///
+    /// A missing file means "no grants yet". A file that cannot be read or
+    /// parsed is **not** fatal: this runs inside a resident helper, and refusing
+    /// to start would cost the user the whole bridge over a file whose entire
+    /// content is a convenience. Such a file degrades to an empty set (so the
+    /// user is asked again) and the next grant overwrites it.
+    pub fn open_at(path: &std::path::Path) -> anyhow::Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("create {}: {e}", parent.display()))?;
+        }
+        Ok(Self {
+            path: path.to_path_buf(),
+            grants: Mutex::new(load_grants(path)),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Grant>> {
+        self.grants
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+impl TokenStore for FileTokenStore {
+    fn is_granted(&self, token: &str, origin: &str) -> bool {
+        self.lock()
+            .iter()
+            .any(|grant| grant.token == token && grant.origin == origin)
+    }
+
+    fn insert(&self, grant: Grant) {
+        let mut grants = self.lock();
+        log::info!(
+            "bridge persisting a grant (origin={}, token={})",
+            grant.origin,
+            redact_token(&grant.token)
+        );
+        grants.push(grant);
+        persist_grants(&self.path, &grants);
+    }
+
+    fn revoke_all(&self) -> usize {
+        let mut grants = self.lock();
+        let count = grants.len();
+        grants.clear();
+        // Clears the *file* as well: a revocation that only emptied memory would
+        // silently come back on the next restart.
+        persist_grants(&self.path, &grants);
+        log::info!("bridge revoked {count} persisted grant(s)");
+        count
+    }
+}
+
+/// Grants currently on disk, or an empty set for anything unreadable.
+///
+/// Never logs the file's contents — it is a list of secrets.
+fn load_grants(path: &std::path::Path) -> Vec<Grant> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            log::warn!(
+                "bridge cannot read the grant file {} ({e}), starting with no grants",
+                path.display()
+            );
+            return Vec::new();
+        }
+    };
+    let file: GrantFile = match serde_json::from_str(&text) {
+        Ok(file) => file,
+        Err(e) => {
+            log::warn!(
+                "bridge grant file {} is not parsable ({e}), starting with no grants",
+                path.display()
+            );
+            return Vec::new();
+        }
+    };
+    if file.version != GRANT_FILE_VERSION {
+        log::warn!(
+            "bridge grant file {} has unsupported version {}, starting with no grants",
+            path.display(),
+            file.version
+        );
+        return Vec::new();
+    }
+    file.grants
+        .into_iter()
+        .map(|wire| Grant {
+            token: wire.token,
+            origin: wire.origin,
+            granted_at_ms: wire.granted_at_ms,
+        })
+        .collect()
+}
+
+/// Replace the grant file with `grants`.
+///
+/// Failure is logged, never propagated: the in-memory copy is already updated,
+/// so the worst case is one extra confirmation after the next restart — and a
+/// resident helper must not die because a config directory went read-only.
+fn persist_grants(path: &std::path::Path, grants: &[Grant]) {
+    if let Err(e) = write_grants(path, grants) {
+        log::warn!(
+            "bridge could not persist grants to {}: {e:#}",
+            path.display()
+        );
+    }
+}
+
+/// Write the grant list through a sibling temp file and rename it over the
+/// target: a crash mid-write must not be able to turn a good file into a
+/// truncated or empty one.
+fn write_grants(path: &std::path::Path, grants: &[Grant]) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    let file = GrantFile {
+        version: GRANT_FILE_VERSION,
+        grants: grants
+            .iter()
+            .map(|grant| WireGrant {
+                token: grant.token.clone(),
+                origin: grant.origin.clone(),
+                granted_at_ms: grant.granted_at_ms,
+            })
+            .collect(),
+    };
+    let text = serde_json::to_string(&file)?;
+
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("{} has no file name", path.display()))?;
+    let mut tmp_name = name.to_os_string();
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+
+    {
+        // The temp file carries the final permissions, so the token is never
+        // even briefly world-readable (the rename below preserves them).
+        let mut handle = create_private(&tmp)?;
+        handle.write_all(text.as_bytes())?;
+        handle.flush()?;
+    }
+    std::fs::rename(&tmp, path)
+        .map_err(|e| anyhow::anyhow!("rename {} -> {}: {e}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+/// Create/truncate `path` for writing, readable and writable by its owner only.
+#[cfg(unix)]
+fn create_private(path: &std::path::Path) -> anyhow::Result<std::fs::File> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
+    // `mode` applies only when *this* call created the file, so a leftover from
+    // an interrupted write would keep whatever permissions it had. Narrow it
+    // before any token reaches the disk, not after.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| anyhow::anyhow!("chmod {}: {e}", path.display()))?;
+    Ok(file)
+}
+
+/// Windows has no POSIX mode bits (and no chmod): the grant file inherits the
+/// ACL of the per-user config directory under `%APPDATA%`, which is already
+/// restricted to the account that owns it. A deliberate documented no-op rather
+/// than a permission change that would only pretend to do something.
+#[cfg(not(unix))]
+fn create_private(path: &std::path::Path) -> anyhow::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))
+}
+
+/// Where the "who asked for what, and what did the user answer" trail goes.
+pub trait AuditSink: Send + Sync {
+    fn record(&self, line: &str);
+}
+
+/// Library default: the audit trail joins the developer log channel under its
+/// own target, so it can be filtered out of (or into) a dedicated sink.
+pub struct LogAuditSink;
+
+impl AuditSink for LogAuditSink {
+    fn record(&self, line: &str) {
+        log::info!(target: "bridge::audit", "{line}");
+    }
+}
+
+/// Library default prompt: refuses immediately and says so loudly.
+///
+/// Deliberately inert rather than "ask the OS": a process that forgot to inject
+/// a real confirmation UI must fail visibly, and `cargo test` must never pop a
+/// dialog.
+struct DenyPrompt;
+
+impl AuthPrompt for DenyPrompt {
+    fn request(&self, request: ConfirmRequest, respond: ConfirmResponder) {
+        log::error!(
+            "bridge has no confirmation UI wired, refusing {} on {} from {}",
+            request.op.as_str(),
+            request.port,
+            request.origin
+        );
+        respond(ConfirmDecision::Reject);
+    }
+}
+
+/// How long a confirmation dialog may stay unanswered before the operation is
+/// refused, and the default of [`BridgeServer::with_confirm_timeout`].
+///
+/// Long enough for a user who has to walk back to the machine, short enough
+/// that a dialog nobody will ever answer does not pin a job task forever.
+const CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The injected security surface, bundled so one `Arc` threads through the
+/// accept loop into every connection.
+struct SecurityConfig {
+    prompt: Arc<dyn AuthPrompt>,
+    tokens: Arc<dyn TokenStore>,
+    audit: Arc<dyn AuditSink>,
+    confirm_timeout: Duration,
+    /// Whether persisted grants count at all; see [`GrantPolicy`].
+    grant_policy: GrantPolicy,
+    /// Every live connection, so a revocation can reach the ones already open and
+    /// not just the grant file. Shared with the [`Authority`] handles handed out
+    /// before `run_*` consumes the server.
+    connections: Arc<ConnectionRegistry>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            prompt: Arc::new(DenyPrompt),
+            tokens: Arc::new(MemoryTokenStore::default()),
+            audit: Arc::new(LogAuditSink),
+            confirm_timeout: CONFIRM_TIMEOUT,
+            // Honouring grants is the attended behaviour every existing host and
+            // test expects; ignoring them is the opt-in of the unattended
+            // posture, not something a default may impose.
+            grant_policy: GrantPolicy::Honour,
+            connections: Arc::new(ConnectionRegistry::default()),
+        }
+    }
+}
+
+/// Fresh grant token: 32 CSPRNG bytes as base64url without padding (43 chars).
+///
+/// `None` means the OS gave us no entropy. Callers must refuse the operation
+/// rather than fall back to a weaker source — a guessable token is worse than
+/// asking the user again.
+fn new_token() -> Option<String> {
+    let mut bytes = [0u8; 32];
+    match getrandom::fill(&mut bytes) {
+        Ok(()) => Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)),
+        Err(e) => {
+            log::error!("bridge cannot issue a grant token, no CSPRNG entropy: {e}");
+            None
+        }
+    }
+}
+
+/// The `token` query parameter of a handshake request URI, percent-decoded.
+///
+/// The web client builds the URL with an encoder, so the value arrives escaped;
+/// decoding here is what keeps a credential from depending on which side
+/// happened to escape it. A grant token is 43 base64url characters and needs no
+/// escaping at all, but a token the *user* seeded or a future token alphabet
+/// must not silently stop matching.
+///
+/// The first `token=` wins if a client repeats the parameter; an empty value
+/// counts as absent, and so does one this crate cannot decode (see
+/// [`percent_decode`]) — an unusable token downgrades the connection to
+/// unauthorized, which is the safe direction.
+fn token_from_query(query: Option<&str>) -> Option<String> {
+    let raw = query?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("token="))?;
+    let decoded = percent_decode(raw)?;
+    (!decoded.is_empty()).then_some(decoded)
+}
+
+/// Percent-decode one URI **query value**.
+///
+/// Hand-rolled rather than a new dependency: this is the only percent-encoded
+/// input the bridge has, and the whole rule is "`%XX` is a byte".
+///
+/// Two deliberate decisions:
+/// - `+` stays a literal `+`. Form encoding (`application/x-www-form-urlencoded`)
+///   reads it as a space, but this is a URI query value, not a form body — a
+///   token containing `+` must round-trip unchanged.
+/// - a malformed escape (`%`, `%A`, `%ZZ`) or a byte sequence that is not UTF-8
+///   yields `None` instead of the raw text, so an undecodable token is treated
+///   as no token at all (one more confirmation) rather than compared as
+///   something the client never sent.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let high = hex_nibble(*bytes.get(i + 1)?)?;
+            let low = hex_nibble(*bytes.get(i + 2)?)?;
+            out.push(high << 4 | low);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// One hex digit's value, either case; `None` for anything else.
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Token fingerprint for logs and audit lines: enough to correlate two entries,
+/// never enough to replay the grant.
+fn redact_token(token: &str) -> String {
+    let head: String = token.chars().take(6).collect();
+    format!("{head}…(len={})", token.len())
+}
+
+/// The one `confirm` line every dangerous operation leaves — whether a dialog
+/// was shown, whether the connection was already authorized, or whether the
+/// request was refused before it could ask anything.
+///
+/// Frozen format (see PROTOCOL.md §审计行): space-separated `key=value`, one line
+/// per event, `-` for an absent value. `decision` carries the whole vocabulary:
+/// `approved` / `rejected` / `timeout` / `abandoned` (a dialog was shown),
+/// `preauthorized` (the connection already held a valid grant, so no dialog was
+/// needed) and `execution_busy` (refused by the single-active-execution rule).
+///
+/// No credential can reach this line by construction: `uuid` / `auth_key` are
+/// not part of [`ConfirmRequest`] at all, and tokens only ever appear through
+/// [`redact_token`] on the separate `grant` line.
+fn audit_confirm(audit: &dyn AuditSink, request: &ConfirmRequest, decision: &str) {
+    audit.record(&format!(
+        "confirm op={} origin={} chip={} port={} firmware_bytes={} decision={decision}",
+        request.op.as_str(),
+        request.origin,
+        request.chip_id,
+        request.port,
+        match request.firmware_bytes {
+            Some(bytes) => bytes.to_string(),
+            None => "-".to_string(),
+        },
+    ));
+}
+
+/// The audit line a revocation leaves ("撤销所有授权" wipes every stored grant).
+///
+/// Public because the only caller is the shell around this library: the tray
+/// menu item that revokes is B7 cycle 4's and lives in `main.rs`. Defined here
+/// anyway so the whole audit vocabulary stays in one place, and so `grants=<n>`
+/// is formatted the same way wherever a revocation happens.
+pub fn audit_revoke_all(audit: &dyn AuditSink, grants: usize) {
+    audit.record(&format!("revoke_all grants={grants}"));
+}
+
+/// The connections a revocation has to reach.
+///
+/// Held as `Weak` on purpose: the registry is a side index, not an owner, so a
+/// connection that ended must be collectable even if its entry is still listed —
+/// the alternative (strong references plus perfectly matched deregistration)
+/// turns any missed teardown path into a leaked socket.
+#[derive(Default)]
+struct ConnectionRegistry {
+    live: Mutex<Vec<Weak<ConnContext>>>,
+}
+
+impl ConnectionRegistry {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Weak<ConnContext>>> {
+        self.live
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// List `ctx` until the returned guard is dropped.
+    fn register(self: &Arc<Self>, ctx: &Arc<ConnContext>) -> RegisteredConnection {
+        let mut live = self.lock();
+        live.retain(|weak| weak.strong_count() > 0);
+        live.push(Arc::downgrade(ctx));
+        RegisteredConnection {
+            registry: Arc::clone(self),
+            conn_id: ctx.conn_id,
+        }
+    }
+
+    /// The connections still alive right now.
+    fn snapshot(&self) -> Vec<Arc<ConnContext>> {
+        self.lock().iter().filter_map(Weak::upgrade).collect()
+    }
+}
+
+/// Keeps one connection listed in the registry until dropped.
+///
+/// An RAII guard rather than a paired deregister call, for the same reason the
+/// execution right is one: `handle_connection` has several exit paths, and a
+/// forgotten one would leave a dead entry that `revoke_all` then walks.
+struct RegisteredConnection {
+    registry: Arc<ConnectionRegistry>,
+    conn_id: u64,
+}
+
+impl Drop for RegisteredConnection {
+    fn drop(&mut self) {
+        let mut live = self.registry.lock();
+        live.retain(|weak| match weak.upgrade() {
+            Some(ctx) => ctx.conn_id != self.conn_id,
+            None => false,
+        });
+    }
+}
+
+/// The revocation control the shell around this library drives: what the tray's
+/// 「撤销所有授权」 item calls from the UI thread.
+///
+/// Cheap to clone and safe to hold across threads, so the server thread can hand
+/// one to the UI thread and keep serving.
+#[derive(Clone)]
+pub struct Authority {
+    tokens: Arc<dyn TokenStore>,
+    audit: Arc<dyn AuditSink>,
+    connections: Arc<ConnectionRegistry>,
+}
+
+// The trait objects behind it are not `Debug`, and a security handle has nothing
+// worth printing anyway — but the host may well carry it inside a `Debug` event
+// enum (the tray does), so the impl exists.
+impl std::fmt::Debug for Authority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Authority")
+    }
+}
+
+impl Authority {
+    /// Withdraw every authorization: clear the store, drop the privilege of every
+    /// connection that is already open, and tell each of them so.
+    ///
+    /// Clearing the store is what actually removes token-derived privilege —
+    /// including on connections that are already open, because the gate re-reads
+    /// the store on every dangerous operation (`ConnContext::is_authorized`).
+    /// The walk over live connections covers the other half: an in-session dialog
+    /// approval, which no store holds, plus the `auth_revoked` push that lets a
+    /// client drop its stored token instead of discovering the revocation by
+    /// wasting a flash attempt. So the registry is a completeness and
+    /// notification mechanism here, not what makes revoking a token correct — a
+    /// connection the walk misses is unprivileged all the same.
+    ///
+    /// Safe to call from any thread, including a UI thread: it takes no async
+    /// runtime and never blocks on the network (frames are queued, not sent
+    /// inline). The store write is a small local file.
+    pub fn revoke_all(&self) {
+        let grants = self.tokens.revoke_all();
+        let live = self.connections.snapshot();
+        for ctx in &live {
+            ctx.approved
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            ctx.send(&ServerFrame::AuthRevoked);
+        }
+        audit_revoke_all(self.audit.as_ref(), grants);
+        log::info!(
+            "bridge revoked all authorizations: {grants} stored grant(s) cleared, \
+             {} live connection(s) deauthorized",
+            live.len()
+        );
+    }
+}
+
+/// Decoded length of a base64 payload, computed from the text alone.
+///
+/// The confirmation dialog names the firmware size, and it runs on the async
+/// worker before anything is decoded — a multi-MB image must not be decoded
+/// twice (nor decoded at all for an operation the user is about to refuse).
+///
+/// `None` for anything that is not well-formed padded base64; the caller still
+/// asks (the job would fail `bad_request` on the real decode later anyway).
+fn base64_decoded_len(text: &str) -> Option<u64> {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    if !len.is_multiple_of(4) {
+        return None;
+    }
+    if len == 0 {
+        return Some(0);
+    }
+    let padding = bytes.iter().rev().take_while(|b| **b == b'=').count();
+    // A quantum holds at most 2 pad characters, and they may only sit at the
+    // very end.
+    if padding > 2 || bytes[..len - padding].contains(&b'=') {
+        return None;
+    }
+    Some((len / 4 * 3 - padding) as u64)
 }
 
 /// Platform tag reported in the hello frame (kept in the wire vocabulary the
@@ -275,7 +1042,9 @@ fn default_job_mode() -> String {
 /// a frame that simply omits one must reach the bridge's own validation and be
 /// answered with a `bad_request` `job_result`, not be dropped as unparsable
 /// (the wire contract has no error frame for undecodable input).
-#[derive(Debug, Deserialize)]
+///
+/// `Debug` is hand-written for the same reason as [`AuthJobSpec`]'s.
+#[derive(Deserialize)]
 struct WireAuth {
     chip_id: String,
     port: String,
@@ -285,6 +1054,18 @@ struct WireAuth {
     uuid: String,
     #[serde(default)]
     auth_key: String,
+}
+
+impl std::fmt::Debug for WireAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WireAuth")
+            .field("chip_id", &self.chip_id)
+            .field("port", &self.port)
+            .field("baud_rate", &self.baud_rate)
+            .field("uuid", &Redacted(&self.uuid))
+            .field("auth_key", &Redacted(&self.auth_key))
+            .finish()
+    }
 }
 
 /// Authorization runs over the device's UART shell, not the flash bootloader,
@@ -375,7 +1156,10 @@ impl WireDebugCfg {
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// `Debug` is hand-written (see the impl below): a derive would print
+/// [`WireAuth`]'s credentials through it and dump the whole base64 firmware
+/// image of a `run_job` frame.
+#[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientMessage {
     RunJob {
@@ -398,6 +1182,38 @@ enum ClientMessage {
         cfg: WireDebugCfg,
     },
     SerialDebugClose,
+}
+
+impl std::fmt::Debug for ClientMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RunJob {
+                request_id,
+                job,
+                file_content,
+            } => f
+                .debug_struct("RunJob")
+                .field("request_id", request_id)
+                .field("job", job)
+                .field("file_content", &Base64Len(file_content.len()))
+                .finish(),
+            // `auth` redacts itself, see WireAuth's Debug impl.
+            Self::RunAuth { request_id, auth } => f
+                .debug_struct("RunAuth")
+                .field("request_id", request_id)
+                .field("auth", auth)
+                .finish(),
+            Self::Cancel { request_id } => f
+                .debug_struct("Cancel")
+                .field("request_id", request_id)
+                .finish(),
+            Self::CheckPort { port } => f.debug_struct("CheckPort").field("port", port).finish(),
+            Self::SerialDebugOpen { cfg } => {
+                f.debug_struct("SerialDebugOpen").field("cfg", cfg).finish()
+            }
+            Self::SerialDebugClose => f.write_str("SerialDebugClose"),
+        }
+    }
 }
 
 /// One serial monitor chunk on the wire.
@@ -467,6 +1283,20 @@ enum ServerFrame {
     SerialDebugDisconnected {
         reason: String,
     },
+    // ── B7 local-transport hardening ─────────────────────────────────────────
+    /// The user approved a dangerous operation on this connection. The token is
+    /// the receipt of that one click, so the client can present it later instead
+    /// of asking the user again.
+    AuthGranted {
+        token: String,
+    },
+    /// Every grant was revoked (托盘「撤销所有授权」), so the token the client
+    /// stored is now worthless and this connection is unauthorized again.
+    ///
+    /// Pushed, hence no `request_id`. It exists so the client can drop its stored
+    /// token immediately instead of discovering the revocation by wasting a flash
+    /// attempt on it.
+    AuthRevoked,
 }
 
 /// Tracks first-seen timestamps so a port keeps its `first_seen_ms` across
@@ -740,6 +1570,91 @@ impl PortArbiter {
 fn apply_arbitration_busy(ports: &mut [EnumeratedPort], arbiter: &PortArbiter) {
     for port in ports.iter_mut() {
         port.busy = port.busy || arbiter.is_busy(&port.path);
+    }
+}
+
+// ── Single active execution (B7) ─────────────────────────────────────────────
+
+/// Why the process-wide execution right could not be taken.
+enum ExecutionRefused {
+    /// Another connection is driving a dangerous operation.
+    OtherConnection,
+    /// This connection's own earlier dangerous operation still holds it — most
+    /// often a confirmation dialog the user has not answered yet.
+    SameConnection,
+}
+
+/// Process-wide "one dangerous operation at a time" gate: at most one flash or
+/// authorization is in flight anywhere in the helper at any instant, counting
+/// the time its confirmation dialog spends waiting for the user. A conflicting
+/// request is refused immediately with `execution_busy` — no queuing, same rule
+/// as port arbitration (PRD: 占用即拒，不排队).
+///
+/// Two things this buys that the per-port [`PortArbiter`] cannot:
+/// - **blast radius**: a second connection cannot drive a flash while another
+///   one is running, not even on a *different* port (which the port table would
+///   happily allow);
+/// - **no dialog stacking**: while a confirmation is on screen, further
+///   dangerous requests are refused instead of raising a second dialog on the
+///   user.
+///
+/// Deliberately **not** re-entrant for the holder, and deliberately **not**
+/// sticky per connection: the invariant is "one dangerous operation at a time,
+/// whoever asks", not "the first connection owns the execution right for its
+/// lifetime". Ownership by connection would let the earliest tab lock the helper
+/// for as long as it stays open, which contradicts the product requirement that
+/// several tabs may connect and watch (with only one of them driving) — so the
+/// right is released the moment an operation finishes and the next asker gets it.
+struct ExecutionArbiter {
+    /// `Some(conn_id)` exactly while a dangerous operation is in flight.
+    holder: Mutex<Option<u64>>,
+}
+
+impl ExecutionArbiter {
+    fn new() -> Self {
+        Self {
+            holder: Mutex::new(None),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<u64>> {
+        self.holder
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Take the execution right for `conn_id`.
+    ///
+    /// Released by dropping the returned guard — an RAII handle rather than a
+    /// paired release call, so none of the many exit paths of a dangerous
+    /// operation (rejection, timeout, entropy failure, `bad_request`,
+    /// `port_busy`, a panicking job thread, a client disconnect) can leak it,
+    /// and a future early return cannot forget to.
+    fn try_acquire(self: &Arc<Self>, conn_id: u64) -> Result<ExecutionGuard, ExecutionRefused> {
+        let mut holder = self.lock();
+        match *holder {
+            Some(owner) if owner == conn_id => Err(ExecutionRefused::SameConnection),
+            Some(_) => Err(ExecutionRefused::OtherConnection),
+            None => {
+                *holder = Some(conn_id);
+                Ok(ExecutionGuard {
+                    arbiter: Arc::clone(self),
+                })
+            }
+        }
+    }
+}
+
+/// Holds the process-wide execution right until dropped.
+struct ExecutionGuard {
+    arbiter: Arc<ExecutionArbiter>,
+}
+
+impl Drop for ExecutionGuard {
+    /// Clearing unconditionally is safe by construction: the arbiter hands out
+    /// at most one guard at a time, so whoever holds this one is the holder.
+    fn drop(&mut self) {
+        *self.arbiter.lock() = None;
     }
 }
 
@@ -1055,6 +1970,62 @@ fn real_port_enumerator() -> PortEnumerator {
 
 // ── Production flash backend ─────────────────────────────────────────────────
 
+/// Map one authorization slot outcome onto the wire result.
+///
+/// Terminal states the slot reports as `Ok`: only a written (or already present)
+/// credential counts as success on the wire.
+///
+/// Pure and separate from [`RealFlashBackend::run_auth`] so the mapping — the
+/// part a client's user-facing copy depends on — is testable without a device.
+///
+/// Two rules this function is the sole guardian of:
+/// - **no credential ever travels in a `JobError`**: the message goes on the
+///   wire and into logs, so a device is named by its MAC and never by the uuid
+///   it was handed (which is why the outcomes carrying a uuid are destructured
+///   field by field instead of formatted with `{:?}`);
+/// - **`cancelled` and `cancelled_after_write` are different facts**: the second
+///   means the write command already left the bridge, so the code may be spent.
+///   A client cannot parse prose to tell them apart, so it gets two codes.
+///
+/// Matched exhaustively on purpose: a new core variant must become a compile
+/// error here, not a `{:?}` dump that could carry the next secret field someone
+/// adds to the enum.
+fn auth_slot_outcome(result: tyutool_core::BatchAuthSlotResult) -> Result<(), JobError> {
+    use tyutool_core::BatchAuthSlotResult as Slot;
+    match result {
+        Slot::Done { .. } | Slot::AlreadyDone { .. } => Ok(()),
+        Slot::Cancelled => Err(JobError {
+            error_code: "cancelled".to_string(),
+            message: "cancelled by user".to_string(),
+        }),
+        // The write command already left the bridge: the credential may be on
+        // the device, so say so rather than reporting a clean abort.
+        Slot::CancelledAfterWrite { mac, uuid: _ } => Err(JobError {
+            error_code: "cancelled_after_write".to_string(),
+            message: format!(
+                "cancelled after the authorization write command had already been sent \
+                 to the device {mac}; the authorization code may already be on it, \
+                 so treat it as used"
+            ),
+        }),
+        Slot::DefaultMac { mac } => Err(JobError {
+            error_code: "auth_failed".to_string(),
+            message: format!("device still carries the factory default MAC {mac}"),
+        }),
+        // Unreachable with this adaptation (credentials always allocate,
+        // Overwrite never skips), mapped anyway so a core change surfaces as a
+        // failure instead of a silent success.
+        Slot::Skipped { mac, .. } => Err(JobError {
+            error_code: "auth_failed".to_string(),
+            message: format!("device {mac} already carries other credentials and was skipped"),
+        }),
+        Slot::InsufficientCodes { mac } => Err(JobError {
+            error_code: "auth_failed".to_string(),
+            message: format!("no authorization code was available for the device {mac}"),
+        }),
+    }
+}
+
 /// Production flash execution surface backed by tyutool-core.
 #[derive(Debug, Default)]
 pub struct RealFlashBackend;
@@ -1199,37 +2170,8 @@ impl FlashBackend for RealFlashBackend {
             },
         );
 
-        // Terminal states the slot reports as `Ok`: only a written (or already
-        // present) credential counts as success on the wire.
         match result {
-            Ok(tyutool_core::BatchAuthSlotResult::Done { .. })
-            | Ok(tyutool_core::BatchAuthSlotResult::AlreadyDone { .. }) => Ok(()),
-            Ok(tyutool_core::BatchAuthSlotResult::Cancelled) => Err(JobError {
-                error_code: "cancelled".to_string(),
-                message: "cancelled by user".to_string(),
-            }),
-            // The write command already left the bridge: the credential may be
-            // on the device, so say so rather than reporting a clean abort.
-            Ok(tyutool_core::BatchAuthSlotResult::CancelledAfterWrite { mac, uuid }) => {
-                Err(JobError {
-                    error_code: "cancelled".to_string(),
-                    message: format!(
-                        "cancelled after the auth write was sent (mac {mac}, uuid {uuid}); \
-                         the credential may already be on the device"
-                    ),
-                })
-            }
-            Ok(tyutool_core::BatchAuthSlotResult::DefaultMac { mac }) => Err(JobError {
-                error_code: "auth_failed".to_string(),
-                message: format!("device still carries the factory default MAC {mac}"),
-            }),
-            // Unreachable with this adaptation (credentials always allocate,
-            // Overwrite never skips), mapped anyway so a core change surfaces
-            // as a failure instead of a silent success.
-            Ok(other) => Err(JobError {
-                error_code: "auth_failed".to_string(),
-                message: format!("authorization did not complete: {other:?}"),
-            }),
+            Ok(slot) => auth_slot_outcome(slot),
             Err(e) => Err(JobError {
                 error_code: match e {
                     tyutool_core::FlashError::Cancelled => "cancelled",
@@ -1344,6 +2286,7 @@ impl Drop for TempFirmware {
 pub struct BridgeServer {
     listener: TcpListener,
     handoff_window: Duration,
+    security: SecurityConfig,
 }
 
 /// Bind the bridge WS server on 127.0.0.1:`port`.
@@ -1357,6 +2300,9 @@ pub async fn bind(port: u16) -> anyhow::Result<BridgeServer> {
     Ok(BridgeServer {
         listener,
         handoff_window: HANDOFF_WINDOW,
+        // Inert confirmation prompt, in-memory grants, audit into the log
+        // channel: a host that wants a real dialog injects it below.
+        security: SecurityConfig::default(),
     })
 }
 
@@ -1374,6 +2320,67 @@ impl BridgeServer {
     pub fn with_handoff_window(mut self, window: Duration) -> Self {
         self.handoff_window = window;
         self
+    }
+
+    /// Wire the confirmation UI that gates `run_job` / `run_auth`.
+    ///
+    /// Without it every dangerous operation is refused (see [`DenyPrompt`]), so
+    /// the production host must inject one; tests inject a fake that states what
+    /// the user would have answered.
+    pub fn with_auth_prompt(mut self, prompt: Arc<dyn AuthPrompt>) -> Self {
+        self.security.prompt = prompt;
+        self
+    }
+
+    /// Wire where issued grants are kept (default: in-memory, process-lifetime).
+    pub fn with_token_store(mut self, tokens: Arc<dyn TokenStore>) -> Self {
+        self.security.tokens = tokens;
+        self
+    }
+
+    /// Wire where the confirmation audit trail goes (default: the developer log
+    /// channel under the `bridge::audit` target).
+    pub fn with_audit_sink(mut self, audit: Arc<dyn AuditSink>) -> Self {
+        self.security.audit = audit;
+        self
+    }
+
+    /// Shorten (or lengthen) the window an unanswered confirmation dialog gets
+    /// before the operation is refused; [`CONFIRM_TIMEOUT`] by default.
+    pub fn with_confirm_timeout(mut self, timeout: Duration) -> Self {
+        self.security.confirm_timeout = timeout;
+        self
+    }
+
+    /// Decide whether grants persisted by earlier sessions count on this server;
+    /// [`GrantPolicy::Honour`] by default.
+    ///
+    /// [`GrantPolicy::Ignore`] is what an unattended host passes: combined with
+    /// the refusing prompt it makes "no human present" mean "no dangerous
+    /// operation", regardless of what an earlier attended session left in
+    /// `grants.json`. See [`GrantPolicy`] for why that is the safe direction.
+    pub fn with_grant_policy(mut self, policy: GrantPolicy) -> Self {
+        self.security.grant_policy = policy;
+        self
+    }
+
+    /// A handle for revoking every authorization ("撤销所有授权").
+    ///
+    /// Take it **before** `run_*`, which consumes the server — that is the whole
+    /// reason it exists: the tray's UI thread needs the control while the server
+    /// thread keeps serving.
+    ///
+    /// ⚠ It **snapshots the currently configured token store and audit sink**, so
+    /// [`BridgeServer::with_token_store`] (and [`BridgeServer::with_audit_sink`])
+    /// must be called first — an `Authority` taken before them would keep
+    /// revoking the store it saw, i.e. the default in-memory one, and leave the
+    /// grant file on disk untouched.
+    pub fn authority(&self) -> Authority {
+        Authority {
+            tokens: Arc::clone(&self.security.tokens),
+            audit: Arc::clone(&self.security.audit),
+            connections: Arc::clone(&self.security.connections),
+        }
     }
 
     /// The accept loop, additionally publishing runtime stats (active
@@ -1395,7 +2402,11 @@ impl BridgeServer {
         stats_tx: watch::Sender<status::StatsSnapshot>,
     ) -> anyhow::Result<()> {
         let arbiter = Arc::new(PortArbiter::new(self.handoff_window));
+        // Ports are exclusive one by one; dangerous operations are exclusive as a
+        // whole (see [`ExecutionArbiter`]), so the two tables sit side by side.
+        let execution = Arc::new(ExecutionArbiter::new());
         let stats = Arc::new(StatsPublisher::new(stats_tx));
+        let security = Arc::new(self.security);
 
         // Seed synchronously before accepting: the first client must get the
         // current device list in its initial ports frame, not an empty list
@@ -1419,8 +2430,10 @@ impl BridgeServer {
                         stream,
                         Arc::clone(&ports),
                         Arc::clone(&arbiter),
+                        Arc::clone(&execution),
                         Arc::clone(&backend),
                         Arc::clone(&stats),
+                        Arc::clone(&security),
                     ));
                 }
                 Err(e) => log::warn!("bridge accept error: {e}"),
@@ -1692,6 +2705,24 @@ enum FinishedOpen {
 struct ConnContext {
     /// This connection's `request_id` namespace in the shared arbiter.
     conn_id: u64,
+    /// The allowlisted `Origin` this connection completed its handshake with;
+    /// shown to the user in the confirmation dialog and recorded in the audit
+    /// trail.
+    origin: String,
+    /// Did a human approve a dangerous operation *in this session*, through the
+    /// confirmation dialog?
+    ///
+    /// Starts `false` on every connection and is flipped by the first approval,
+    /// which also issues the token that lets the next connection skip the
+    /// dialog. Cleared by [`Authority::revoke_all`]. This flag covers the
+    /// dialog half of authorization only — the token half is re-derived from the
+    /// store, see [`ConnContext::is_authorized`].
+    approved: AtomicBool,
+    /// The decoded `?token=` this connection presented at handshake time, if
+    /// any. Kept (rather than reduced to a bool once) so the gate can re-ask the
+    /// store whether it is *still* granted.
+    presented_token: Option<String>,
+    security: Arc<SecurityConfig>,
     /// Feeds the single sink pump task; every frame of this connection (hello,
     /// ports, progress, results) goes through it, so frame order is stable even
     /// though jobs push from their own tasks.
@@ -1702,16 +2733,97 @@ struct ConnContext {
     /// Raised when the queue was abandoned, so the read loop stops too.
     shutdown: tokio::sync::Notify,
     arbiter: Arc<PortArbiter>,
+    /// The process-wide "one dangerous operation at a time" gate, shared with
+    /// every other connection.
+    execution: Arc<ExecutionArbiter>,
     backend: Arc<dyn FlashBackend>,
     ports: Arc<PortsBroadcaster>,
     /// Jobs started by this connection and not yet finished, so a disconnect
     /// does not leave a serial port held forever.
     inflight: Mutex<HashSet<String>>,
+    /// Requests of this connection whose confirmation is still pending, each
+    /// with the one-shot that ends the wait.
+    ///
+    /// A job waiting for consent has claimed no port and is not in `inflight`
+    /// yet, so neither [`PortArbiter::cancel`] nor the disconnect teardown can
+    /// reach it — this registry is what makes a `cancel` frame (and a closed
+    /// tab) able to end an operation *during* the confirmation window, instead
+    /// of the client showing 「已取消」 while a click seconds later still writes
+    /// the device.
+    ///
+    /// Keyed by `request_id` alone: the map is per connection, which is the same
+    /// namespace `by_request` uses, so a `cancel` still cannot cross connection
+    /// boundaries.
+    pending_confirms: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     /// This connection's serial monitor, at most one at a time.
     session: Mutex<SessionSlot>,
 }
 
+/// Keeps one pending confirmation listed for as long as the wait lasts.
+///
+/// RAII rather than a paired remove call, for the same reason as
+/// [`ExecutionGuard`]: the confirmation wait has many exits (approval, refusal,
+/// timeout, an abandoned responder, a cancel, a disconnect) and a future early
+/// return must not be able to leave a stale sender behind — a later `cancel`
+/// would then be answered as if a dialog were still up.
+struct PendingConfirm {
+    ctx: Arc<ConnContext>,
+    request_id: String,
+}
+
+impl Drop for PendingConfirm {
+    fn drop(&mut self) {
+        self.ctx.lock_pending_confirms().remove(&self.request_id);
+    }
+}
+
 impl ConnContext {
+    /// May this connection run dangerous operations without asking the user?
+    ///
+    /// The one place that decides. Two independent sources of privilege:
+    /// a confirmation the user clicked on *this* connection (`approved`), or a
+    /// `?token=` presented at handshake time that the store **still** grants for
+    /// this exact Origin.
+    ///
+    /// The token half is a live lookup on purpose, not a bool cached at
+    /// handshake time. Caching it would make privilege outlive the grant it came
+    /// from: any revocation that does not walk the live-connection registry — one
+    /// landing in the same instant a connection is being registered, or a future
+    /// revocation path that simply forgets to walk it — would leave an already
+    /// open tab fully privileged after the user revoked. Re-reading the store
+    /// makes "the grant is gone" and "the connection is unprivileged" the same
+    /// fact instead of two facts someone has to keep in sync.
+    ///
+    /// The cost is one lookup per dangerous operation instead of one per
+    /// connection: a mutex lock plus a short `Vec` scan over the in-memory grant
+    /// list (`FileTokenStore` caches it and never reads the disk here). That is
+    /// nothing next to a flash job, so please do not "optimize" it back into a
+    /// cached bool.
+    ///
+    /// Under [`GrantPolicy::Ignore`] the token half is skipped entirely: the
+    /// store is shared with the attended tray shell, so consulting it here is
+    /// exactly how an unattended run would inherit a confirmation a human gave
+    /// at a keyboard days ago.
+    ///
+    /// The `approved` half staying outside the policy is a deliberate
+    /// library-level invariant, not an oversight: a dialog somebody actually
+    /// answered *on this connection* and a stale line in a shared file are
+    /// different kinds of evidence, and only the second one is what
+    /// [`GrantPolicy::Ignore`] exists to distrust. Under the current wiring that
+    /// branch is unreachable — `Ignore` is only ever paired with a prompt that
+    /// refuses everything — so it is intentionally untested. Should a future host
+    /// combine `Ignore` with a prompt that *can* approve (say a headless mode
+    /// that asks over a control channel), this branch starts carrying traffic,
+    /// and honouring that fresh answer is the intended behaviour.
+    fn is_authorized(&self) -> bool {
+        self.approved.load(std::sync::atomic::Ordering::Relaxed)
+            || (self.security.grant_policy == GrantPolicy::Honour
+                && self
+                    .presented_token
+                    .as_deref()
+                    .is_some_and(|token| self.security.tokens.is_granted(token, &self.origin)))
+    }
+
     fn send(&self, frame: &ServerFrame) {
         match serde_json::to_string(frame) {
             Ok(text) => {
@@ -1762,6 +2874,65 @@ impl ConnContext {
         self.inflight
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_pending_confirms(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<String, tokio::sync::oneshot::Sender<()>>> {
+        self.pending_confirms
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// List `request_id` as waiting for its confirmation and hand back the
+    /// receiving end of its cancel signal.
+    ///
+    /// Must be called *before* the prompt is raised, so a `cancel` arriving in
+    /// the same instant as the dialog cannot fall between the two.
+    fn begin_pending_confirm(
+        self: &Arc<Self>,
+        request_id: &str,
+    ) -> (PendingConfirm, tokio::sync::oneshot::Receiver<()>) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        // No key collision is possible: the execution right is taken before the
+        // prompt and held for the whole job, so this connection cannot have a
+        // second dangerous operation (let alone the same `request_id`) pending.
+        self.lock_pending_confirms()
+            .insert(request_id.to_string(), tx);
+        (
+            PendingConfirm {
+                ctx: Arc::clone(self),
+                request_id: request_id.to_string(),
+            },
+            rx,
+        )
+    }
+
+    /// End the confirmation wait of `request_id`; `false` means this connection
+    /// has no confirmation pending under that id (already answered, already
+    /// running, or never asked) and the caller should look elsewhere.
+    fn cancel_pending_confirm(&self, request_id: &str) -> bool {
+        match self.lock_pending_confirms().remove(request_id) {
+            // Err only if the waiter is already gone, which makes the signal
+            // moot — the operation ended on its own.
+            Some(tx) => tx.send(()).is_ok(),
+            None => false,
+        }
+    }
+
+    /// End every confirmation wait of this connection (it is going away), and
+    /// report how many there were.
+    fn cancel_all_pending_confirms(&self) -> usize {
+        let pending: Vec<tokio::sync::oneshot::Sender<()>> = self
+            .lock_pending_confirms()
+            .drain()
+            .map(|(_, tx)| tx)
+            .collect();
+        let count = pending.len();
+        for tx in pending {
+            let _ = tx.send(());
+        }
+        count
     }
 
     fn lock_session(&self) -> std::sync::MutexGuard<'_, SessionSlot> {
@@ -1883,14 +3054,86 @@ impl ConnContext {
     }
 }
 
+/// What the handshake callback learned about a connection it accepted, handed
+/// out through a slot because the callback is the only place that sees the
+/// request.
+struct AcceptedHandshake {
+    /// The matched allowlist entry (the confirmation dialog has to name who is
+    /// asking).
+    origin: &'static str,
+    /// The decoded `?token=` the client presented, `None` when it presented
+    /// none. Carried into the connection because the gate re-checks it against
+    /// the store on every dangerous operation — see
+    /// [`ConnContext::is_authorized`].
+    presented_token: Option<String>,
+    /// Was `presented_token` recognized for this exact Origin *at handshake
+    /// time*, under the configured [`GrantPolicy`]? Only drives the log line,
+    /// the `connect` audit line and "do not pop a pointless first dialog"; it is
+    /// not itself the authorization.
+    pre_authorized: bool,
+    /// Fingerprint of the presented token for the audit line; `None` when the
+    /// client presented none.
+    token_fingerprint: Option<String>,
+}
+
+// The handshake callback below returns tungstenite's `ErrorResponse` by value:
+// its signature is fixed by the `accept_hdr_async` contract, so the large `Err`
+// variant cannot be boxed away (same reason as on [`allowlisted_origin`]).
+#[allow(clippy::result_large_err)]
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     ports: Arc<PortsBroadcaster>,
     arbiter: Arc<PortArbiter>,
+    execution: Arc<ExecutionArbiter>,
     backend: Arc<dyn FlashBackend>,
     stats: Arc<StatsPublisher>,
+    security: Arc<SecurityConfig>,
 ) {
-    let ws = match tokio_tungstenite::accept_hdr_async(stream, check_origin).await {
+    // The handshake callback is the only place that sees the request, so it
+    // hands out both the matched Origin and the `?token=` verdict through this
+    // slot for the connection to carry.
+    let accepted: Arc<Mutex<Option<AcceptedHandshake>>> = Arc::new(Mutex::new(None));
+    let captured = Arc::clone(&accepted);
+    let handshake_security = Arc::clone(&security);
+    let ws = match tokio_tungstenite::accept_hdr_async(
+        stream,
+        move |req: &Request, response: Response| {
+            let origin = allowlisted_origin(req)?;
+            // A token problem never refuses the connection — it only downgrades
+            // it, so a stale grant from a previous install cannot lock the user
+            // out of the device list. 403 stays exclusively the Origin check's.
+            let presented = token_from_query(req.uri().query());
+            // The policy applies here too, not just at the gate: under
+            // `GrantPolicy::Ignore` a stored grant buys nothing, so a log line or
+            // an audit line claiming `pre_authorized=true` would simply be false.
+            let pre_authorized = handshake_security.grant_policy == GrantPolicy::Honour
+                && presented
+                    .as_deref()
+                    .is_some_and(|token| handshake_security.tokens.is_granted(token, origin));
+            let token_fingerprint = presented.as_deref().map(redact_token);
+            match (&token_fingerprint, pre_authorized) {
+                (Some(fingerprint), true) => log::info!(
+                    "bridge connection pre-authorized (origin={origin}, token={fingerprint})"
+                ),
+                (Some(fingerprint), false) => log::info!(
+                    "bridge token not recognized, connection continues unauthorized \
+                     (origin={origin}, token={fingerprint})"
+                ),
+                (None, _) => {}
+            }
+            *captured
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(AcceptedHandshake {
+                origin,
+                presented_token: presented,
+                pre_authorized,
+                token_fingerprint,
+            });
+            Ok(response)
+        },
+    )
+    .await
+    {
         Ok(ws) => ws,
         Err(e) => {
             // Covers both a rejected Origin and a malformed handshake.
@@ -1898,6 +3141,28 @@ async fn handle_connection(
             return;
         }
     };
+    let accepted = accepted
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+        .unwrap_or_else(|| {
+            // Unreachable: a completed handshake ran the callback above. Fall
+            // back to an Origin no allowlist entry can equal, and to no
+            // authorization at all, rather than panic in a resident process.
+            log::error!("bridge accepted a connection whose handshake was not recorded");
+            AcceptedHandshake {
+                origin: "",
+                presented_token: None,
+                pre_authorized: false,
+                token_fingerprint: None,
+            }
+        });
+    let origin = accepted.origin;
+    security.audit.record(&format!(
+        "connect origin={origin} pre_authorized={} token={}",
+        accepted.pre_authorized,
+        accepted.token_fingerprint.as_deref().unwrap_or("-")
+    ));
     // Counted from here on: a refused Origin never becomes a "connection" the
     // user sees in the tray. Released by the guard on every exit below.
     let _counted = stats.connection();
@@ -1915,16 +3180,28 @@ async fn handle_connection(
         }
     });
 
+    let connections = Arc::clone(&security.connections);
     let ctx = Arc::new(ConnContext {
         conn_id: arbiter.next_conn_id(),
+        origin: origin.to_string(),
+        approved: AtomicBool::new(false),
+        presented_token: accepted.presented_token,
+        security,
         sink_tx: Mutex::new(Some(sink_tx)),
         shutdown: tokio::sync::Notify::new(),
         arbiter,
+        execution,
         backend,
         ports,
         inflight: Mutex::new(HashSet::new()),
+        pending_confirms: Mutex::new(HashMap::new()),
         session: Mutex::new(SessionSlot::Idle),
     });
+
+    // Listed from here on, so a revocation can clear an in-session approval and
+    // push `auth_revoked` to this connection. Dropped (deregistered) on every
+    // exit below.
+    let _registered = connections.register(&ctx);
 
     match serde_json::to_string(&Hello::current()) {
         Ok(text) => {
@@ -1981,6 +3258,17 @@ async fn handle_connection(
         ctx.arbiter.cancel(ctx.conn_id, &request_id);
     }
 
+    // A request still waiting for its confirmation is *not* in `inflight` (it has
+    // claimed no port), yet it holds the process-wide execution right for the
+    // whole confirmation window. Without this, one abandoned tab would lock every
+    // other tab out of flashing for up to 60s.
+    let pending = ctx.cancel_all_pending_confirms();
+    if pending > 0 {
+        log::warn!(
+            "bridge connection closed with {pending} confirmation(s) pending, cancelling them"
+        );
+    }
+
     // A serial monitor holds its port until told otherwise, so it has to be
     // torn down here rather than merely cancelled. Blocking (two thread joins),
     // hence the blocking pool. An open still in flight is marked as closed
@@ -2027,7 +3315,15 @@ fn dispatch(ctx: &Arc<ConnContext>, text: &str) {
             tokio::spawn(run_auth_task(Arc::clone(ctx), request_id, auth));
         }
         ClientMessage::Cancel { request_id } => {
-            if !ctx.arbiter.cancel(ctx.conn_id, &request_id) {
+            // Two places a cancellable request can be: still waiting for the
+            // user's confirmation (no port claimed, so the port arbiter has
+            // never heard of it), or already running. The registry is checked
+            // first because a request can only be in one of the two.
+            if ctx.cancel_pending_confirm(&request_id) {
+                log::info!(
+                    "bridge cancel ended job {request_id} while its confirmation was pending"
+                );
+            } else if !ctx.arbiter.cancel(ctx.conn_id, &request_id) {
                 log::info!("bridge cancel for unknown or finished job {request_id}, ignored");
             }
         }
@@ -2043,9 +3339,193 @@ fn dispatch(ctx: &Arc<ConnContext>, text: &str) {
     }
 }
 
-/// One flash job end to end: claim the port, then decode and flash off the
-/// async worker (base64 decoding a multi-MB image is CPU work that belongs on
-/// the blocking pool, like every other synchronous step here).
+/// Everything a dangerous operation has to clear before it may touch a device:
+/// the process-wide execution right first, the human confirmation second.
+///
+/// `None` back means the operation is off and the `job_result` frame explaining
+/// why has already been sent. `Some(guard)` must be held for the whole job: the
+/// execution right is released by dropping it, i.e. after the terminal
+/// `job_result`, not merely after the confirmation — a confirmed job is still an
+/// operation nobody else may start alongside.
+///
+/// The exclusion is taken *before* the prompt on purpose: that is what keeps a
+/// retrying client (or a rogue local process hammering the port) from stacking a
+/// second dialog on the user while the first one is still on screen.
+async fn admit_dangerous_op(
+    ctx: &Arc<ConnContext>,
+    request_id: &str,
+    started: Instant,
+    request: ConfirmRequest,
+) -> Option<ExecutionGuard> {
+    let execution = match ctx.execution.try_acquire(ctx.conn_id) {
+        Ok(guard) => guard,
+        Err(refused) => {
+            // One machine-readable code for both cases; the message is what tells
+            // a developer reading the logs which of the two they are looking at.
+            let message = match refused {
+                ExecutionRefused::OtherConnection => {
+                    "another connection is already running a dangerous operation; \
+                     the bridge runs one at a time"
+                }
+                ExecutionRefused::SameConnection => {
+                    "this connection already has a dangerous operation in flight \
+                     (waiting for the user's confirmation, or running)"
+                }
+            };
+            audit_confirm(ctx.security.audit.as_ref(), &request, "execution_busy");
+            ctx.send(&failed(
+                request_id,
+                started,
+                "execution_busy",
+                message.to_string(),
+            ));
+            return None;
+        }
+    };
+
+    if authorize_dangerous_op(ctx, request_id, started, request).await {
+        Some(execution)
+    } else {
+        None
+    }
+}
+
+/// The human-in-the-loop gate every dangerous operation passes (B7).
+///
+/// Runs before the port is claimed, before the firmware is decoded and before
+/// any backend call, so a refusal costs the device nothing and leaves no claim
+/// behind. `false` back means the operation is off and the `job_result` frame
+/// explaining why has already been sent.
+///
+/// Consent is per connection: the first approval flips `ctx.approved`, so a
+/// client that flashes ten boards in a row is asked once — and a connection whose
+/// `?token=` the store still grants for its Origin is never asked at all (and is
+/// issued no second token). Both halves are decided by
+/// [`ConnContext::is_authorized`], which re-reads the store rather than trusting
+/// a verdict cached at handshake time.
+async fn authorize_dangerous_op(
+    ctx: &Arc<ConnContext>,
+    request_id: &str,
+    started: Instant,
+    request: ConfirmRequest,
+) -> bool {
+    if ctx.is_authorized() {
+        // No dialog, but still one audit line: without it a session's second and
+        // later flashes would be invisible to a review, which is exactly the
+        // history an incident needs.
+        audit_confirm(ctx.security.audit.as_ref(), &request, "preauthorized");
+        return true;
+    }
+
+    let security = Arc::clone(&ctx.security);
+    // Listed before the prompt is raised, so a `cancel` frame that arrives in the
+    // same instant as the dialog cannot fall between registration and display.
+    // `_pending` deregisters on every exit path below.
+    let (_pending, cancel_rx) = ctx.begin_pending_confirm(request_id);
+    // One-shot rather than a callback into the connection: `respond` may be
+    // invoked from any thread (a native dialog answers on the UI thread), and a
+    // oneshot sender is both `Send` and non-async to fire.
+    let (answer_tx, answer_rx) = tokio::sync::oneshot::channel::<ConfirmDecision>();
+    security.prompt.request(
+        request.clone(),
+        Box::new(move |decision| {
+            // Err only means this task already gave up (timeout or a cancel);
+            // the decision is then moot.
+            let _ = answer_tx.send(decision);
+        }),
+    );
+
+    // Three ways out: the user answered, the client took the request back, or
+    // nobody answered in time.
+    //
+    // Accepted limitation: a `cancel` (or a disconnect) ends the *wait*, not the
+    // dialog. `AuthPrompt` has no dismiss operation, so an OS dialog already on
+    // screen lingers until the user dismisses it or the platform gives up, and
+    // its late answer lands in the dropped `answer_tx` and is ignored — the same
+    // trade-off already documented on the Windows MessageBox arm. What matters
+    // is that a late 「允许」 can no longer start the operation.
+    //
+    // `biased` with the cancel branch first so a cancellation that landed in the
+    // same instant as the answer always wins: not running a dangerous operation
+    // is the safe direction, and an unbiased `select!` would decide that race by
+    // coin flip.
+    let outcome = tokio::select! {
+        biased;
+        // `Err` means the sender vanished without signalling, which no path does
+        // today; treated as a cancellation anyway, same fail-closed reasoning.
+        _ = cancel_rx => "cancelled",
+        answered = tokio::time::timeout(security.confirm_timeout, answer_rx) => match answered {
+            Ok(Ok(ConfirmDecision::Approve)) => "approved",
+            Ok(Ok(ConfirmDecision::Reject)) => "rejected",
+            // The responder was dropped without being called: no consent was
+            // given, which is a refusal — silence never opens the door.
+            Ok(Err(_)) => "abandoned",
+            Err(_) => "timeout",
+        },
+    };
+    audit_confirm(security.audit.as_ref(), &request, outcome);
+
+    if outcome == "cancelled" {
+        // Deliberately the plain `cancelled` code, not one of its own: nothing
+        // reached the device, and the client already renders `cancelled` as
+        // 「已取消」 — which is exactly what the user asked for and what the
+        // device state is.
+        ctx.send(&failed(
+            request_id,
+            started,
+            "cancelled",
+            format!(
+                "the client cancelled this {} while its confirmation was still pending",
+                request.op.as_str()
+            ),
+        ));
+        return false;
+    }
+
+    if outcome != "approved" {
+        ctx.send(&failed(
+            request_id,
+            started,
+            "user_rejected",
+            format!(
+                "the user did not confirm this {} ({outcome})",
+                request.op.as_str()
+            ),
+        ));
+        return false;
+    }
+
+    // Persist the click as a token so the user is not asked again.
+    let Some(token) = new_token() else {
+        ctx.send(&failed(
+            request_id,
+            started,
+            "internal",
+            "cannot issue a confirmation token, no system entropy available".to_string(),
+        ));
+        return false;
+    };
+    security.tokens.insert(Grant {
+        token: token.clone(),
+        origin: request.origin.clone(),
+        granted_at_ms: now_ms(),
+    });
+    ctx.approved
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    security.audit.record(&format!(
+        "grant origin={} op={} token={}",
+        request.origin,
+        request.op.as_str(),
+        redact_token(&token)
+    ));
+    ctx.send(&ServerFrame::AuthGranted { token });
+    true
+}
+
+/// One flash job end to end: take the execution right, confirm with the user,
+/// claim the port, then decode and flash off the async worker (base64 decoding a
+/// multi-MB image is CPU work that belongs on the blocking pool, like every other
+/// synchronous step here).
 async fn run_job_task(
     ctx: Arc<ConnContext>,
     request_id: String,
@@ -2053,6 +3533,28 @@ async fn run_job_task(
     file_content: String,
 ) {
     let started = Instant::now();
+
+    // Before the claim and before the decode: the size shown to the user is
+    // derived from the base64 text, so a refused job never pays for a multi-MB
+    // decode and never holds the port. `_execution` keeps the process-wide
+    // execution right for the rest of this task.
+    let Some(_execution) = admit_dangerous_op(
+        &ctx,
+        &request_id,
+        started,
+        ConfirmRequest {
+            op: DangerousOp::Flash,
+            origin: ctx.origin.clone(),
+            chip_id: job.chip_id.clone(),
+            port: job.port.clone(),
+            firmware_bytes: base64_decoded_len(&file_content),
+        },
+    )
+    .await
+    else {
+        return;
+    };
+
     let port = job.port.clone();
     let backend = Arc::clone(&ctx.backend);
 
@@ -2084,7 +3586,9 @@ async fn run_job_task(
 }
 
 /// One authorization write end to end. Credentials are validated up front so a
-/// malformed request neither claims the port nor reaches the device.
+/// malformed request neither claims the port nor reaches the device — and, since
+/// validation precedes the confirmation gate, does not bother the user with a
+/// dialog for a request that cannot run anyway.
 async fn run_auth_task(ctx: Arc<ConnContext>, request_id: String, auth: WireAuth) {
     let started = Instant::now();
 
@@ -2097,6 +3601,26 @@ async fn run_auth_task(ctx: Arc<ConnContext>, request_id: String, auth: WireAuth
         ));
         return;
     }
+
+    // Overwriting an authorization code cannot be undone (PRD: 覆盖不可撤销), so
+    // it is gated exactly like flashing. The dialog names no credential: `uuid`
+    // and `auth_key` never leave the job path.
+    let Some(_execution) = admit_dangerous_op(
+        &ctx,
+        &request_id,
+        started,
+        ConfirmRequest {
+            op: DangerousOp::Authorize,
+            origin: ctx.origin.clone(),
+            chip_id: auth.chip_id.clone(),
+            port: auth.port.clone(),
+            firmware_bytes: None,
+        },
+    )
+    .await
+    else {
+        return;
+    };
 
     let port = auth.port.clone();
     let backend = Arc::clone(&ctx.backend);
@@ -2476,23 +4000,29 @@ fn failed(request_id: &str, started: Instant, error_code: &str, message: String)
 }
 
 /// Handshake gate: the request `Origin` must byte-for-byte match one of
-/// [`ORIGIN_ALLOWLIST`].
+/// [`ORIGIN_ALLOWLIST`]; the matched entry is handed back so the accepted
+/// connection can carry it.
 ///
 /// A non-allowlisted Origin is refused with 403 and the socket is dropped; a
 /// missing Origin is treated as a non-browser caller and refused the same way
 /// (非白名单直接断开，缺失 Origin 视为非浏览器来源同样拒绝).
+///
+/// This is a filter, not a trust anchor: `Origin` is a header the browser is
+/// forced to add, not one a native local process has to tell the truth about.
+/// Dangerous operations therefore additionally pass [`admit_dangerous_op`].
 // The Result signature is fixed by tungstenite's handshake callback contract,
 // so the large `ErrorResponse` variant cannot be boxed away here.
 #[allow(clippy::result_large_err)]
-fn check_origin(req: &Request, response: Response) -> Result<Response, ErrorResponse> {
+fn allowlisted_origin(req: &Request) -> Result<&'static str, ErrorResponse> {
     let origin = req.headers().get("Origin");
-    let allowed = origin.is_some_and(|value| {
+    let matched = origin.and_then(|value| {
         ORIGIN_ALLOWLIST
             .iter()
-            .any(|allowed| value.as_bytes() == allowed.as_bytes())
+            .find(|allowed| value.as_bytes() == allowed.as_bytes())
+            .copied()
     });
-    if allowed {
-        return Ok(response);
+    if let Some(matched) = matched {
+        return Ok(matched);
     }
 
     log::warn!(
@@ -2607,5 +4137,239 @@ mod tests {
         ];
 
         assert_eq!(allowlisted_device_count(&ports), 2);
+    }
+
+    #[test]
+    fn decoded_length_is_derived_from_the_base64_text_alone() {
+        // Expected values produced independently (`python3 -c "import base64;
+        // len(base64.b64decode(s))"`), not by calling the decoder under test.
+        assert_eq!(base64_decoded_len(""), Some(0));
+        assert_eq!(base64_decoded_len("aGVsbG8="), Some(5)); // "hello"
+        assert_eq!(base64_decoded_len("aGk="), Some(2)); // "hi"
+        assert_eq!(base64_decoded_len("YWJj"), Some(3)); // "abc", unpadded
+        assert_eq!(base64_decoded_len("YWJjZA=="), Some(4)); // "abcd"
+    }
+
+    #[test]
+    fn malformed_base64_has_no_derivable_length() {
+        // Not a whole number of quanta.
+        assert_eq!(base64_decoded_len("aGVsbG8"), None);
+        // Three pad characters: no quantum decodes to zero bytes.
+        assert_eq!(base64_decoded_len("a==="), None);
+        // Padding in the middle rather than at the end.
+        assert_eq!(base64_decoded_len("aGk=aGk="), None);
+    }
+
+    #[test]
+    fn a_redacted_token_reveals_neither_the_secret_nor_more_than_its_length() {
+        let token = "Ab3-xYz_0123456789";
+
+        let redacted = redact_token(token);
+
+        assert_eq!(redacted, "Ab3-xY…(len=18)");
+        assert!(
+            !redacted.contains("z_0123456789"),
+            "the tail must not survive redaction: {redacted}"
+        );
+    }
+
+    /// Shorthand: what the handshake would compare against the store.
+    fn token_of(query: &str) -> Option<String> {
+        token_from_query(Some(query))
+    }
+
+    #[test]
+    fn a_token_query_value_is_percent_decoded() {
+        // Escape sequences taken from RFC 3986 §2.1 (`%20` = space, `%2B` = '+'),
+        // not from this decoder.
+        assert_eq!(token_of("token=Ab3-xYz_09"), Some("Ab3-xYz_09".to_string()));
+        assert_eq!(token_of("token=tok%20en"), Some("tok en".to_string()));
+        assert_eq!(token_of("token=tok%2Ben"), Some("tok+en".to_string()));
+        // Hex is case-insensitive.
+        assert_eq!(token_of("token=tok%2ben"), Some("tok+en".to_string()));
+        // Multi-byte UTF-8 (「你」 = E4 BD A0), reassembled across three escapes.
+        assert_eq!(token_of("token=%E4%BD%A0"), Some("你".to_string()));
+    }
+
+    #[test]
+    fn a_plus_in_a_token_query_value_is_a_literal_plus() {
+        // This is a URI query value, not a form body: `+` is not a space.
+        assert_eq!(token_of("token=tok+en"), Some("tok+en".to_string()));
+    }
+
+    #[test]
+    fn a_malformed_escape_makes_the_token_unusable() {
+        // Unusable rather than "compared raw": the connection then downgrades to
+        // unauthorized, which costs one confirmation instead of matching text the
+        // client never sent.
+        assert_eq!(token_of("token=%"), None);
+        assert_eq!(token_of("token=tok%"), None);
+        assert_eq!(token_of("token=tok%A"), None);
+        assert_eq!(token_of("token=tok%ZZ"), None);
+        assert_eq!(token_of("token=tok%2"), None);
+        // Valid escapes, but not a UTF-8 sequence (a lone continuation byte, and
+        // an unfinished 3-byte sequence): must be rejected, never panic.
+        assert_eq!(token_of("token=%A0"), None);
+        assert_eq!(token_of("token=%E4%BD"), None);
+        assert_eq!(token_of("token=%FF%FE"), None);
+    }
+
+    #[test]
+    fn an_absent_or_empty_token_parameter_counts_as_no_token() {
+        assert_eq!(token_from_query(None), None);
+        assert_eq!(token_of(""), None);
+        assert_eq!(token_of("token="), None);
+        assert_eq!(token_of("a=1&b=2"), None);
+        // Only a full `token=` key matches, not a suffix of another key.
+        assert_eq!(token_of("mytoken=abc"), None);
+    }
+
+    #[test]
+    fn the_token_parameter_is_found_among_others_and_the_first_one_wins() {
+        assert_eq!(token_of("a=1&token=X&b=2"), Some("X".to_string()));
+        assert_eq!(
+            token_of("token=first&token=second"),
+            Some("first".to_string())
+        );
+    }
+    #[test]
+    fn a_cancel_after_the_auth_write_left_the_bridge_gets_its_own_code() {
+        // The write command was already on the wire when the cancel landed, so the
+        // credential may be on the device. The web client has to be able to tell
+        // that apart from a clean abort *structurally* — it owes the user honest
+        // copy ("可能已写入"), and it cannot parse prose to find out.
+        let after_write =
+            auth_slot_outcome(tyutool_core::BatchAuthSlotResult::CancelledAfterWrite {
+                mac: "AA:BB:CC:DD:EE:FF".to_string(),
+                uuid: "uuid-supersecret-9f1".to_string(),
+            })
+            .expect_err("a cancelled write is not a success");
+        assert_eq!(after_write.error_code, "cancelled_after_write");
+        assert!(
+            after_write.message.contains("AA:BB:CC:DD:EE:FF"),
+            "the device MAC identifies which board is in doubt: {}",
+            after_write.message
+        );
+        // The authorization uuid is a credential; it must not travel on the wire
+        // or into a log line just because the operation went wrong.
+        assert!(
+            !after_write.message.contains("uuid-supersecret-9f1"),
+            "the message leaked the authorization uuid: {}",
+            after_write.message
+        );
+
+        // A cancel that stopped before the write keeps the plain code.
+        let clean = auth_slot_outcome(tyutool_core::BatchAuthSlotResult::Cancelled)
+            .expect_err("a cancellation is not a success");
+        assert_eq!(clean.error_code, "cancelled");
+
+        assert!(auth_slot_outcome(tyutool_core::BatchAuthSlotResult::Done {
+            mac: "AA:BB:CC:DD:EE:FF".to_string(),
+        })
+        .is_ok());
+    }
+
+    #[test]
+    fn debug_output_of_a_request_never_carries_a_credential() {
+        // No log line prints these today, but "nobody prints it" is a review
+        // promise, while a redacted Debug is a compile-time one: the next person
+        // who adds `{message:?}` to a warning cannot leak a key by accident.
+        let auth = WireAuth {
+            chip_id: "t5ai".to_string(),
+            port: "/dev/tty.fakeA".to_string(),
+            baud_rate: 921_600,
+            uuid: "uuid-supersecret-9f1".to_string(),
+            auth_key: "authkey-supersecret-3c7".to_string(),
+        };
+        let rendered = format!("{auth:?}");
+        assert!(
+            !rendered.contains("uuid-supersecret-9f1")
+                && !rendered.contains("authkey-supersecret-3c7"),
+            "WireAuth Debug leaked a credential: {rendered}"
+        );
+        // Still useful for diagnosis: the non-secret fields survive.
+        assert!(
+            rendered.contains("t5ai") && rendered.contains("/dev/tty.fakeA"),
+            "{rendered}"
+        );
+
+        let spec = AuthJobSpec {
+            chip_id: "t5ai".to_string(),
+            port: "/dev/tty.fakeA".to_string(),
+            baud_rate: 921_600,
+            uuid: "uuid-supersecret-9f1".to_string(),
+            auth_key: "authkey-supersecret-3c7".to_string(),
+        };
+        let rendered = format!("{spec:?}");
+        assert!(
+            !rendered.contains("uuid-supersecret-9f1")
+                && !rendered.contains("authkey-supersecret-3c7"),
+            "AuthJobSpec Debug leaked a credential: {rendered}"
+        );
+
+        let message = ClientMessage::RunAuth {
+            request_id: "a-1".to_string(),
+            auth: WireAuth {
+                chip_id: "t5ai".to_string(),
+                port: "/dev/tty.fakeA".to_string(),
+                baud_rate: 921_600,
+                uuid: "uuid-supersecret-9f1".to_string(),
+                auth_key: "authkey-supersecret-3c7".to_string(),
+            },
+        };
+        let rendered = format!("{message:?}");
+        assert!(
+            !rendered.contains("uuid-supersecret-9f1")
+                && !rendered.contains("authkey-supersecret-3c7"),
+            "ClientMessage Debug leaked a credential: {rendered}"
+        );
+
+        // A multi-MB base64 image has no business in a log line either.
+        let flash = ClientMessage::RunJob {
+            request_id: "j-1".to_string(),
+            job: serde_json::from_value(serde_json::json!({
+                "chip_id": "t5ai",
+                "port": "/dev/tty.fakeA",
+                "baud_rate": 2_000_000
+            }))
+            .expect("build a WireJob"),
+            file_content: "QUJDRA==".repeat(64),
+        };
+        let rendered = format!("{flash:?}");
+        assert!(
+            !rendered.contains("QUJDRA==QUJDRA=="),
+            "ClientMessage Debug dumped the whole firmware payload: {rendered}"
+        );
+    }
+    #[test]
+    fn debug_output_of_a_grant_never_carries_its_token() {
+        // The token is a bearer credential: presenting it is enough to write a
+        // device. That makes it at least as sensitive as `auth_key`, which
+        // already has a hand-written Debug — one stray `log::debug!("{grant:?}")`
+        // or a `Vec<Grant>` in an error message would otherwise dump it whole.
+        let grant = Grant {
+            token: "Ab3-xYz_supersecret_token_value_0123456789a".to_string(),
+            origin: "http://localhost:3000".to_string(),
+            granted_at_ms: 1_784_800_000_000,
+        };
+
+        let rendered = format!("{grant:?}");
+
+        assert!(
+            !rendered.contains("supersecret"),
+            "Grant Debug leaked the token: {rendered}"
+        );
+        // Not even a prefix: `redact_token`'s fingerprint exists for the audit
+        // trail, where correlating two lines is the point. A Debug rendering has
+        // no such need, so it gets the strict form.
+        assert!(
+            !rendered.contains("Ab3-xY"),
+            "Grant Debug leaked a token prefix: {rendered}"
+        );
+        // Still useful: which origin, and that a token is present at all.
+        assert!(
+            rendered.contains("http://localhost:3000") && rendered.contains("len=43"),
+            "Grant Debug lost its diagnostic value: {rendered}"
+        );
     }
 }

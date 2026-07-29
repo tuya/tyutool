@@ -56,9 +56,10 @@ pub fn diagnose_bind_error(error: &anyhow::Error) -> StartupDiagnosis {
 /// deliberately; `--headless` keeps `exit(1)` because a supervisor / CI script
 /// needs the non-zero status.
 ///
-/// TODO: a native system notification would surface the failure without the
-/// user opening the menu, but on macOS that needs an .app bundle (or a new
-/// notification dependency) — revisit in the packaging slice.
+/// The same text is also pushed as a system notification, so a user who never
+/// opens the menu still finds out (the tray shell fires it on
+/// `UserEvent::StartupFailed`). Kept out of here on purpose: this function stays
+/// pure so it can be unit-tested, and firing a notification is the shell's job.
 pub fn startup_error_line(diagnosis: StartupDiagnosis, error: &anyhow::Error) -> String {
     match diagnosis {
         StartupDiagnosis::AlreadyRunning => "已有实例在运行 / 端口被占用".to_string(),

@@ -1,11 +1,18 @@
 //! B4 slice integration tests: run_auth authorization writes — same wire
 //! contract as run_job (progress + terminal job_result, request_id keyed),
-//! mutual exclusion with flash jobs on the same port through the shared
-//! arbiter, cancel support, and credential validation (bad_request).
+//! mutual exclusion with flash jobs (since B7 cycle 3 a global one: one
+//! dangerous operation at a time), cancel support, and credential validation
+//! (bad_request).
 //!
 //! The authorize execution surface is injected (fake backend); the real
 //! tyutool-core `run_batch_auth_slot` path is verified on a physical board
 //! separately.
+//!
+//! Every `run_auth` / `run_job` here would trip the B7 confirmation gate, so
+//! these servers run with the shared approving prompt: this file is about
+//! orchestration, not about what the user answered (that is `local_auth.rs`).
+
+mod common;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,7 +103,10 @@ impl FlashBackend for FakeBackend {
 
 async fn start_server(backend: Arc<dyn FlashBackend>) -> SocketAddr {
     let enumerator: PortEnumerator = Arc::new(Vec::new);
-    let server = tyutool_bridge::bind(0).await.expect("bind ephemeral port");
+    let server = tyutool_bridge::bind(0)
+        .await
+        .expect("bind ephemeral port")
+        .with_auth_prompt(common::approving() as Arc<dyn tyutool_bridge::AuthPrompt>);
     let addr = server.local_addr().expect("local addr");
     tokio::spawn(server.run_with(enumerator, Duration::from_millis(20), backend));
     addr
@@ -225,8 +235,14 @@ async fn run_auth_streams_progress_then_job_result() {
 }
 
 #[tokio::test]
-async fn flash_and_auth_are_mutually_exclusive_on_the_same_port() {
-    // Direction 1: a flash job holds the port, run_auth answers busy.
+async fn flash_and_auth_are_mutually_exclusive() {
+    // The exclusion used to be per port (one holder per port, B3); since B7
+    // cycle 3 it is global — one dangerous operation at a time in the whole
+    // process — so the refusal code is `execution_busy` and holds for any port,
+    // not just the one in flight. Still bidirectional, which is what this test
+    // is here for.
+    //
+    // Direction 1: a flash job is in flight, run_auth answers busy.
     let (backend, _specs, finish) = FakeBackend::new();
     let addr = start_server(backend).await;
     let mut ws = connect_ready(&addr).await;
@@ -246,12 +262,12 @@ async fn flash_and_auth_are_mutually_exclusive_on_the_same_port() {
     let busy = next_frame_of_type(&mut ws, "job_result").await;
     assert_eq!(busy["request_id"], "a-002", "{busy}");
     assert_eq!(busy["ok"], false, "{busy}");
-    assert_eq!(busy["error_code"], "port_busy", "{busy}");
+    assert_eq!(busy["error_code"], "execution_busy", "{busy}");
     finish.store(true, Ordering::Relaxed);
     let done = next_frame_of_type(&mut ws, "job_result").await;
     assert_eq!(done["request_id"], "j-001", "{done}");
 
-    // Direction 2 (fresh server): an auth job holds the port, run_job answers busy.
+    // Direction 2 (fresh server): an auth job is in flight, run_job answers busy.
     let (backend, _specs, finish) = FakeBackend::new();
     let addr = start_server(backend).await;
     let mut ws = connect_ready(&addr).await;
@@ -271,7 +287,7 @@ async fn flash_and_auth_are_mutually_exclusive_on_the_same_port() {
     let busy = next_frame_of_type(&mut ws, "job_result").await;
     assert_eq!(busy["request_id"], "j-102", "{busy}");
     assert_eq!(busy["ok"], false, "{busy}");
-    assert_eq!(busy["error_code"], "port_busy", "{busy}");
+    assert_eq!(busy["error_code"], "execution_busy", "{busy}");
     finish.store(true, Ordering::Relaxed);
     let done = next_frame_of_type(&mut ws, "job_result").await;
     assert_eq!(done["request_id"], "a-101", "{done}");

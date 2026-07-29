@@ -6,6 +6,14 @@
 //! The flash execution surface is injected (fake backend) so orchestration is
 //! exercised without real hardware; the real tyutool-core path is compiled in
 //! production code and verified on a physical board separately.
+//!
+//! Every `run_job` here would trip the B7 confirmation gate, so these servers
+//! run with the shared approving prompt: this file is about orchestration, not
+//! about what the user answered (that is `local_auth.rs`). B7 cycle 3 also made
+//! dangerous operations globally exclusive, so a conflicting `run_job` now
+//! answers `execution_busy` before port arbitration is consulted.
+
+mod common;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -90,7 +98,10 @@ async fn start_server(
     initial_ports: Vec<EnumeratedPort>,
 ) -> SocketAddr {
     let enumerator: PortEnumerator = Arc::new(move || initial_ports.clone());
-    let server = tyutool_bridge::bind(0).await.expect("bind ephemeral port");
+    let server = tyutool_bridge::bind(0)
+        .await
+        .expect("bind ephemeral port")
+        .with_auth_prompt(common::approving() as Arc<dyn tyutool_bridge::AuthPrompt>);
     let addr = server.local_addr().expect("local addr");
     tokio::spawn(server.run_with(enumerator, Duration::from_millis(20), backend));
     addr
@@ -208,7 +219,7 @@ async fn run_job_streams_progress_then_job_result() {
 }
 
 #[tokio::test]
-async fn second_job_on_held_port_answers_busy_immediately() {
+async fn second_job_while_one_runs_answers_busy_immediately() {
     let (backend, _specs, finish) = FakeBackend::new();
     let addr = start_server(backend, vec![]).await;
     let mut ws = connect_ready(&addr).await;
@@ -229,8 +240,15 @@ async fn second_job_on_held_port_answers_busy_immediately() {
     let busy = next_frame_of_type(&mut ws, "job_result").await;
     assert_eq!(busy["request_id"], "j-002", "{busy}");
     assert_eq!(busy["ok"], false, "{busy}");
+    // Since B7 cycle 3 the single-active-execution rule refuses a second
+    // dangerous operation before the port table is even consulted, so this
+    // conflict answers `execution_busy` rather than `port_busy` — the
+    // "immediately, no queuing" contract is the same. `port_busy` for a
+    // `run_job` is still reachable (and covered in `serial_debug.rs`) when the
+    // port is held by a serial monitor session or another connection's handoff
+    // reservation.
     assert_eq!(
-        busy["error_code"], "port_busy",
+        busy["error_code"], "execution_busy",
         "conflict must answer busy immediately, no queuing: {busy}"
     );
 
@@ -380,43 +398,59 @@ async fn wait_ports_where(ws: &mut Ws, busy: bool) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn two_ports_flash_concurrently_and_finish_independently() {
+async fn two_ports_flash_one_after_the_other_and_finish_independently() {
+    // B3 let these two run at the same time (one holder per *port*); B7 cycle 3
+    // deliberately took that away — at most one dangerous operation runs in the
+    // whole process, another port included (see `local_auth.rs`). What still has
+    // to hold is that each port's job is independent: the second one runs on its
+    // own port and reports its own terminal frame once the first is done.
     let (backend, specs, finish) = FakeBackend::new();
     let addr = start_server(backend, vec![]).await;
     let mut ws = connect_ready(&addr).await;
 
     send_json(&mut ws, run_job_frame("j-A", "/dev/tty.fakeA", "aGVsbG8=")).await;
-    send_json(&mut ws, run_job_frame("j-B", "/dev/tty.fakeB", "aGVsbG8=")).await;
+    let progress = next_frame_of_type(&mut ws, "progress").await;
+    assert_eq!(progress["request_id"], "j-A", "{progress}");
 
-    // Both jobs must be in flight at the same time (progress from each).
-    let mut in_flight = std::collections::HashSet::new();
-    while in_flight.len() < 2 {
-        let v = next_frame_of_type(&mut ws, "progress").await;
-        in_flight.insert(v["request_id"].as_str().expect("request_id").to_string());
-    }
-    assert!(
-        in_flight.contains("j-A") && in_flight.contains("j-B"),
-        "{in_flight:?}"
-    );
-    assert_eq!(specs.lock().expect("specs lock").len(), 2);
+    // While j-A holds the execution right, the other port is refused.
+    send_json(&mut ws, run_job_frame("j-B", "/dev/tty.fakeB", "aGVsbG8=")).await;
+    let refused = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(refused["request_id"], "j-B", "{refused}");
+    assert_eq!(refused["error_code"], "execution_busy", "{refused}");
 
     finish.store(true, Ordering::Relaxed);
-    let mut done = std::collections::HashSet::new();
-    while done.len() < 2 {
-        let v = next_frame_of_type(&mut ws, "job_result").await;
-        assert_eq!(v["ok"], true, "{v}");
-        done.insert(v["request_id"].as_str().expect("request_id").to_string());
-    }
-    assert!(done.contains("j-A") && done.contains("j-B"), "{done:?}");
+    let first = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(first["request_id"], "j-A", "{first}");
+    assert_eq!(first["ok"], true, "{first}");
+
+    // Retried after the first one finished: the execution right is free again.
+    send_json(&mut ws, run_job_frame("j-B", "/dev/tty.fakeB", "aGVsbG8=")).await;
+    let second = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(second["request_id"], "j-B", "{second}");
+    assert_eq!(second["ok"], true, "{second}");
+
+    let recorded = specs.lock().expect("specs lock");
+    let ports: Vec<&str> = recorded.iter().map(|spec| spec.port.as_str()).collect();
+    assert_eq!(
+        ports,
+        vec!["/dev/tty.fakeA", "/dev/tty.fakeB"],
+        "each job must have reached the backend on its own port"
+    );
 }
 
 #[tokio::test]
-async fn connections_have_isolated_request_id_namespaces() {
+async fn a_closed_connection_releases_its_port_and_the_execution_right() {
     let (backend, _specs, finish) = FakeBackend::new();
     let addr = start_server(backend, vec![]).await;
 
-    // Two connections reuse the same request_id on different ports: both jobs
-    // must run (per-connection namespace, not a process-global one).
+    // B3 proved the per-connection `request_id` namespace by running two jobs at
+    // once from two connections; B7 cycle 3 made that impossible (one dangerous
+    // operation process-wide), so the namespace now only lives inside the
+    // arbiter's job key and is no longer observable on the wire. What is
+    // observable — and what matters more — is that a tab closing mid-flash frees
+    // *both* the port and the execution right, or one abandoned tab would leave
+    // the helper dead for everyone. The same `request_id` is reused across the
+    // two connections here so the namespace still gets exercised.
     let mut ws_a = connect_ready(&addr).await;
     let mut ws_b = connect_ready(&addr).await;
     send_json(
@@ -425,39 +459,32 @@ async fn connections_have_isolated_request_id_namespaces() {
     )
     .await;
     next_frame_of_type(&mut ws_a, "progress").await;
+
+    // While A is flashing, B is refused (nothing sticky about it, see below).
     send_json(
         &mut ws_b,
-        run_job_frame("j-1", "/dev/tty.fakeB", "aGVsbG8="),
+        run_job_frame("j-1", "/dev/tty.fakeA", "aGVsbG8="),
     )
     .await;
-    let progress = next_frame_of_type(&mut ws_b, "progress").await;
-    assert_eq!(
-        progress["request_id"], "j-1",
-        "same request_id on another connection must not collide: {progress}"
-    );
+    let refused = next_frame_of_type(&mut ws_b, "job_result").await;
+    assert_eq!(refused["error_code"], "execution_busy", "{refused}");
 
-    // Closing connection A (cancels its own jobs) must not touch B's job.
+    // A goes away mid-job: its job is cancelled, its port released, and the
+    // execution right handed back.
     drop(ws_a);
     tokio::time::sleep(Duration::from_millis(50)).await;
     finish.store(true, Ordering::Relaxed);
-    let done = next_frame_of_type(&mut ws_b, "job_result").await;
-    assert_eq!(done["request_id"], "j-1", "{done}");
-    assert_eq!(
-        done["ok"], true,
-        "closing another connection must not cancel this job: {done}"
-    );
 
-    // And connection A's port was released by its disconnect cleanup: B can
-    // claim it right away.
     send_json(
         &mut ws_b,
-        run_job_frame("j-2", "/dev/tty.fakeA", "aGVsbG8="),
+        run_job_frame("j-1", "/dev/tty.fakeA", "aGVsbG8="),
     )
     .await;
     let reclaim = next_frame_of_type(&mut ws_b, "job_result").await;
-    assert_eq!(reclaim["request_id"], "j-2", "{reclaim}");
+    assert_eq!(reclaim["request_id"], "j-1", "{reclaim}");
     assert_eq!(
         reclaim["ok"], true,
-        "disconnect cleanup must release the dead connection's port: {reclaim}"
+        "disconnect cleanup must release the dead connection's port and \
+         execution right: {reclaim}"
     );
 }

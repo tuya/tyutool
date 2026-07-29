@@ -6,6 +6,12 @@
 //! The session source is injected (fake backend records configs and exposes
 //! the chunk/disconnect callbacks for the test to drive); the real
 //! tyutool-core SerialDebugSession path is verified on a physical board.
+//!
+//! The handoff-window tests drive `run_job`, which would trip the B7
+//! confirmation gate, so these servers run with the shared approving prompt
+//! (the monitor itself is ungated — see `local_auth.rs`).
+
+mod common;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -272,7 +278,10 @@ impl FlashBackend for FakeBackend {
 
 async fn start_server(backend: Arc<dyn FlashBackend>) -> SocketAddr {
     let enumerator: PortEnumerator = Arc::new(Vec::new);
-    let server = tyutool_bridge::bind(0).await.expect("bind ephemeral port");
+    let server = tyutool_bridge::bind(0)
+        .await
+        .expect("bind ephemeral port")
+        .with_auth_prompt(common::approving() as Arc<dyn tyutool_bridge::AuthPrompt>);
     let addr = server.local_addr().expect("local addr");
     tokio::spawn(server.run_with(enumerator, Duration::from_millis(20), backend));
     addr
@@ -288,7 +297,8 @@ async fn start_server_with_handoff_window(
     let server = tyutool_bridge::bind(0)
         .await
         .expect("bind ephemeral port")
-        .with_handoff_window(window);
+        .with_handoff_window(window)
+        .with_auth_prompt(common::approving() as Arc<dyn tyutool_bridge::AuthPrompt>);
     let addr = server.local_addr().expect("local addr");
     tokio::spawn(server.run_with(enumerator, Duration::from_millis(20), backend));
     addr

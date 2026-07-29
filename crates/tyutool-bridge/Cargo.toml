@@ -15,6 +15,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }
 dirs = "5"
 fern = "0.7"
+getrandom = "0.3"
 log = "0.4"
 muda = "0.17"
 tao = "0.34"
