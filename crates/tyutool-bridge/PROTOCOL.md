@@ -10,8 +10,25 @@
 - 仅监听 127.0.0.1。
 - WS 升级阶段校验 `Origin` 头：必须与编译期白名单**逐字节相等**，否则 HTTP 403 拒绝并断开。
 - **缺失 Origin 一律拒绝**（视为非浏览器来源）。
-- 当前白名单（生产域名清单联调期确认后补充，见 `ORIGIN_ALLOWLIST`）：
-  `http://localhost:3000` / `http://127.0.0.1:3000` / `http://localhost:5173` / `http://127.0.0.1:5173`
+- 当前白名单共 **18 条**（见 `ORIGIN_ALLOWLIST`，来源：cobuilder-web `config/index.cjs` 的
+  `base` / `daily` / `pre` / `prod` 区域表）：
+  - 本地开发（4）：`http://localhost:3000` / `http://127.0.0.1:3000` / `http://localhost:5173` / `http://127.0.0.1:5173`
+  - 日常（1）：`https://dev-claw-wb.wgine.com`（`base` 与 `daily` 两个块同指它，去重后 1 条；
+    团队在该环境验证烧录，必须随包发出）
+  - 预发（wgine，6）：`https://developer.wgine.com` / `https://developer-us.wgine.com` /
+    `https://developer-eu.wgine.com` / `https://developer-in.wgine.com` /
+    `https://developer-ue.wgine.com` / `https://developer-we.wgine.com`
+    （预发 AZ 与 SG 同指 `developer-us`，去重后 6 条）
+  - 生产（tuya，7）：`https://platform.tuya.com` / `https://us.platform.tuya.com` /
+    `https://eu.platform.tuya.com` / `https://ind.platform.tuya.com` /
+    `https://ue.platform.tuya.com` / `https://we.platform.tuya.com` / `https://sg.platform.tuya.com`
+    （生产 SG 是独立域名 `sg.platform.tuya.com`，不与 AZ 合并）
+- ⚠ **漏一个域名 = 重发安装包 + 存量用户全部重装**：白名单是编译期常量，随二进制发出，
+  改配置文件救不回来；漏掉的环境上第一次连 Bridge 就是 403，只能再走一轮发版。
+  新环境/新区域上线前就要补进来，宁可多列一个合法的 cobuilder-web 域名。
+- ⚠ 白名单**只做逐字节精确匹配，禁止改成通配/后缀匹配**（`*.wgine.com` 之类等于把烧录/授权能力
+  交给任何拿下兄弟子域的人）。上面那条重装代价是"把域名列全"的理由，**不是**用通配的理由；
+  新增区域只能按字面量追加。
 - 握手 query 可带回上次的授权令牌：`ws://127.0.0.1:18730/?token=<token>`。
   **403 仅属于 Origin 校验**，令牌问题永不返回 403、只降级为未授权。
 - ⚠ `Origin` 只是过滤器，不是信任根 —— 完整口径与令牌生命周期见 [§安全模型](#安全模型b7本地传输加固)。

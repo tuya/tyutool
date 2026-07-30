@@ -58,15 +58,56 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Handshake Origin allowlist (compile-time constant).
 ///
-/// Currently local development addresses only (cobuilder-web dev server
-/// defaults to port 3000; 5173 is the plain Vite default kept as fallback).
-/// TODO: add the Cobuilder production domain list once confirmed during
-/// integration (联调期确认线上域名清单后补充).
+/// Local development addresses (cobuilder-web dev server defaults to port
+/// 3000; 5173 is the plain Vite default kept as fallback) plus every origin a
+/// real cobuilder-web deployment is served from, transcribed from cobuilder-web
+/// `config/index.cjs` (`base` / `daily` / `pre` / `prod` region maps). `base`
+/// and `daily` both serve from `dev-claw-wb.wgine.com`, and `pre` maps both AZ
+/// and SG to `developer-us.wgine.com`, so each of those appears once.
+///
+/// ## Missing an origin is a release-level mistake, not a config typo
+///
+/// This is a **compile-time** constant: it ships inside the installed binary.
+/// An origin left out of this list cannot be fixed by editing a config file on
+/// a user's machine — the only remedy is to cut a new Bridge release **and get
+/// every existing user to reinstall**, because their installed binary will keep
+/// answering 403 forever. The first person to open cobuilder-web on the missing
+/// origin just sees the connection fail. So when a new region or environment
+/// appears, add it here *before* it ships, and prefer to over-include a legit
+/// cobuilder-web origin over discovering it after release.
+///
+/// ## Still: exact matching only
+///
+/// Entries are compared **byte-for-byte** by [`allowlisted_origin`]. Never
+/// relax that into wildcard or suffix matching: `*.wgine.com` would hand the
+/// bridge — including the dangerous flash / auth operations behind it — to
+/// anyone who takes over a sibling subdomain. The reinstall cost above is the
+/// reason to be thorough about enumerating origins, never a reason to reach for
+/// a pattern. New regions are added here as literals.
 pub const ORIGIN_ALLOWLIST: &[&str] = &[
+    // Local development.
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    // Daily (internal test environment; `base` and `daily` share this origin).
+    // The team validates flashing here, so it must ship in the allowlist.
+    "https://dev-claw-wb.wgine.com",
+    // Pre-release (wgine).
+    "https://developer.wgine.com",
+    "https://developer-us.wgine.com",
+    "https://developer-eu.wgine.com",
+    "https://developer-in.wgine.com",
+    "https://developer-ue.wgine.com",
+    "https://developer-we.wgine.com",
+    // Production (tuya).
+    "https://platform.tuya.com",
+    "https://us.platform.tuya.com",
+    "https://eu.platform.tuya.com",
+    "https://ind.platform.tuya.com",
+    "https://ue.platform.tuya.com",
+    "https://we.platform.tuya.com",
+    "https://sg.platform.tuya.com",
 ];
 
 /// USB VID allowlist for the device selector (constant table, extended over

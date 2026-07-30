@@ -13,6 +13,30 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 /// Must be present in the compile-time allowlist (cobuilder-web dev default).
 const ALLOWED_DEV_ORIGIN: &str = "http://localhost:3000";
 
+/// Origins a real cobuilder-web deployment is served from, transcribed from
+/// cobuilder-web `config/index.cjs` (`base` / `daily` / `pre` / `prod` region
+/// maps). Deduplicated: `base` and `daily` share `dev-claw-wb.wgine.com`, and
+/// `pre` maps both AZ and SG to `developer-us.wgine.com`.
+const DEPLOYED_ORIGINS: &[&str] = &[
+    // daily (internal test environment)
+    "https://dev-claw-wb.wgine.com",
+    // pre
+    "https://developer.wgine.com",
+    "https://developer-us.wgine.com",
+    "https://developer-eu.wgine.com",
+    "https://developer-in.wgine.com",
+    "https://developer-ue.wgine.com",
+    "https://developer-we.wgine.com",
+    // prod
+    "https://platform.tuya.com",
+    "https://us.platform.tuya.com",
+    "https://eu.platform.tuya.com",
+    "https://ind.platform.tuya.com",
+    "https://ue.platform.tuya.com",
+    "https://we.platform.tuya.com",
+    "https://sg.platform.tuya.com",
+];
+
 async fn start_server() -> SocketAddr {
     let server = tyutool_bridge::bind(0).await.expect("bind ephemeral port");
     let addr = server.local_addr().expect("local addr");
@@ -76,6 +100,49 @@ async fn non_whitelisted_origin_is_rejected_at_handshake() {
     assert!(
         result.is_err(),
         "forged origin must be rejected during the WS handshake"
+    );
+}
+
+#[tokio::test]
+async fn deployed_cobuilder_origins_complete_the_handshake() {
+    let addr = start_server().await;
+    let mut refused = Vec::new();
+    for origin in DEPLOYED_ORIGINS {
+        if connect_with_origin(&addr, origin).await.is_err() {
+            refused.push(*origin);
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "every deployed cobuilder-web origin must complete the WS handshake, refused: {refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn origins_that_only_look_like_deployed_ones_are_still_rejected() {
+    let addr = start_server().await;
+    // Exact string matching only: no wildcard, no suffix/prefix matching, no
+    // scheme relaxation. Each of these would slip through a looser rule.
+    let lookalikes = [
+        "https://evil.example.com",
+        "https://developer.wgine.com.evil.com",
+        "https://evil-developer.wgine.com",
+        "https://developer.wgine.com.attacker.io",
+        "https://attacker.developer.wgine.com",
+        "http://developer.wgine.com",
+        "https://developer.wgine.com/",
+        "https://platform.tuya.com.evil.com",
+        "https://evil.platform.tuya.com",
+    ];
+    let mut accepted = Vec::new();
+    for origin in lookalikes {
+        if connect_with_origin(&addr, origin).await.is_ok() {
+            accepted.push(origin);
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "origins outside the allowlist must be refused at the handshake, accepted: {accepted:?}"
     );
 }
 
