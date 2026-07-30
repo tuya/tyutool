@@ -162,6 +162,8 @@ fn fake_enumerator() -> PortEnumerator {
             pid: Some(0x55D2),
             vendor: Some("WCH".to_string()),
             busy: false,
+            serial_number: None,
+            usb_interface: None,
         }]
     })
 }

@@ -47,6 +47,8 @@ fn wch_port(path: &str) -> EnumeratedPort {
         pid: Some(0x55D2),
         vendor: Some("WCH".to_string()),
         busy: false,
+        serial_number: None,
+        usb_interface: None,
     }
 }
 
@@ -57,6 +59,8 @@ fn unknown_vid_port(path: &str) -> EnumeratedPort {
         pid: Some(0x5678),
         vendor: None,
         busy: false,
+        serial_number: None,
+        usb_interface: None,
     }
 }
 

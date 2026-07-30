@@ -342,6 +342,8 @@ async fn ports_frames_carry_arbitration_busy_truth() {
         pid: Some(0x55D2),
         vendor: Some("WCH".to_string()),
         busy: false,
+        serial_number: None,
+        usb_interface: None,
     }];
     let addr = start_server(backend, enumerated).await;
 
@@ -486,5 +488,93 @@ async fn a_closed_connection_releases_its_port_and_the_execution_right() {
         reclaim["ok"], true,
         "disconnect cleanup must release the dead connection's port and \
          execution right: {reclaim}"
+    );
+}
+
+// ── B12: unparsable frames must answer, not hang the client ──────────────────
+
+#[tokio::test]
+async fn run_job_missing_baud_rate_answers_bad_request_instead_of_silence() {
+    let (backend, specs, finish) = FakeBackend::new();
+    // Let the fake job complete immediately: if the frame ever were accepted,
+    // this test must fail on the assertions below rather than hang waiting for
+    // a job that never finishes.
+    finish.store(true, Ordering::Relaxed);
+    let addr = start_server(backend, vec![]).await;
+    let mut ws = connect_ready(&addr).await;
+
+    // The exact frame from the pre-environment incident: the web client omitted
+    // `baud_rate`, which `run_job` requires (unlike run_auth / serial_debug_open,
+    // whose baud rate defaults). The bridge used to log a warning and drop the
+    // frame, so the page sat on "等待确认…0%" forever.
+    send_json(
+        &mut ws,
+        serde_json::json!({
+            "type": "run_job",
+            "request_id": "j-777",
+            "job": {
+                "chip_id": "t5ai",
+                "port": "/dev/tty.fakeA",
+                "mode": "write",
+                "start_addr": 0
+            },
+            "file_content": "aGVsbG8="
+        }),
+    )
+    .await;
+
+    let result = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(result["request_id"], "j-777", "{result}");
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(
+        result["error_code"], "bad_request",
+        "an undecodable request must fail fast, not be dropped: {result}"
+    );
+    let message = result["message"].as_str().unwrap_or_else(|| {
+        panic!("bad_request must carry a message naming the offending field: {result}")
+    });
+    assert!(
+        message.contains("baud_rate"),
+        "the message must name the missing field so the client can fix it: {message}"
+    );
+
+    assert!(
+        specs.lock().expect("specs lock").is_empty(),
+        "a frame that failed to decode must never reach the flash backend"
+    );
+}
+
+#[tokio::test]
+async fn bad_request_message_never_echoes_the_frame_contents() {
+    let (backend, _specs, _finish) = FakeBackend::new();
+    let addr = start_server(backend, vec![]).await;
+    let mut ws = connect_ready(&addr).await;
+
+    // A double `JSON.stringify` on the client side turns `job` into a string.
+    // serde's own error text quotes the whole offending value back, and that
+    // text travels to the client *and* into the log file — where a real frame's
+    // base64 firmware, device uuid and auth key would land with it.
+    const SECRET: &str = "c2VjcmV0LWZpcm13YXJlLXV1aWQtYXV0aGtleQ";
+    send_json(
+        &mut ws,
+        serde_json::json!({
+            "type": "run_job",
+            "request_id": "j-778",
+            "job": format!("{{\"chip_id\":\"t5ai\",\"auth_key\":\"{SECRET}\"}}"),
+            "file_content": SECRET
+        }),
+    )
+    .await;
+
+    let result = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(result["request_id"], "j-778", "{result}");
+    assert_eq!(result["error_code"], "bad_request", "{result}");
+    let message = result["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("bad_request must carry a message: {result}"));
+    assert!(
+        !message.contains(SECRET),
+        "the message must describe the shape of the failure, never echo frame \
+         contents (firmware / uuid / auth_key travel in these frames): {message}"
     );
 }

@@ -82,6 +82,8 @@ fn wch_port(path: &str, busy: bool) -> EnumeratedPort {
         pid: Some(0x55D2),
         vendor: Some("WCH".to_string()),
         busy,
+        serial_number: None,
+        usb_interface: None,
     }
 }
 
@@ -121,6 +123,8 @@ async fn device_change_pushes_updated_list_to_all_clients() {
                 pid: Some(0x5678),
                 vendor: None,
                 busy: false,
+                serial_number: None,
+                usb_interface: None,
             },
         ];
     }
@@ -248,5 +252,79 @@ async fn first_seen_ms_is_stable_across_pushes_and_busy_is_passed_through() {
     assert!(
         newcomer_seen >= first_seen,
         "newcomer must not predate an earlier device: {newcomer_seen} < {first_seen}"
+    );
+}
+
+// ── B12: the fields a client needs to group ports by physical device ─────────
+
+#[tokio::test]
+async fn ports_frame_carries_serial_number_and_usb_interface_for_grouping() {
+    // Real values from a T5 board (`tyutool-cli usb-port-survey`): one physical
+    // device exposing two UART bridges. Both ports report the *same*
+    // serialNumber, and only usbInterface tells them apart — without those two
+    // fields a client counts one board as two devices.
+    let dual = |path: &str, interface: u8| EnumeratedPort {
+        path: path.to_string(),
+        vid: Some(0x1A86),
+        pid: Some(0x55D2),
+        vendor: Some("WCH".to_string()),
+        busy: false,
+        serial_number: Some("56D7042724".to_string()),
+        usb_interface: Some(interface),
+    };
+    let (addr, _fake) = start_server_with_fake_ports(vec![
+        dual("/dev/cu.usbmodem56D70427241", 1),
+        dual("/dev/cu.usbmodem56D70427243", 3),
+        // A non-USB port: the OS reports neither field.
+        EnumeratedPort {
+            path: "/dev/cu.Bluetooth-Incoming-Port".to_string(),
+            vid: None,
+            pid: None,
+            vendor: None,
+            busy: false,
+            serial_number: None,
+            usb_interface: None,
+        },
+    ])
+    .await;
+    let mut ws = connect(&addr).await;
+    next_json(&mut ws, "hello").await;
+
+    let frame = next_ports_frame(&mut ws, "initial ports").await;
+    let list = frame["ports"].as_array().expect("ports array");
+    assert_eq!(list.len(), 3, "{frame}");
+
+    let port_at = |path: &str| {
+        list.iter()
+            .find(|p| p["port"] == path)
+            .unwrap_or_else(|| panic!("{path} missing: {frame}"))
+            .clone()
+    };
+
+    let first = port_at("/dev/cu.usbmodem56D70427241");
+    let second = port_at("/dev/cu.usbmodem56D70427243");
+    assert_eq!(first["serial_number"], "56D7042724", "{first}");
+    assert_eq!(second["serial_number"], "56D7042724", "{second}");
+    assert_eq!(
+        first["serial_number"], second["serial_number"],
+        "both UART bridges of one board share a serial_number: that is the \
+         grouping key the client needs"
+    );
+    assert_eq!(first["usb_interface"], 1, "{first}");
+    assert_eq!(
+        second["usb_interface"], 3,
+        "usb_interface is what distinguishes the two ports of one board: {second}"
+    );
+
+    // Absent means the key is omitted, not null (same rule as vid / pid).
+    let bluetooth = port_at("/dev/cu.Bluetooth-Incoming-Port");
+    let object = bluetooth.as_object().expect("port must be an object");
+    assert!(
+        !object.contains_key("serial_number"),
+        "an unknown serial_number must be omitted, not null: {bluetooth}"
+    );
+    assert!(
+        !object.contains_key("usb_interface"),
+        "an unknown usb_interface must be omitted, not null: {bluetooth}"
     );
 }

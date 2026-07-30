@@ -905,3 +905,35 @@ async fn close_racing_a_disconnect_during_an_in_flight_open_yields_exactly_one_t
         "the port must be free once the single terminal frame is out: {reopened}"
     );
 }
+
+// ── B12: an unparsable open must answer too ──────────────────────────────────
+
+#[tokio::test]
+async fn an_unparsable_serial_debug_open_answers_open_failed_instead_of_silence() {
+    let (backend, cfgs, _hooks, _closed) = FakeBackend::new();
+    let addr = start_server(backend).await;
+    let mut ws = connect_ready(&addr).await;
+
+    // `baud_rate` as a string is the same client-side mistake class that broke
+    // `run_job` in the pre environment. These frames carry no `request_id`, so
+    // the answer is the session's own terminal frame.
+    send_json(
+        &mut ws,
+        serde_json::json!({
+            "type": "serial_debug_open",
+            "cfg": { "port": "/dev/tty.fakeA", "baud_rate": "115200" }
+        }),
+    )
+    .await;
+
+    let failed = next_serial_debug_frame(&mut ws).await;
+    assert_eq!(
+        failed["type"], "serial_debug_open_failed",
+        "an undecodable open must fail fast, not be dropped: {failed}"
+    );
+    assert_eq!(failed["error_code"], "bad_request", "{failed}");
+    assert!(
+        cfgs.lock().expect("cfgs lock").is_empty(),
+        "a frame that failed to decode must never reach the session backend"
+    );
+}

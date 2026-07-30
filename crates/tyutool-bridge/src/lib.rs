@@ -124,6 +124,19 @@ pub struct EnumeratedPort {
     pub pid: Option<u16>,
     pub vendor: Option<String>,
     pub busy: bool,
+    /// USB iSerial string. The two UART bridges of one dual-serial board report
+    /// the **same** value, which is what lets a client group ports into devices
+    /// instead of showing one board twice. `None` for non-USB ports and for
+    /// devices that ship no serial number.
+    pub serial_number: Option<String>,
+    /// USB interface number, the only thing that tells apart two ports sharing a
+    /// `serial_number`.
+    ///
+    /// `None` is normal, not an error: Linux commonly omits it. The number is
+    /// also **not comparable across platforms** — macOS reports the CDC data
+    /// interfaces (1 / 3) where Windows reports the paired control interfaces
+    /// (0 / 2) for the same board.
+    pub usb_interface: Option<u8>,
 }
 
 /// Injectable enumeration source: production wires tyutool-core enumeration,
@@ -1039,6 +1052,13 @@ struct WirePort {
     pid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vendor: Option<String>,
+    /// Shared by every port of one physical device: the client's grouping key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    serial_number: Option<String>,
+    /// Distinguishes ports that share a `serial_number`. Omitted when the OS
+    /// does not report one (routine on Linux).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usb_interface: Option<u8>,
     whitelisted: bool,
     busy: bool,
     first_seen_ms: u64,
@@ -1718,6 +1738,8 @@ fn ports_frame_json(ports: &[EnumeratedPort], ledger: &FirstSeenLedger) -> anyho
                 vid: p.vid.map(|vid| format!("{vid:04X}")),
                 pid: p.pid.map(|pid| format!("{pid:04X}")),
                 vendor: p.vendor.clone(),
+                serial_number: p.serial_number.clone(),
+                usb_interface: p.usb_interface,
                 whitelisted: p.vid.is_some_and(|vid| VID_ALLOWLIST.contains(&vid)),
                 busy: p.busy,
                 first_seen_ms: ledger.first_seen(&p.path),
@@ -1973,6 +1995,32 @@ fn vendor_for_vid(vid: u16) -> Option<String> {
     }
 }
 
+/// Map one core enumeration entry onto the bridge's port shape.
+///
+/// Split out of [`real_port_enumerator`] so the field mapping is testable
+/// without real hardware: the closure below only exists to call
+/// `list_serial_ports()`.
+///
+/// `serial_number` / `usb_interface` are forwarded **as reported**. The bridge
+/// deliberately does not derive a device identity or a port role from them:
+/// grouping ports into devices belongs to the client, which is also the only
+/// side that knows the platform quirks (macOS reports the CDC data interfaces
+/// 1 / 3 where Windows reports the control interfaces 0 / 2, and Linux often
+/// reports none at all).
+fn enumerated_from_core(entry: tyutool_core::SerialPortEntry) -> EnumeratedPort {
+    EnumeratedPort {
+        vid: entry.usb_vid,
+        pid: entry.usb_pid,
+        vendor: entry.usb_vid.and_then(vendor_for_vid),
+        // Enumeration reports no ownership of its own; ports the bridge holds
+        // for a job are folded in later by `apply_arbitration_busy`.
+        busy: false,
+        serial_number: entry.usb_serial,
+        usb_interface: entry.usb_interface,
+        path: entry.path,
+    }
+}
+
 fn real_port_enumerator() -> PortEnumerator {
     let last_good: Arc<std::sync::Mutex<Vec<EnumeratedPort>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1988,19 +2036,7 @@ fn real_port_enumerator() -> PortEnumerator {
             }
         };
 
-        let ports: Vec<EnumeratedPort> = entries
-            .into_iter()
-            .map(|entry| EnumeratedPort {
-                vid: entry.usb_vid,
-                pid: entry.usb_pid,
-                vendor: entry.usb_vid.and_then(vendor_for_vid),
-                // Enumeration reports no ownership of its own; ports the bridge
-                // holds for a job are folded in later by
-                // `apply_arbitration_busy`.
-                busy: false,
-                path: entry.path,
-            })
-            .collect();
+        let ports: Vec<EnumeratedPort> = entries.into_iter().map(enumerated_from_core).collect();
 
         *last_good
             .lock()
@@ -3333,13 +3369,13 @@ async fn handle_connection(
 
 /// Parse and route one inbound text frame.
 ///
-/// Unparsable frames and unknown `type` values are logged and dropped: B3 has no
-/// error frame in the wire contract, so answering is not an option yet.
+/// A frame that fails to decode is *answered*, not dropped: see
+/// [`reject_unparsable`].
 fn dispatch(ctx: &Arc<ConnContext>, text: &str) {
     let message: ClientMessage = match serde_json::from_str(text) {
         Ok(message) => message,
         Err(e) => {
-            log::warn!("bridge ignoring unparsable client frame: {e}");
+            reject_unparsable(ctx, text, &e);
             return;
         }
     };
@@ -3377,6 +3413,89 @@ fn dispatch(ctx: &Arc<ConnContext>, text: &str) {
         ClientMessage::SerialDebugClose => {
             tokio::spawn(close_debug_session_task(Arc::clone(ctx)));
         }
+    }
+}
+
+/// Answer a frame the strict decoder rejected.
+///
+/// Dropping it (what the bridge used to do) is invisible to the client: it sent
+/// a `run_job` and simply never heard back, so the page sat on "等待确认…0%"
+/// until the user gave up. A client must be able to fail fast, so an undecodable
+/// request is answered with the existing `bad_request` code.
+///
+/// Correlation is best-effort: the strict decode failed, but `type` and
+/// `request_id` are plain top-level strings and usually survive whatever broke
+/// the payload, so they are re-read from a lenient `Value` parse.
+///
+/// - `serial_debug_open` answers `serial_debug_open_failed` (that frame class
+///   carries no `request_id` — a connection has at most one session);
+/// - anything else carrying a non-empty string `request_id` answers
+///   `job_result` — including an unknown `type`, so a client on a newer protocol
+///   fails fast instead of waiting;
+/// - a frame with neither (unknown `type` and no usable `request_id`, or text
+///   that is not JSON at all) is logged and dropped: there is nothing to address
+///   an answer to, and inventing a `request_id` would answer a task the client
+///   never started.
+fn reject_unparsable(ctx: &Arc<ConnContext>, text: &str, error: &serde_json::Error) {
+    let started = Instant::now();
+    let reason = parse_failure_reason(error);
+    // Deliberately logged without the frame itself: it may carry a base64
+    // firmware image, a device uuid or an auth key.
+    log::warn!("bridge rejecting unparsable client frame: {reason}");
+
+    let envelope: Option<serde_json::Value> = serde_json::from_str(text).ok();
+    let string_field = |name: &str| {
+        envelope
+            .as_ref()
+            .and_then(|value| value.get(name))
+            .and_then(serde_json::Value::as_str)
+            .filter(|found| !found.is_empty())
+            .map(str::to_string)
+    };
+
+    if string_field("type").as_deref() == Some("serial_debug_open") {
+        ctx.send(&open_failed("bad_request", reason));
+    } else if let Some(request_id) = string_field("request_id") {
+        ctx.send(&failed(&request_id, started, "bad_request", reason));
+    } else {
+        log::warn!(
+            "bridge dropped the unparsable frame: no request_id to answer it with \
+             (the client will have to time out on its own)"
+        );
+    }
+}
+
+/// Render a decode failure as structure only — never the data that caused it.
+///
+/// `serde_json::Error`'s own `Display` embeds the offending value for a type
+/// mismatch (`invalid type: string "…"`) and the offending tag for an unknown
+/// variant, and this text travels to the client and into the log file. Client
+/// frames carry base64 firmware, device uuids and auth keys, so the value is
+/// dropped and only the field name (ours, from the struct definition), the
+/// failure class and the position survive.
+fn parse_failure_reason(error: &serde_json::Error) -> String {
+    let rendered = error.to_string();
+    // The one shape worth forwarding verbatim: the name comes from our own
+    // `#[derive(Deserialize)]` structs, never from the frame.
+    if let Some(field) = rendered
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.split('`').next())
+    {
+        return format!("missing required field `{field}`");
+    }
+    if rendered.starts_with("unknown variant") {
+        return "unknown or unsupported frame `type`".to_string();
+    }
+    let (line, column) = (error.line(), error.column());
+    match error.classify() {
+        serde_json::error::Category::Data => {
+            format!("wrong type for a field at line {line} column {column}")
+        }
+        serde_json::error::Category::Syntax => {
+            format!("malformed JSON at line {line} column {column}")
+        }
+        serde_json::error::Category::Eof => "truncated JSON frame".to_string(),
+        serde_json::error::Category::Io => "frame could not be read".to_string(),
     }
 }
 
@@ -4161,6 +4280,48 @@ mod tests {
     }
 
     #[test]
+    fn production_enumeration_carries_serial_number_and_usb_interface() {
+        // Real values from a T5 board (`tyutool-cli usb-port-survey`): both UART
+        // bridges of one physical device share a serial number and differ only
+        // by USB interface. Dropping either field is what made the web UI count
+        // one board as two devices.
+        let entry = tyutool_core::SerialPortEntry {
+            path: "/dev/cu.usbmodem56D70427243".to_string(),
+            name: Some("USB Dual_Serial".to_string()),
+            usb_vid: Some(0x1A86),
+            usb_pid: Some(0x55D2),
+            usb_serial: Some("56D7042724".to_string()),
+            usb_interface: Some(3),
+            port_role: None,
+        };
+
+        let port = enumerated_from_core(entry);
+
+        assert_eq!(port.path, "/dev/cu.usbmodem56D70427243");
+        assert_eq!(port.serial_number.as_deref(), Some("56D7042724"));
+        assert_eq!(port.usb_interface, Some(3));
+        assert_eq!(port.vendor.as_deref(), Some("WCH"));
+    }
+
+    #[test]
+    fn production_enumeration_omits_both_fields_for_a_non_usb_port() {
+        let entry = tyutool_core::SerialPortEntry {
+            path: "/dev/cu.Bluetooth-Incoming-Port".to_string(),
+            name: None,
+            usb_vid: None,
+            usb_pid: None,
+            usb_serial: None,
+            usb_interface: None,
+            port_role: None,
+        };
+
+        let port = enumerated_from_core(entry);
+
+        assert_eq!(port.serial_number, None);
+        assert_eq!(port.usb_interface, None);
+    }
+
+    #[test]
     fn device_count_ignores_ports_without_an_allowlisted_vid() {
         let port = |vid: Option<u16>| EnumeratedPort {
             path: format!("/dev/tty.{vid:?}"),
@@ -4168,6 +4329,8 @@ mod tests {
             pid: None,
             vendor: None,
             busy: false,
+            serial_number: None,
+            usb_interface: None,
         };
         // 0x1A86 = WCH CH34x (allowlisted), 0x0403 = FTDI (allowlisted).
         let ports = vec![

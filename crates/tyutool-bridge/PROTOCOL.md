@@ -51,13 +51,46 @@
 ### ports（B2；连接即推全量，此后变更推送）
 
 ```json
-{ "type": "ports", "ports": [ { "port": "/dev/tty.wchusbserial56D70347441", "vid": "1A86", "pid": "55D2", "vendor": "WCH", "whitelisted": true, "busy": false, "first_seen_ms": 1784800000000 } ] }
+{ "type": "ports", "ports": [ { "port": "/dev/cu.usbmodem56D70427241", "vid": "1A86", "pid": "55D2", "vendor": "WCH", "serial_number": "56D7042724", "usb_interface": 1, "whitelisted": true, "busy": false, "first_seen_ms": 1784800000000 } ] }
 ```
 
 - **永远是全量列表，不是增量**；后台 1s 枚举 diff，有变更才推，广播到所有连接。
 - `vid` / `pid`：大写 4 位 hex 字符串；非 USB 串口**省略字段**（不是 null）。`vendor` 同理可省略。
 - `vendor`：按 VID 常量映射（`1A86`→`WCH`、`10C4`→`Silicon Labs`、`0403`→`FTDI`），未知 VID 无此字段。
 - `whitelisted`：VID ∈ {0x1A86, 0x10C4, 0x0403}；非白名单设备**照常推送**、值为 false（前端置灰）。
+- `serial_number`：USB iSerial 字符串，**同一物理设备的多个串口该值相同，前端据此归组**。
+  拿不到（非 USB 串口、设备没烧 iSerial）时**省略字段**，与 `vid`/`pid` 同一处理方式。
+- `usb_interface`：USB 接口号（数字），用来区分 `serial_number` 相同的多个口。
+  **拿不到是常态、不是异常**（Linux 经常不报），此时**省略字段**——消费方不得把「缺失」当错误处理。
+
+#### 一个设备两个口：为什么必须由前端归组
+
+T5 这类板子是**双串口**的：一块板子的 UART 桥在系统里就是两个串口设备。实测（`tyutool-cli usb-port-survey`）：
+
+```
+/dev/cu.usbmodem56D70427241  vid 1A86 pid 55D2  serial_number "56D7042724"  usb_interface 1
+/dev/cu.usbmodem56D70427243  vid 1A86 pid 55D2  serial_number "56D7042724"  usb_interface 3
+```
+
+两行 `serial_number` 完全相同，只有 `usb_interface` 不同。**Bridge 只如实上报这两个字段，
+不在服务端归组、不排序、不标记「推荐端口」**：ports 帧的单位永远是**端口**而不是设备
+（改成推设备是破坏性变更，而且前端仍然需要能选到具体端口）。归组逻辑放前端。
+
+⚠ **`usb_interface` 的取值不可跨平台比较**（与 tyutool Tauri 端 `src/utils/serial-port-label.ts` 同一口径）：
+
+| 平台 | 烧录/授权口 | 日志口 |
+| --- | --- | --- |
+| macOS | 1（CDC data 接口） | 3 |
+| Windows | 0（配对的 control 接口） | 2 |
+| Linux | 常常**不报** `usb_interface` | 同左 |
+
+所以判定要按 `{0,1}` / `{2,3}` 两个集合来写，不能写死某个数字；缺失时只能退化成
+「这是个双串口设备」的通用提示。
+
+⚠ **这是「提示」，不是权威判定。** tyutool Tauri 端的 i18n 键刻意叫
+`flash.tuyaPortHint.maybeFlashAuth` / `maybeLog`——用的是「可能是」的口吻，
+它的自动选口逻辑（`useFlashConnection.ts`）其实只取 `ports[0].path`，并不依赖角色推断。
+Bridge 前端请保持一致：角色只用于 hover 提示帮用户判断，**不要拿它做自动烧录决策**。
 - `busy`：枚举源占用 **或** bridge 自身任务持有（烧录/授权在途即 true）；claim/release 即触发一次推送。
 - `first_seen_ms`：毫秒时间戳；设备在场期间稳定；**拔掉重插按新设备重新计时**。
 
@@ -73,6 +106,13 @@
   "file_content": "<base64>" }
 ```
 
+- `chip_id` / `port` / `baud_rate`：**三个都必填**。
+- ⚠ **`baud_rate` 必填，与 run_auth（默认 921600）和 serial_debug_open（默认 115200）不同** ——
+  这是刻意的不对称，**不要为了「一致性」顺手给它加 `#[serde(default)]`**。
+  理由：烧录波特率是会**影响写入过程**的参数（T5 用 2000000），静默套一个默认值可能让烧录变慢、
+  甚至中途失败，而那种失败排查起来极其昂贵；**明确报错比猜一个值更安全**。
+  run_auth / serial_debug_open 的波特率只影响串口会话本身，猜错了大不了读到乱码，代价不对称。
+  省略该字段 → `job_result bad_request`（见 §通用约定 的不可解析帧处理）。
 - `mode`：可省略，默认 `"write"`；当前仅支持 `"write"`（映射 tyutool-core `FlashMode::Flash`），其他值 → `job_result bad_request`。
 - `start_addr`：可省略，默认 0（数字，非 hex 字符串）。
 - `file_content`：base64 固件，解码失败 → `bad_request`。
@@ -153,7 +193,7 @@
 
 | error_code | 触发 |
 | --- | --- |
-| `bad_request` | port 缺失/空、data_bits·stop_bits·parity 取值非法 |
+| `bad_request` | port 缺失/空、data_bits·stop_bits·parity 取值非法、**整帧无法解码（如 `baud_rate` 传成字符串），见 §不可解析的请求帧** |
 | `port_busy` | 该串口被其他任务/会话持有，或处于**他人的烧后交接窗口**内 |
 | `already_open` | 本连接已有会话（不静默替换：替换会让在跑会话的串口占用悬空） |
 | `open_failed` | 执行层打开串口失败（message = core 错误文本） |
@@ -246,7 +286,7 @@
 | `execution_busy` | 已有危险操作在途（含正在等用户确认），全局单一执行权拒绝，立即返回、不排队（B7，见 §单一执行权） |
 | `cancelled` | cancel 帧 / 连接断开 / core 返回 FlashError::Cancelled；也包括「确认窗口内取消」（此时设备完全没被碰过） |
 | `cancelled_after_write` | **仅 run_auth**：授权写命令**已经发给设备**之后才取消（core 返回 `CancelledAfterWrite`）——授权码可能已经写进去了，见 §取消后的设备状态。message 只带设备 MAC，**永不带 uuid** |
-| `bad_request` | base64 解码失败 / mode 不支持 / uuid·auth_key 为空缺失 / 同连接 request_id 重复在途 |
+| `bad_request` | base64 解码失败 / mode 不支持 / uuid·auth_key 为空缺失 / 同连接 request_id 重复在途 / **帧无法解码（含 run_job 缺 `baud_rate`、未知 `type`），见 §不可解析的请求帧** |
 | `flash_failed` | run_job 执行层其余错误（message=FlashError 文本） |
 | `auth_failed` | run_auth 执行层其余错误 |
 | `user_rejected` | 危险操作的人工确认被拒绝 / 超时未答 / 确认通道被丢弃（B7） |
@@ -466,7 +506,34 @@ revoke_all grants=<n>
 
 ## 通用约定
 
-- 解析失败或未知 `type`：log 后**丢弃**，无 error 帧（与 serve 蓝本不同；协议收敛后再评估是否补 error 帧）。
+### 不可解析的请求帧：必须回一条错误应答
+
+**解析失败或未知 `type` 的帧一律要有应答，不再静默丢弃。** 旧行为（只打一条 warn 就丢）在 pre 环境
+造成过真实故障：前端发了 `run_job` 却因缺 `baud_rate` 解析失败，Bridge 一声不吭，页面永远停在
+「等待确认·请在系统托盘…0%」，而托盘确认框根本没弹过——**客户端必须能快速失败，而不是永久挂着**。
+
+关联方式是**尽力而为**：整体解析失败后，Bridge 再按宽松结构把顶层的 `type` 与 `request_id`
+两个字符串抠出来（它们是顶层裸字符串，通常能在载荷坏掉的情况下幸存）。据此分三种情况：
+
+| 情况 | 应答 |
+| --- | --- |
+| `type` == `"serial_debug_open"` | `serial_debug_open_failed error_code:"bad_request"`（该帧族本就不带 `request_id`） |
+| 能抠出非空字符串 `request_id`（**含未知 `type`**） | `job_result ok=false error_code:"bad_request"` |
+| 两者都抠不出（未知 `type` 且无可用 `request_id`，或压根不是 JSON） | log 后**丢弃** |
+
+- 未知 `type` 只要带了 `request_id` 也回 `job_result bad_request`：让跑在更新协议上的客户端立刻失败，
+  而不是干等。
+- 最后一种刻意不应答：**没有任何东西可以对上号**，而伪造一个 `request_id` 会去应答一个客户端
+  从未发起的任务。规避方法很简单——**请求帧永远带上 `request_id`**。
+- ⚠ **`message` 只描述结构，绝不回显原始帧内容。** 客户端帧里有 base64 固件、设备 `uuid`、
+  `auth_key`，而 serde 的原生错误文本会把出错的值原样引回来
+  （`invalid type: string "…"`），这段文本既上线路又进日志文件。因此实现只保留：
+  字段名（来自 Bridge 自己的结构体定义，不是帧内容）、失败类别、行列位置。
+  典型取值：`missing required field \`baud_rate\`` / `wrong type for a field at line 1 column 210` /
+  `malformed JSON at line 1 column 3` / `unknown or unsupported frame \`type\``。
+  与既有的「日志永不打印 `uuid` / `auth_key` / 完整 token」是同一条纪律。
+- 该应答**不占串口、不取执行权、不触达 backend**，设备完全没被碰过（见 §取消后的设备状态 中
+  `bad_request` 那一行）。
 - 多连接：ports 推送广播到所有连接；progress/job_result/check_port_result/serial_debug_* 只回发起连接。
 - 同串口执行权全局唯一（跨连接互斥，任务与会话共表）；危险操作另有**全局单一执行权**（换串口也互斥，见 §单一执行权）；request_id 命名空间按连接隔离（不同连接可用相同 request_id）。
 - `cancel` 只作用于任务：会话不在 request 索引里，取消帧碰不到串口监视器。
