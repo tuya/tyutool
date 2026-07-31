@@ -34,7 +34,7 @@ pub mod status;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -1132,8 +1132,22 @@ impl std::fmt::Debug for WireAuth {
 
 /// Authorization runs over the device's UART shell, not the flash bootloader,
 /// so it uses the firmware console rate rather than the flash baud rate.
+///
+/// 115200 is that console rate for every chip we support: it is the value each
+/// entry of `src/features/firmware-flash/chip-manifests.ts` carries as
+/// `defaultAuthBaudRate`, and the rate the GUI batch pipeline, `tyutool-cli
+/// authorize` and the direct-vendor web path all open the port at.
+///
+/// This used to be 921600 — T5AI's *flash* baud rate, copied over from the
+/// flashing path by mistake. The web client deliberately omits `baud_rate` and
+/// takes this default, so every browser-driven authorization was speaking to a
+/// 115200 console at 921600: the device saw framing errors and dropped every
+/// probe, never answering (`bytes=0` for the whole 30 s window). Measured on a
+/// user's T5AI board on 2026-07-31 — within the same minute, the CLI at 115200
+/// got its `tuya>` prompt 0.6 s after reset and finished reading the
+/// authorization in 2.7 s.
 fn default_auth_baud_rate() -> u32 {
-    921_600
+    115_200
 }
 
 /// Serial monitor parameters as sent by the web client.
@@ -2048,66 +2062,169 @@ fn real_port_enumerator() -> PortEnumerator {
 
 // ── Production flash backend ─────────────────────────────────────────────────
 
-/// Map one authorization slot outcome onto the wire result.
+/// Build the core job for one single-device authorization.
 ///
-/// Terminal states the slot reports as `Ok`: only a written (or already present)
-/// credential counts as success on the wire.
+/// `FlashMode::Authorize` is dispatched by `registry::run_job` straight to
+/// `authorize::run_authorize` — before any chip plugin is looked up, which is
+/// also why a chip the registry does not know (`other`) authorizes fine. That
+/// flow writes the *given* credentials to whatever device is on the port and
+/// **never reads the device MAC**: the MAC is exclusively the batch pipeline's
+/// lookup key into the Excel row that holds the credentials, and this flow has
+/// no sheet to look anything up in.
 ///
-/// Pure and separate from [`RealFlashBackend::run_auth`] so the mapping — the
-/// part a client's user-facing copy depends on — is testable without a device.
-///
-/// Two rules this function is the sole guardian of:
-/// - **no credential ever travels in a `JobError`**: the message goes on the
-///   wire and into logs, so a device is named by its MAC and never by the uuid
-///   it was handed (which is why the outcomes carrying a uuid are destructured
-///   field by field instead of formatted with `{:?}`);
-/// - **`cancelled` and `cancelled_after_write` are different facts**: the second
-///   means the write command already left the bridge, so the code may be spent.
-///   A client cannot parse prose to tell them apart, so it gets two codes.
-///
-/// Matched exhaustively on purpose: a new core variant must become a compile
-/// error here, not a `{:?}` dump that could carry the next secret field someone
-/// adds to the enum.
-fn auth_slot_outcome(result: tyutool_core::BatchAuthSlotResult) -> Result<(), JobError> {
-    use tyutool_core::BatchAuthSlotResult as Slot;
-    match result {
-        Slot::Done { .. } | Slot::AlreadyDone { .. } => Ok(()),
-        Slot::Cancelled => Err(JobError {
-            error_code: "cancelled".to_string(),
-            message: "cancelled by user".to_string(),
-        }),
-        // The write command already left the bridge: the credential may be on
-        // the device, so say so rather than reporting a clean abort.
-        Slot::CancelledAfterWrite { mac, uuid: _ } => Err(JobError {
-            error_code: "cancelled_after_write".to_string(),
-            message: format!(
-                "cancelled after the authorization write command had already been sent \
-                 to the device {mac}; the authorization code may already be on it, \
-                 so treat it as used"
-            ),
-        }),
-        Slot::DefaultMac { mac } => Err(JobError {
-            error_code: "auth_failed".to_string(),
-            message: format!("device still carries the factory default MAC {mac}"),
-        }),
-        // Unreachable with this adaptation (credentials always allocate,
-        // Overwrite never skips), mapped anyway so a core change surfaces as a
-        // failure instead of a silent success.
-        Slot::Skipped { mac, .. } => Err(JobError {
-            error_code: "auth_failed".to_string(),
-            message: format!("device {mac} already carries other credentials and was skipped"),
-        }),
-        Slot::InsufficientCodes { mac } => Err(JobError {
-            error_code: "auth_failed".to_string(),
-            message: format!("no authorization code was available for the device {mac}"),
-        }),
+/// Pure and separate from [`RealFlashBackend::run_auth`] so the shape of the
+/// job — the part that decides which core flow runs — is testable without a
+/// device.
+fn authorize_job(spec: &AuthJobSpec) -> tyutool_core::FlashJob {
+    tyutool_core::FlashJob {
+        mode: tyutool_core::FlashMode::Authorize,
+        chip_id: spec.chip_id.clone(),
+        port: spec.port.clone(),
+        baud_rate: spec.baud_rate,
+        segments: None,
+        flash_start_hex: None,
+        flash_end_hex: None,
+        erase_start_hex: None,
+        erase_end_hex: None,
+        read_start_hex: None,
+        read_end_hex: None,
+        read_file_path: None,
+        firmware_path: None,
+        authorize_uuid: Some(spec.uuid.clone()),
+        authorize_key: Some(spec.auth_key.clone()),
+        // `run_authorize` forces KV for single-device writes and ignores this
+        // field; `None` keeps the bridge from ever looking like it asked for
+        // the irreversible OTP burn (a batch-only feature).
+        authorize_storage: None,
+        // No callback = "the caller already confirmed": the dangerous-op gate
+        // ran before this job started, so a device carrying other credentials
+        // is overwritten rather than skipped (PRD 覆盖不可撤销) — the same
+        // decision `ConflictPolicy::Overwrite` encoded on the batch path.
+        confirm_overwrite: None,
     }
+}
+
+/// Translate one core `FlashEvent` into an authorization `progress` payload —
+/// or `None` when nothing may be sent for it.
+///
+/// The wire contract for `run_auth` is `{"step": "<snake_case>"}` and nothing
+/// else (PROTOCOL.md §progress), so this is a **narrowing** map, not a
+/// pass-through: `run_job` forwards `FlashEvent` verbatim, `run_auth` does not.
+///
+/// It is also the credential firewall. `run_authorize` reports what it found on
+/// the device through milestones, and two of them carry credentials in the
+/// clear — `AuthReadComplete` (the device's uuid + authkey) and `AuthConflict`
+/// (the credentials about to be overwritten). The GUI shows those in a secure
+/// modal; on this transport they must simply not exist. The web client's own
+/// filter is the *other* end being careful — this is the half we control.
+///
+/// Matched exhaustively on purpose: the next milestone someone adds to core
+/// must become a compile error here, not a payload nobody classified.
+fn auth_progress_payload(event: &tyutool_core::FlashEvent) -> Option<serde_json::Value> {
+    use tyutool_core::FlashMilestone as M;
+
+    let tyutool_core::FlashEvent::Milestone { milestone } = event else {
+        // JobSummary / Phase / Percent / Warning / Done: none of them is a
+        // `step`, and `Done` additionally carries the failure prose that the
+        // bridge already answers with in its own `job_result` frame.
+        return None;
+    };
+
+    match milestone {
+        // The auth-write command has left the bridge — the one moment on this
+        // path the user is waiting on, and a milestone that carries no
+        // credential of its own.
+        M::AuthWriteSent => Some(serde_json::json!({ "step": "writing_auth" })),
+
+        // Credentials in the clear: never.
+        M::AuthReadComplete { .. } | M::AuthConflict { .. } => None,
+
+        // Real outcomes with no `step` equivalent — the terminal `job_result`
+        // is what tells the client about them.
+        M::AuthReadEmpty | M::AuthWriteSkipped => None,
+
+        // Flash-side milestones; unreachable on the authorize path.
+        M::HandshakeComplete
+        | M::Connected { .. }
+        | M::FlashIdRead { .. }
+        | M::EraseComplete
+        | M::SegmentWritten { .. }
+        | M::WriteComplete
+        | M::VerifyPassed
+        | M::Rebooted => None,
+    }
+}
+
+/// Run one single-device authorization through core and translate both halves
+/// of its answer — the event stream and the failure — onto the wire.
+///
+/// `run_core` is injected for the same reason [`auth_after_natural_boot`]
+/// injects its two steps: the real one is the only code in the bridge that can
+/// reach a device, so the mapping it feeds has to be exercisable without one.
+///
+/// Sole guardian of two rules:
+/// - **no credential leaves through either half** — the progress side is
+///   narrowed by [`auth_progress_payload`], the failure side never formats a
+///   uuid (core's own messages are credential-free, see `authorize.rs`);
+/// - **`cancelled` and `cancelled_after_write` stay different facts** — the
+///   second means the write command already reached the device, so the code may
+///   be spent and the client is forbidden from saying 未写入 (PROTOCOL.md).
+///   The batch slot used to draw that line for the bridge; on this path core
+///   draws it with `FlashMilestone::AuthWriteSent`.
+fn authorize_slot<R>(
+    spec: &AuthJobSpec,
+    progress: &(dyn Fn(serde_json::Value) + Send + Sync),
+    run_core: R,
+) -> Result<(), JobError>
+where
+    R: FnOnce(
+        &tyutool_core::FlashJob,
+        &dyn Fn(tyutool_core::FlashEvent),
+    ) -> Result<(), tyutool_core::FlashError>,
+{
+    let job = authorize_job(spec);
+    let write_sent = AtomicBool::new(false);
+
+    let on_event = |event: tyutool_core::FlashEvent| {
+        if matches!(
+            &event,
+            tyutool_core::FlashEvent::Milestone {
+                milestone: tyutool_core::FlashMilestone::AuthWriteSent
+            }
+        ) {
+            write_sent.store(true, Ordering::Relaxed);
+        }
+        if let Some(payload) = auth_progress_payload(&event) {
+            progress(payload);
+        }
+    };
+
+    run_core(&job, &on_event).map_err(|e| {
+        if matches!(e, tyutool_core::FlashError::Cancelled) && write_sent.load(Ordering::Relaxed) {
+            return JobError {
+                error_code: "cancelled_after_write".to_string(),
+                // The port names the board in doubt. The batch path could name
+                // its MAC; this one never reads one — and a uuid is not an
+                // option, it is the very thing that must not travel.
+                message: format!(
+                    "cancelled after the authorization write command had already been sent \
+                     to the device on {}; the authorization code may already be on it, \
+                     so treat it as used",
+                    spec.port
+                ),
+            };
+        }
+        JobError {
+            error_code: auth_error_code(&e).to_string(),
+            message: e.to_string(),
+        }
+    })
 }
 
 /// Map a core error raised on the authorization path onto its wire error code.
 ///
 /// Pure and separate from [`RealFlashBackend::run_auth`] for the same reason as
-/// [`auth_slot_outcome`]: the code a client keys its copy off must be testable
+/// [`authorize_slot`]: the code a client keys its copy off must be testable
 /// without a device.
 ///
 /// `device_no_response` is a distinct fact, not a flavour of `auth_failed`: the
@@ -2121,6 +2238,41 @@ fn auth_error_code(err: &tyutool_core::FlashError) -> &'static str {
         e if tyutool_core::is_device_no_response(e) => "device_no_response",
         _ => "auth_failed",
     }
+}
+
+/// Order the two device-touching steps of one authorization: let the device
+/// finish booting on its own **first**, then hand the port to the auth slot.
+///
+/// Why this order is load-bearing: the slot's first act is a hardware reset
+/// (`detect_firmware`). A reset fired into a device that is still running its
+/// *first* boot after a firmware flash restarts that boot, so a client that
+/// flashes and authorizes back to back — which is exactly what the web
+/// workbench does — can restart the same boot indefinitely and never get a
+/// byte back. The GUI's batch pipeline has always done the wait first
+/// (`src-tauri/src/lib.rs`, "wait for the device to boot naturally after flash
+/// before the auth slot issues a hardware reset"); the bridge did not, and
+/// that difference is the whole bug.
+///
+/// The wait itself is **non-fatal by construction** (it cannot return an error:
+/// a port it cannot open or a device that never talks simply falls through to
+/// the slot, which resets and probes anyway), so this function only has to fix
+/// the order.
+///
+/// Both steps are injected rather than called directly so the order is testable
+/// without a board: the real caller is [`RealFlashBackend::run_auth`], which is
+/// the only place that can reach a device.
+fn auth_after_natural_boot<W, S>(
+    spec: &AuthJobSpec,
+    cancel: &AtomicBool,
+    wait_for_natural_boot: W,
+    run_slot: S,
+) -> Result<(), JobError>
+where
+    W: FnOnce(&str, u32, &str, &AtomicBool),
+    S: FnOnce() -> Result<(), JobError>,
+{
+    wait_for_natural_boot(&spec.port, spec.baud_rate, &spec.chip_id, cancel);
+    run_slot()
 }
 
 /// Production flash execution surface backed by tyutool-core.
@@ -2208,72 +2360,42 @@ impl FlashBackend for RealFlashBackend {
         })
     }
 
-    /// Maps the wire auth request onto tyutool-core's batch-auth slot, the only
-    /// in-repo flow that writes *and verifies* one device's credentials
-    /// (`run_batch_auth_slot`, `crates/tyutool-core/src/authorize.rs`).
+    /// Maps the wire auth request onto tyutool-core's single-device
+    /// authorization: `FlashMode::Authorize`, which `registry::run_job`
+    /// dispatches to `authorize::run_authorize` before any chip plugin lookup.
     ///
-    /// Single-slot adaptation of its Excel-oriented row callbacks:
-    /// - `find_by_mac` → always `None`: the bridge authorizes whatever device is
-    ///   on the port with the credentials the request carries, it does not
-    ///   re-bind a MAC to a previously issued row.
-    /// - `allocate_row` → the request's own credentials at row 0 (the row index
-    ///   is only echoed back through `update_row`).
-    /// - `update_row` → the developer log channel; there is no sheet to update.
+    /// That is the CLI's `authorize` command — write *these* credentials to
+    /// *this* device — and it is the flow CoBuilder actually asks for: the
+    /// backend has already decided the uuid/authkey for the board on the port.
     ///
-    /// `ConflictPolicy::Overwrite` matches the PRD ("覆盖不可撤销"): the caller
-    /// already confirmed the overwrite in the web UI, so a device carrying
-    /// other credentials must be rewritten rather than skipped.
+    /// It is emphatically **not** `run_batch_auth_slot`. The batch slot exists
+    /// to bind a spreadsheet row to a device, so its first act is reading the
+    /// MAC to look that row up — which is why an adapter with a `|_mac| None`
+    /// lookup still died on `Failed to read MAC address` (T5AI field failure,
+    /// 2026-07-31) on a board whose shell answered in 625 ms.
     ///
-    /// Intentionally always-write: with `find_by_mac` pinned to `None` the
-    /// slot's `AlreadyDone` / `Skipped` / `InsufficientCodes` outcomes are
-    /// unreachable by construction — every request writes the supplied
-    /// credentials, which is safe for the KV storage this adapter targets.
+    /// Everything else about the request is preserved by [`authorize_job`]:
+    /// KV storage, and an existing credential overwritten rather than skipped
+    /// (PRD 覆盖不可撤销) because the dangerous-op gate already asked the user.
     fn run_auth(
         &self,
         spec: AuthJobSpec,
         cancel: Arc<AtomicBool>,
         progress: &(dyn Fn(serde_json::Value) + Send + Sync),
     ) -> Result<(), JobError> {
-        let config = tyutool_core::BatchAuthSlotConfig {
-            auth_baud_rate: spec.baud_rate,
-            conflict_policy: tyutool_core::ConflictPolicy::Overwrite,
-            auth_storage: tyutool_core::AuthStorage::Kv,
-        };
-        let credentials = Some((0usize, spec.uuid.clone(), spec.auth_key.clone()));
-        let port = spec.port.clone();
-
-        let result = tyutool_core::run_batch_auth_slot(
-            &spec.port,
-            &spec.chip_id,
-            &config,
-            |_mac| None,
-            move || credentials,
-            |_row, mac, update| match update {
-                tyutool_core::BatchAuthRowUpdate::StepFailed { step, error } => {
-                    log::warn!(
-                        "bridge auth step failed: port={port} mac={mac} step={step}: {error}"
-                    )
-                }
-                other => log::info!("bridge auth progress: port={port} mac={mac} {other:?}"),
-            },
+        // Order fixed by `auth_after_natural_boot`: natural-boot wait, then the
+        // authorization. A caller that flashes and authorizes back to back would
+        // otherwise reset a device mid-first-boot and never get a byte back.
+        auth_after_natural_boot(
+            &spec,
             &cancel,
-            // BatchAuthStep serializes to a bare snake_case string; wrap it as
-            // {"step": "..."} so every progress payload on the wire is a JSON
-            // object (run_job's FlashEvent payloads already are). Keeps the
-            // client decoder uniform across job kinds (see PROTOCOL.md).
-            |step| match serde_json::to_value(step) {
-                Ok(value) => progress(serde_json::json!({ "step": value })),
-                Err(e) => log::warn!("bridge auth progress serialize failed: {e}"),
+            tyutool_core::wait_after_firmware_flash,
+            || {
+                authorize_slot(&spec, progress, |job, on_event| {
+                    tyutool_core::run_job(job, &cancel, on_event)
+                })
             },
-        );
-
-        match result {
-            Ok(slot) => auth_slot_outcome(slot),
-            Err(e) => Err(JobError {
-                error_code: auth_error_code(&e).to_string(),
-                message: e.to_string(),
-            }),
-        }
+        )
     }
 
     /// Opens tyutool-core's `SerialDebugSession` — the same reader-thread
@@ -3778,6 +3900,21 @@ async fn run_auth_task(ctx: Arc<ConnContext>, request_id: String, auth: WireAuth
         return;
     }
 
+    // Length is the same kind of fact as emptiness — the firmware's own
+    // constraint on the pair (`tuya_authorize.c`), knowable without a device —
+    // so it is answered with the same `bad_request` rather than `auth_failed`:
+    // nothing was attempted on the board, and a client must not tell its user
+    // the device may have been touched. `run_authorize` (the CLI's authorize
+    // path, which this bridge now uses) does *not* check, so an over-long uuid
+    // would otherwise be written to the device and only fail at verify, having
+    // spent a real authorization code. The rule itself is core's — one copy.
+    if let Err(e) = tyutool_core::validate_auth_credentials(auth.uuid.trim(), auth.auth_key.trim())
+    {
+        // Core's message carries the offending *length*, never the credential.
+        ctx.send(&failed(&request_id, started, "bad_request", e.to_string()));
+        return;
+    }
+
     // Overwriting an authorization code cannot be undone (PRD: 覆盖不可撤销), so
     // it is gated exactly like flashing. The dialog names no credential: `uuid`
     // and `auth_key` never leave the job path.
@@ -4452,43 +4589,6 @@ mod tests {
             Some("first".to_string())
         );
     }
-    #[test]
-    fn a_cancel_after_the_auth_write_left_the_bridge_gets_its_own_code() {
-        // The write command was already on the wire when the cancel landed, so the
-        // credential may be on the device. The web client has to be able to tell
-        // that apart from a clean abort *structurally* — it owes the user honest
-        // copy ("可能已写入"), and it cannot parse prose to find out.
-        let after_write =
-            auth_slot_outcome(tyutool_core::BatchAuthSlotResult::CancelledAfterWrite {
-                mac: "AA:BB:CC:DD:EE:FF".to_string(),
-                uuid: "uuid-supersecret-9f1".to_string(),
-            })
-            .expect_err("a cancelled write is not a success");
-        assert_eq!(after_write.error_code, "cancelled_after_write");
-        assert!(
-            after_write.message.contains("AA:BB:CC:DD:EE:FF"),
-            "the device MAC identifies which board is in doubt: {}",
-            after_write.message
-        );
-        // The authorization uuid is a credential; it must not travel on the wire
-        // or into a log line just because the operation went wrong.
-        assert!(
-            !after_write.message.contains("uuid-supersecret-9f1"),
-            "the message leaked the authorization uuid: {}",
-            after_write.message
-        );
-
-        // A cancel that stopped before the write keeps the plain code.
-        let clean = auth_slot_outcome(tyutool_core::BatchAuthSlotResult::Cancelled)
-            .expect_err("a cancellation is not a success");
-        assert_eq!(clean.error_code, "cancelled");
-
-        assert!(auth_slot_outcome(tyutool_core::BatchAuthSlotResult::Done {
-            mac: "AA:BB:CC:DD:EE:FF".to_string(),
-        })
-        .is_ok());
-    }
-
     /// A device that never answered is not "the authorization failed": nothing
     /// was attempted on it. The web client must be able to say "it is probably
     /// still booting, retry" *structurally*, the same way it tells the two
@@ -4504,7 +4604,7 @@ mod tests {
         // Everything else on the auth path keeps its existing code.
         assert_eq!(
             auth_error_code(&tyutool_core::FlashError::Plugin(
-                "Failed to read MAC address".to_string()
+                "Verification failed: no response from auth-read".to_string()
             )),
             "auth_failed"
         );
@@ -4512,6 +4612,207 @@ mod tests {
             auth_error_code(&tyutool_core::FlashError::Cancelled),
             "cancelled"
         );
+    }
+
+    /// Field failure this encodes (T5AI, 2026-07-31): the web workbench flashes
+    /// and authorizes back to back, and the authorization slot's very first act
+    /// is a hardware reset. Firing that reset into a device that is still
+    /// running its *first* boot after a flash restarts that boot, so it never
+    /// completes — three consecutive runs read zero bytes for the whole 30 s
+    /// probe window, while the same board answered in 627 / 636 / 642 ms once it
+    /// had been left alone long enough to finish booting.
+    ///
+    /// The fix is the one the GUI's batch pipeline already documents: let the
+    /// device boot naturally *before* handing the port to the slot. So the order
+    /// of the two device-touching steps is the behaviour under test.
+    #[test]
+    fn an_authorization_lets_the_device_boot_before_the_slot_resets_it() {
+        let steps = std::cell::RefCell::new(Vec::<String>::new());
+        let spec = AuthJobSpec {
+            chip_id: "T5AI".to_string(),
+            port: "/dev/tty.fakeA".to_string(),
+            baud_rate: 921_600,
+            uuid: "uuidxxxxxxxxxxxxxxxx".to_string(),
+            auth_key: "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+
+        let outcome = auth_after_natural_boot(
+            &spec,
+            &cancel,
+            |port, baud_rate, chip_id, _cancel| {
+                steps
+                    .borrow_mut()
+                    .push(format!("wait {port} {baud_rate} {chip_id}"));
+            },
+            || {
+                steps.borrow_mut().push("slot".to_string());
+                Ok(())
+            },
+        );
+
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert_eq!(
+            steps.into_inner(),
+            vec![
+                // Same arguments the GUI passes: the port, the *auth* baud rate
+                // and the chip id, so the wait speaks the device's protocol.
+                "wait /dev/tty.fakeA 921600 T5AI".to_string(),
+                "slot".to_string(),
+            ],
+            "the natural-boot wait must precede the slot's hardware reset"
+        );
+    }
+
+    /// Field failure this encodes (T5AI, 2026-07-31, fifth round): with the
+    /// natural-boot wait in place the shell answered in 625 ms and the firmware
+    /// was detected — and the authorization *still* died on `Failed to read MAC
+    /// address`. The bridge was calling `run_batch_auth_slot`, the GUI's Excel
+    /// batch pipeline, whose very first act is reading the MAC because the MAC
+    /// is its lookup key into the spreadsheet row that holds the credentials.
+    ///
+    /// CoBuilder has no spreadsheet: the backend hands the bridge one specific
+    /// uuid/authkey and one specific device. That is `FlashMode::Authorize` —
+    /// the CLI's `authorize` command, dispatched by `registry::run_job` to
+    /// `run_authorize` before any chip plugin is looked up — and it never asks
+    /// the device for its MAC.
+    #[test]
+    fn an_authorization_writes_the_given_credentials_without_asking_for_a_mac() {
+        let spec = AuthJobSpec {
+            chip_id: "t5ai".to_string(),
+            port: "/dev/tty.fakeA".to_string(),
+            baud_rate: 115_200,
+            uuid: "uuidxxxxxxxxxxxxxxxx".to_string(),
+            auth_key: "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
+        };
+
+        let job = authorize_job(&spec);
+
+        assert!(
+            matches!(job.mode, tyutool_core::FlashMode::Authorize),
+            "the MAC-free single-device flow is the Authorize mode, not a batch slot"
+        );
+        assert_eq!(job.authorize_uuid.as_deref(), Some(spec.uuid.as_str()));
+        assert_eq!(job.authorize_key.as_deref(), Some(spec.auth_key.as_str()));
+        assert_eq!(job.port, spec.port);
+        assert_eq!(job.chip_id, spec.chip_id);
+        assert_eq!(job.baud_rate, spec.baud_rate);
+        // KV is not the bridge's choice to make: `run_authorize` forces it for
+        // single-device writes and ignores this field. Spelling it `None` keeps
+        // the bridge from ever *looking* like it asked for the irreversible OTP
+        // burn, which is a batch-only feature.
+        assert_eq!(job.authorize_storage, None);
+        // No callback = "already confirmed": the dangerous-op gate ran before
+        // the job started, so a device holding other credentials is overwritten
+        // (PRD 覆盖不可撤销) — the `ConflictPolicy::Overwrite` this flow had.
+        assert!(job.confirm_overwrite.is_none());
+        // Nothing that could send the job down a flash / erase / read branch.
+        assert!(job.firmware_path.is_none());
+        assert!(job.segments.is_none());
+    }
+
+    /// `run_authorize` reports what it found on the device through milestones,
+    /// and two of them carry credentials in the clear: `AuthReadComplete`
+    /// (the device's uuid + authkey) and `AuthConflict` (the credentials it is
+    /// about to lose). The GUI shows those in a secure modal; the bridge has no
+    /// business putting them on a WebSocket that a browser tab logs.
+    ///
+    /// The web client's SECURE_SILENT filter is not the guarantee here — that is
+    /// the *other end* being careful. This is the bridge refusing to send them
+    /// at all, which is the only half we control.
+    #[test]
+    fn credential_bearing_milestones_never_become_a_progress_frame() {
+        for milestone in [
+            tyutool_core::FlashMilestone::AuthReadComplete {
+                uuid: "uuid-supersecret-9f1".to_string(),
+                authkey: "authkey-supersecret-3c7".to_string(),
+            },
+            tyutool_core::FlashMilestone::AuthConflict {
+                existing_uuid: "uuid-supersecret-9f1".to_string(),
+                existing_authkey: "authkey-supersecret-3c7".to_string(),
+            },
+        ] {
+            let payload = auth_progress_payload(&tyutool_core::FlashEvent::Milestone {
+                milestone: milestone.clone(),
+            });
+            assert!(
+                payload.is_none(),
+                "{milestone:?} must not reach the client, got {payload:?}"
+            );
+        }
+
+        // `Done` carries the failure prose, which is the other way a credential
+        // could ride out on the progress channel. The bridge answers with its
+        // own `job_result` frame, so this event has nothing to add anyway.
+        let done = auth_progress_payload(&tyutool_core::FlashEvent::Done {
+            result: tyutool_core::FlashResult::Err {
+                message: "anything at all".to_string(),
+                elapsed_secs: 1.0,
+            },
+        });
+        assert!(done.is_none(), "got {done:?}");
+    }
+
+    /// `cancelled_after_write` is the protocol's only way of saying "this
+    /// authorization code may already be spent" (PROTOCOL.md §取消后的设备状态
+    /// forbids the client from saying 未写入 for it), so moving the bridge onto
+    /// `run_authorize` may not quietly lose it.
+    ///
+    /// The dividing line is the same one the batch slot drew: has the write
+    /// command left the bridge? Core announces that with `AuthWriteSent`, which
+    /// is also the milestone the user is shown as `writing_auth`.
+    #[test]
+    fn a_cancel_after_the_write_command_reached_the_device_still_gets_its_own_code() {
+        let spec = AuthJobSpec {
+            chip_id: "t5ai".to_string(),
+            port: "/dev/tty.fakeA".to_string(),
+            baud_rate: 115_200,
+            uuid: "uuid-supersecret-9f1".to_string(),
+            auth_key: "authkey-supersecret-3c7".to_string(),
+        };
+        let frames = std::sync::Mutex::new(Vec::<serde_json::Value>::new());
+        let record = |payload: serde_json::Value| {
+            frames.lock().expect("frames lock").push(payload);
+        };
+
+        let after_write = authorize_slot(&spec, &record, |job, on_event| {
+            // What core is actually asked to run: the MAC-free single-device
+            // authorization, carrying the request's own credentials.
+            assert!(matches!(job.mode, tyutool_core::FlashMode::Authorize));
+            assert_eq!(job.authorize_uuid.as_deref(), Some(spec.uuid.as_str()));
+            on_event(tyutool_core::FlashEvent::Milestone {
+                milestone: tyutool_core::FlashMilestone::AuthWriteSent,
+            });
+            Err(tyutool_core::FlashError::Cancelled)
+        })
+        .expect_err("a cancelled write is not a success");
+
+        assert_eq!(after_write.error_code, "cancelled_after_write");
+        assert!(
+            after_write.message.contains(&spec.port),
+            "the message must name the board in doubt: {}",
+            after_write.message
+        );
+        // The message travels on the wire and into logs; a credential may not.
+        assert!(
+            !after_write.message.contains(&spec.uuid)
+                && !after_write.message.contains(&spec.auth_key),
+            "the message leaked a credential: {}",
+            after_write.message
+        );
+        // Same milestone, seen from the client's side: the step that says the
+        // write is under way.
+        assert_eq!(
+            frames.into_inner().expect("frames"),
+            vec![serde_json::json!({ "step": "writing_auth" })]
+        );
+
+        // A cancel that landed before the write keeps the plain code.
+        let clean = authorize_slot(&spec, &|_| {}, |_job, _on_event| {
+            Err(tyutool_core::FlashError::Cancelled)
+        })
+        .expect_err("a cancellation is not a success");
+        assert_eq!(clean.error_code, "cancelled");
     }
 
     #[test]

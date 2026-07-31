@@ -5,8 +5,8 @@
 //! (bad_request).
 //!
 //! The authorize execution surface is injected (fake backend); the real
-//! tyutool-core `run_batch_auth_slot` path is verified on a physical board
-//! separately.
+//! tyutool-core `FlashMode::Authorize` path (`run_authorize`) is verified on a
+//! physical board separately.
 //!
 //! Every `run_auth` / `run_job` here would trip the B7 confirmation gate, so
 //! these servers run with the shared approving prompt: this file is about
@@ -207,8 +207,8 @@ async fn run_auth_streams_progress_then_job_result() {
         run_auth_frame(
             "a-001",
             "/dev/tty.fakeA",
-            "uuidxxxxxxxx",
-            "keyxxxxxxxxxxxxxxxx",
+            "uuidxxxxxxxxxxxxxxxx",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     )
     .await;
@@ -230,8 +230,48 @@ async fn run_auth_streams_progress_then_job_result() {
     assert_eq!(recorded[0].chip_id, "t5ai");
     assert_eq!(recorded[0].port, "/dev/tty.fakeA");
     assert_eq!(recorded[0].baud_rate, 921_600);
-    assert_eq!(recorded[0].uuid, "uuidxxxxxxxx");
-    assert_eq!(recorded[0].auth_key, "keyxxxxxxxxxxxxxxxx");
+    assert_eq!(recorded[0].uuid, "uuidxxxxxxxxxxxxxxxx");
+    assert_eq!(recorded[0].auth_key, "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+}
+
+/// The web client deliberately omits `baud_rate` and relies on the protocol
+/// default, so that default *is* the rate every browser-driven authorization
+/// runs at. It must be the firmware console rate (115200 — the value every
+/// entry of `src/features/firmware-flash/chip-manifests.ts` carries as
+/// `defaultAuthBaudRate`, and the one the GUI batch pipeline, `tyutool-cli
+/// authorize` and the direct-vendor web path all use), not a flash bootloader
+/// rate.
+#[tokio::test]
+async fn an_omitted_baud_rate_authorizes_at_the_firmware_console_rate() {
+    let (backend, auth_specs, finish) = FakeBackend::new();
+    finish.store(true, Ordering::Relaxed);
+    let addr = start_server(backend).await;
+    let mut ws = connect_ready(&addr).await;
+
+    send_json(
+        &mut ws,
+        serde_json::json!({
+            "type": "run_auth",
+            "request_id": "a-baud",
+            "auth": {
+                "port": "/dev/tty.fakeA",
+                "chip_id": "t5ai",
+                "uuid": "uuidxxxxxxxxxxxxxxxx",
+                "auth_key": "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+        }),
+    )
+    .await;
+
+    let result = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(result["ok"], true, "{result}");
+
+    let recorded = auth_specs.lock().expect("auth specs lock");
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(
+        recorded[0].baud_rate, 115_200,
+        "an omitted baud_rate must authorize at the console rate"
+    );
 }
 
 #[tokio::test]
@@ -254,8 +294,8 @@ async fn flash_and_auth_are_mutually_exclusive() {
         run_auth_frame(
             "a-002",
             "/dev/tty.fakeA",
-            "uuidxxxxxxxx",
-            "keyxxxxxxxxxxxxxxxx",
+            "uuidxxxxxxxxxxxxxxxx",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     )
     .await;
@@ -277,8 +317,8 @@ async fn flash_and_auth_are_mutually_exclusive() {
         run_auth_frame(
             "a-101",
             "/dev/tty.fakeA",
-            "uuidxxxxxxxx",
-            "keyxxxxxxxxxxxxxxxx",
+            "uuidxxxxxxxxxxxxxxxx",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     )
     .await;
@@ -305,8 +345,8 @@ async fn cancel_fails_the_auth_and_releases_the_port() {
         run_auth_frame(
             "a-201",
             "/dev/tty.fakeA",
-            "uuidxxxxxxxx",
-            "keyxxxxxxxxxxxxxxxx",
+            "uuidxxxxxxxxxxxxxxxx",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     )
     .await;
@@ -329,8 +369,8 @@ async fn cancel_fails_the_auth_and_releases_the_port() {
         run_auth_frame(
             "a-202",
             "/dev/tty.fakeA",
-            "uuidxxxxxxxx",
-            "keyxxxxxxxxxxxxxxxx",
+            "uuidxxxxxxxxxxxxxxxx",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     )
     .await;
@@ -349,7 +389,12 @@ async fn missing_or_empty_credentials_answer_bad_request_without_claiming() {
     // Empty uuid.
     send_json(
         &mut ws,
-        run_auth_frame("a-301", "/dev/tty.fakeA", "", "keyxxxxxxxxxxxxxxxx"),
+        run_auth_frame(
+            "a-301",
+            "/dev/tty.fakeA",
+            "",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        ),
     )
     .await;
     let rejected = next_frame_of_type(&mut ws, "job_result").await;
@@ -366,7 +411,7 @@ async fn missing_or_empty_credentials_answer_bad_request_without_claiming() {
             "auth": {
                 "port": "/dev/tty.fakeA",
                 "chip_id": "t5ai",
-                "uuid": "uuidxxxxxxxx",
+                "uuid": "uuidxxxxxxxxxxxxxxxx",
                 "baud_rate": 921600
             }
         }),
@@ -383,8 +428,8 @@ async fn missing_or_empty_credentials_answer_bad_request_without_claiming() {
         run_auth_frame(
             "a-303",
             "/dev/tty.fakeA",
-            "uuidxxxxxxxx",
-            "keyxxxxxxxxxxxxxxxx",
+            "uuidxxxxxxxxxxxxxxxx",
+            "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     )
     .await;
@@ -395,5 +440,49 @@ async fn missing_or_empty_credentials_answer_bad_request_without_claiming() {
         auth_specs.lock().expect("auth specs lock").len(),
         1,
         "rejected requests must never reach the backend"
+    );
+}
+
+/// Credential *lengths* are a firmware protocol constraint, not something the
+/// device gets to answer: `tuya_authorize.c` accepts a UUID of 16 or 20
+/// characters and an AuthKey of exactly 32, and rejects anything else after the
+/// write command has already been sent. Sending it anyway spends a real
+/// authorization code and reports back as `auth_failed` — "we touched your
+/// device and it went wrong" — for a request that was malformed before it left
+/// the bridge. So the length check happens here, on the same footing as the
+/// empty-credential check: `bad_request`, no port claim, no byte on the wire.
+#[tokio::test]
+async fn malformed_credential_lengths_answer_bad_request_without_touching_the_device() {
+    let (backend, auth_specs, finish) = FakeBackend::new();
+    finish.store(true, Ordering::Relaxed);
+    let addr = start_server(backend).await;
+    let mut ws = connect_ready(&addr).await;
+
+    // 19-character UUID: one short of the firmware's 20, well past its 16.
+    send_json(
+        &mut ws,
+        run_auth_frame("a-401", "/dev/tty.fakeA", &"u".repeat(19), &"k".repeat(32)),
+    )
+    .await;
+    let rejected = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(rejected["request_id"], "a-401", "{rejected}");
+    assert_eq!(rejected["ok"], false, "{rejected}");
+    assert_eq!(rejected["error_code"], "bad_request", "{rejected}");
+
+    // 31-character AuthKey with a well-formed UUID.
+    send_json(
+        &mut ws,
+        run_auth_frame("a-402", "/dev/tty.fakeA", &"u".repeat(20), &"k".repeat(31)),
+    )
+    .await;
+    let rejected = next_frame_of_type(&mut ws, "job_result").await;
+    assert_eq!(rejected["request_id"], "a-402", "{rejected}");
+    assert_eq!(rejected["ok"], false, "{rejected}");
+    assert_eq!(rejected["error_code"], "bad_request", "{rejected}");
+
+    assert!(
+        auth_specs.lock().expect("auth specs lock").is_empty(),
+        "a malformed credential must never reach the execution layer — \
+         the device may not be written to at all"
     );
 }

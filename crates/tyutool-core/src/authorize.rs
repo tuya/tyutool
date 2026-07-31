@@ -51,7 +51,6 @@ use crate::job::FlashJob;
 
 // ── Timing ────────────────────────────────────────────────────────────────
 
-const BAUD: u32 = 115_200;
 /// Per-command absolute read deadline (hard ceiling regardless of idle).
 const CMD_TIMEOUT: Duration = Duration::from_secs(3);
 /// Hard ceiling for the `auth` write command — OTP/eFuse burning on some
@@ -73,7 +72,29 @@ const AUTH_READ_OTP_IDLE: Duration = Duration::from_secs(30);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Maximum time to wait for natural device boot after firmware flash.
-const WAIT_AFTER_FLASH_MAX: Duration = Duration::from_secs(3);
+///
+/// ⚠ 30 000 ms is a CONSERVATIVE ESTIMATE, NOT a measurement — the same status
+/// as T5AI's `boot_max_wait`, and picked to match it (see the `CHIP_TIMING`
+/// note). Measurements it is derived from (T5AI, real board, 2026-07-31):
+///   • warm reset (device already booted): shell ready in 627 / 636 / 642 ms — 3 runs.
+///   • first cold boot right after a firmware flash: ZERO bytes for the whole
+///     window in three consecutive runs, so the real cold-boot time is only
+///     known to be **> 30 s**; its upper bound has never been measured (it
+///     needs a reflash to reproduce).
+/// If a cold boot is ever actually timed, replace this estimate with the number.
+///
+/// Raising it is close to free, which is what makes a window this generous safe:
+///   • This wait is **passive** — [`AuthSession::wait_natural_boot`] only reads,
+///     and its one write is a bare `\r\n` probe. It never toggles DTR/RTS, so
+///     unlike the auth slot's `detect_firmware` it cannot interrupt the boot it
+///     is waiting for. Waiting longer therefore cannot make a boot slower.
+///   • It **exits early** the moment the device proves it is up: the TuyaOpen
+///     boot banner in the stream, or a `tuya>` / `no command` answer to the
+///     probe sent after 500 ms of silence. An already-booted device (the warm
+///     case above) is released in well under a second and never sees this bound.
+///   • Only a device that says nothing at all pays the full window — and that is
+///     exactly the device this wait exists for.
+const WAIT_AFTER_FLASH_MAX: Duration = Duration::from_secs(30);
 /// After this idle gap, send a `\r\n` probe during post-flash boot wait.
 const WAIT_AFTER_FLASH_PROBE_IDLE: Duration = Duration::from_millis(500);
 /// Devices shipped un-authorized carry this placeholder UUID.
@@ -332,15 +353,27 @@ pub fn is_device_no_response(err: &FlashError) -> bool {
 ///
 /// Wording is load-bearing: it is what the CLI prints and what the bridge puts
 /// on the wire as `job_result.message`. It must name the cause we actually
-/// observed (the device never talked) and the one the field data points at (a
-/// first boot right after flashing takes far longer than a warm reboot), and it
-/// must not borrow the vocabulary of a later step — the old code path reported
-/// this exact situation as "Failed to read MAC address".
+/// observed (the device never talked) and it must not borrow the vocabulary of a
+/// later step — the old code path reported this exact situation as "Failed to
+/// read MAC address".
+///
+/// It used to end in "wait a few seconds and retry". That advice is now spent by
+/// the time the user reads it: `detect_firmware` resets once and then leaves the
+/// device alone for the whole boot window, and the callers that flash right
+/// before authorizing wait the first boot out *before* that reset
+/// ([`wait_after_firmware_flash`]). Repeating "wait a bit longer" would send the
+/// user round the loop they have already been through, so the message names the
+/// next thing that can actually change the outcome instead.
+///
+/// What it still must not claim (nothing was attempted past the reset): that the
+/// authorization failed, or that the device's state is unknown.
 fn device_no_response_error(waited: Duration) -> FlashError {
     FlashError::Plugin(format!(
-        "{DEVICE_NO_RESPONSE_PREFIX} within {:.1} s after reset — it may still be running its \
-         first boot after a firmware flash, which takes much longer than a warm reboot; \
-         wait a few seconds and retry",
+        "{DEVICE_NO_RESPONSE_PREFIX} within {:.1} s after reset — not one byte, over a window \
+         the device had entirely to itself. A slow first boot after a firmware flash explains a \
+         short silence, not one this long, so a few more seconds will not help: power-cycle the \
+         board (unplug it and plug it back in), then retry. If it stays silent, check that the \
+         flashed firmware boots at all and that this port is the device's console",
         waited.as_secs_f32()
     ))
 }
@@ -356,7 +389,14 @@ fn invalid_auth_read_response() -> FlashError {
 /// rejected by the device *before* any OTP burn, but the rejection still
 /// consumes an allocated code and produces a confusing "no response" verify
 /// failure — so we validate up front and fail with an explicit message.
-fn validate_credentials(uuid: &str, authkey: &str) -> Result<(), FlashError> {
+///
+/// Public because it is a **protocol-level constraint on the credential pair**,
+/// not a property of any one flow: the batch slot below checks it, and so does
+/// `tyutool-bridge` before it hands a single-device authorization to
+/// [`run_authorize`] (which, like the CLI's `authorize` command, does not check
+/// on its own). Two copies of the rule would be two rules the day the firmware
+/// accepts a new length.
+pub fn validate_auth_credentials(uuid: &str, authkey: &str) -> Result<(), FlashError> {
     let ul = uuid.chars().count();
     if ul != 16 && ul != 20 {
         return Err(FlashError::Plugin(format!(
@@ -1197,6 +1237,27 @@ pub fn run_authorize<F>(job: &FlashJob, cancel: &AtomicBool, progress: F) -> Res
 where
     F: Fn(FlashEvent),
 {
+    run_authorize_with(job, cancel, progress, |port, timing, baud_rate| {
+        AuthSession::open(port, timing, baud_rate)
+    })
+}
+
+/// [`run_authorize`] with the serial port opener injected.
+///
+/// Only the opener touches hardware, so injecting it is what makes the rest —
+/// including *which baud rate the session runs at* — assertable without a
+/// board. Same reason `run_batch_auth_slot` takes its Excel callbacks.
+fn run_authorize_with<T, O, F>(
+    job: &FlashJob,
+    cancel: &AtomicBool,
+    progress: F,
+    open: O,
+) -> Result<(), FlashError>
+where
+    T: AuthIo,
+    O: FnOnce(&str, AuthTiming, u32) -> Result<AuthSession<T>, FlashError>,
+    F: Fn(FlashEvent),
+{
     let uuid = job
         .authorize_uuid
         .as_deref()
@@ -1214,7 +1275,13 @@ where
     // ── Step 1: Open serial ───────────────────────────────────────────
     log::info!("flash.log.auth.openingPort: port={}", job.port);
     let timing = AuthTiming::for_chip(&job.chip_id);
-    let mut sess = AuthSession::open(&job.port, timing, BAUD)?;
+    // The job's rate, not a constant of our own: the caller drives both serial
+    // sessions of one authorization (its natural-boot wait via
+    // `wait_after_firmware_flash`, then this one) and `JobSummary` already
+    // reports `job.baud_rate` as the rate in use. 115200 stays the *default*
+    // where callers pick it (`tyutool-cli authorize`, the bridge's
+    // `default_auth_baud_rate`), which is a caller's decision to make.
+    let mut sess = open(&job.port, timing, job.baud_rate)?;
 
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
@@ -1296,6 +1363,12 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
+                // Announced *before* the command goes out, not after: a caller
+                // accounting for authorization codes has to treat one that may
+                // have left as spent, so the only safe error direction is early.
+                progress(FlashEvent::Milestone {
+                    milestone: FlashMilestone::AuthWriteSent,
+                });
                 let auth_idle = if storage == AuthStorage::Otp {
                     AUTH_WRITE_OTP_IDLE
                 } else {
@@ -1343,9 +1416,16 @@ where
                             "Verification failed: AuthKey mismatch".into(),
                         ))
                     }
-                    Some((rb_uuid, _)) => Err(FlashError::Plugin(format!(
-                        "Verification failed: UUID mismatch (wrote {uuid}, read back {rb_uuid})"
-                    ))),
+                    Some((rb_uuid, _)) => {
+                        // The two uuids stay out of the message on purpose: it is
+                        // returned verbatim to every caller — CLI stderr, the GUI
+                        // log panel and the bridge's `job_result` frame — and a
+                        // credential may not travel on any of them.
+                        let _ = rb_uuid;
+                        Err(FlashError::Plugin(
+                            "Verification failed: the device read back a different UUID".into(),
+                        ))
+                    }
                     None => Err(FlashError::Plugin(
                         "Verification failed: no response from auth-read".into(),
                     )),
@@ -1412,6 +1492,11 @@ where
                 }
 
                 log::info!("flash.log.auth.writeStart");
+                // See the new-firmware branch: announced before the command goes
+                // out so a cancellation can never claim the code was untouched.
+                progress(FlashEvent::Milestone {
+                    milestone: FlashMilestone::AuthWriteSent,
+                });
                 let _lines = sess.auth_write(&uuid, &authkey, storage, Duration::from_millis(2000));
 
                 if cancel.load(Ordering::Relaxed) {
@@ -1447,9 +1532,16 @@ where
                             "Verification failed: AuthKey mismatch (device may have rejected the write — check UUID/AuthKey length and format)".into(),
                         ))
                     }
-                    Some((rb_uuid, _)) => Err(FlashError::Plugin(format!(
-                        "Verification failed: UUID mismatch (wrote {uuid}, read back {rb_uuid})"
-                    ))),
+                    Some((rb_uuid, _)) => {
+                        // The two uuids stay out of the message on purpose: it is
+                        // returned verbatim to every caller — CLI stderr, the GUI
+                        // log panel and the bridge's `job_result` frame — and a
+                        // credential may not travel on any of them.
+                        let _ = rb_uuid;
+                        Err(FlashError::Plugin(
+                            "Verification failed: the device read back a different UUID".into(),
+                        ))
+                    }
                     None => Err(FlashError::Plugin(
                         "Verification failed: no response from auth-read".into(),
                     )),
@@ -1495,9 +1587,11 @@ where
 
 /// Wait for the device to naturally boot after firmware flash before the auth slot starts.
 ///
-/// Opens the serial port at `baud_rate` and reads passively for up to 3 seconds.
-/// Exits early when the TuyaOpen boot banner is detected in the byte stream, or when
-/// a `\r\n` probe (sent after 500 ms of silence) gets a shell response.
+/// Opens the serial port at `baud_rate` and reads passively for up to
+/// [`WAIT_AFTER_FLASH_MAX`]. Exits early when the TuyaOpen boot banner is detected in
+/// the byte stream, or when a `\r\n` probe (sent after 500 ms of silence) gets a shell
+/// response — so an already-booted device is released in well under a second and only a
+/// device that stays silent pays the full window.
 ///
 /// This function is non-fatal: if the port cannot be opened or the wait times out,
 /// the auth slot will still run — `detect_firmware` does its own hardware reset.
@@ -1644,7 +1738,7 @@ where
             // Belt-and-suspenders: allocation already skips malformed rows, but a
             // MAC-matched row whose Excel was edited to an invalid value could still
             // arrive here. Fail before the (irreversible) OTP burn is attempted.
-            if let Err(e) = validate_credentials(&uuid, &authkey) {
+            if let Err(e) = validate_auth_credentials(&uuid, &authkey) {
                 log::warn!("[batch-auth] invalid credentials  port={port} mac={mac}: {e}");
                 update_row(
                     row_idx,
@@ -1902,7 +1996,7 @@ where
             update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
 
             // ── 8b. Validate credential lengths before any device write ──
-            if let Err(e) = validate_credentials(&uuid, &authkey) {
+            if let Err(e) = validate_auth_credentials(&uuid, &authkey) {
                 log::warn!("[batch-auth] invalid credentials (old fw)  port={port} mac={mac}: {e}");
                 update_row(
                     row_idx,
@@ -2529,20 +2623,73 @@ mod tests {
         assert!(sess.port.sent_str().contains("auth myuuid mykey\r\n"));
     }
 
+    /// One authorization is two serial sessions on the same port: the caller's
+    /// passive natural-boot wait ([`wait_after_firmware_flash`], opened at the
+    /// baud rate *it* was given) and this write session. A caller that asks for
+    /// 921600 and gets a wait at 921600 followed by a write at a hard-coded
+    /// 115200 is talking to the device at two speeds in one operation, and
+    /// `JobSummary` — which reports `job.baud_rate` — tells the user the rate
+    /// that was not used. So the job's field is the one source: honoured here,
+    /// not silently replaced by a constant.
+    #[test]
+    fn run_authorize_opens_the_session_at_the_jobs_baud_rate() {
+        use crate::job::FlashMode;
+        let opened_at = std::cell::Cell::new(0u32);
+        let job = FlashJob {
+            mode: FlashMode::Authorize,
+            chip_id: "t5ai".into(),
+            port: "/dev/tty.fake".into(),
+            baud_rate: 921_600,
+            segments: None,
+            flash_start_hex: None,
+            flash_end_hex: None,
+            erase_start_hex: None,
+            erase_end_hex: None,
+            read_start_hex: None,
+            read_end_hex: None,
+            read_file_path: None,
+            firmware_path: None,
+            authorize_uuid: Some("u".repeat(20)),
+            authorize_key: Some("k".repeat(32)),
+            authorize_storage: None,
+            confirm_overwrite: None,
+        };
+        let cancel = AtomicBool::new(false);
+
+        // The opener refuses the port, so nothing past it runs: this test is
+        // about the rate the session is asked for, not the flow behind it.
+        let result = run_authorize_with(
+            &job,
+            &cancel,
+            |_| {},
+            |_port, _timing, baud_rate| {
+                opened_at.set(baud_rate);
+                Err::<AuthSession<MockAuthIo>, _>(FlashError::Plugin("opener declined".into()))
+            },
+        );
+
+        assert!(result.is_err(), "the injected opener declined: {result:?}");
+        assert_eq!(
+            opened_at.get(),
+            921_600,
+            "the authorization session must run at the baud rate the job asked for"
+        );
+    }
+
     #[test]
     fn validate_credentials_accepts_expected_lengths() {
         let key = "k".repeat(32);
-        assert!(validate_credentials(&"u".repeat(20), &key).is_ok());
-        assert!(validate_credentials(&"u".repeat(16), &key).is_ok());
+        assert!(validate_auth_credentials(&"u".repeat(20), &key).is_ok());
+        assert!(validate_auth_credentials(&"u".repeat(16), &key).is_ok());
     }
 
     #[test]
     fn validate_credentials_rejects_bad_lengths() {
         let key = "k".repeat(32);
-        assert!(validate_credentials(&"u".repeat(19), &key).is_err());
-        assert!(validate_credentials(&"u".repeat(21), &key).is_err());
-        assert!(validate_credentials(&"u".repeat(20), &"k".repeat(31)).is_err());
-        assert!(validate_credentials(&"u".repeat(20), &"k".repeat(33)).is_err());
+        assert!(validate_auth_credentials(&"u".repeat(19), &key).is_err());
+        assert!(validate_auth_credentials(&"u".repeat(21), &key).is_err());
+        assert!(validate_auth_credentials(&"u".repeat(20), &"k".repeat(31)).is_err());
+        assert!(validate_auth_credentials(&"u".repeat(20), &"k".repeat(33)).is_err());
     }
 
     #[test]
@@ -2767,6 +2914,48 @@ mod tests {
         );
     }
 
+    /// "Wait a few seconds and retry" was honest while the device might simply
+    /// not have finished its first boot yet. It no longer is: `detect_firmware`
+    /// resets once and then leaves the device alone for the whole boot window,
+    /// and the callers that flash immediately before authorizing now let the
+    /// first boot finish *before* that reset ([`wait_after_firmware_flash`]). A
+    /// silence that survives both has already been given the extra seconds, so
+    /// asking for them again sends the user round the same loop — the copy has
+    /// to name a different action.
+    ///
+    /// The three standing prohibitions still hold: this device was never
+    /// touched past the reset, so the message must not blame the MAC read, must
+    /// not call the authorization failed, and must not describe the device's
+    /// state as unknown.
+    #[test]
+    fn silent_device_error_asks_for_a_power_cycle_not_more_waiting() {
+        let mut sess = AuthSession {
+            port: MockAuthIo::new(),
+            timing: fast_boot_timing(),
+            port_name: "/dev/mock".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+        let message = sess.detect_firmware(&cancel).unwrap_err().to_string();
+        let lower = message.to_lowercase();
+
+        assert!(
+            lower.contains("power-cycle"),
+            "must name an action the user has not already taken: {message}"
+        );
+        assert!(
+            !lower.contains("wait a few seconds"),
+            "the extra seconds have already been spent; do not ask for them again: {message}"
+        );
+        assert!(
+            !lower.contains("authorization failed") && !lower.contains("authorisation failed"),
+            "nothing was attempted on the device, so the authorization did not fail: {message}"
+        );
+        assert!(
+            !lower.contains("unknown"),
+            "the device state is not unknown — it was never touched past the reset: {message}"
+        );
+    }
+
     /// The other half of the same rule: a device that *did* talk but whose output
     /// matched neither keyword may genuinely be old firmware printing something
     /// else, so the Old fallback stays for it.
@@ -2829,6 +3018,25 @@ mod tests {
             window > measured_silence,
             "T5AI boot window {window:?} closes before the {measured_silence:?} of silence \
              measured on a real first cold boot"
+        );
+    }
+
+    /// Same bench datum, applied to the *passive* post-flash wait: the point of
+    /// [`wait_after_firmware_flash`] is to let a first boot finish before the
+    /// auth slot resets the device. A wait that gives up while the device is
+    /// still silent hands the port over mid-boot and the reset restarts the very
+    /// boot it was supposed to protect — the wait then buys nothing at all.
+    ///
+    /// 8 100 ms is the measured lower bound on that silence (T5AI, 2026-07-31);
+    /// a wait shorter than that provably cannot outlast the boot it waits for.
+    #[test]
+    fn post_flash_wait_outlasts_the_measured_cold_boot_silence() {
+        let measured_silence = Duration::from_millis(8100);
+        assert!(
+            WAIT_AFTER_FLASH_MAX > measured_silence,
+            "post-flash wait {WAIT_AFTER_FLASH_MAX:?} gives up before the {measured_silence:?} \
+             of silence measured on a real first cold boot, so the auth slot would still reset \
+             a booting device"
         );
     }
 

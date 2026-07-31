@@ -498,7 +498,12 @@ async fn refused_run_auth_never_reaches_the_device() {
     // like flashing.
     send_json(
         &mut ws,
-        run_auth_frame("a-1", PORT_A, "uuid-abcdef", "key-0123456789"),
+        run_auth_frame(
+            "a-1",
+            PORT_A,
+            "uuid-abcdef000000000",
+            "key-0123456789000000000000000000",
+        ),
     )
     .await;
 
@@ -829,7 +834,7 @@ async fn a_request_arriving_while_a_confirmation_is_pending_raises_no_second_dia
 #[tokio::test]
 async fn the_audit_trail_records_the_operation_but_never_a_credential_or_a_full_token() {
     const SECRET_UUID: &str = "uuid-supersecret-9f1";
-    const SECRET_KEY: &str = "authkey-supersecret-3c7";
+    const SECRET_KEY: &str = "authkey-supersecret-3c7000000000";
 
     let backend = FakeBackend::finishing();
     let audit = common::capturing_audit();

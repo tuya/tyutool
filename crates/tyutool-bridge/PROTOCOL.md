@@ -107,7 +107,7 @@ Bridge 前端请保持一致：角色只用于 hover 提示帮用户判断，**�
 ```
 
 - `chip_id` / `port` / `baud_rate`：**三个都必填**。
-- ⚠ **`baud_rate` 必填，与 run_auth（默认 921600）和 serial_debug_open（默认 115200）不同** ——
+- ⚠ **`baud_rate` 必填，与 run_auth / serial_debug_open（两者都默认 115200）不同** ——
   这是刻意的不对称，**不要为了「一致性」顺手给它加 `#[serde(default)]`**。
   理由：烧录波特率是会**影响写入过程**的参数（T5 用 2000000），静默套一个默认值可能让烧录变慢、
   甚至中途失败，而那种失败排查起来极其昂贵；**明确报错比猜一个值更安全**。
@@ -123,13 +123,72 @@ Bridge 前端请保持一致：角色只用于 hover 提示帮用户判断，**�
 
 ```json
 { "type": "run_auth", "request_id": "a-001",
-  "auth": { "port": "/dev/tty.xxx", "chip_id": "t5ai", "uuid": "uuidxxxxxxxx", "auth_key": "keyxxxxxxxxxxxxxxxx", "baud_rate": 921600 } }
+  "auth": { "port": "/dev/tty.xxx", "chip_id": "t5ai", "uuid": "uuidxxxxxxxxxxxxxxxx", "auth_key": "keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "baud_rate": 115200 } }
 ```
 
-- `uuid` / `auth_key` 为空或缺失 → `job_result bad_request`（不触达执行层、不占串口）。
-- `baud_rate` 可省略，默认 921600。
-- 存储位与冲突策略：`AuthStorage::Kv`（默认位）+ `ConflictPolicy::Overwrite`（对齐 PRD「自定义授权码覆盖不可撤销」警示口径）；wire 暂无 storage 字段，需要 OTP 时再扩展。
+- `uuid` / `auth_key` **为空、缺失、或长度不合法** → `job_result bad_request`（不触达执行层、不占串口、
+  **一个字节都不发给设备**，也不弹危险操作确认框——不合法的请求本来就跑不了，不该去打扰用户）。
+  合法长度是**固件的硬约束**（`tuya_authorize.c`：`UUID_LENGTH=20` / `UUID_LENGTH_16=16`、
+  `AUTHKEY_LENGTH=32`）：**uuid 必须是 16 或 20 个字符，auth_key 必须是 32 个字符**（先 trim）。
+  规则只有一份，在 core（`tyutool_core::validate_auth_credentials`），bridge 复用它，不自己抄一遍。
+  ⚠ **这类失败不是 `auth_failed`**：`auth_failed` 的含义是「已经发到设备之后出的错、设备状态未知」，
+  而长度不合法是**在本机就能判定、设备完全没被碰过**，与「为空/缺失」是同一类事实，故同归 `bad_request`
+  （`message` 只带**出错的长度**，永不回显 uuid / auth_key 本身）。
+  背景：授权走的 core 入口 `run_authorize`（= `tyutool-cli authorize`）**自己不做这道校验**，
+  真发给设备的话，畸形凭证会被固件在写入环节拒掉——白白消耗一枚后端已分配的授权码，
+  还报成「设备侧失败」。批量流水线 `run_batch_auth_slot` 一直有这道写前校验，本路径补齐。
+- `baud_rate` 可省略，默认 **115200**。
+  ⚠ **这是固件 UART 控制台的速率，不是烧录波特率，别为了「和 run_job 一致」把它改回 921600。**
+  授权走的是设备固件起来之后的 shell（`tuya>`），不是烧录 bootloader；全芯片的控制台都跑 115200
+  （前端 `src/features/firmware-flash/chip-manifests.ts` 每一项的 `defaultAuthBaudRate`、
+  GUI 批量授权、`tyutool-cli authorize`、web 直连 vendor 四处同值）。
+  历史教训：这里曾误写成 921600（T5AI 的**烧录**波特率），而 web 端刻意省略该字段吃默认值，
+  于是所有浏览器侧授权都在拿 921600 敲 115200 的控制台——设备侧全是帧错误、整窗口 `bytes=0` 零应答。
+  2026-07-31 真机实测：同一块 T5AI 板子，115200 复位后 0.6s 拿到 `tuya>`、2.7s 读完授权。
+  **该字段是这次授权全过程的唯一速率来源**：自然启动等待（`wait_after_firmware_flash`）和授权会话
+  本身（core `run_authorize` 用 `job.baud_rate` 开串口）都取它，客户端显式传非默认值时两段也保持一致。
+  （`run_authorize` 曾把会话速率写死成 115200 常量，与前半段的 `baud_rate` 分家；已收敛。）
+- 存储位与冲突策略：KV（`run_authorize` 对单设备写死 KV，OTP 只属于批量流程）+ 覆盖既有凭证
+  （对齐 PRD「自定义授权码覆盖不可撤销」警示口径：危险操作确认框已经问过用户）；
+  wire 暂无 storage 字段，需要 OTP 时再扩展。
 - 与 run_job 共用同一仲裁表：同串口互斥双向成立；且与 run_job 共用同一份全局单一执行权（见 §单一执行权）。
+
+#### run_auth 的 core 入口（为什么不再读 MAC）
+
+bridge 走 core 的 **`FlashMode::Authorize`**（`registry::run_job` 在查芯片插件**之前**就把它
+分派给 `authorize::run_authorize`，这也是 `chip_id="other"` 能授权的原因）。语义正是本流程要的：
+**把后端给定的这一对 uuid/auth_key 写进串口上的这一台设备**，与 `tyutool-cli authorize` 同一条路。
+
+它**不读设备 MAC**。历史上 bridge 接的是 `run_batch_auth_slot`（GUI 的 Excel 批量流水线）：
+那条路第一步就必须读 MAC，因为 MAC 是它去表格里查「这台设备该用哪一行凭证」的键。
+CoBuilder 没有表格，适配层把查表回调写成了 `|_mac| None`，但 MAC 读取本身仍是硬前置——
+于是 2026-07-31 真机上出现了「shell 625 ms 应答、固件探测成功，却报
+`Failed to read MAC address`」。**`Failed to read MAC address` 从此不在 CoBuilder 链路上可达。**
+
+#### run_auth 的自然启动等待（先等启动，再复位）
+
+授权槽位的**第一个动作就是硬件复位**（core `detect_firmware` 脉冲 RTS）。而 Web 工作台
+的典型节奏是「烧完立刻授权」，此时设备正在跑烧录后的**首次启动**——复位打断首启，首启
+重来，如此往复，设备永远没机会应答。真机实测：烧完立刻授权连续三次整整 30 s **零字节**；
+同一块板放几分钟等首启跑完后再跑，shell 627 / 636 / 642 ms 就应答。
+
+因此 bridge 在进入授权槽位**之前**先调 core 的 `wait_after_firmware_flash`（GUI 批量烧录
+一直是这么做的）：
+
+- **被动读，不复位**：只读串口，唯一的写是空闲 500 ms 后发一个 `\r\n` 探针，不碰
+  DTR/RTS，所以它不会打断正在进行的启动。
+- **提前退出**：读到 TuyaOpen 启动横幅，或探针拿到 `tuya>` / `no command` 应答即返回。
+  已经启动完的设备通常 1 s 内就放行，等待上限对它无感。
+- **非致命**：开口失败或等满上限都照常往下走授权，不产生任何 error_code。
+- **波特率跟 `baud_rate` 同一个值**（省略即上面的默认 115200）：这段等待读的就是固件控制台，
+  速率必须和随后授权槽位用的一致，否则横幅和 `tuya>` 都会读成乱码、白等满上限。
+  两段同源由代码钉住：等待用 `spec.baud_rate`，授权会话用 `job.baud_rate`（同一个字段），
+  各有一条测试守着（bridge `an_authorization_lets_the_device_boot_before_the_slot_resets_it`、
+  core `run_authorize_opens_the_session_at_the_jobs_baud_rate`）。
+- 上限（core `WAIT_AFTER_FLASH_MAX`）取 30 s，与探测窗口 `boot_max_wait` 同量级；这是
+  **保守估计不是实测值**（首启耗时上界从未测到）。
+- 对 wire 契约**没有影响**：不新增帧、不新增 error_code，只是 `run_auth` 在设备沉默时
+  最坏耗时多出这段等待。
 
 ### cancel
 
@@ -266,7 +325,19 @@ Bridge 前端请保持一致：角色只用于 hover 提示帮用户判断，**�
 
 `payload` 恒为 JSON 对象：
 - run_job：tyutool-core `FlashEvent` 的 serde JSON **原样透传**（与 tyutool-cli serve 的 progress payload 同源同词汇——kind 标签，如 JobSummary/Phase/Percent/Milestone/Done）。技术方案样例 `{"phase","percent","log"}` 为示意，实际以 FlashEvent 序列化为准。
-- run_auth：`{"step": "<BatchAuthStep>"}`——core 的 `BatchAuthStep` 序列化为裸 snake_case 字符串（`reading_mac` / `reading_auth` / `writing_auth` / `verifying` …），bridge 包一层 `step` 键使 payload 保持对象形，前端按 request 种类无需特判非对象 payload。
+- run_auth：`{"step": "<snake_case>"}`——payload 恒为对象（前端按 request 种类无需特判非对象 payload）。
+  **当前实际只会发一种：`{"step": "writing_auth"}`**，在授权写命令发给设备的那一刻发一帧。
+  与 run_job 不同，run_auth 的 progress 是**收窄映射而不是透传**：bridge 走的是 core 的
+  `FlashMode::Authorize`（单设备授权，见 §run_auth 的 core 入口），core 那侧发的是 `FlashEvent`，
+  bridge 只把其中 `FlashMilestone::AuthWriteSent` 翻成 `writing_auth`，其余一律**不出帧**：
+  - `AuthReadComplete` / `AuthConflict` **携带明文 uuid + authkey**，绝不上线路（bridge 侧拦截，
+    不依赖前端的 SECURE_SILENT）；
+  - `AuthReadEmpty` / `AuthWriteSkipped` 是结果而不是步骤，由终态 `job_result` 表达；
+  - `JobSummary` / `Phase` / `Percent` / `Warning` / `Done` 与授权无关（`Done` 还带失败文案，
+    bridge 自己有 `job_result`）。
+  历史口径（B4~B18）是 `reading_mac` / `reading_auth` / `writing_auth` / `verifying` 四选一，
+  来自 core 的 `BatchAuthStep`。那条路已废弃——**`reading_mac` 从此不会再出现**，
+  前端保留对旧值的兼容分支无害，但不要再依赖它们出现。
 
 ### job_result（终态，恰好一帧）
 
@@ -285,10 +356,10 @@ Bridge 前端请保持一致：角色只用于 hover 提示帮用户判断，**�
 | `port_busy` | 串口已被串口监视器会话 / 他人的烧后交接窗口持有（仲裁拒绝，立即返回） |
 | `execution_busy` | 已有危险操作在途（含正在等用户确认），全局单一执行权拒绝，立即返回、不排队（B7，见 §单一执行权） |
 | `cancelled` | cancel 帧 / 连接断开 / core 返回 FlashError::Cancelled；也包括「确认窗口内取消」（此时设备完全没被碰过） |
-| `cancelled_after_write` | **仅 run_auth**：授权写命令**已经发给设备**之后才取消（core 返回 `CancelledAfterWrite`）——授权码可能已经写进去了，见 §取消后的设备状态。message 只带设备 MAC，**永不带 uuid** |
-| `bad_request` | base64 解码失败 / mode 不支持 / uuid·auth_key 为空缺失 / 同连接 request_id 重复在途 / **帧无法解码（含 run_job 缺 `baud_rate`、未知 `type`），见 §不可解析的请求帧** |
+| `cancelled_after_write` | **仅 run_auth**：授权写命令**已经发给设备**之后才取消（bridge 以 core 的 `FlashMilestone::AuthWriteSent` 为分界，该里程碑在命令发出**之前**就发，宁可早不可晚）——授权码可能已经写进去了，见 §取消后的设备状态。message 只带**串口名**（这条路不读 MAC），**永不带 uuid** |
+| `bad_request` | base64 解码失败 / mode 不支持 / **uuid·auth_key 为空缺失或长度不合法（uuid≠16且≠20 字符、auth_key≠32 字符，见 §run_auth）** / 同连接 request_id 重复在途 / **帧无法解码（含 run_job 缺 `baud_rate`、未知 `type`），见 §不可解析的请求帧**。共同点：**设备完全没被碰过**，前端文案不得暗示「可能已写入」 |
 | `flash_failed` | run_job 执行层其余错误（message=FlashError 文本） |
-| `device_no_response` | **仅 run_auth**：复位后整个探测窗口内设备**一个字节都没回**（core 判定，不是靠解析文案）。此时授权**一步都没做**，设备状态未被触碰；典型成因是刚烧完固件的首次冷启动比热复位慢得多，文案口径是「设备可能还在启动，稍后重试」，**不要**说成「授权失败/状态未知」 |
+| `device_no_response` | **仅 run_auth**：复位后整个探测窗口内设备**一个字节都没回**（core 判定，不是靠解析文案）。此时授权**一步都没做**，设备状态未被触碰。注意 bridge 在进授权槽位前已先做过一轮**被动自然启动等待**（不复位，见 §run_auth 的自然启动等待），所以拿到这个码时「首启慢」已经被等过了，文案口径是「再多等几秒没用，请断电重上电后重试」，**不要**说成「稍等几秒重试」，也**不要**说成「授权失败/状态未知」 |
 | `auth_failed` | run_auth 执行层其余错误 |
 | `user_rejected` | 危险操作的人工确认被拒绝 / 超时未答 / 确认通道被丢弃（B7） |
 | `internal` | 执行线程 join 失败（panic 等）；或无系统熵可用、无法签发授权令牌 |
@@ -422,7 +493,7 @@ zenity 是首选（它能把焦点放在**拒绝**那颗按钮上：`--default-c
 非零退出、把每次危险操作变成硬拒绝；**转义才是保证**，flag 只是可有可无的双保险。
 
 日志与审计**永不打印完整 token**（只打前 6 字符 + 长度），也**永不打印授权文件内容**；
-`uuid` / `auth_key` 一律不入日志——包括出错时的 `message`（`cancelled_after_write` 只带 MAC），
+`uuid` / `auth_key` 一律不入日志——包括出错时的 `message`（`cancelled_after_write` 只带串口名），
 也包括 `{:?}`：`WireAuth` / `AuthJobSpec` / `ClientMessage` 的 `Debug` 都是手写的，
 凭证渲染成 `<redacted len=N>`、固件渲染成 `<base64 len=N>`，这是编译期保证而非评审承诺。
 
@@ -434,10 +505,10 @@ zenity 是首选（它能把焦点放在**拒绝**那颗按钮上：`--default-c
 | --- | --- | --- |
 | `user_rejected` | **完全没碰设备**（拒绝 / 超时 / 通道丢弃都在弹窗阶段） | 「未执行」 |
 | `cancelled`（确认窗口内取消） | **完全没碰设备**（串口都没占） | 「已取消，设备未改动」 |
-| `port_busy` / `execution_busy` / `bad_request` | **完全没碰设备**（都在飞行前被拒） | 「未执行」 |
+| `port_busy` / `execution_busy` / `bad_request` | **完全没碰设备**（都在飞行前被拒；含**凭证为空/缺失/长度不合法**，那道校验在占串口和弹确认框之前就跑了） | 「未执行」 |
 | `cancelled`（烧录途中取消） | **可能留下半个镜像**：已写的扇区不会回滚，板子可能起不来 | 「已取消，固件可能不完整，建议重烧」 |
 | `cancelled_after_write` | **授权码可能已经写进设备**（KV 可覆盖；**OTP 是永久的**） | 「已取消，但授权码可能已被消耗」——**禁止**说「未写入」 |
-| `device_no_response` | **完全没碰设备**（复位后设备一直没应答，授权一步没走） | 「设备没有响应，可能仍在首次启动（刚烧完固件的首启较慢），请稍后重试」 |
+| `device_no_response` | **完全没碰设备**（复位后设备一直没应答，授权一步没走） | 「设备一直没有响应。首启慢已经等过了，再多等几秒也没用：请给板子断电重上电后重试；若仍无响应，确认烧进去的固件能正常启动、且这个串口是设备的调试口」 |
 | `flash_failed` / `auth_failed`（操作途中失败） | 可能留下部分状态（取决于失败在哪一步） | 「失败，设备状态未知，建议重试并检查」 |
 
 - **`cancelled_after_write` 是唯一表示「凭证可能已被消耗」的码。** 拿到它的调用方
@@ -545,7 +616,7 @@ revoke_all grants=<n>
 ## 与《071 技术方案》样例的差异点（联调对账用）
 
 1. `run_job.job.mode` 样例为 `"write"` —— 实现接受 `"write"`（默认）并映射 core `FlashMode::Flash`；`erase`/`read` 未实现（后续切片）。
-2. progress payload 样例 `{"phase","percent","log"}` 为示意 —— 实际为 FlashEvent / BatchAuthStep 原样序列化（见上）。
+2. progress payload 样例 `{"phase","percent","log"}` 为示意 —— run_job 为 FlashEvent 原样序列化；run_auth 为 `{"step":...}` 收窄映射（见上）。
 3. `check_port_result.reason` 样例只出现 `occupied_by_other_process` —— 实现另有 `occupied_by_bridge_job`（bridge 自持）；不存在的串口暂也归 `occupied_by_other_process`。
 4. `cancel` 样例未说明作用域 —— 实现为连接内命名空间（跨连接不可 cancel）。
 5. run_auth 样例无存储位字段 —— 实现默认 Kv + Overwrite，OTP 需扩展 wire 字段。
@@ -562,3 +633,14 @@ revoke_all grants=<n>
 9. `cancel` 语义比样例多覆盖一段：**确认窗口内也能取消**（B8，见 §cancel）；
    run_auth 另新增 `cancelled_after_write` 一个 error_code，用来把「干净取消」和
    「写命令已发出、授权码可能已消耗」在结构上分开（前端文案依据见 §取消后的设备状态）。
+10. **run_auth 不做「出厂默认 MAC」保护——这是明确裁决，不是遗漏。** GUI 的批量流水线
+    (`run_batch_auth_slot`) 会先读 MAC，若读到出厂默认 MAC 就拒绝授权（防止把授权码浪费在
+    未校准的板子上）。CoBuilder 单设备路径**不补**这道保护：
+    ① 本路径的参考实现 `tyutool-cli authorize`（同一个 `run_authorize`）本身就没有这道检查，
+    两者同构；
+    ② 补它的前提是**读 MAC**，而现场固件恰恰不支持——2026-07-31 真机：shell 625 ms 就绪、
+    固件探测为 Old，`read_mac` 三次重试全失败。把它补回去等于把刚拆掉的硬阻塞重新装上
+    （那正是 `Failed to read MAC address` 的成因，见 §run_auth 的 core 入口）；
+    ③ 它防的是「给未校准板子浪费授权码」，而 CoBuilder 的授权码是后端按 pid 现场分配的，
+    浪费面比批量产线小得多。
+    **若将来出现产线场景需要这道保护，正确做法是走 batch 路径，而不是给单设备路径加读 MAC。**

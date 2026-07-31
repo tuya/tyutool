@@ -94,6 +94,7 @@ describe("dynamic key families", () => {
       "write_complete",
       "rebooted",
       "auth_write_skipped",
+      "auth_write_sent",
     ];
     for (const m of milestones) {
       expect(i18n.global.te(`flash.log.milestone.${m}`, "en")).toBe(true);

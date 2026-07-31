@@ -470,7 +470,8 @@
         "erase_complete": "Erase complete.",
         "write_complete": "Write complete.",
         "rebooted": "Reboot command sent.",
-        "auth_write_skipped": "Device already has matching credentials — write skipped."
+        "auth_write_skipped": "Device already has matching credentials — write skipped.",
+        "auth_write_sent": "Authorization write sent to the device."
       }
     }
   },

@@ -119,6 +119,11 @@ pub enum FlashMilestone {
     },
     /// Write skipped because the device already holds the exact credentials requested.
     AuthWriteSkipped,
+    /// The auth-write command has been handed to the device. Nothing is known yet
+    /// about whether it took effect — but from here on a cancellation can no longer
+    /// claim the credential was left untouched, so callers that account for
+    /// authorization codes must treat it as possibly spent.
+    AuthWriteSent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
