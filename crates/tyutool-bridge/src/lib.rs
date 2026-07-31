@@ -29,6 +29,7 @@
 //! included), and every one of them leaves exactly one audit line. Everything
 //! low-risk (hello / ports / serial monitor) stays open so "插线即就绪" survives.
 
+pub mod lang;
 pub mod status;
 
 use std::collections::{HashMap, HashSet};
@@ -317,7 +318,7 @@ pub enum DangerousOp {
 
 impl DangerousOp {
     /// Stable label for logs and audit lines.
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             DangerousOp::Flash => "flash",
             DangerousOp::Authorize => "authorize",

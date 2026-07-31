@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
+use tyutool_bridge::lang::{detect_lang, Lang};
 use tyutool_bridge::status::{self, StatsSnapshot};
 use tyutool_bridge::{
     bind, AuthPrompt, Authority, ConfirmDecision, ConfirmRequest, ConfirmResponder, DangerousOp,
@@ -54,6 +55,15 @@ const LOG_FILE_PREFIX: &str = "tyutool-bridge-";
 const UNATTENDED_FLAG: &str = "--allow-unattended-writes";
 
 fn main() {
+    // Read once, here, and passed down by value from now on: the tray shell has
+    // no settings UI to change it from, and re-reading it per string would only
+    // let one dialog disagree with the next.
+    //
+    // `sys_locale` rather than `LANG`: the shipped bridge is started by a
+    // LaunchAgent, and that process inherits no shell environment at all — the
+    // env-var route would be dead on the one path that matters most.
+    let lang = detect_lang(&sys_locale::get_locale().unwrap_or_default());
+
     // Hand-rolled, order-independent, and it *rejects* what it does not know:
     // a typo'd `--allow-unattended-write` must not look like it worked.
     let mut headless = false;
@@ -65,11 +75,11 @@ fn main() {
             "--help" | "-h" => {
                 // Before any logging setup: `--help` must not create a session
                 // log file just to print a paragraph.
-                print!("{}", help_text());
+                print!("{}", help_text(lang));
                 return;
             }
             other => {
-                eprintln!("tyutool-bridge: 无法识别的参数 {other:?}；用 --help 看可用选项。");
+                eprintln!("{}", unknown_argument_line(other, lang));
                 std::process::exit(2);
             }
         }
@@ -82,9 +92,19 @@ fn main() {
 
     let choice = prompt_choice(headless, unattended);
     if headless {
-        run_headless(choice);
+        run_headless(choice, lang);
     } else {
-        run_tray(choice);
+        run_tray(choice, lang);
+    }
+}
+
+/// The one line an unknown flag gets, before anything else has been set up.
+fn unknown_argument_line(argument: &str, lang: Lang) -> String {
+    match lang {
+        Lang::Zh => format!("tyutool-bridge: 无法识别的参数 {argument:?}；用 --help 看可用选项。"),
+        Lang::En => format!(
+            "tyutool-bridge: unrecognized argument {argument:?}; run --help for the available options."
+        ),
     }
 }
 
@@ -95,26 +115,54 @@ fn main() {
 /// The flag spellings are literals here (`concat!` cannot take a `const`); the
 /// `the_help_text_documents_both_flags_and_the_risk` test asserts this text
 /// contains [`UNATTENDED_FLAG`], so the two cannot drift apart unnoticed.
-fn help_text() -> &'static str {
-    concat!(
-        "Cobuilder Bridge —— 常驻本机的烧录 helper，监听 ws://127.0.0.1:18730\n",
-        "\n",
-        "用法: tyutool-bridge [选项]\n",
-        "\n",
-        "选项:\n",
-        "  --headless                  不建托盘图标，在前台跑服务（CI / 服务器 / ssh 会话）。\n",
-        "                              这种环境里没有人能看到确认框，所以默认拒绝所有危险\n",
-        "                              操作（烧录、写授权码），只读能力照常可用。\n",
-        "                              「默认拒绝」是无条件的：即使托盘模式下有人点过允许、\n",
-        "                              授权记录还存在本机，这里也一律不认，照样拒绝。\n",
-        "  --allow-unattended-writes   仅在 --headless 下有意义：关闭人工确认，危险操作一律\n",
-        "                              自动放行，每次放行都会写一条 warn 日志。等于交出 B7 的\n",
-        "                              「必须用户点一次」保证，只在这台机器的控制台本身可信、\n",
-        "                              且确实要无人值守烧录时才用。\n",
-        "  -h, --help                  打印本帮助并退出。\n",
-        "\n",
-        "不带 --headless 时：托盘常驻，每个危险操作弹一次系统确认框，默认按钮是「拒绝」。\n",
-    )
+fn help_text(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Zh => concat!(
+            "Cobuilder Bridge —— 常驻本机的烧录 helper，监听 ws://127.0.0.1:18730\n",
+            "\n",
+            "用法: tyutool-bridge [选项]\n",
+            "\n",
+            "选项:\n",
+            "  --headless                  不建托盘图标，在前台跑服务（CI / 服务器 / ssh 会话）。\n",
+            "                              这种环境里没有人能看到确认框，所以默认拒绝所有危险\n",
+            "                              操作（烧录、写授权码），只读能力照常可用。\n",
+            "                              「默认拒绝」是无条件的：即使托盘模式下有人点过允许、\n",
+            "                              授权记录还存在本机，这里也一律不认，照样拒绝。\n",
+            "  --allow-unattended-writes   仅在 --headless 下有意义：关闭人工确认，危险操作一律\n",
+            "                              自动放行，每次放行都会写一条 warn 日志。等于交出 B7 的\n",
+            "                              「必须用户点一次」保证，只在这台机器的控制台本身可信、\n",
+            "                              且确实要无人值守烧录时才用。\n",
+            "  -h, --help                  打印本帮助并退出。\n",
+            "\n",
+            "不带 --headless 时：托盘常驻，每个危险操作弹一次系统确认框，默认按钮是「拒绝」。\n",
+        ),
+        Lang::En => concat!(
+            "Cobuilder Bridge — resident local flash helper, listening on ws://127.0.0.1:18730\n",
+            "\n",
+            "Usage: tyutool-bridge [options]\n",
+            "\n",
+            "Options:\n",
+            "  --headless                  No tray icon; serve in the foreground (CI, a server,\n",
+            "                              an ssh session). Nobody can see a confirmation dialog\n",
+            "                              in such an environment, so every dangerous operation\n",
+            "                              (flashing, writing an authorization code) is refused\n",
+            "                              by default; read-only features keep working.\n",
+            "                              That refusal is unconditional: even if somebody once\n",
+            "                              clicked Allow in tray mode and the grant is still on\n",
+            "                              this machine, stored grants are never honoured here.\n",
+            "  --allow-unattended-writes   Only meaningful together with --headless.\n",
+            "                              It turns the human confirmation off, so every\n",
+            "                              dangerous operation is approved automatically,\n",
+            "                              each with a warn log line. That gives up the\n",
+            "                              \"the user must click once\" guarantee — use it\n",
+            "                              only if this machine's own console is trusted\n",
+            "                              and you really do need unattended flashing.\n",
+            "  -h, --help                  Print this help and exit.\n",
+            "\n",
+            "Without --headless: the tray stays resident and every dangerous operation raises\n",
+            "one system confirmation dialog, whose default button is the refusing one.\n",
+        ),
+    }
 }
 
 /// Who answers a confirmation request in a given run mode.
@@ -315,11 +363,39 @@ fn open_token_store() -> Arc<dyn TokenStore> {
 
 // ── Confirmation dialog ──────────────────────────────────────────────────────
 
-/// Title of the confirmation dialog and of the notifications.
-const CONFIRM_TITLE: &str = "Cobuilder Bridge 需要你的确认";
+/// Title of the confirmation dialog.
+fn confirm_title(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Zh => "Cobuilder Bridge 需要你的确认",
+        Lang::En => "Cobuilder Bridge needs your confirmation",
+    }
+}
+
 /// The one label that authorizes a write, and the one that does not.
-const APPROVE_LABEL: &str = "允许";
-const REJECT_LABEL: &str = "拒绝";
+///
+/// A pair, resolved once per dialog, rather than two lookups: on macOS the same
+/// labels are both interpolated into the AppleScript *and* compared against what
+/// osascript prints back, so if those two ever read from different [`Lang`]
+/// values an English user's press of "Allow" would parse as a refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DialogLabels {
+    approve: &'static str,
+    reject: &'static str,
+}
+
+fn dialog_labels(lang: Lang) -> DialogLabels {
+    match lang {
+        Lang::Zh => DialogLabels {
+            approve: "允许",
+            reject: "拒绝",
+        },
+        Lang::En => DialogLabels {
+            approve: "Allow",
+            reject: "Deny",
+        },
+    }
+}
+
 /// Seconds the dialog waits before giving up by itself, matching the bridge's own
 /// confirmation timeout. Both paths end in the same `user_rejected`, so the race
 /// between them is harmless.
@@ -330,22 +406,30 @@ const DIALOG_TIMEOUT_SECS: u32 = 60;
 ///
 /// Without it injected, the library refuses every dangerous operation
 /// (`DenyPrompt`), so the shipped helper could not flash at all.
-struct SystemPrompt;
+struct SystemPrompt {
+    /// The language the dialog is written in, snapshotted at startup.
+    lang: Lang,
+}
 
 impl AuthPrompt for SystemPrompt {
     /// Returns immediately, as the trait requires: the dialog blocks a throwaway
     /// thread, never the async worker that is holding the execution right (and
     /// certainly not the tray's UI thread).
     fn request(&self, request: ConfirmRequest, respond: ConfirmResponder) {
+        // Developer diagnostics, so the op is its stable `as_str()` label rather
+        // than the dialog's wording (logging contract: `log::*` is never
+        // localized) — same spelling as the audit line and `DenyPrompt` /
+        // `UnattendedPrompt` below, so a grep for `flash`/`authorize` matches all.
         let what = format!(
             "{} on {} from {}",
-            op_label(request.op),
+            request.op.as_str(),
             request.port,
             request.origin
         );
+        let lang = self.lang;
         let spawned = std::thread::Builder::new()
             .name("bridge-confirm".to_string())
-            .spawn(move || respond(ask_user(&request)));
+            .spawn(move || respond(ask_user(&request, lang)));
         if let Err(e) = spawned {
             // `respond` went down with the closure, and the library reads a
             // dropped responder as "no consent given" — exactly the refusal this
@@ -407,19 +491,21 @@ impl AuthPrompt for UnattendedPrompt {
 }
 
 /// The prompt that goes into `with_auth_prompt` for this run.
-fn build_prompt(choice: PromptChoice) -> Arc<dyn AuthPrompt> {
+fn build_prompt(choice: PromptChoice, lang: Lang) -> Arc<dyn AuthPrompt> {
     match choice {
-        PromptChoice::SystemDialog => Arc::new(SystemPrompt),
+        PromptChoice::SystemDialog => Arc::new(SystemPrompt { lang }),
         PromptChoice::DenyAll => Arc::new(DenyPrompt),
         PromptChoice::UnattendedAutoApprove => Arc::new(UnattendedPrompt),
     }
 }
 
 /// What the user is being asked to authorize, in the wording the UI uses.
-fn op_label(op: DangerousOp) -> &'static str {
-    match op {
-        DangerousOp::Flash => "烧录固件",
-        DangerousOp::Authorize => "写入授权码",
+fn op_label(op: DangerousOp, lang: Lang) -> &'static str {
+    match (op, lang) {
+        (DangerousOp::Flash, Lang::Zh) => "烧录固件",
+        (DangerousOp::Flash, Lang::En) => "Flash firmware",
+        (DangerousOp::Authorize, Lang::Zh) => "写入授权码",
+        (DangerousOp::Authorize, Lang::En) => "Write authorization code",
     }
 }
 
@@ -427,25 +513,53 @@ fn op_label(op: DangerousOp) -> &'static str {
 ///
 /// Carries no credential — [`ConfirmRequest`] has no `uuid` / `auth_key` field by
 /// construction, and it must stay that way.
-fn confirm_message(request: &ConfirmRequest) -> String {
-    let mut text = format!(
-        "来源：{}\n操作：{}\n芯片：{}\n串口：{}\n",
+fn confirm_message(request: &ConfirmRequest, lang: Lang) -> String {
+    let labels = dialog_labels(lang);
+    let (origin, op, chip, port) = (
         or_dash(&request.origin),
-        op_label(request.op),
+        op_label(request.op, lang),
         or_dash(&request.chip_id),
         or_dash(&request.port),
     );
+    let mut text = match lang {
+        Lang::Zh => format!("来源：{origin}\n操作：{op}\n芯片：{chip}\n串口：{port}\n"),
+        Lang::En => format!("Origin: {origin}\nOperation: {op}\nChip: {chip}\nPort: {port}\n"),
+    };
     if request.op == DangerousOp::Flash {
-        text.push_str(&format!(
-            "固件大小：{}\n",
-            firmware_size_text(request.firmware_bytes)
-        ));
+        let size = firmware_size_text(request.firmware_bytes, lang);
+        text.push_str(&match lang {
+            Lang::Zh => format!("固件大小：{size}\n"),
+            Lang::En => format!("Firmware size: {size}\n"),
+        });
     }
-    text.push_str("\n点「允许」即向该设备写入数据。");
+    // The button labels are interpolated rather than spelled out again: the text
+    // must name the button the user is actually looking at.
+    text.push_str(&match lang {
+        Lang::Zh => format!("\n点「{}」即向该设备写入数据。", labels.approve),
+        Lang::En => format!(
+            "\nChoosing '{}' writes data to this device.",
+            labels.approve
+        ),
+    });
     if request.op == DangerousOp::Authorize {
-        text.push_str("授权码写入会覆盖原有的值，且无法撤销。");
+        text.push_str(match lang {
+            Lang::Zh => "授权码写入会覆盖原有的值，且无法撤销。",
+            Lang::En => {
+                " Writing an authorization code overwrites the existing value, and \
+                 cannot be undone."
+            }
+        });
     }
-    text.push_str("\n如果这不是你本人刚刚在页面上发起的操作，请点「拒绝」。");
+    text.push_str(&match lang {
+        Lang::Zh => format!(
+            "\n如果这不是你本人刚刚在页面上发起的操作，请点「{}」。",
+            labels.reject
+        ),
+        Lang::En => format!(
+            "\nIf you did not just start this yourself from the page, choose '{}'.",
+            labels.reject
+        ),
+    });
     text
 }
 
@@ -460,39 +574,85 @@ fn or_dash(value: &str) -> &str {
 
 /// Firmware size for humans. `None` = the payload's base64 was malformed, so the
 /// job will fail later anyway; the dialog says so rather than inventing a number.
-fn firmware_size_text(bytes: Option<u64>) -> String {
+fn firmware_size_text(bytes: Option<u64>, lang: Lang) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = 1024 * KIB;
-    match bytes {
-        None => "未知（固件数据异常）".to_string(),
-        Some(n) if n < KIB => format!("{n} 字节"),
-        Some(n) if n < MIB => format!("{:.1} KiB（{n} 字节）", n as f64 / KIB as f64),
-        Some(n) => format!("{:.1} MiB（{n} 字节）", n as f64 / MIB as f64),
+    let Some(n) = bytes else {
+        return match lang {
+            Lang::Zh => "未知（固件数据异常）".to_string(),
+            Lang::En => "unknown (malformed firmware data)".to_string(),
+        };
+    };
+    if n < KIB {
+        return match lang {
+            Lang::Zh => format!("{n} 字节"),
+            Lang::En => format!("{n} bytes"),
+        };
+    }
+    let (value, unit) = if n < MIB {
+        (n as f64 / KIB as f64, "KiB")
+    } else {
+        (n as f64 / MIB as f64, "MiB")
+    };
+    match lang {
+        Lang::Zh => format!("{value:.1} {unit}（{n} 字节）"),
+        Lang::En => format!("{value:.1} {unit} ({n} bytes)"),
     }
 }
 
 /// Ask the user, blocking until they answer (or the dialog gives up).
 ///
-/// Everything that is not an explicit press of [`APPROVE_LABEL`] — a refusal, a
+/// Everything that is not an explicit press of the approve button
+/// ([`DialogLabels::approve`]) — a refusal, a
 /// cancel, the dialog giving up, a missing dialog tool, unparsable output — maps
 /// to [`ConfirmDecision::Reject`]: silence never opens the door.
+/// The AppleScript for one confirmation dialog, in the labels it was handed.
+///
+/// Split out of [`ask_user`] together with [`macos_reply_approves`] so the two
+/// halves of the label coupling can be tested against each other: they take the
+/// *same* [`DialogLabels`] value, and the test round-trips the button label out
+/// of the generated script and back through the parser.
+///
+/// `default button` is the *refusing* one on purpose: a stray Return keypress
+/// must never authorize a flash.
 #[cfg(target_os = "macos")]
-fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
+fn macos_dialog_script(request: &ConfirmRequest, labels: &DialogLabels, lang: Lang) -> String {
+    format!(
+        "display dialog \"{message}\" with title \"{title}\" \
+         buttons {{\"{reject}\", \"{approve}\"}} \
+         default button \"{reject}\" with icon caution \
+         giving up after {DIALOG_TIMEOUT_SECS}",
+        message = applescript_escape(&confirm_message(request, lang)),
+        title = applescript_escape(confirm_title(lang)),
+        reject = labels.reject,
+        approve = labels.approve,
+    )
+}
+
+/// Did osascript report a press of the approving button?
+///
+/// `display dialog` prints one record line, e.g.
+/// `button returned:允许, gave up:false`. A refusal, an Escape (osascript exits
+/// non-zero) and the giving-up path all fail this check.
+#[cfg(target_os = "macos")]
+fn macos_reply_approves(stdout: &str, labels: &DialogLabels) -> bool {
+    let pressed_approve = stdout.lines().next().is_some_and(|line| {
+        line.split(", ")
+            .any(|field| field.trim() == format!("button returned:{}", labels.approve))
+    });
+    pressed_approve && !stdout.contains("gave up:true")
+}
+
+#[cfg(target_os = "macos")]
+fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
     // Interim path until the helper ships as a signed `.app` bundle: an unbundled
     // binary has no bundle identity, so a native `NSAlert` / `UNUserNotification`
     // is not available to it, while `osascript` (which is itself a bundled app)
     // works today. The packaging slice replaces this with a real NSAlert.
     //
-    // `default button` is the *refusing* one on purpose: a stray Return keypress
-    // must never authorize a flash.
-    let script = format!(
-        "display dialog \"{message}\" with title \"{title}\" \
-         buttons {{\"{REJECT_LABEL}\", \"{APPROVE_LABEL}\"}} \
-         default button \"{REJECT_LABEL}\" with icon caution \
-         giving up after {DIALOG_TIMEOUT_SECS}",
-        message = applescript_escape(&confirm_message(request)),
-        title = applescript_escape(CONFIRM_TITLE),
-    );
+    // One snapshot for both the script and the reply parsing: see [`DialogLabels`].
+    let labels = dialog_labels(lang);
+    let script = macos_dialog_script(request, &labels, lang);
 
     let output = match std::process::Command::new("osascript")
         .arg("-e")
@@ -508,20 +668,13 @@ fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
         }
     };
 
-    // `display dialog` prints one record line, e.g.
-    // `button returned:允许, gave up:false`. A refusal, an Escape (osascript exits
-    // non-zero) and the giving-up path all fail this check.
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let pressed_approve = stdout.lines().next().is_some_and(|line| {
-        line.split(", ")
-            .any(|field| field.trim() == format!("button returned:{APPROVE_LABEL}"))
-    });
-    let approved = output.status.success() && pressed_approve && !stdout.contains("gave up:true");
+    let approved = output.status.success() && macos_reply_approves(&stdout, &labels);
     decision(approved, &stdout)
 }
 
 #[cfg(target_os = "windows")]
-fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
+fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
     // Untested on the machine this was written on (compile-only), so it is kept
     // to one obviously correct PowerShell line. WPF's MessageBox ships with every
     // supported Windows and needs no extra runtime.
@@ -534,8 +687,8 @@ fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
     let script = format!(
         "Add-Type -AssemblyName PresentationFramework; \
          [System.Windows.MessageBox]::Show({message},{title},'YesNo','Exclamation','No')",
-        message = powershell_string(&confirm_message(request)),
-        title = powershell_string(CONFIRM_TITLE),
+        message = powershell_string(&confirm_message(request, lang)),
+        title = powershell_string(confirm_title(lang)),
     );
 
     let output = match std::process::Command::new("powershell")
@@ -584,17 +737,31 @@ enum LinuxDialogTool {
 /// attacked should see the literal `<b>` in their dialog rather than text that was
 /// quietly rewritten behind their back.
 #[cfg(any(all(unix, not(target_os = "macos")), test))]
-fn linux_dialog_text(request: &ConfirmRequest, tool: LinuxDialogTool) -> String {
-    let mut text = escape_markup(&confirm_message(request));
+fn linux_dialog_text(request: &ConfirmRequest, tool: LinuxDialogTool, lang: Lang) -> String {
+    let mut text = escape_markup(&confirm_message(request, lang));
     if tool == LinuxDialogTool::KDialog {
         // Only on this branch: zenity gets `--default-cancel`, and a warning that
         // is shown always is a warning users learn to skip.
-        text.push_str(
-            "\n\n注意：这个对话框无法把「否」设为默认按钮，直接按回车有可能就等于同意。\
-             不确定的话请用鼠标点「否」。",
-        );
+        text.push_str(kdialog_default_button_warning(lang));
     }
     text
+}
+
+/// kdialog's `--yesno` cannot say which button is focused, so its text has to.
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
+fn kdialog_default_button_warning(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Zh => {
+            "\n\n注意：这个对话框无法把「否」设为默认按钮，直接按回车有可能就等于同意。\
+             不确定的话请用鼠标点「否」。"
+        }
+        // 'No' rather than the localized reject label: kdialog's --yesno takes
+        // the system's own button wording, which this binary does not set.
+        Lang::En => {
+            "\n\nNote: this dialog cannot make 'No' its default button, so pressing Return \
+             may count as agreeing. If in doubt, click 'No' with the mouse."
+        }
+    }
 }
 
 /// Escape `text` so a markup-rendering dialog shows it verbatim.
@@ -619,7 +786,7 @@ fn escape_markup(text: &str) -> String {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
+fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
     // Compile-only on the machine this was written on, like the Windows arm.
     // Arguments go to the program as argv (no shell in the loop), so there is no
     // quoting to do — but both programs render markup, hence the escaping in
@@ -629,17 +796,18 @@ fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
     // every version still in the field, and an unknown flag makes zenity exit
     // non-zero, which would turn every dangerous operation into a hard refusal.
     // The escaping is the guarantee; the flag would only have been belt-and-braces.
-    let zenity_text = linux_dialog_text(request, LinuxDialogTool::Zenity);
+    let labels = dialog_labels(lang);
+    let zenity_text = linux_dialog_text(request, LinuxDialogTool::Zenity, lang);
 
     // zenity first: it is the only one of the two that can make the refusing
     // button the default, so a stray Return cannot authorize a write.
     let zenity = std::process::Command::new("zenity")
         .arg("--question")
-        .args(["--title", CONFIRM_TITLE])
+        .args(["--title", confirm_title(lang)])
         .arg("--text")
         .arg(&zenity_text)
-        .args(["--ok-label", APPROVE_LABEL])
-        .args(["--cancel-label", REJECT_LABEL])
+        .args(["--ok-label", labels.approve])
+        .args(["--cancel-label", labels.reject])
         .arg("--default-cancel")
         .arg(format!("--timeout={DIALOG_TIMEOUT_SECS}"))
         .status();
@@ -656,9 +824,9 @@ fn ask_user(request: &ConfirmRequest) -> ConfirmDecision {
     // KDE fallback. `--yesno` has no way to say which button is focused, hence
     // second place — and hence the extra warning line in its text.
     let kdialog = std::process::Command::new("kdialog")
-        .args(["--title", CONFIRM_TITLE])
+        .args(["--title", confirm_title(lang)])
         .arg("--yesno")
-        .arg(linux_dialog_text(request, LinuxDialogTool::KDialog))
+        .arg(linux_dialog_text(request, LinuxDialogTool::KDialog, lang))
         .status();
     match kdialog {
         Ok(status) => return decision(status.success(), &format!("kdialog exit {status}")),
@@ -807,33 +975,51 @@ fn show_notification(title: &str, body: &str) {
 
 // ── Headless mode ────────────────────────────────────────────────────────────
 
+/// What `--headless` prints to the console about its confirmation policy.
+///
+/// The operator has to be able to tell "it refused" from "it was never going to
+/// ask", so both branches name [`UNATTENDED_FLAG`] — one as the switch that is
+/// already on, the other as the switch that would turn writes on.
+fn headless_startup_line(choice: PromptChoice, lang: Lang) -> String {
+    match (choice, lang) {
+        (PromptChoice::UnattendedAutoApprove, Lang::Zh) => format!(
+            "tyutool-bridge: {UNATTENDED_FLAG} 已开启——烧录/写授权码将自动放行，不再询问用户。"
+        ),
+        (PromptChoice::UnattendedAutoApprove, Lang::En) => format!(
+            "tyutool-bridge: {UNATTENDED_FLAG} is on — flashing and authorization writes are \
+             approved automatically, with no user confirmation."
+        ),
+        (_, Lang::Zh) => format!(
+            "tyutool-bridge: headless 模式默认拒绝烧录/写授权码（无人可确认）；\
+             需要无人值守烧录请加 {UNATTENDED_FLAG}。"
+        ),
+        (_, Lang::En) => format!(
+            "tyutool-bridge: headless mode refuses flashing and authorization writes by default \
+             (there is nobody to confirm with); pass {UNATTENDED_FLAG} to allow unattended writes."
+        ),
+    }
+}
+
 /// Serve until killed. Exits non-zero when the port is taken: a supervisor or
 /// smoke script needs that signal, whereas the tray shell deliberately stays
 /// resident and shows the error in its status line instead.
-fn run_headless(choice: PromptChoice) {
+fn run_headless(choice: PromptChoice, lang: Lang) {
     // Stated once at startup, on both channels: the operator has to be able to
     // tell "it refused" from "it was never going to ask" without reading code.
+    // The log half is developer diagnostics and stays English (logging contract);
+    // only the console half, which the operator reads, follows the system
+    // language.
     match choice {
-        PromptChoice::UnattendedAutoApprove => {
-            log::warn!(
-                "bridge headless mode started with {UNATTENDED_FLAG}: every dangerous operation \
-                 will be approved automatically, with no human confirmation"
-            );
-            eprintln!(
-                "tyutool-bridge: {UNATTENDED_FLAG} 已开启——烧录/写授权码将自动放行，不再询问用户。"
-            );
-        }
-        _ => {
-            log::info!(
-                "bridge headless mode refuses dangerous operations (no user to confirm with); \
-                 pass {UNATTENDED_FLAG} to allow unattended writes"
-            );
-            eprintln!(
-                "tyutool-bridge: headless 模式默认拒绝烧录/写授权码（无人可确认）；\
-                 需要无人值守烧录请加 {UNATTENDED_FLAG}。"
-            );
-        }
+        PromptChoice::UnattendedAutoApprove => log::warn!(
+            "bridge headless mode started with {UNATTENDED_FLAG}: every dangerous operation \
+             will be approved automatically, with no human confirmation"
+        ),
+        _ => log::info!(
+            "bridge headless mode refuses dangerous operations (no user to confirm with); \
+             pass {UNATTENDED_FLAG} to allow unattended writes"
+        ),
     }
+    eprintln!("{}", headless_startup_line(choice, lang));
 
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
@@ -860,7 +1046,7 @@ fn run_headless(choice: PromptChoice) {
         // starting the tray shell once) is the revocation path in this mode.
         let server = server
             .with_token_store(open_token_store())
-            .with_auth_prompt(build_prompt(choice))
+            .with_auth_prompt(build_prompt(choice, lang))
             .with_grant_policy(grant_policy_for(choice));
         println!("tyutool-bridge listening on ws://127.0.0.1:{DEFAULT_PORT}");
         if let Err(e) = server.run().await {
@@ -888,7 +1074,7 @@ enum UserEvent {
     Menu(muda::MenuId),
 }
 
-fn run_tray(choice: PromptChoice) {
+fn run_tray(choice: PromptChoice, lang: Lang) {
     // macOS pins the whole menu-bar/NSApplication stack to the main thread, so
     // the event loop must be built here and the server pushed to a side thread
     // (not the other way round).
@@ -917,14 +1103,16 @@ fn run_tray(choice: PromptChoice) {
     let server_proxy = proxy.clone();
     let spawned = std::thread::Builder::new()
         .name("bridge-server".to_string())
-        .spawn(move || serve_in_background(server_proxy, choice));
+        .spawn(move || serve_in_background(server_proxy, choice, lang));
     if let Err(e) = spawned {
         log::error!("bridge server thread could not be started: {e}");
-        let _ = proxy.send_event(UserEvent::StartupFailed(format!("启动失败：{e}")));
+        let _ = proxy.send_event(UserEvent::StartupFailed(status::startup_failed_line(
+            e, lang,
+        )));
     }
 
     let mut tray: Option<TrayShell> = None;
-    let mut status_text = status::status_line(VERSION, &StatsSnapshot::default());
+    let mut status_text = status::status_line(VERSION, &StatsSnapshot::default(), lang);
     // `None` until the server thread reports in; clicking "撤销所有授权" before
     // then is a no-op, not a panic.
     let mut authority: Option<Authority> = None;
@@ -935,7 +1123,7 @@ fn run_tray(choice: PromptChoice) {
         match event {
             // tao guarantees this is the first event, and on macOS the status
             // item may only be created once the app is initialized.
-            Event::NewEvents(StartCause::Init) => match TrayShell::build(&status_text) {
+            Event::NewEvents(StartCause::Init) => match TrayShell::build(&status_text, lang) {
                 Ok(shell) => tray = Some(shell),
                 // No icon means no menu, and no menu means no way to quit: the
                 // process would keep serving from a UI loop that can never
@@ -965,7 +1153,7 @@ fn run_tray(choice: PromptChoice) {
                 }
             },
             Event::UserEvent(UserEvent::Stats(snapshot)) => {
-                status_text = status::status_line(VERSION, &snapshot);
+                status_text = status::status_line(VERSION, &snapshot, lang);
                 if let Some(shell) = &tray {
                     shell.set_status(&status_text);
                 }
@@ -978,7 +1166,7 @@ fn run_tray(choice: PromptChoice) {
                 // The status line alone only reaches a user who opens the menu,
                 // and a helper that never came up is precisely the case where
                 // nobody thinks to look there.
-                notify("Cobuilder Bridge 启动失败", &status_text);
+                notify(startup_failed_notification_title(lang), &status_text);
             }
             Event::UserEvent(UserEvent::AuthorityReady(handle)) => {
                 authority = Some(handle);
@@ -988,7 +1176,7 @@ fn run_tray(choice: PromptChoice) {
                     match shell.action_for(&id) {
                         Some(MenuAction::OpenCobuilder) => open_url(COBUILDER_URL),
                         Some(MenuAction::LatestVersion) => open_url(LATEST_VERSION_URL),
-                        Some(MenuAction::RevokeGrants) => revoke_all(authority.as_ref()),
+                        Some(MenuAction::RevokeGrants) => revoke_all(authority.as_ref(), lang),
                         Some(MenuAction::Quit) => *control_flow = ControlFlow::Exit,
                         None => {}
                     }
@@ -1006,12 +1194,14 @@ fn run_tray(choice: PromptChoice) {
 }
 
 /// Background runtime: bind, publish stats to the UI thread, serve forever.
-fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice) {
+fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice, lang: Lang) {
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(e) => {
             log::error!("bridge async runtime could not be created: {e}");
-            let _ = proxy.send_event(UserEvent::StartupFailed(format!("启动失败：{e}")));
+            let _ = proxy.send_event(UserEvent::StartupFailed(status::startup_failed_line(
+                e, lang,
+            )));
             return;
         }
     };
@@ -1023,7 +1213,7 @@ fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice) {
                 // Resident on failure (unlike --headless): the whole point of
                 // the tray is that the user finds out *why* nothing works.
                 let diagnosis = status::diagnose_bind_error(&e);
-                let line = status::startup_error_line(diagnosis, &e);
+                let line = status::startup_error_line(diagnosis, &e, lang);
                 // The status-line copy lands in the log too, so a bug report
                 // shows exactly what the user was reading in the tray.
                 log::error!(
@@ -1036,7 +1226,7 @@ fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice) {
         };
         let server = server
             .with_token_store(open_token_store())
-            .with_auth_prompt(build_prompt(choice))
+            .with_auth_prompt(build_prompt(choice, lang))
             // Always `Honour` in tray mode (a user is present), stated explicitly
             // so the prompt and the grant policy stay one decision.
             .with_grant_policy(grant_policy_for(choice));
@@ -1066,7 +1256,9 @@ fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice) {
 
         if let Err(e) = server.run_with_stats(stats_tx).await {
             log::error!("bridge server stopped: {e:#}");
-            let _ = proxy.send_event(UserEvent::StartupFailed(format!("服务已停止：{e}")));
+            let _ = proxy.send_event(UserEvent::StartupFailed(status::server_stopped_line(
+                e, lang,
+            )));
         }
     });
 }
@@ -1076,7 +1268,7 @@ fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice) {
 /// Runs on the UI thread: `revoke_all` neither awaits nor blocks on the network
 /// (it clears a small local file and queues one frame per live connection), so
 /// the menu does not need a worker thread for it.
-fn revoke_all(authority: Option<&Authority>) {
+fn revoke_all(authority: Option<&Authority>, lang: Lang) {
     let Some(authority) = authority else {
         // Clicked in the window between the tray appearing and the server
         // reporting in — or after a startup failure, when there is nothing to
@@ -1088,7 +1280,57 @@ fn revoke_all(authority: Option<&Authority>) {
     log::info!("bridge revoked all authorizations from the tray menu");
     // Confirmation the user can see: the menu item gives no feedback of its own,
     // and a security control that looks like it did nothing invites a second click.
-    notify("Cobuilder Bridge", "已撤销所有授权，下次烧录会重新询问你。");
+    notify("Cobuilder Bridge", revoked_notification_body(lang));
+}
+
+/// The tray menu's four command items, in menu order.
+///
+/// A struct rather than an array: the items are built and matched by name, and a
+/// positional list is exactly how a translation ends up wiring "Quit" to the
+/// revocation item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MenuLabels {
+    open_cobuilder: &'static str,
+    latest_version: &'static str,
+    revoke_grants: &'static str,
+    quit: &'static str,
+}
+
+fn menu_labels(lang: Lang) -> MenuLabels {
+    match lang {
+        Lang::Zh => MenuLabels {
+            open_cobuilder: "打开 Cobuilder",
+            latest_version: "获取最新版本",
+            revoke_grants: "撤销所有授权",
+            quit: "退出",
+        },
+        Lang::En => MenuLabels {
+            open_cobuilder: "Open Cobuilder",
+            latest_version: "Get the latest version",
+            revoke_grants: "Revoke all authorizations",
+            quit: "Quit",
+        },
+    }
+}
+
+/// Title of the notification fired when the bridge could not start.
+///
+/// The status line alone only reaches a user who opens the menu, and a helper
+/// that never came up is precisely the case where nobody thinks to look there.
+fn startup_failed_notification_title(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Zh => "Cobuilder Bridge 启动失败",
+        Lang::En => "Cobuilder Bridge failed to start",
+    }
+}
+
+/// The revocation notification's body — the only feedback the menu item gives,
+/// so it says both what happened and what changes next time.
+fn revoked_notification_body(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Zh => "已撤销所有授权，下次烧录会重新询问你。",
+        Lang::En => "All authorizations revoked; the next flash will ask you again.",
+    }
 }
 
 /// What a tray menu item does. Kept separate from the muda ids so the event
@@ -1115,13 +1357,14 @@ struct TrayShell {
 }
 
 impl TrayShell {
-    fn build(status_text: &str) -> anyhow::Result<Self> {
+    fn build(status_text: &str, lang: Lang) -> anyhow::Result<Self> {
+        let labels = menu_labels(lang);
         // Disabled: a status readout, not a command.
         let status_item = muda::MenuItem::new(status_text, false, None);
-        let open_cobuilder = muda::MenuItem::new("打开 Cobuilder", true, None);
-        let latest_version = muda::MenuItem::new("获取最新版本", true, None);
-        let revoke_grants = muda::MenuItem::new("撤销所有授权", true, None);
-        let quit = muda::MenuItem::new("退出", true, None);
+        let open_cobuilder = muda::MenuItem::new(labels.open_cobuilder, true, None);
+        let latest_version = muda::MenuItem::new(labels.latest_version, true, None);
+        let revoke_grants = muda::MenuItem::new(labels.revoke_grants, true, None);
+        let quit = muda::MenuItem::new(labels.quit, true, None);
 
         let menu = muda::Menu::new();
         menu.append_items(&[
@@ -1293,6 +1536,35 @@ fn register_autostart() {
 mod tests {
     use super::*;
 
+    /// Does `text` contain Chinese?
+    ///
+    /// The English half of every bilingual pair asserts this is false, which is
+    /// what catches the realistic mistake: a string that was translated except
+    /// for the one clause somebody forgot, or a Chinese full-width colon left
+    /// behind in an otherwise English line. Punctuation ranges are in, because
+    /// 「」／：／、 leak just as visibly as an ideograph does.
+    fn has_chinese(text: &str) -> bool {
+        text.chars().any(|c| {
+            matches!(c as u32,
+                0x3000..=0x303F   // CJK punctuation: 、。「」
+                | 0x4E00..=0x9FFF // CJK unified ideographs
+                | 0xFF00..=0xFFEF // fullwidth forms: ：（）
+            )
+        })
+    }
+
+    #[test]
+    fn the_chinese_detector_the_english_assertions_rely_on_actually_detects_chinese() {
+        // Without this, every `!has_chinese(...)` assertion below would pass for
+        // free if the ranges were wrong, and a half-translated string would ship.
+        assert!(has_chinese("烧录固件"), "ideographs");
+        assert!(has_chinese("Origin：localhost"), "a fullwidth colon");
+        assert!(has_chinese("press 「Allow」"), "CJK brackets");
+        assert!(!has_chinese(
+            "Flash firmware on /dev/tty.usbserial-1 (1.0 MiB)"
+        ));
+    }
+
     fn flash_request() -> ConfirmRequest {
         ConfirmRequest {
             op: DangerousOp::Flash,
@@ -1303,9 +1575,17 @@ mod tests {
         }
     }
 
+    fn authorize_request() -> ConfirmRequest {
+        ConfirmRequest {
+            op: DangerousOp::Authorize,
+            firmware_bytes: None,
+            ..flash_request()
+        }
+    }
+
     #[test]
     fn the_flash_dialog_names_the_source_the_operation_and_the_device() {
-        let text = confirm_message(&flash_request());
+        let text = confirm_message(&flash_request(), Lang::Zh);
 
         assert!(text.contains("http://localhost:3000"), "{text}");
         assert!(text.contains("烧录固件"), "{text}");
@@ -1317,12 +1597,23 @@ mod tests {
     }
 
     #[test]
+    fn the_english_flash_dialog_names_the_source_the_operation_and_the_device() {
+        let text = confirm_message(&flash_request(), Lang::En);
+
+        assert!(text.contains("http://localhost:3000"), "{text}");
+        assert!(text.contains("Flash firmware"), "{text}");
+        assert!(text.contains("t5ai"), "{text}");
+        assert!(text.contains("/dev/tty.usbserial-1"), "{text}");
+        // The size line is the one part that is assembled rather than picked, so
+        // it is the one most likely to keep a Chinese unit suffix behind.
+        assert!(text.contains("1.0 MiB"), "{text}");
+        assert!(text.contains("1048576 bytes"), "{text}");
+        assert!(!has_chinese(&text), "{text}");
+    }
+
+    #[test]
     fn the_authorization_dialog_says_the_write_cannot_be_undone() {
-        let text = confirm_message(&ConfirmRequest {
-            op: DangerousOp::Authorize,
-            firmware_bytes: None,
-            ..flash_request()
-        });
+        let text = confirm_message(&authorize_request(), Lang::Zh);
 
         assert!(text.contains("写入授权码"), "{text}");
         assert!(
@@ -1331,6 +1622,121 @@ mod tests {
         );
         // An authorization write carries no image, so no size line is invented.
         assert!(!text.contains("固件大小"), "{text}");
+    }
+
+    /// The irreversibility warning is a safety statement, not decoration: an
+    /// authorization write overwrites a value that cannot be restored, so it has
+    /// to survive into every language the dialog is shown in.
+    #[test]
+    fn the_english_authorization_dialog_says_the_write_cannot_be_undone() {
+        let text = confirm_message(&authorize_request(), Lang::En);
+
+        assert!(text.contains("Write authorization code"), "{text}");
+        assert!(text.contains("cannot be undone"), "{text}");
+        assert!(!text.contains("Firmware size"), "{text}");
+        assert!(!has_chinese(&text), "{text}");
+    }
+
+    #[test]
+    fn a_malformed_firmware_size_is_reported_rather_than_invented() {
+        // `None` means the payload's base64 was malformed; the dialog must say
+        // so in either language rather than print a plausible-looking number.
+        assert!(firmware_size_text(None, Lang::Zh).contains("未知"));
+        let en = firmware_size_text(None, Lang::En);
+        assert!(en.contains("unknown"), "{en}");
+        assert!(!has_chinese(&en), "{en}");
+        // Below 1 KiB the raw byte count is the clearest form, and its unit is
+        // the easiest one to leave untranslated.
+        assert_eq!(firmware_size_text(Some(512), Lang::En), "512 bytes");
+    }
+
+    #[test]
+    fn the_dialog_buttons_and_title_follow_the_system_language() {
+        let zh = dialog_labels(Lang::Zh);
+        assert_eq!(zh.approve, "允许");
+        assert_eq!(zh.reject, "拒绝");
+        assert!(confirm_title(Lang::Zh).contains("确认"));
+
+        let en = dialog_labels(Lang::En);
+        assert_eq!(en.approve, "Allow");
+        assert_eq!(en.reject, "Deny");
+        assert!(
+            !has_chinese(confirm_title(Lang::En)),
+            "{}",
+            confirm_title(Lang::En)
+        );
+        // The body has to quote the buttons the user is actually looking at,
+        // otherwise it tells an English user to press a button that is not there.
+        let body = confirm_message(&authorize_request(), Lang::En);
+        assert!(body.contains(en.approve), "{body}");
+        assert!(body.contains(en.reject), "{body}");
+    }
+
+    /// The approving button label the dialog script actually declares.
+    ///
+    /// Read back out of the generated AppleScript rather than from
+    /// `dialog_labels` a second time — that is what makes the test below a
+    /// coupling test: it compares the *script* against the *parser*, so a parser
+    /// reading a different language's label cannot pass.
+    #[cfg(target_os = "macos")]
+    fn approve_button_in(script: &str) -> String {
+        let buttons = script
+            .split_once("buttons {")
+            .expect("the script declares a buttons list")
+            .1
+            .split_once('}')
+            .expect("the buttons list is closed")
+            .0;
+        // `{"<reject>", "<approve>"}` — the approving one is second, which is
+        // also why the refusing one can be the default button.
+        buttons
+            .rsplit_once('"')
+            .and_then(|(head, _)| head.rsplit_once('"'))
+            .map(|(_, label)| label.to_string())
+            .expect("the approving label is quoted")
+    }
+
+    /// The dialog is only a gate if pressing "Allow" is *read* as allowing.
+    ///
+    /// The macOS path builds an AppleScript with one set of button labels and
+    /// then string-matches osascript's reply against them; if those two ever came
+    /// from different `Lang` values, an English user's press of the approving
+    /// button would parse as a refusal — a silent, total failure of the flash
+    /// path that no type would catch.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_button_the_dialog_offers_is_the_button_the_reply_parser_accepts() {
+        for lang in [Lang::Zh, Lang::En] {
+            let labels = dialog_labels(lang);
+            let script = macos_dialog_script(&flash_request(), &labels, lang);
+            // What osascript prints when the user presses the approving button
+            // this very script declared.
+            let reply = format!(
+                "button returned:{}, gave up:false\n",
+                approve_button_in(&script)
+            );
+            assert!(
+                macos_reply_approves(&reply, &labels),
+                "{lang:?}: pressing the offered button must read as approval: {reply}"
+            );
+        }
+
+        // The failure mode stated as its own assertion: a reply carrying the
+        // other language's label is not an approval, so a mismatched snapshot
+        // could never quietly approve either.
+        let en = dialog_labels(Lang::En);
+        let zh_reply = format!(
+            "button returned:{}, gave up:false\n",
+            dialog_labels(Lang::Zh).approve
+        );
+        assert!(
+            !macos_reply_approves(&zh_reply, &en),
+            "a label from another language must never count as approval"
+        );
+
+        // The dialog giving up by itself is not a press of anything.
+        let en_timeout = format!("button returned:{}, gave up:true\n", en.approve);
+        assert!(!macos_reply_approves(&en_timeout, &en), "{en_timeout}");
     }
 
     /// A hostile string like a port name could arrive from the WS client; it must
@@ -1414,31 +1820,35 @@ mod tests {
             firmware_bytes: Some(5),
         };
 
-        for tool in [LinuxDialogTool::Zenity, LinuxDialogTool::KDialog] {
-            let text = linux_dialog_text(&request, tool);
-            assert!(
-                !text.contains('<') && !text.contains('>'),
-                "{tool:?}: angle brackets must be escaped: {text}"
-            );
-            assert!(
-                text.contains("&lt;b&gt;"),
-                "{tool:?}: the hostile tag must appear escaped, not dropped: {text}"
-            );
-            assert!(
-                text.contains("A &amp; B"),
-                "{tool:?}: the bare ampersand must be escaped: {text}"
-            );
-            // Exactly once: escaping the `&` of an escape already emitted would
-            // show the user `&amp;lt;b&amp;gt;` instead of `<b>`.
-            assert!(
-                !text.contains("&amp;amp;"),
-                "{tool:?}: double-escaped ampersand: {text}"
-            );
-            // Escaping must not eat the information the user decides on.
-            assert!(
-                text.contains("http://localhost:3000") && text.contains("fake"),
-                "{tool:?}: the dialog lost its content: {text}"
-            );
+        // Both languages: the escaping happens once, but a translation is exactly
+        // the kind of edit that reintroduces raw markup into one arm only.
+        for lang in [Lang::Zh, Lang::En] {
+            for tool in [LinuxDialogTool::Zenity, LinuxDialogTool::KDialog] {
+                let text = linux_dialog_text(&request, tool, lang);
+                assert!(
+                    !text.contains('<') && !text.contains('>'),
+                    "{lang:?}/{tool:?}: angle brackets must be escaped: {text}"
+                );
+                assert!(
+                    text.contains("&lt;b&gt;"),
+                    "{lang:?}/{tool:?}: the hostile tag must appear escaped, not dropped: {text}"
+                );
+                assert!(
+                    text.contains("A &amp; B"),
+                    "{lang:?}/{tool:?}: the bare ampersand must be escaped: {text}"
+                );
+                // Exactly once: escaping the `&` of an escape already emitted would
+                // show the user `&amp;lt;b&amp;gt;` instead of `<b>`.
+                assert!(
+                    !text.contains("&amp;amp;"),
+                    "{lang:?}/{tool:?}: double-escaped ampersand: {text}"
+                );
+                // Escaping must not eat the information the user decides on.
+                assert!(
+                    text.contains("http://localhost:3000") && text.contains("fake"),
+                    "{lang:?}/{tool:?}: the dialog lost its content: {text}"
+                );
+            }
         }
     }
 
@@ -1455,8 +1865,8 @@ mod tests {
         // kdialog cannot be told which button is focused, so Return may authorize.
         // zenity (tried first) can, and must not carry the warning — otherwise the
         // warning becomes noise users learn to skip.
-        let kdialog = linux_dialog_text(&request, LinuxDialogTool::KDialog);
-        let zenity = linux_dialog_text(&request, LinuxDialogTool::Zenity);
+        let kdialog = linux_dialog_text(&request, LinuxDialogTool::KDialog, Lang::Zh);
+        let zenity = linux_dialog_text(&request, LinuxDialogTool::Zenity, Lang::Zh);
         assert!(
             kdialog.contains("回车"),
             "the kdialog fallback must warn about its default button: {kdialog}"
@@ -1465,6 +1875,59 @@ mod tests {
             !zenity.contains("回车"),
             "zenity defaults to refusing and needs no such warning: {zenity}"
         );
+    }
+
+    /// Same warning, same asymmetry, in English: it is the only thing standing
+    /// between a stray Return and an authorized write on the kdialog fallback.
+    #[test]
+    fn the_english_kdialog_fallback_warns_that_its_default_button_is_the_permissive_one() {
+        let request = authorize_request();
+
+        let kdialog = linux_dialog_text(&request, LinuxDialogTool::KDialog, Lang::En);
+        let zenity = linux_dialog_text(&request, LinuxDialogTool::Zenity, Lang::En);
+        assert!(
+            kdialog.contains("pressing Return"),
+            "the kdialog fallback must warn about its default button: {kdialog}"
+        );
+        assert!(!has_chinese(&kdialog), "{kdialog}");
+        assert!(
+            !zenity.contains("pressing Return"),
+            "zenity defaults to refusing and needs no such warning: {zenity}"
+        );
+    }
+
+    #[test]
+    fn the_tray_menu_items_follow_the_system_language() {
+        let zh = menu_labels(Lang::Zh);
+        assert_eq!(zh.open_cobuilder, "打开 Cobuilder");
+        assert_eq!(zh.latest_version, "获取最新版本");
+        assert_eq!(zh.revoke_grants, "撤销所有授权");
+        assert_eq!(zh.quit, "退出");
+
+        let en = menu_labels(Lang::En);
+        assert_eq!(en.open_cobuilder, "Open Cobuilder");
+        assert_eq!(en.latest_version, "Get the latest version");
+        // The security control in the menu: it has to name what it withdraws,
+        // not just say "reset".
+        assert_eq!(en.revoke_grants, "Revoke all authorizations");
+        assert_eq!(en.quit, "Quit");
+    }
+
+    #[test]
+    fn the_tray_notifications_follow_the_system_language() {
+        assert!(startup_failed_notification_title(Lang::Zh).contains("启动失败"));
+        let title = startup_failed_notification_title(Lang::En);
+        assert!(title.contains("Cobuilder Bridge"), "{title}");
+        assert!(title.contains("failed to start"), "{title}");
+        assert!(!has_chinese(title), "{title}");
+
+        assert!(revoked_notification_body(Lang::Zh).contains("已撤销"));
+        let body = revoked_notification_body(Lang::En);
+        // Both halves: what happened, and what the user will see next time — a
+        // security control that looks like it did nothing invites a second click.
+        assert!(body.contains("revoked"), "{body}");
+        assert!(body.contains("ask you again"), "{body}");
+        assert!(!has_chinese(body), "{body}");
     }
 
     #[test]
@@ -1498,7 +1961,7 @@ mod tests {
 
     #[test]
     fn the_help_text_documents_both_flags_and_the_risk() {
-        let help = help_text();
+        let help = help_text(Lang::Zh);
         assert!(help.contains("--headless"), "{help}");
         assert!(help.contains(UNATTENDED_FLAG), "{help}");
         // The escape hatch removes the only thing standing between a local process
@@ -1517,6 +1980,65 @@ mod tests {
             help.contains("这里也一律不认"),
             "--help must say the headless refusal ignores stored grants: {help}"
         );
+    }
+
+    /// The English `--help` has to carry the same two security statements, not
+    /// just the flag names: an operator reading it in English must still learn
+    /// what the opt-in removes and that a stored grant does not re-enable
+    /// headless writes.
+    #[test]
+    fn the_english_help_text_documents_both_flags_and_the_risk() {
+        let help = help_text(Lang::En);
+        assert!(help.contains("--headless"), "{help}");
+        assert!(help.contains(UNATTENDED_FLAG), "{help}");
+        assert!(
+            help.contains("turns the human confirmation off"),
+            "the help text must explain what the flag disables: {help}"
+        );
+        assert!(
+            help.contains("stored grants are never honoured here"),
+            "--help must say the headless refusal ignores stored grants: {help}"
+        );
+        assert!(!has_chinese(help), "{help}");
+    }
+
+    #[test]
+    fn an_unknown_flag_is_reported_in_the_system_language() {
+        // The typo the doc comment on the argument loop calls out: it must be
+        // echoed back, in either language, so the user can see what they typed.
+        const TYPO: &str = "--allow-unattended-write";
+
+        let zh = unknown_argument_line(TYPO, Lang::Zh);
+        assert!(zh.contains("无法识别的参数"), "{zh}");
+        assert!(zh.contains(TYPO), "{zh}");
+
+        let en = unknown_argument_line(TYPO, Lang::En);
+        assert!(en.contains("unrecognized argument"), "{en}");
+        assert!(en.contains(TYPO), "{en}");
+        assert!(!has_chinese(&en), "{en}");
+    }
+
+    #[test]
+    fn the_headless_console_banner_names_the_opt_in_flag_in_the_system_language() {
+        for lang in [Lang::Zh, Lang::En] {
+            // Both branches, because the flag name is the actionable half of
+            // each: "it is on" and "this is how you would turn it on".
+            let refusing = headless_startup_line(PromptChoice::DenyAll, lang);
+            let approving = headless_startup_line(PromptChoice::UnattendedAutoApprove, lang);
+            assert!(refusing.contains(UNATTENDED_FLAG), "{lang:?}: {refusing}");
+            assert!(approving.contains(UNATTENDED_FLAG), "{lang:?}: {approving}");
+            assert_ne!(
+                refusing, approving,
+                "{lang:?}: the two policies must not read the same"
+            );
+        }
+
+        let refusing = headless_startup_line(PromptChoice::DenyAll, Lang::En);
+        let approving = headless_startup_line(PromptChoice::UnattendedAutoApprove, Lang::En);
+        assert!(refusing.contains("refuses"), "{refusing}");
+        assert!(approving.contains("no user confirmation"), "{approving}");
+        assert!(!has_chinese(&refusing), "{refusing}");
+        assert!(!has_chinese(&approving), "{approving}");
     }
 
     #[test]
