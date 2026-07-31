@@ -2104,6 +2104,25 @@ fn auth_slot_outcome(result: tyutool_core::BatchAuthSlotResult) -> Result<(), Jo
     }
 }
 
+/// Map a core error raised on the authorization path onto its wire error code.
+///
+/// Pure and separate from [`RealFlashBackend::run_auth`] for the same reason as
+/// [`auth_slot_outcome`]: the code a client keys its copy off must be testable
+/// without a device.
+///
+/// `device_no_response` is a distinct fact, not a flavour of `auth_failed`: the
+/// device never said a word, so nothing was attempted on it and the honest
+/// advice is "it may still be booting, retry" rather than "state unknown". The
+/// classification is asked of core ([`tyutool_core::is_device_no_response`])
+/// instead of matched on the message here — the bridge does not parse prose.
+fn auth_error_code(err: &tyutool_core::FlashError) -> &'static str {
+    match err {
+        tyutool_core::FlashError::Cancelled => "cancelled",
+        e if tyutool_core::is_device_no_response(e) => "device_no_response",
+        _ => "auth_failed",
+    }
+}
+
 /// Production flash execution surface backed by tyutool-core.
 #[derive(Debug, Default)]
 pub struct RealFlashBackend;
@@ -2251,11 +2270,7 @@ impl FlashBackend for RealFlashBackend {
         match result {
             Ok(slot) => auth_slot_outcome(slot),
             Err(e) => Err(JobError {
-                error_code: match e {
-                    tyutool_core::FlashError::Cancelled => "cancelled",
-                    _ => "auth_failed",
-                }
-                .to_string(),
+                error_code: auth_error_code(&e).to_string(),
                 message: e.to_string(),
             }),
         }
@@ -4472,6 +4487,31 @@ mod tests {
             mac: "AA:BB:CC:DD:EE:FF".to_string(),
         })
         .is_ok());
+    }
+
+    /// A device that never answered is not "the authorization failed": nothing
+    /// was attempted on it. The web client must be able to say "it is probably
+    /// still booting, retry" *structurally*, the same way it tells the two
+    /// cancellations apart — by code, never by parsing the message.
+    #[test]
+    fn a_device_that_never_answered_gets_its_own_code() {
+        let silent = tyutool_core::FlashError::Plugin(format!(
+            "{} within 30.0 s after reset — ...",
+            tyutool_core::DEVICE_NO_RESPONSE_PREFIX
+        ));
+        assert_eq!(auth_error_code(&silent), "device_no_response");
+
+        // Everything else on the auth path keeps its existing code.
+        assert_eq!(
+            auth_error_code(&tyutool_core::FlashError::Plugin(
+                "Failed to read MAC address".to_string()
+            )),
+            "auth_failed"
+        );
+        assert_eq!(
+            auth_error_code(&tyutool_core::FlashError::Cancelled),
+            "cancelled"
+        );
     }
 
     #[test]

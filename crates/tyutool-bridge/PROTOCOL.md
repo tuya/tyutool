@@ -288,6 +288,7 @@ Bridge 前端请保持一致：角色只用于 hover 提示帮用户判断，**�
 | `cancelled_after_write` | **仅 run_auth**：授权写命令**已经发给设备**之后才取消（core 返回 `CancelledAfterWrite`）——授权码可能已经写进去了，见 §取消后的设备状态。message 只带设备 MAC，**永不带 uuid** |
 | `bad_request` | base64 解码失败 / mode 不支持 / uuid·auth_key 为空缺失 / 同连接 request_id 重复在途 / **帧无法解码（含 run_job 缺 `baud_rate`、未知 `type`），见 §不可解析的请求帧** |
 | `flash_failed` | run_job 执行层其余错误（message=FlashError 文本） |
+| `device_no_response` | **仅 run_auth**：复位后整个探测窗口内设备**一个字节都没回**（core 判定，不是靠解析文案）。此时授权**一步都没做**，设备状态未被触碰；典型成因是刚烧完固件的首次冷启动比热复位慢得多，文案口径是「设备可能还在启动，稍后重试」，**不要**说成「授权失败/状态未知」 |
 | `auth_failed` | run_auth 执行层其余错误 |
 | `user_rejected` | 危险操作的人工确认被拒绝 / 超时未答 / 确认通道被丢弃（B7） |
 | `internal` | 执行线程 join 失败（panic 等）；或无系统熵可用、无法签发授权令牌 |
@@ -436,6 +437,7 @@ zenity 是首选（它能把焦点放在**拒绝**那颗按钮上：`--default-c
 | `port_busy` / `execution_busy` / `bad_request` | **完全没碰设备**（都在飞行前被拒） | 「未执行」 |
 | `cancelled`（烧录途中取消） | **可能留下半个镜像**：已写的扇区不会回滚，板子可能起不来 | 「已取消，固件可能不完整，建议重烧」 |
 | `cancelled_after_write` | **授权码可能已经写进设备**（KV 可覆盖；**OTP 是永久的**） | 「已取消，但授权码可能已被消耗」——**禁止**说「未写入」 |
+| `device_no_response` | **完全没碰设备**（复位后设备一直没应答，授权一步没走） | 「设备没有响应，可能仍在首次启动（刚烧完固件的首启较慢），请稍后重试」 |
 | `flash_failed` / `auth_failed`（操作途中失败） | 可能留下部分状态（取决于失败在哪一步） | 「失败，设备状态未知，建议重试并检查」 |
 
 - **`cancelled_after_write` 是唯一表示「凭证可能已被消耗」的码。** 拿到它的调用方

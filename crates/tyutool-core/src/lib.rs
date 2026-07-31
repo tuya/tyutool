@@ -14,9 +14,9 @@ mod tuya_dev_usb;
 mod usb_port_survey;
 
 pub use authorize::{
-    read_auth_probe, run_batch_auth_slot, wait_after_firmware_flash, AuthStorage,
-    BatchAuthRowUpdate, BatchAuthSlotConfig, BatchAuthSlotResult, BatchAuthStep, ConflictPolicy,
-    ReadAuthProbeResult,
+    is_device_no_response, read_auth_probe, run_batch_auth_slot, wait_after_firmware_flash,
+    AuthStorage, BatchAuthRowUpdate, BatchAuthSlotConfig, BatchAuthSlotResult, BatchAuthStep,
+    ConflictPolicy, ReadAuthProbeResult, DEVICE_NO_RESPONSE_PREFIX,
 };
 pub use error::FlashError;
 pub use flash_event::{
