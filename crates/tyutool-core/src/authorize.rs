@@ -12,8 +12,11 @@
 //! - No recognizable response within `boot_max_wait` → old firmware (timeout fallback)
 //!
 //! Polling starts at `boot_probe_start` after reset and repeats every
-//! `boot_probe_interval`. Both values come from `AuthTiming::for_chip`, which
-//! holds chip-measured values (T5AI: 600 ms start / 50 ms interval / 2 100 ms max).
+//! `boot_probe_interval`; both come from `AuthTiming::for_chip`. The two probe
+//! values are chip-measured (T5AI: 600 ms start / 50 ms interval), but
+//! `boot_max_wait` is *not* a measurement — it is calibrated against the worst
+//! case, the first cold boot right after a flash (T5AI: 8 000 ms). See the cost
+//! asymmetry note above `CHIP_TIMING` before touching it.
 //!
 //! # Write flow
 //!
@@ -112,13 +115,26 @@ struct AuthTiming {
 //
 // Derivation:
 //   probe_start  ≈ measured_boot_ready − 100 ms
-//   max_wait     ≥ 3 × measured_boot_ready
+//   max_wait     ≥ first-cold-boot shell-ready time (see below), NOT 3 × warm reboot
 //   cmd_idle     ≈ 3 × max_observed_first_byte_rtt
 //   drain_quiet  ≥ 2 × observed post-log-off settle time
 //   mac_retries  / auth_retries: number of attempts (0 = try once, no retry)
 //   mac_retry_ms / auth_retry_ms: wait between retries
 //
 // To add a chip: append one row; record the measurement date in the comment.
+//
+// ⚠ `max_wait` (boot_max_wait) is BOTH the new-firmware probe window AND the
+// fallback timeout after which we declare the device "old firmware". Raising it
+// therefore costs genuinely-old devices exactly that much extra wait before auth
+// starts. The two costs are NOT symmetric — never trade this back for speed:
+//   • too SHORT → a new device that boots slowly is misdetected as old, the old
+//     protocol is spoken to a new firmware, and the job FAILS ("Failed to read
+//     MAC address"). Unrecoverable within the job.
+//   • too LONG  → a genuinely-old device waits a few extra seconds. Only slow.
+// Calibrate against the worst case the flash pipeline actually faces: the
+// **first cold boot right after flashing** (KV / partition init runs on first
+// boot), not a warm reboot of an already-provisioned device. tyutool's GUI never
+// exposed this because a human clicks "authorize" seconds after the flash ends.
 //
 // columns: chips, start, int, max, idle, settle, drain_q, mac_ret, mac_ms, auth_ret, auth_ms
 type ChipTimingRow = (
@@ -138,8 +154,8 @@ type ChipTimingRow = (
 #[rustfmt::skip]
 const CHIP_TIMING: &[ChipTimingRow] = &[
     //                                            start  int   max   idle settle drain_q  mac_ret mac_ms auth_ret auth_ms
-    (&["T5AI", "T5"],                              600,  50,  2100,  50,  3000,   800,       3,    500,      2,    200), // ready ~703ms,  RTT ~11ms
-    (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400,       3,    500,      2,    200), // ready ~1108ms, RTT 20–40ms (2026-06-25)
+    (&["T5AI", "T5"],                              600,  50,  8000,  50,  3000,   800,       3,    500,      2,    200), // warm ready ~703ms, RTT ~11ms; max_wait covers first cold boot: warm-calibrated 2100 timed out at 2158ms right after a flash and misdetected Old (2026-07-30)
+    (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400,       3,    500,      2,    200), // warm ready ~1108ms, RTT 20–40ms (2026-06-25); no cold-boot misdetect observed yet — if one appears, raise max_wait the same way
 ];
 
 impl AuthTiming {
@@ -2088,6 +2104,10 @@ mod tests {
         sent: Vec<Vec<u8>>,
         /// Control-line transitions in order: ('D', level) for DTR, ('R', level) for RTS.
         control_lines: Vec<(char, bool)>,
+        /// When set, the device stays mute until this instant: `clear_input`
+        /// serves nothing and consumes no queued response. Simulates a shell
+        /// that only comes up some time after reset (first cold boot).
+        shell_ready_at: Option<Instant>,
     }
 
     impl MockAuthIo {
@@ -2097,6 +2117,15 @@ mod tests {
                 buf: Vec::new(),
                 sent: Vec::new(),
                 control_lines: Vec::new(),
+                shell_ready_at: None,
+            }
+        }
+
+        /// Like `new`, but the device answers nothing until `delay` has passed.
+        fn with_shell_ready_after(delay: Duration) -> Self {
+            Self {
+                shell_ready_at: Some(Instant::now() + delay),
+                ..Self::new()
             }
         }
 
@@ -2137,6 +2166,12 @@ mod tests {
             Ok(())
         }
         fn clear_input(&mut self) -> io::Result<()> {
+            // Device still booting: stays mute, and the queued response is kept
+            // for the first command issued after the shell comes up.
+            if self.shell_ready_at.is_some_and(|at| Instant::now() < at) {
+                self.buf.clear();
+                return Ok(());
+            }
             // A command is starting: load its response so the following read
             // loop sees the device's reply.
             self.buf = self.responses.pop_front().unwrap_or_default();
@@ -2586,6 +2621,37 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::Old);
+    }
+
+    /// Regression (real device, T5AI, batch flash+auth): `run_auth` runs right
+    /// after the firmware was flashed, so the device is doing its **first cold
+    /// boot** (KV / partition init) — the shell answers seconds later than on a
+    /// warm reboot. The probe window must stay open long enough to see it;
+    /// otherwise the timeout fallback declares Old firmware, the Old protocol
+    /// is used against a New device, and the MAC read fails outright.
+    ///
+    /// 2500 ms is chosen to sit between the old 2100 ms window (which the real
+    /// device blew past at 2158 ms) and the current 8000 ms one — it pins the
+    /// regression without paying 5 s of wall clock per run.
+    #[test]
+    fn detect_firmware_t5ai_cold_boot_shell_ready_at_2500ms_is_new() {
+        let mut io = MockAuthIo::with_shell_ready_after(Duration::from_millis(2500));
+        // Served only once the shell is up: sys_log_enable off → OK
+        io.add_response("OK: log disabled\r\n");
+        // wake_shell clear_input → empty
+        io.add_response("");
+        // sys_version command
+        io.add_response("project.version   1.0.0\r\n");
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::for_chip("T5AI"),
+            port_name: String::new(),
+        };
+        let cancel = AtomicBool::new(false);
+        assert_eq!(
+            sess.detect_firmware(&cancel).unwrap(),
+            FirmwareKind::New(CliVersion(1, 0, 0))
+        );
     }
 
     #[test]
