@@ -6067,6 +6067,7 @@ dependencies = [
  "getrandom 0.3.4",
  "log",
  "muda",
+ "png",
  "serde",
  "serde_json",
  "sys-locale",

@@ -37,6 +37,7 @@ use tyutool_bridge::autostart;
 use tyutool_bridge::lang::{detect_lang, Lang};
 use tyutool_bridge::proc::hidden_command;
 use tyutool_bridge::status::{self, StatsSnapshot};
+use tyutool_bridge::tray_glyph;
 use tyutool_bridge::{
     bind, AuthPrompt, Authority, ConfirmDecision, ConfirmRequest, ConfirmResponder, DangerousOp,
     FileTokenStore, GrantPolicy, MemoryTokenStore, TokenStore, DEFAULT_PORT,
@@ -1464,12 +1465,16 @@ impl TrayShell {
         ])
         .map_err(|e| anyhow::anyhow!("build tray menu: {e}"))?;
 
+        let (glyph, is_template) = tray_glyph_icon()?;
         let icon = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
-            .with_icon(placeholder_icon()?)
-            // macOS recolors a template image for the current menu bar
-            // appearance, which is what keeps a black glyph visible in dark mode.
-            .with_icon_as_template(true)
+            .with_icon(glyph)
+            // macOS-only, and the only reason light/dark works there for free: the
+            // system tints a template image to match the menu bar. Passed as the
+            // artwork's own flag rather than a literal `true`, because on Windows
+            // and Linux nothing recolours the icon — they get the colour logo and
+            // this must be `false` to describe it honestly.
+            .with_icon_as_template(is_template)
             .with_tooltip("Cobuilder Bridge")
             .build()
             .map_err(|e| anyhow::anyhow!("create tray icon: {e}"))?;
@@ -1518,33 +1523,17 @@ impl TrayShell {
     }
 }
 
-/// Generated ring glyph (opaque black on transparent), drawn in code so the
-/// binary needs no asset pipeline yet. Black + alpha is exactly what a macOS
-/// template image wants; other platforms show it as-is.
+/// The product logo, from the artwork embedded by [`tray_glyph`].
 ///
-/// TODO: replace with the real Cobuilder Bridge artwork (proper per-platform
-/// icon set, `.ico` on Windows) when the design lands.
-fn placeholder_icon() -> anyhow::Result<tray_icon::Icon> {
-    const SIZE: u32 = 32;
-    const OUTER: f32 = 14.0;
-    const INNER: f32 = 8.0;
-    let center = (SIZE as f32 - 1.0) / 2.0;
-    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
-            let distance_sq = dx * dx + dy * dy;
-            let on_ring = (INNER * INNER..=OUTER * OUTER).contains(&distance_sq);
-            rgba.extend_from_slice(if on_ring {
-                &[0x00, 0x00, 0x00, 0xFF]
-            } else {
-                &[0x00, 0x00, 0x00, 0x00]
-            });
-        }
-    }
-    tray_icon::Icon::from_rgba(rgba, SIZE, SIZE)
-        .map_err(|e| anyhow::anyhow!("build tray icon bitmap: {e}"))
+/// Which of the two assets and whether to ask for template rendering is that
+/// module's decision, not this one's — the flag travels with the pixels so a
+/// black silhouette can never be handed to a platform that will not tint it (it
+/// would be invisible on a dark taskbar). See its module docs.
+fn tray_glyph_icon() -> anyhow::Result<(tray_icon::Icon, bool)> {
+    let glyph = tray_glyph::for_this_platform()?;
+    let icon = tray_icon::Icon::from_rgba(glyph.rgba, glyph.width, glyph.height)
+        .map_err(|e| anyhow::anyhow!("build tray icon bitmap: {e}"))?;
+    Ok((icon, glyph.is_template))
 }
 
 /// Hand the URL to the platform's default handler. `std::process::Command`

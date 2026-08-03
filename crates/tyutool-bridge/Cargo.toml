@@ -25,6 +25,13 @@ fern = "0.7"
 getrandom = "0.3"
 log = "0.4"
 muda = "0.17"
+# Decodes the embedded tray artwork (see `tray_glyph`). `tray_icon::Icon` only
+# takes raw RGBA, and `Icon::from_path` would mean shipping a loose file and
+# resolving it inside the `.app` bundle at runtime — embedding the PNG and
+# decoding a 44×44 image once at startup is both simpler and bundle-proof.
+# Already in the workspace lock at 0.17 (pulled by the Tauri side), so this adds
+# no new version to the tree.
+png = "0.17"
 tao = "0.34"
 tray-icon = "0.21"
 serde = { version = "1", features = ["derive"] }

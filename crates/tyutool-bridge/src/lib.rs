@@ -33,6 +33,7 @@ pub mod autostart;
 pub mod lang;
 pub mod proc;
 pub mod status;
+pub mod tray_glyph;
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
