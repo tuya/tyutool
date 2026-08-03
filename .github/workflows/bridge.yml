@@ -1,0 +1,334 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Bridge — CI + release for the `tyutool-bridge` crate
+# ════════════════════════════════════════════════════════════════════════════
+#
+#  ── Why this is a separate file ────────────────────────────────────────────
+#  `tyutool-bridge` is a fork-only crate (resident local WebSocket flash helper
+#  + system tray). Upstream `ci.yml` / `release.yml` know nothing about it, and
+#  we deliberately keep it that way: EVERYTHING bridge-related lives in this one
+#  file, so merging the fork back into upstream is a whole-file accept/reject
+#  decision with zero hunk conflicts.
+#
+#  DO NOT move bridge steps into `ci.yml` or `release.yml`. If you need a new
+#  bridge job, add it here.
+#
+#  The tag namespace is also deliberately disjoint:
+#      upstream releases → `v*.*.*`      (release.yml)
+#      bridge releases   → `bridge-v*`   (this file)
+#  Neither side's tags can trigger the other side's pipeline.
+#
+#  ── ⚠ These are UNSIGNED builds ────────────────────────────────────────────
+#  A fork does not inherit upstream repository secrets. The Apple / Tauri
+#  signing secrets referenced in `release.yml` (APPLE_CERTIFICATE, APPLE_ID,
+#  APPLE_TEAM_ID, TAURI_SIGNING_PRIVATE_KEY, …) are empty here, so this
+#  workflow references NO secrets at all and signs nothing. Consequences:
+#
+#    • macOS   — Gatekeeper blocks the downloaded binary. Users must either
+#                right-click → Open, or run:
+#                    xattr -d com.apple.quarantine ./tyutool-bridge
+#    • Windows — SmartScreen shows "Windows protected your PC"; users must
+#                click "More info" → "Run anyway".
+#    • Linux   — unaffected (no OS-level signature gate).
+#
+#  This is fine for internal integration testing. It is NOT fine for public
+#  distribution. To get signed builds, hand this workflow to upstream together
+#  with the signing-secret configuration — do NOT put signing credentials into
+#  the fork's secrets, since fork secrets are visible to anyone who can push a
+#  workflow change here.
+#
+#  ── TODO: macOS `.app` bundle? ─────────────────────────────────────────────
+#  This workflow ships a BARE BINARY (tar.gz), not a `.app` bundle. Verified
+#  locally: the bare binary does run the menu-bar tray on macOS. What a bundle
+#  would additionally buy us:
+#    • `LSUIElement = true` in Info.plist → no Dock icon and no app-switcher
+#      entry. A bare binary is an unbundled process, so macOS always gives it a
+#      Dock tile — cosmetically wrong for a background helper.
+#    • A stable bundle identifier, which is what `codesign` / `notarytool` and
+#      LaunchAgent-based autostart really want.
+#  Decision for now: bare binary is enough for integration testing, and a
+#  bundle without a signing identity would still be Gatekeeper-blocked, so it
+#  buys little until signing exists. Revisit together with signing.
+#
+#  ── TODO: Windows console window ───────────────────────────────────────────
+#  `crates/tyutool-bridge/src/main.rs` has no `#![windows_subsystem = "windows"]`,
+#  so on Windows the tray binary also opens a console window. Same bucket as the
+#  `.app` question: a packaging-polish item, not a CI item. Noted here so it is
+#  not lost.
+# ════════════════════════════════════════════════════════════════════════════
+
+name: Bridge
+
+on:
+  push:
+    tags: ["bridge-v*"] # disjoint from upstream's `v*.*.*`
+    branches: [bridge/main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: bridge-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Clippy + tests, bridge crate only ──────────────────────────────────────
+  # Scoped with `-p tyutool-bridge` on purpose: core/cli are already covered by
+  # `ci.yml`, and so is `cargo fmt --all` (which formats the bridge sources too).
+  # Nothing here duplicates that job.
+  check:
+    name: Bridge (clippy + test)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      # Same dependency set as the Linux build below — clippy/test have to
+      # link the tray stack too. See the build job for the per-package rationale.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libayatana-appindicator3-dev libxdo-dev libudev-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "bridge-check" }
+
+      - name: Clippy
+        run: cargo clippy -p tyutool-bridge --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p tyutool-bridge
+
+  # ── Version extraction ─────────────────────────────────────────────────────
+  # Mirrors release.yml's `prepare` job, minus `scripts/bump-version.mjs`: that
+  # script rewrites package.json / src-tauri versions for the upstream `v*.*.*`
+  # line, which has nothing to do with `bridge-v*` and would dirty files this
+  # workflow must not touch.
+  #   bridge-v1.0.3 → 1.0.3
+  #   anything else → <Cargo.toml version>-dev.<short sha>
+  prepare:
+    name: Prepare
+    if: startsWith(github.ref, 'refs/tags/bridge-v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      file_label: ${{ steps.v.outputs.file_label }}
+      is_tag: ${{ steps.v.outputs.is_tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: v
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" == refs/tags/bridge-v* ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#bridge-v}"
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            CRATE_VER=$(grep -m1 '^version' crates/tyutool-bridge/Cargo.toml | cut -d'"' -f2)
+            VER="${CRATE_VER}-dev.$(git rev-parse --short HEAD)"
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "file_label=${VER}" >> "$GITHUB_OUTPUT"
+          echo "Bridge version label: ${VER}"
+
+  # ── Build (3 platforms) ────────────────────────────────────────────────────
+  # Artifacts follow release.yml's CLI naming style:
+  #   tyutool-bridge_{platform}_{arch}_{ver}.tar.gz   (Linux / macOS)
+  #   tyutool-bridge_{platform}_{arch}_{ver}.zip      (Windows)
+  # Binary file name is `tyutool-bridge` (from [[bin]] name in Cargo.toml) —
+  # note the dash, unlike the CLI's underscored `tyutool_cli`.
+  build:
+    name: Bridge · ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS universal: `universal-apple-darwin` is not a real rustc target
+          # (release.yml only gets away with the name because Tauri synthesises
+          # it). For a plain cargo build we compile both arches and `lipo` them.
+          - os: macos-latest
+            platform: macos
+            arch: universal
+            targets: "aarch64-apple-darwin x86_64-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          # Linux: GNU, NOT musl. release.yml's CLI can use musl because it is
+          # pure Rust; the bridge links GTK/appindicator for its tray, and those
+          # do not static-link under musl.
+          # ubuntu-22.04 (not -latest) for the older glibc → wider compatibility.
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x86_64
+            targets: "x86_64-unknown-linux-gnu"
+            rust_targets: "x86_64-unknown-linux-gnu"
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            platform: windows
+            arch: x86_64
+            targets: "x86_64-pc-windows-msvc"
+            rust_targets: "x86_64-pc-windows-msvc"
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v6
+
+      # Deliberately much shorter than release.yml's Tauri dependency list:
+      #   libgtk-3-dev                  → tao (event loop) + muda (menus)
+      #   libayatana-appindicator3-dev  → tray-icon (the menu-bar/status icon)
+      #   libxdo-dev                    → required by tray-icon / muda
+      #   libudev-dev                   → serial port enumeration
+      # NOT installed: libwebkit2gtk / libjavascriptcoregtk / librsvg2 /
+      # patchelf — those are Tauri's WebView + bundler needs. The bridge has no
+      # WebView.
+      #
+      # Note: tyutool-core declares serialport with `default-features = false`
+      # and gates libudev behind an opt-in `libudev` feature that only src-tauri
+      # enables — so today's bridge build would link without libudev-dev too.
+      # It is kept as cheap insurance: the moment the bridge wants proper USB
+      # port metadata on Linux it will need that feature, and a missing -dev
+      # package is a confusing link error to debug in CI.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libayatana-appindicator3-dev libxdo-dev libudev-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.rust_targets }}" }
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "bridge-${{ matrix.platform }}-${{ matrix.arch }}" }
+
+      # bash on every platform (git-bash on Windows) so one loop covers both the
+      # single-target and the two-target (macOS universal) case.
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          for T in ${{ matrix.targets }}; do
+            echo "── cargo build --release -p tyutool-bridge --target $T"
+            cargo build --release -p tyutool-bridge --target "$T"
+          done
+
+      # ── Stage the binary into out/ ──
+      - name: Stage binary (macOS universal)
+        if: matrix.arch == 'universal'
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          lipo -create -output out/tyutool-bridge \
+            target/aarch64-apple-darwin/release/tyutool-bridge \
+            target/x86_64-apple-darwin/release/tyutool-bridge
+          lipo -info out/tyutool-bridge
+          chmod +x out/tyutool-bridge
+
+      - name: Stage binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp "target/${{ matrix.target }}/release/tyutool-bridge" out/
+          chmod +x out/tyutool-bridge
+
+      - name: Stage binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/tyutool-bridge.exe" out/
+
+      # Cheap smoke test. `--help` is handled before logging setup and before
+      # any tray/GTK initialisation (see main.rs), so it is safe on a headless
+      # runner with no DISPLAY.
+      - name: Smoke test (Unix)
+        if: runner.os != 'Windows'
+        run: ./out/tyutool-bridge --help
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./out/tyutool-bridge.exe --help
+
+      # ── Package ──
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf "dist/tyutool-bridge_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.prepare.outputs.file_label }}.tar.gz" \
+              -C out tyutool-bridge
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "out/tyutool-bridge.exe" `
+            -DestinationPath "dist/tyutool-bridge_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.prepare.outputs.file_label }}.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tyutool-bridge_${{ matrix.platform }}_${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+  # ── GitHub Release (bridge-v* tags only) ───────────────────────────────────
+  # No `scripts/changelog-section.ts` / `generate-manifest.ts` / updater manifest
+  # here: those belong to the upstream `v*.*.*` release line. The bridge has no
+  # auto-updater, so the release body is written inline.
+  release:
+    name: Create Release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.is_tag == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+          pattern: "tyutool-bridge_*"
+          merge-multiple: false
+
+      - name: Collect release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find artifacts/ -type f -exec cp {} release-assets/ \;
+          echo "── Release assets ──────────────────────────────"
+          ls -lh release-assets/
+
+      - name: Write release body
+        run: |
+          cat > release-body.md <<'EOF'
+          `tyutool-bridge` — resident local WebSocket flash helper with a system tray.
+
+          | Platform | Asset |
+          |---|---|
+          | macOS (Intel + Apple Silicon universal) | `tyutool-bridge_macos_universal_*.tar.gz` |
+          | Windows x86_64 | `tyutool-bridge_windows_x86_64_*.zip` |
+          | Linux x86_64 (glibc) | `tyutool-bridge_linux_x86_64_*.tar.gz` |
+
+          ## ⚠ Unsigned builds
+
+          These binaries are **not code-signed and not notarized**.
+
+          - **macOS** — Gatekeeper will refuse to launch the binary. Either
+            right-click → Open, or clear the quarantine flag:
+            ```
+            xattr -d com.apple.quarantine ./tyutool-bridge
+            ```
+          - **Windows** — SmartScreen will warn; choose "More info" → "Run anyway".
+          - **Linux** — no additional step needed.
+
+          Intended for internal integration testing, not public distribution.
+          EOF
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: tyutool-bridge ${{ github.ref_name }}
+          body_path: release-body.md
+          files: release-assets/*
