@@ -302,9 +302,22 @@ jobs:
 
       # ── Package: installers ──
       #
-      # cargo-packager only packages — it never builds — so it consumes the very
-      # binary the steps above staged (`--binaries-dir out`), including the
-      # `lipo`-merged universal one on macOS that no cargo target directory holds.
+      # cargo-packager only packages, never builds, so it has to be pointed at an
+      # already-built binary.
+      #
+      # ⚠ **`--binaries-dir` cannot do that.** In 0.11.8 the flag is declared on the
+      # CLI struct and then never read — `config.binaries_dir` is only ever set from
+      # the config file or from the computed default, so passing it is silently
+      # ignored. (First attempt did exactly that and failed with
+      # `Failed to copy … target/release/tyutool-bridge: No such file or directory`.)
+      # The only reliable lever is that default:
+      #     `target_directory [/ <--target triple>] / <profile>`
+      # so the binary must be sitting exactly there. Hence the two cases below.
+      #
+      # `--out-dir` *is* honoured, and stays absolute because the tool
+      # `set_current_dir`s into the directory of the Cargo.toml holding the config
+      # (`crates/tyutool-bridge/`) before packaging — anything relative would
+      # resolve from there rather than the workspace root.
       #
       # Every external tool it needs (NSIS, `create-dmg`, `linuxdeploy`) is
       # downloaded and SHA-checked at run time, so there is nothing to pre-install
@@ -313,10 +326,6 @@ jobs:
       # `CI` is set) and AppImage needing libfuse2 (it uses
       # `--appimage-extract-and-run`).
       #
-      # Absolute paths on purpose: the tool `set_current_dir`s to the directory of
-      # the Cargo.toml that holds the config (`crates/tyutool-bridge/`) before it
-      # runs, so anything relative would resolve from there instead of the
-      # workspace root.
       # `cargo install`, not `taiki-e/install-action` — that action's tool list
       # does not include cargo-packager (checked against its TOOLS.md), so asking
       # it for one fails the job outright. `--locked` pins the tool's own
@@ -337,13 +346,29 @@ jobs:
             ${{ runner.os == 'macOS' && 'dmg'
              || runner.os == 'Windows' && 'nsis'
              || 'deb,appimage' }}
+          # Empty on the macOS row (it builds two triples and merges them), set on
+          # Linux/Windows. Drives which of the two cases below applies.
+          PACKAGER_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          cargo packager \
-            --release \
-            --packages tyutool-bridge \
-            --formats "$FORMATS" \
-            --binaries-dir "$GITHUB_WORKSPACE/out" \
+          args=(--release --packages tyutool-bridge --formats "$FORMATS")
+
+          if [ -n "$PACKAGER_TARGET" ]; then
+            # Single-triple platforms: `cargo build --target $T` already left the
+            # binary in `target/$T/release/`, which is exactly where passing
+            # `--target` makes the packager look. Nothing to copy.
+            args+=(--target "$PACKAGER_TARGET")
+          else
+            # macOS universal: no triple owns the `lipo`-merged binary, so place it
+            # where the *no-target* default looks (`target/release/`). Cargo never
+            # writes there on this row — both real builds went to
+            # `target/<triple>/release/` — so this cannot clobber a build output.
+            mkdir -p target/release
+            cp out/tyutool-bridge target/release/tyutool-bridge
+            lipo -info target/release/tyutool-bridge
+          fi
+
+          cargo packager "${args[@]}" \
             --out-dir "$GITHUB_WORKSPACE/installers" \
             --verbose
           echo "── Installers ──────────────────────────────────"
