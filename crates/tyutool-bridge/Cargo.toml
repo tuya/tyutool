@@ -1,6 +1,6 @@
 [package]
 name = "tyutool-bridge"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Cobuilder Bridge — resident local WebSocket flash helper with a tray shell (--headless for CI)"
 

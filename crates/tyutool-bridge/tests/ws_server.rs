@@ -77,7 +77,15 @@ async fn whitelisted_origin_receives_hello_with_full_fields() {
 
     assert_eq!(v["type"], "hello", "frame: {text}");
     assert_eq!(v["protocol_version"], 1, "frame: {text}");
-    assert_eq!(v["app_version"], "0.1.0", "frame: {text}");
+    // Read from the crate, not spelled out. A literal here couples every version
+    // bump to this file: `0.1.0 → 0.2.0` broke it with a failure that says nothing
+    // about the wire contract, which is the opposite of what this test is for.
+    //
+    // What still gets asserted — and what actually matters to the web client —
+    // is that the field is present and carries *the bridge's own version* rather
+    // than being empty, absent, or some other string: the frontend's update hint
+    // feeds this straight into `compareSemver` against the released version.
+    assert_eq!(v["app_version"], env!("CARGO_PKG_VERSION"), "frame: {text}");
     #[cfg(target_os = "macos")]
     assert_eq!(v["platform"], "darwin", "frame: {text}");
     #[cfg(target_os = "windows")]
