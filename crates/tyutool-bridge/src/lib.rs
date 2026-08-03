@@ -29,7 +29,9 @@
 //! included), and every one of them leaves exactly one audit line. Everything
 //! low-risk (hello / ports / serial monitor) stays open so "插线即就绪" survives.
 
+pub mod autostart;
 pub mod lang;
+pub mod proc;
 pub mod status;
 
 use std::collections::{HashMap, HashSet};
@@ -4397,7 +4399,7 @@ fn detect_os_version() -> Option<String> {
 /// Run `program args...` and return its first non-empty stdout line.
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn command_first_line(program: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(program)
+    let output = crate::proc::hidden_command(program)
         .args(args)
         .output()
         .ok()?;

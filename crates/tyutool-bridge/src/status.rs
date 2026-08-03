@@ -54,6 +54,40 @@ pub fn diagnose_bind_error(error: &anyhow::Error) -> StartupDiagnosis {
     StartupDiagnosis::Other
 }
 
+/// What the tray shell does about a startup failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupFailureAction {
+    /// Terminate with status 0, showing the user nothing.
+    ExitSilently,
+    /// Stay resident with the reason in the status line (and a notification).
+    ShowError,
+}
+
+/// Whether a tray-mode startup failure is worth telling the user about.
+///
+/// Only [`StartupDiagnosis::AlreadyRunning`] is not: the bridge the user wanted
+/// is already serving on the port, so the *outcome they asked for* has been
+/// achieved and a second icon explaining that would be noise. Exit status 0 says
+/// the same thing to anything scripting it.
+///
+/// ⚠ Known cost of this, accepted deliberately: `AddrInUse` cannot tell "another
+/// bridge" from "a foreign process squatting on 18730". In the second case the
+/// user now double-clicks the app and *nothing happens*, with no on-screen
+/// explanation — which looks identical to a broken install. Two things keep that
+/// survivable: the reason is still written to the session log (so a bug report
+/// carries it), and the collision is unlikely on a private fixed port. Telling
+/// the two apart would mean completing a WS handshake against the occupant and
+/// checking for our own `hello`; that belongs in its own slice, not here.
+///
+/// `--headless` does not consult this: a supervisor needs the non-zero status,
+/// so that path keeps its `exit(1)`.
+pub fn tray_startup_failure_action(diagnosis: StartupDiagnosis) -> StartupFailureAction {
+    match diagnosis {
+        StartupDiagnosis::AlreadyRunning => StartupFailureAction::ExitSilently,
+        StartupDiagnosis::Other => StartupFailureAction::ShowError,
+    }
+}
+
 /// Error state rendered in the status line when the bridge could not start.
 ///
 /// Trade-off (technical design): the resident tray shell stays alive with this
@@ -113,6 +147,34 @@ mod tests {
         connections: 0,
         devices: 0,
     };
+
+    /// Double-clicking an installed app is a routine gesture, so "already
+    /// running" is a routine outcome — not an error to report.
+    ///
+    /// Before the app was packaged this was the opposite: a user ran the bare
+    /// binary from a terminal, so the second instance staying resident to
+    /// explain itself was the helpful choice. In `/Applications` it is a defect
+    /// — it leaves a second, permanently dead menu-bar icon next to the working
+    /// one, and the two are indistinguishable.
+    #[test]
+    fn a_second_instance_leaves_no_trace_at_all() {
+        assert_eq!(
+            tray_startup_failure_action(StartupDiagnosis::AlreadyRunning),
+            StartupFailureAction::ExitSilently
+        );
+    }
+
+    /// The guard on the rule above: "exit quietly" must stay scoped to the one
+    /// diagnosis that means "it is already working". A permissions failure or an
+    /// unexpected I/O error that vanished silently would leave the user with an
+    /// app that does nothing when double-clicked and no way to find out why.
+    #[test]
+    fn any_other_startup_failure_still_stays_up_to_explain_itself() {
+        assert_eq!(
+            tray_startup_failure_action(StartupDiagnosis::Other),
+            StartupFailureAction::ShowError
+        );
+    }
 
     #[test]
     fn status_line_shows_version_connections_and_devices() {

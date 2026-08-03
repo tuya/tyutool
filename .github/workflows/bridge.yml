@@ -242,17 +242,49 @@ jobs:
       # Cheap smoke test. `--help` is handled before logging setup and before
       # any tray/GTK initialisation (see main.rs), so it is safe on a headless
       # runner with no DISPLAY.
+      # The exit code alone is not enough any more: the release binary is linked
+      # as a GUI-subsystem app on Windows, and writes to a NULL standard handle
+      # *succeed* (`std` maps ERROR_INVALID_HANDLE to `Ok`), so a `--help` that
+      # printed nothing would still exit 0.
+      #
+      # What this step does and does not cover, precisely: because the runner
+      # shell always redirects the child's stdout into a pipe, the handle here is
+      # never NULL — inherited handles are independent of the subsystem. So this
+      # asserts the GUI-subsystem exe still writes to a *redirected* stdout (the
+      # supervisor / `> out.txt` case). The NULL-handle case only happens in an
+      # interactive terminal, where `proc::attach_parent_console` is what saves
+      # it, and that remains a real-machine check — CI structurally cannot see it.
       - name: Smoke test (Unix)
         if: runner.os != 'Windows'
-        run: ./out/tyutool-bridge --help
+        run: |
+          set -euo pipefail
+          out=$(./out/tyutool-bridge --help)
+          printf '%s\n' "$out"
+          case "$out" in
+            *--headless*) ;;
+            *) echo "::error::--help produced no usable output"; exit 1 ;;
+          esac
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./out/tyutool-bridge.exe --help
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = & ./out/tyutool-bridge.exe --help | Out-String
+          Write-Host $out
+          if ($out -notmatch '--headless') {
+            Write-Host "::error::--help produced no usable output (GUI subsystem swallowed stdout?)"
+            exit 1
+          }
 
-      # ── Package ──
-      - name: Package (Unix)
+      # ── Package: bare archive ──
+      #
+      # Kept *alongside* the installers below, not replaced by them. The two have
+      # different consumers: an installer puts the binary somewhere a human can
+      # double-click it (inside `.app/Contents/MacOS/` on macOS), while CI jobs,
+      # supervisors and `--headless` smoke scripts want one file at a predictable
+      # path. Dropping the archive would break the latter to serve the former.
+      - name: Package archive (Unix)
         if: runner.os != 'Windows'
         run: |
           set -euo pipefail
@@ -260,13 +292,97 @@ jobs:
           tar -czf "dist/tyutool-bridge_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.prepare.outputs.file_label }}.tar.gz" \
               -C out tyutool-bridge
 
-      - name: Package (Windows)
+      - name: Package archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path "out/tyutool-bridge.exe" `
             -DestinationPath "dist/tyutool-bridge_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.prepare.outputs.file_label }}.zip"
+
+      # ── Package: installers ──
+      #
+      # cargo-packager only packages — it never builds — so it consumes the very
+      # binary the steps above staged (`--binaries-dir out`), including the
+      # `lipo`-merged universal one on macOS that no cargo target directory holds.
+      #
+      # Every external tool it needs (NSIS, `create-dmg`, `linuxdeploy`) is
+      # downloaded and SHA-checked at run time, so there is nothing to pre-install
+      # on the runners. Two CI-specific quirks it already handles by itself:
+      # `create-dmg` hanging on a headless runner (it passes `--skip-jenkins` when
+      # `CI` is set) and AppImage needing libfuse2 (it uses
+      # `--appimage-extract-and-run`).
+      #
+      # Absolute paths on purpose: the tool `set_current_dir`s to the directory of
+      # the Cargo.toml that holds the config (`crates/tyutool-bridge/`) before it
+      # runs, so anything relative would resolve from there instead of the
+      # workspace root.
+      # `cargo install`, not `taiki-e/install-action` — that action's tool list
+      # does not include cargo-packager (checked against its TOOLS.md), so asking
+      # it for one fails the job outright. `--locked` pins the tool's own
+      # dependency tree so a fresh transitive release cannot break packaging on a
+      # day nobody touched this repo; the version is pinned for the same reason.
+      - name: Install cargo-packager
+        shell: bash
+        run: cargo install cargo-packager --locked --version 0.11.8
+
+      - name: Build installers
+        shell: bash
+        env:
+          # macOS: dmg. Windows: nsis (the installer with shortcuts + an
+          # uninstall entry) — not wix, which produces an .msi with neither.
+          # Linux: both a .deb for apt-managed machines and an .AppImage for
+          # everything else.
+          FORMATS: >-
+            ${{ runner.os == 'macOS' && 'dmg'
+             || runner.os == 'Windows' && 'nsis'
+             || 'deb,appimage' }}
+        run: |
+          set -euo pipefail
+          cargo packager \
+            --release \
+            --packages tyutool-bridge \
+            --formats "$FORMATS" \
+            --binaries-dir "$GITHUB_WORKSPACE/out" \
+            --out-dir "$GITHUB_WORKSPACE/installers" \
+            --verbose
+          echo "── Installers ──────────────────────────────────"
+          ls -lh "$GITHUB_WORKSPACE/installers"
+
+      # Renamed into the same `<platform>_<arch>_<label>` scheme as the archives so
+      # a release page lists one coherent set of names rather than a mix of ours
+      # and the packager's own (which are inconsistent between formats: `.dmg` and
+      # `-setup.exe` use the product name, `.deb`/`.AppImage` the binary name).
+      #
+      # `*.AppImage` is safe to glob despite the tool also downloading
+      # `linuxdeploy-*.AppImage` helpers: those go to `dirs::cache_dir()`, never
+      # into the out-dir.
+      - name: Collect installers into dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          label="${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.prepare.outputs.file_label }}"
+          shopt -s nullglob
+          found=0
+          for f in "$GITHUB_WORKSPACE"/installers/*.dmg \
+                   "$GITHUB_WORKSPACE"/installers/*setup.exe \
+                   "$GITHUB_WORKSPACE"/installers/*.deb \
+                   "$GITHUB_WORKSPACE"/installers/*.AppImage; do
+            ext="${f##*.}"
+            # `*-setup.exe` keeps the "this is an installer, not the app" signal
+            # that a bare `.exe` next to a `.zip` of the same name would lose.
+            case "$f" in *setup.exe) name="tyutool-bridge_${label}-setup.exe" ;;
+                         *)           name="tyutool-bridge_${label}.${ext}" ;; esac
+            cp "$f" "dist/$name"
+            found=$((found + 1))
+          done
+          # Silence here would mean shipping a release with no installer in it and
+          # nobody noticing until a user clicked the download link.
+          if [ "$found" -eq 0 ]; then
+            echo "::error::cargo packager produced no installer for ${{ matrix.platform }}"
+            exit 1
+          fi
+          ls -lh dist/
 
       - uses: actions/upload-artifact@v7
         with:
@@ -305,25 +421,48 @@ jobs:
           cat > release-body.md <<'EOF'
           `tyutool-bridge` — resident local WebSocket flash helper with a system tray.
 
+          ## Install (pick this)
+
+          | Platform | Asset | What it does |
+          |---|---|---|
+          | macOS (Intel + Apple Silicon) | `tyutool-bridge_macos_universal_*.dmg` | Drag **Cobuilder Bridge** into Applications. Runs in the menu bar only — no Dock icon. |
+          | Windows x86_64 | `tyutool-bridge_windows_x86_64_*-setup.exe` | Per-user install (no admin needed): Start-menu + desktop shortcuts, and an entry in Settings ▸ Apps for uninstalling. |
+          | Linux x86_64 (deb) | `tyutool-bridge_linux_x86_64_*.deb` | `sudo apt install ./…deb` — adds a desktop entry. |
+          | Linux x86_64 (portable) | `tyutool-bridge_linux_x86_64_*.AppImage` | `chmod +x` and run; no install. |
+
+          Autostart at login is **on by default** and can be turned off from the
+          tray menu ("开机自启" / "Start at login").
+
+          ## Bare binaries (for CI and supervisors)
+
+          The archives below hold the single executable, for running
+          `--headless` from a script where a `.app`/installed path is in the way.
+
           | Platform | Asset |
           |---|---|
-          | macOS (Intel + Apple Silicon universal) | `tyutool-bridge_macos_universal_*.tar.gz` |
+          | macOS (universal) | `tyutool-bridge_macos_universal_*.tar.gz` |
           | Windows x86_64 | `tyutool-bridge_windows_x86_64_*.zip` |
           | Linux x86_64 (glibc) | `tyutool-bridge_linux_x86_64_*.tar.gz` |
 
           ## ⚠ Unsigned builds
 
-          These binaries are **not code-signed and not notarized**.
+          Nothing here is **code-signed or notarized**, and packaging does not
+          change that — an unsigned `.dmg` is if anything *harder* to get past
+          Gatekeeper than a loose binary was, because the block applies to the
+          whole `.app`.
 
-          - **macOS** — Gatekeeper will refuse to launch the binary. Either
-            right-click → Open, or clear the quarantine flag:
+          - **macOS** — after dragging it in, the first launch is refused. Either
+            right-click the app → Open (then confirm), or:
             ```
-            xattr -d com.apple.quarantine ./tyutool-bridge
+            xattr -dr com.apple.quarantine "/Applications/Cobuilder Bridge.app"
             ```
-          - **Windows** — SmartScreen will warn; choose "More info" → "Run anyway".
+          - **Windows** — SmartScreen will warn about the installer; choose
+            "More info" → "Run anyway".
           - **Linux** — no additional step needed.
 
           Intended for internal integration testing, not public distribution.
+          A Developer ID signature + notarization is what removes the macOS step;
+          until then the drag-and-drop experience stops one click short.
           EOF
 
       - uses: softprops/action-gh-release@v3

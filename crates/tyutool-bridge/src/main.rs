@@ -13,11 +13,29 @@
 //! A hand-rolled flag check instead of clap: the binary has three flags and no
 //! subcommands, so an argument parser would be the larger surface.
 
+// No console window on Windows: this is a resident tray app that a user starts
+// from a Start-menu shortcut or an autostart entry, and a console-subsystem
+// binary would put a black window on their screen for as long as it runs.
+//
+// Two consequences are handled elsewhere rather than left to chance:
+//  * children no longer inherit a console either, so `CreateProcess` would give
+//    each one its own — every dialog, every `open <url>`, and (worst) the
+//    `cmd /c ver` behind **every** WebSocket hello frame. See [`tyutool_bridge::proc`].
+//  * with no console the standard handles are NULL, and `std` silently discards
+//    writes to those, so `--help` / `--headless` output would disappear without
+//    an error. See [`tyutool_bridge::proc::attach_parent_console`].
+//
+// `not(debug_assertions)` so `cargo run` during development keeps its console,
+// matching the GUI shell's own entry point (`src-tauri/src/main.rs`).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::sync::Arc;
 
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
+use tyutool_bridge::autostart;
 use tyutool_bridge::lang::{detect_lang, Lang};
+use tyutool_bridge::proc::hidden_command;
 use tyutool_bridge::status::{self, StatsSnapshot};
 use tyutool_bridge::{
     bind, AuthPrompt, Authority, ConfirmDecision, ConfirmRequest, ConfirmResponder, DangerousOp,
@@ -55,6 +73,11 @@ const LOG_FILE_PREFIX: &str = "tyutool-bridge-";
 const UNATTENDED_FLAG: &str = "--allow-unattended-writes";
 
 fn main() {
+    // First statement, before anything can write: see the module doc on
+    // `proc::attach_parent_console` for why a later call would be a no-op that
+    // still looks like it worked.
+    tyutool_bridge::proc::attach_parent_console();
+
     // Read once, here, and passed down by value from now on: the tray shell has
     // no settings UI to change it from, and re-reading it per string would only
     // let one dialog disagree with the next.
@@ -654,11 +677,7 @@ fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
     let labels = dialog_labels(lang);
     let script = macos_dialog_script(request, &labels, lang);
 
-    let output = match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-    {
+    let output = match hidden_command("osascript").arg("-e").arg(&script).output() {
         Ok(output) => output,
         Err(e) => {
             log::error!(
@@ -691,7 +710,7 @@ fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
         title = powershell_string(confirm_title(lang)),
     );
 
-    let output = match std::process::Command::new("powershell")
+    let output = match hidden_command("powershell")
         .args(["-NoProfile", "-Command"])
         .arg(&script)
         .output()
@@ -801,7 +820,7 @@ fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
 
     // zenity first: it is the only one of the two that can make the refusing
     // button the default, so a stray Return cannot authorize a write.
-    let zenity = std::process::Command::new("zenity")
+    let zenity = hidden_command("zenity")
         .arg("--question")
         .args(["--title", confirm_title(lang)])
         .arg("--text")
@@ -823,7 +842,7 @@ fn ask_user(request: &ConfirmRequest, lang: Lang) -> ConfirmDecision {
 
     // KDE fallback. `--yesno` has no way to say which button is focused, hence
     // second place — and hence the extra warning line in its text.
-    let kdialog = std::process::Command::new("kdialog")
+    let kdialog = hidden_command("kdialog")
         .args(["--title", confirm_title(lang)])
         .arg("--yesno")
         .arg(linux_dialog_text(request, LinuxDialogTool::KDialog, lang))
@@ -935,11 +954,7 @@ fn show_notification(title: &str, body: &str) {
         applescript_escape(body),
         applescript_escape(title)
     );
-    match std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .status()
-    {
+    match hidden_command("osascript").arg("-e").arg(&script).status() {
         Ok(status) if status.success() => {}
         Ok(status) => log::warn!("bridge notification not shown: osascript exit {status}"),
         Err(e) => log::warn!("bridge notification not shown: {e}"),
@@ -949,11 +964,7 @@ fn show_notification(title: &str, body: &str) {
 #[cfg(all(unix, not(target_os = "macos")))]
 fn show_notification(title: &str, body: &str) {
     // argv, no shell: nothing to escape.
-    match std::process::Command::new("notify-send")
-        .arg(title)
-        .arg(body)
-        .status()
-    {
+    match hidden_command("notify-send").arg(title).arg(body).status() {
         Ok(status) if status.success() => {}
         Ok(status) => log::warn!("bridge notification not shown: notify-send exit {status}"),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -1075,6 +1086,13 @@ enum UserEvent {
 }
 
 fn run_tray(choice: PromptChoice, lang: Lang) {
+    // Before anything shared is touched. The authoritative bind still happens on
+    // the server thread below (and still handles the case where someone grabs the
+    // port in between), but by then this process has already reconciled the login
+    // item and put an icon in the menu bar — both of which a doomed instance must
+    // not do. See the test in `tests`.
+    exit_if_already_running();
+
     // macOS pins the whole menu-bar/NSApplication stack to the main thread, so
     // the event loop must be built here and the server pushed to a side thread
     // (not the other way round).
@@ -1096,7 +1114,19 @@ fn run_tray(choice: PromptChoice, lang: Lang) {
         let _ = menu_proxy.send_event(UserEvent::Menu(event.id));
     }));
 
-    register_autostart();
+    // Reconcile the login-item registration with what the user last chose, and
+    // remember what was actually reached — that, not a hardcoded default, is what
+    // the menu's tick shows. See `autostart`'s module docs for why the recorded
+    // choice and the OS bit are two different things.
+    let autostart = open_autostart();
+    let autostart_state = match &autostart {
+        Some((preference, registration)) => {
+            autostart::apply_at_startup(preference, registration.as_ref())
+        }
+        // Nothing to reconcile against and nothing the user can toggle; the tick
+        // says "off" because that is the truth about this session.
+        None => false,
+    };
 
     // Detached on purpose: the tray owns the process lifetime, and quitting
     // tears the runtime down with it.
@@ -1116,6 +1146,10 @@ fn run_tray(choice: PromptChoice, lang: Lang) {
     // `None` until the server thread reports in; clicking "撤销所有授权" before
     // then is a no-op, not a panic.
     let mut authority: Option<Authority> = None;
+    // Whatever the reconciliation above actually reached — the value the tick is
+    // built from and the value the next toggle flips, so the menu can never claim
+    // a setting the OS did not accept.
+    let mut autostart_on = autostart_state;
 
     event_loop.run(move |event, _target, control_flow| {
         // Purely event-driven: nothing to poll between stats pushes and clicks.
@@ -1123,35 +1157,37 @@ fn run_tray(choice: PromptChoice, lang: Lang) {
         match event {
             // tao guarantees this is the first event, and on macOS the status
             // item may only be created once the app is initialized.
-            Event::NewEvents(StartCause::Init) => match TrayShell::build(&status_text, lang) {
-                Ok(shell) => tray = Some(shell),
-                // No icon means no menu, and no menu means no way to quit: the
-                // process would keep serving from a UI loop that can never
-                // receive an event, invisible and killable only from Activity
-                // Monitor / taskkill. So fail loudly and name the mode that
-                // works in a tray-less environment (a real case on Linux
-                // desktops without a StatusNotifier host).
-                //
-                // Not "degrade to headless in place": `tao::EventLoop::run`
-                // never returns (on macOS it exits the process), so there is no
-                // after-the-loop to fall through to. Exiting non-zero also
-                // makes the failure visible to whatever autostarts us, which a
-                // silent resident process would not be.
-                Err(e) => {
-                    log::error!(
-                        "bridge tray icon could not be created: {e:#}; no usable system tray \
+            Event::NewEvents(StartCause::Init) => {
+                match TrayShell::build(&status_text, autostart_on, lang) {
+                    Ok(shell) => tray = Some(shell),
+                    // No icon means no menu, and no menu means no way to quit: the
+                    // process would keep serving from a UI loop that can never
+                    // receive an event, invisible and killable only from Activity
+                    // Monitor / taskkill. So fail loudly and name the mode that
+                    // works in a tray-less environment (a real case on Linux
+                    // desktops without a StatusNotifier host).
+                    //
+                    // Not "degrade to headless in place": `tao::EventLoop::run`
+                    // never returns (on macOS it exits the process), so there is no
+                    // after-the-loop to fall through to. Exiting non-zero also
+                    // makes the failure visible to whatever autostarts us, which a
+                    // silent resident process would not be.
+                    Err(e) => {
+                        log::error!(
+                            "bridge tray icon could not be created: {e:#}; no usable system tray \
                          in this environment — run `tyutool-bridge --headless` instead"
-                    );
-                    eprintln!(
-                        "tyutool-bridge: no usable system tray ({e:#}); \
+                        );
+                        eprintln!(
+                            "tyutool-bridge: no usable system tray ({e:#}); \
                          run `tyutool-bridge --headless` instead"
-                    );
-                    // The error line is the whole point of this exit; make sure
-                    // it reached the log file before the process goes away.
-                    log::logger().flush();
-                    std::process::exit(1);
+                        );
+                        // The error line is the whole point of this exit; make sure
+                        // it reached the log file before the process goes away.
+                        log::logger().flush();
+                        std::process::exit(1);
+                    }
                 }
-            },
+            }
             Event::UserEvent(UserEvent::Stats(snapshot)) => {
                 status_text = status::status_line(VERSION, &snapshot, lang);
                 if let Some(shell) = &tray {
@@ -1176,6 +1212,20 @@ fn run_tray(choice: PromptChoice, lang: Lang) {
                     match shell.action_for(&id) {
                         Some(MenuAction::OpenCobuilder) => open_url(COBUILDER_URL),
                         Some(MenuAction::LatestVersion) => open_url(LATEST_VERSION_URL),
+                        Some(MenuAction::ToggleAutostart) => {
+                            autostart_on = match &autostart {
+                                Some((preference, registration)) => autostart::toggle(
+                                    preference,
+                                    registration.as_ref(),
+                                    autostart_on,
+                                ),
+                                None => false,
+                            };
+                            // The platform already ticked the item on click, so
+                            // this only matters when the flip did *not* take —
+                            // and that is exactly when the menu must not lie.
+                            shell.set_autostart_checked(autostart_on);
+                        }
                         Some(MenuAction::RevokeGrants) => revoke_all(authority.as_ref(), lang),
                         Some(MenuAction::Quit) => *control_flow = ControlFlow::Exit,
                         None => {}
@@ -1210,9 +1260,26 @@ fn serve_in_background(proxy: EventLoopProxy<UserEvent>, choice: PromptChoice, l
         let server = match bind(DEFAULT_PORT).await {
             Ok(server) => server,
             Err(e) => {
-                // Resident on failure (unlike --headless): the whole point of
-                // the tray is that the user finds out *why* nothing works.
                 let diagnosis = status::diagnose_bind_error(&e);
+                if status::tray_startup_failure_action(diagnosis)
+                    == status::StartupFailureAction::ExitSilently
+                {
+                    // The bridge the user wanted is already running; double-click
+                    // is a routine gesture and gets no feedback. Logged (never
+                    // shown) so a bug report still explains the "nothing
+                    // happened" — see `tray_startup_failure_action`.
+                    log::info!(
+                        "bridge is already running on 127.0.0.1:{DEFAULT_PORT}; \
+                         this instance exits without showing anything: {e:#}"
+                    );
+                    log::logger().flush();
+                    // From the server thread: this ends the whole process, which
+                    // is the point — returning would leave the event loop running
+                    // a second, permanently idle status item.
+                    std::process::exit(0);
+                }
+                // Resident on every other failure (unlike --headless): the whole
+                // point of the tray is that the user finds out *why* nothing works.
                 let line = status::startup_error_line(diagnosis, &e, lang);
                 // The status-line copy lands in the log too, so a bug report
                 // shows exactly what the user was reading in the tray.
@@ -1283,7 +1350,7 @@ fn revoke_all(authority: Option<&Authority>, lang: Lang) {
     notify("Cobuilder Bridge", revoked_notification_body(lang));
 }
 
-/// The tray menu's four command items, in menu order.
+/// The tray menu's command items, in menu order.
 ///
 /// A struct rather than an array: the items are built and matched by name, and a
 /// positional list is exactly how a translation ends up wiring "Quit" to the
@@ -1292,6 +1359,7 @@ fn revoke_all(authority: Option<&Authority>, lang: Lang) {
 struct MenuLabels {
     open_cobuilder: &'static str,
     latest_version: &'static str,
+    autostart: &'static str,
     revoke_grants: &'static str,
     quit: &'static str,
 }
@@ -1301,12 +1369,17 @@ fn menu_labels(lang: Lang) -> MenuLabels {
         Lang::Zh => MenuLabels {
             open_cobuilder: "打开 Cobuilder",
             latest_version: "获取最新版本",
+            // A checkable item, so the label states the setting rather than an
+            // action ("开机自启" + a tick), the convention every platform's own
+            // menus use for a toggle.
+            autostart: "开机自启",
             revoke_grants: "撤销所有授权",
             quit: "退出",
         },
         Lang::En => MenuLabels {
             open_cobuilder: "Open Cobuilder",
             latest_version: "Get the latest version",
+            autostart: "Start at login",
             revoke_grants: "Revoke all authorizations",
             quit: "Quit",
         },
@@ -1338,6 +1411,7 @@ fn revoked_notification_body(lang: Lang) -> &'static str {
 enum MenuAction {
     OpenCobuilder,
     LatestVersion,
+    ToggleAutostart,
     RevokeGrants,
     Quit,
 }
@@ -1350,19 +1424,27 @@ struct TrayShell {
     _icon: tray_icon::TrayIcon,
     _menu: muda::Menu,
     status_item: muda::MenuItem,
+    /// Held (not just its id) because the tick has to be updated after a toggle.
+    autostart_item: muda::CheckMenuItem,
     open_cobuilder: muda::MenuId,
     latest_version: muda::MenuId,
+    autostart: muda::MenuId,
     revoke_grants: muda::MenuId,
     quit: muda::MenuId,
 }
 
 impl TrayShell {
-    fn build(status_text: &str, lang: Lang) -> anyhow::Result<Self> {
+    fn build(status_text: &str, autostart_on: bool, lang: Lang) -> anyhow::Result<Self> {
         let labels = menu_labels(lang);
         // Disabled: a status readout, not a command.
         let status_item = muda::MenuItem::new(status_text, false, None);
         let open_cobuilder = muda::MenuItem::new(labels.open_cobuilder, true, None);
         let latest_version = muda::MenuItem::new(labels.latest_version, true, None);
+        // Built from the *reconciled* state, not from a hardcoded `true`: the tick
+        // is the only place the user can read what the setting currently is, so it
+        // must reflect what `autostart::apply_at_startup` actually achieved —
+        // including the case where the OS refused.
+        let autostart_item = muda::CheckMenuItem::new(labels.autostart, true, autostart_on, None);
         let revoke_grants = muda::MenuItem::new(labels.revoke_grants, true, None);
         let quit = muda::MenuItem::new(labels.quit, true, None);
 
@@ -1372,6 +1454,10 @@ impl TrayShell {
             &muda::PredefinedMenuItem::separator(),
             &open_cobuilder,
             &latest_version,
+            // Grouped with the settings above rather than next to "退出": it is a
+            // preference, and its neighbour on the other side is a security
+            // control that must not be a mis-click away from a routine toggle.
+            &autostart_item,
             &revoke_grants,
             &muda::PredefinedMenuItem::separator(),
             &quit,
@@ -1392,9 +1478,11 @@ impl TrayShell {
             _icon: icon,
             open_cobuilder: open_cobuilder.id().clone(),
             latest_version: latest_version.id().clone(),
+            autostart: autostart_item.id().clone(),
             revoke_grants: revoke_grants.id().clone(),
             quit: quit.id().clone(),
             status_item,
+            autostart_item,
             _menu: menu,
         })
     }
@@ -1403,11 +1491,23 @@ impl TrayShell {
         self.status_item.set_text(text);
     }
 
+    /// Force the tick to a known state.
+    ///
+    /// Not a no-op even right after a click: the platform menu ticks the item
+    /// itself on activation, so when the OS refuses the change the tick is already
+    /// wrong and has to be put back — otherwise the menu claims a setting that is
+    /// not in effect.
+    fn set_autostart_checked(&self, checked: bool) {
+        self.autostart_item.set_checked(checked);
+    }
+
     fn action_for(&self, id: &muda::MenuId) -> Option<MenuAction> {
         if *id == self.open_cobuilder {
             Some(MenuAction::OpenCobuilder)
         } else if *id == self.latest_version {
             Some(MenuAction::LatestVersion)
+        } else if *id == self.autostart {
+            Some(MenuAction::ToggleAutostart)
         } else if *id == self.revoke_grants {
             Some(MenuAction::RevokeGrants)
         } else if *id == self.quit {
@@ -1458,13 +1558,13 @@ fn open_url(url: &'static str) {
         .spawn(move || {
             #[cfg(target_os = "macos")]
             let mut command = {
-                let mut c = std::process::Command::new("open");
+                let mut c = hidden_command("open");
                 c.arg(url);
                 c
             };
             #[cfg(target_os = "windows")]
             let mut command = {
-                let mut c = std::process::Command::new("cmd");
+                let mut c = hidden_command("cmd");
                 // Empty title argument: `start` treats a lone quoted argument
                 // as the window title otherwise.
                 c.args(["/C", "start", "", url]);
@@ -1472,7 +1572,7 @@ fn open_url(url: &'static str) {
             };
             #[cfg(all(unix, not(target_os = "macos")))]
             let mut command = {
-                let mut c = std::process::Command::new("xdg-open");
+                let mut c = hidden_command("xdg-open");
                 c.arg(url);
                 c
             };
@@ -1490,51 +1590,121 @@ fn open_url(url: &'static str) {
 
 // ── Autostart ────────────────────────────────────────────────────────────────
 
-/// Register the bridge to start with the user's session, once. Advisory only:
-/// every failure is a warning, never a reason not to run.
+/// Quit immediately, and quietly, if another instance already holds the port.
 ///
-/// TODO: once the bridge ships as a macOS .app bundle, switch to
-/// `SMAppService` (`MacOSLaunchMode::SMAppService`, or the objc2 API directly)
-/// — that is the packaging slice's job, together with cleaning up the
-/// LaunchAgent plist this leaves behind when a user disables autostart.
-fn register_autostart() {
-    let exe = match std::env::current_exe() {
-        Ok(exe) => exe,
+/// A cheap synchronous probe: bind the port and drop it again. It duplicates no
+/// *decision* — the verdict still comes from [`status::diagnose_bind_error`] and
+/// [`status::tray_startup_failure_action`], the same pair the server thread
+/// consults — it only asks the question earlier, while giving up is still free.
+///
+/// Reliable on all three platforms despite `SO_REUSEADDR` looking like it should
+/// spoil it: on unix `std` sets `SO_REUSEADDR`, but that only affects `TIME_WAIT`
+/// sockets, so binding over a *live* listener still fails with `EADDRINUSE`; and
+/// on Windows `std` deliberately does **not** set it, precisely because there it
+/// would allow hijacking an active listener.
+///
+/// The window between this probe and the real bind is harmless: losing that race
+/// just lands in the server thread's error path, which reaches the same verdict.
+fn exit_if_already_running() {
+    let probe = std::net::TcpListener::bind(("127.0.0.1", DEFAULT_PORT));
+    let Err(e) = probe else {
+        return;
+    };
+    let error = anyhow::Error::new(e).context(format!("probe 127.0.0.1:{DEFAULT_PORT}"));
+    let diagnosis = status::diagnose_bind_error(&error);
+    if status::tray_startup_failure_action(diagnosis) != status::StartupFailureAction::ExitSilently
+    {
+        // Something other than "already running" — let the normal startup path
+        // reach it, so the user gets the tray shell that explains the failure.
+        return;
+    }
+    log::info!(
+        "bridge is already running on 127.0.0.1:{DEFAULT_PORT}; this instance exits \
+         without showing anything and without touching autostart: {error:#}"
+    );
+    log::logger().flush();
+    std::process::exit(0);
+}
+
+/// The pieces the autostart toggle needs: where the user's choice is recorded,
+/// and the platform registration to apply it to.
+///
+/// `None` when either could not be opened — no config directory, or no resolvable
+/// executable path. Advisory throughout: the bridge's job is flashing devices, and
+/// a login item it cannot manage is never a reason to refuse to run. The menu
+/// item stays visible but unticked in that case, which is the honest report.
+type Autostart = (
+    autostart::AutostartPreference,
+    Box<dyn autostart::AutostartRegistration>,
+);
+
+fn open_autostart() -> Option<Autostart> {
+    let preference = match autostart::AutostartPreference::open() {
+        Ok(preference) => preference,
         Err(e) => {
-            log::warn!("bridge autostart skipped, own path unknown: {e}");
-            return;
+            log::warn!("bridge autostart preference unavailable: {e}");
+            return None;
         }
     };
-
-    let builder = auto_launch::AutoLaunchBuilder::new()
-        .set_app_name(AUTOSTART_APP_NAME)
-        .set_app_path(&exe.to_string_lossy())
-        // A LaunchAgent plist works for a bare binary; both the AppleScript
-        // login item and `SMAppService` modes want a real .app bundle.
-        .set_macos_launch_mode(auto_launch::MacOSLaunchMode::LaunchAgent)
-        .build();
-
-    let launcher = match builder {
-        Ok(launcher) => launcher,
-        Err(e) => {
-            log::warn!("bridge autostart not configured: {e}");
-            return;
+    match autostart::SystemAutostart::for_current_exe(AUTOSTART_APP_NAME) {
+        Ok(registration) => {
+            log::info!(
+                "bridge autostart target: {}",
+                registration.target().display()
+            );
+            Some((preference, Box::new(registration)))
         }
-    };
-
-    match launcher.is_enabled() {
-        Ok(true) => log::info!("bridge autostart already registered"),
-        Ok(false) => match launcher.enable() {
-            Ok(()) => log::info!("bridge autostart registered for {}", exe.display()),
-            Err(e) => log::warn!("bridge autostart registration failed: {e}"),
-        },
-        Err(e) => log::warn!("bridge autostart state unknown: {e}"),
+        Err(e) => {
+            log::warn!("bridge autostart unavailable: {e}");
+            None
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A second instance must give up **before** it touches anything shared.
+    ///
+    /// Found on a real machine, not reasoned about: launching a stray copy of the
+    /// app while the installed one was running produced this log order —
+    ///
+    /// ```text
+    /// bridge autostart target: …/stage-a/Cobuilder Bridge.app/…
+    /// bridge autostart enabled
+    /// bridge is already running on 127.0.0.1:18730; this instance exits …
+    /// ```
+    ///
+    /// — i.e. the doomed instance re-pointed the login item at *itself* on the way
+    /// out. The user-visible consequence is a login item aimed at whatever stray
+    /// copy was double-clicked last (a leftover in ~/Downloads, say), which breaks
+    /// autostart for good the day that copy is deleted. It is the same defect
+    /// family as the stale-path bug in `autostart`: the registration has to point
+    /// at the app that is actually being used.
+    ///
+    /// Ordering, like the console attach in `proc`, has no local symptom and no
+    /// unit-testable seam — `run_tray` builds a real event loop. So the invariant
+    /// is asserted on source order: the give-up check comes first.
+    #[test]
+    fn a_second_instance_gives_up_before_touching_the_autostart_registration() {
+        let src = include_str!("main.rs");
+        let body = src
+            .split_once("fn run_tray(")
+            .expect("run_tray must exist")
+            .1;
+        let line_of = |needle: &str| {
+            body.lines()
+                .position(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("expected {needle} inside run_tray"))
+        };
+
+        assert!(
+            line_of("exit_if_already_running(") < line_of("open_autostart()"),
+            "run_tray must bail out on an occupied port before it reconciles \
+             autostart, or a second instance rewrites the login item on its way out"
+        );
+    }
 
     /// Does `text` contain Chinese?
     ///
@@ -1901,16 +2071,31 @@ mod tests {
         let zh = menu_labels(Lang::Zh);
         assert_eq!(zh.open_cobuilder, "打开 Cobuilder");
         assert_eq!(zh.latest_version, "获取最新版本");
+        assert_eq!(zh.autostart, "开机自启");
         assert_eq!(zh.revoke_grants, "撤销所有授权");
         assert_eq!(zh.quit, "退出");
 
         let en = menu_labels(Lang::En);
         assert_eq!(en.open_cobuilder, "Open Cobuilder");
         assert_eq!(en.latest_version, "Get the latest version");
+        assert_eq!(en.autostart, "Start at login");
         // The security control in the menu: it has to name what it withdraws,
         // not just say "reset".
         assert_eq!(en.revoke_grants, "Revoke all authorizations");
         assert_eq!(en.quit, "Quit");
+
+        // Same guard the notification strings carry: an English build that kept
+        // one Chinese label is the realistic translation mistake, and the tray
+        // menu is where it is most visible.
+        for label in [
+            en.open_cobuilder,
+            en.latest_version,
+            en.autostart,
+            en.revoke_grants,
+            en.quit,
+        ] {
+            assert!(!has_chinese(label), "{label}");
+        }
     }
 
     #[test]

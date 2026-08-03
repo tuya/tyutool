@@ -8,6 +8,13 @@ description = "Cobuilder Bridge — resident local WebSocket flash helper with a
 name = "tyutool-bridge"
 path = "src/main.rs"
 
+# Plain (not `[target.'cfg(windows)'.build-dependencies]`) on purpose: a
+# build-dependency cfg is evaluated against the **host**, so gating it on Windows
+# would drop the crate exactly when cross-building from macOS/Linux to Windows —
+# the case it is needed for. `build.rs` gates on the *target* instead.
+[build-dependencies]
+winresource = "0.1"
+
 [dependencies]
 anyhow = "1"
 auto-launch = "0.6"
@@ -30,3 +37,129 @@ tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 tyutool-core = { path = "../tyutool-core" }
+
+# `AttachConsole` only. The tray binary is linked as a GUI-subsystem app so it
+# never allocates its own console window (see `main.rs`), but that also means a
+# user who types `tyutool-bridge --headless` in cmd.exe gets a process with NULL
+# standard handles — `std` silently discards every write to them
+# (`handle_ebadf` in `library/std/src/io/stdio.rs` turns ERROR_INVALID_HANDLE
+# into `Ok`), so `--help` and the headless startup lines would vanish without a
+# word. Attaching to the parent's console gives those handles back.
+#
+# Pinned to 0.60 deliberately: `tray-icon` and `muda` already resolve to
+# windows-sys 0.60.2, so this reuses that copy instead of adding a sixth
+# major version to the tree. First platform-conditional dependency in the
+# workspace; the section syntax follows `auto-launch`'s own manifest.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_System_Console"] }
+
+# ── Installer packaging (cargo-packager 0.11) ────────────────────────────────
+#
+# Turns the staged binary into a real installer per platform: a `.dmg` to drag
+# into /Applications, an NSIS `.exe` that writes shortcuts and an uninstall entry,
+# and `.deb` / `.AppImage` on Linux. cargo-packager only *packages* — it does not
+# build — so CI keeps its existing `cargo build` + `lipo` steps and points
+# `--binaries-dir` at the same `out/` they already stage into.
+#
+# Two behaviours of the tool that shape everything below:
+#  · it `set_current_dir`s to **this file's directory** before packaging, so every
+#    relative path here resolves from `crates/tyutool-bridge/` (which is why
+#    `icons/…` is correct and why CI passes *absolute* --binaries-dir/--out-dir);
+#  · the config is `deny_unknown_fields`, so a misspelled key is a hard error
+#    rather than a silently ignored setting. Keys are camelCase (kebab-case is
+#    accepted as an alias on most, but not all, fields — do not rely on it).
+#
+# Inherited from [package] and deliberately not repeated: `version`,
+# `description`, `authors`, and the `binaries` list (auto-detected from the single
+# `[[bin]]`, which is what makes it `main`).
+[package.metadata.packager]
+# ⚠ Must be set. It defaults to the *crate* name, and this is the one string the
+# user actually reads: NSIS uses it for the shortcut names, the install directory
+# and the "Programs and Features" DisplayName, and macOS uses it for the .app.
+#
+# The naming split is intentional and settled here once: `Cobuilder Bridge` is the
+# product, `tyutool-bridge` stays the executable/identifier everywhere a path or a
+# key is involved (the `[[bin]]` name, `AUTOSTART_APP_NAME`, the log directory,
+# `grants.json`). Nothing user-visible depends on the crate name, and nothing
+# machine-visible depends on the product name.
+productName = "Cobuilder Bridge"
+# Follows the GUI shell's `com.tyutool.desktop` (src-tauri/tauri.conf.json).
+# Without this the tool would synthesise one from the first author, which would
+# change if the author list ever did — and on Windows it is also the
+# AppUserModelID stamped onto both shortcuts, i.e. the identity a future toast
+# notification would have to match.
+identifier = "com.tyutool.bridge"
+publisher = "Tuya"
+category = "DeveloperTool"
+icons = [
+    "icons/32x32.png",
+    "icons/64x64.png",
+    "icons/128x128.png",
+    "icons/128x128@2x.png",
+    "icons/icon.icns",
+    "icons/icon.ico",
+]
+
+[package.metadata.packager.macos]
+# The whole point of the macOS half of this work: `LSUIElement` in Info.plist, so
+# the app lives in the menu bar with no Dock tile and no app-switcher entry.
+#
+# It is the *packaging* half of a pair — `run_tray` already sets
+# `ActivationPolicy::Accessory` at runtime (main.rs). Both are needed: the
+# activation policy is what a bare binary can do for itself, and `LSUIElement` is
+# what stops the Dock tile from appearing for the moment before the app gets
+# far enough to set it.
+backgroundApp = true
+# tao 0.34 / objc2 already require 10.13+; stating it keeps the plist honest and
+# gives Finder something to refuse with instead of a crash on launch.
+minimumSystemVersion = "10.15"
+
+[package.metadata.packager.nsis]
+# Per-user install: no UAC prompt, and it keeps the whole installation consistent
+# with an autostart entry that is deliberately per-user (HKCU\...\Run — see
+# `autostart::SystemAutostart`). A perMachine install would put the app under
+# Program Files for everyone while autostart still only applied to the installing
+# user, which is a confusing half-state.
+installMode = "currentUser"
+# Offered as a checkbox by the uninstaller ("also delete application data").
+# These are the two files the bridge creates outside its install directory:
+# `grants.json` (the persisted "this origin may flash" consent) and
+# `autostart.json` (the login-item choice). Left alone unless the user ticks it,
+# because reinstalling should not silently cost them their consent.
+appdataPaths = ["$APPDATA\\tyutool-bridge"]
+#
+# ⚠ KNOWN LEFTOVER — the autostart entry survives uninstall, on Windows and Linux
+# alike, and this is not something the config above can fix:
+#
+#  · Windows: our per-user autostart is a value under
+#    `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. cargo-packager's NSIS
+#    template deletes the uninstall key, the shortcuts and (optionally) appdata,
+#    but nothing it generates knows that value exists — and the template exposes
+#    only a `preinstall_section` hook, no pre-uninstall counterpart. Removing it
+#    would mean supplying `nsis.template` and maintaining a fork of the upstream
+#    ~670-line Handlebars template against future releases, to delete one
+#    registry value.
+#  · Linux: `auto-launch` writes `~/.config/autostart/tyutool-bridge.desktop`, and
+#    a deb `postrm` is not allowed to touch `$HOME` (Debian policy) — per-user
+#    files are the user's, not the package's.
+#
+# Consequence, stated plainly: after uninstalling, one autostart entry remains
+# that points at a path that no longer exists. Both OSes tolerate that (the entry
+# simply fails to launch anything; Windows shows it in Task Manager ▸ Startup),
+# and the tray toggle removes it properly *before* uninstalling. Whoever revisits
+# this should weigh a template fork against shipping a tiny uninstall helper —
+# not add a second place that decides where autostart lives.
+
+[package.metadata.packager.deb]
+# Derived from what the tray actually links, one package per reason — the same
+# list the CI workflow installs `-dev` versions of, minus the build-only parts:
+#   libgtk-3-0                  → tao (event loop) + muda (menus)
+#   libayatana-appindicator3-1  → tray-icon (the status icon itself)
+#   libxdo3                     → required by tray-icon / muda
+#
+# `libudev1` is deliberately **absent**: `tyutool-core` declares serialport with
+# `default-features = false` and hides libudev behind an opt-in feature that only
+# `src-tauri` turns on, so the bridge does not link it. Listing it would make the
+# package refuse to install on systems that can in fact run it. Revisit the day
+# the bridge wants richer USB metadata on Linux.
+depends = ["libgtk-3-0", "libayatana-appindicator3-1", "libxdo3"]
