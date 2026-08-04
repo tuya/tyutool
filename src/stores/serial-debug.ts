@@ -1031,6 +1031,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   async function pickAutoSaveDir(): Promise<void> {
+    if (!isTauriRuntime()) return;
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") {

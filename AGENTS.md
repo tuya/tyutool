@@ -261,9 +261,11 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 
 ### File and directory naming
 
-- `.ts` / `.rs` files: kebab-case (`hex-format.ts`, `serial_debug.rs`)
+- `.ts` files: kebab-case (`hex-format.ts`, `flash-ipc-types.ts`); composables use camelCase `use*` / `*State` (`useFlashConnection.ts`, `confirmDialog.ts`)
+- `.rs` files: snake_case (`serial_debug.rs`, `flash_table.rs`) — Rust convention
 - `.vue` files: PascalCase (`SerialDebugPage.vue`)
 - Feature directories: kebab-case (`firmware-flash/`, `serial-debug/`)
+- Test files: same stem as the source plus `.test.ts`/`.test.rs` (a `.test.ts` matching a PascalCase `.vue` source is expected, not a violation of the `.ts` rule)
 
 ### Tauri IPC contract
 

@@ -161,8 +161,12 @@ tyutool update --source tuya
 ### Verbose logging
 
 ```bash
-RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
+tyutool --verbose write -d bk7231n -f firmware.bin
 ```
+
+`--verbose` writes developer diagnostic logs (protocol frames, retry counts) to
+stderr in addition to the always-on log file. The CLI does **not** read the
+`RUST_LOG` environment variable.
 
 ## Build from Source
 

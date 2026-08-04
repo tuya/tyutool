@@ -161,8 +161,11 @@ tyutool update --source tuya
 ### 详细日志
 
 ```bash
-RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
+tyutool --verbose write -d bk7231n -f firmware.bin
 ```
+
+`--verbose` 将开发者诊断日志（协议帧、重试计数等）输出到 stderr，日志文件照常写入。
+CLI **不**读取 `RUST_LOG` 环境变量。
 
 ## 从源码构建
 
