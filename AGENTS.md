@@ -216,6 +216,16 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
   (CLI: `SessionLogWriter` → `tyutool-<ts>-N.log`; GUI: `tauri-plugin-log` `max_file_size` +
   `RotationStrategy::KeepAll`). Across sessions, `prune_log_files` trims old files at startup
   (≤100 files / ≤100 MB total). New log sinks must stay bounded too.
+- **Credential isolation (two-channel model):** batch-auth plaintext interaction data
+  (verify comparison UUID/AuthKey values) is written to `batch-auth-<ts>.trace` via
+  `BatchAuthTraceWriter`, **never** into `tyutool-*.log`. The `.trace` file uses a non-`.log`
+  extension and non-`tyutool-` prefix on purpose — `collect_log_files`/`prune_log_files`/
+  `list_log_files_impl`/`pick_active_log` all ignore it, so it can never land in an export or
+  archive zip. It is the operator's local diagnosis record. `prune_trace_files` bounds growth
+  (≤20 files). UUID shape is **not** assumed (devices return 12/16/20+ chars); redaction on
+  the export path (`write_logs_zip` `mask = true`) matches the prefixes tyutool itself emits
+  (`uuid=`/`authkey=`/`existing_uuid=`/`otp_uuid=`), not UUID value patterns. The archive
+  path (`mask = false`) intentionally keeps plaintext — it is the user's local bundle.
 - **Custom-command ACL:** new Tauri commands for logs need no capability entry — register
   them only in `invoke_handler`. Don't add redundant `fs`/`dialog` permissions.
 - Any change to log file locations must update `.github/ISSUE_TEMPLATE/bug_report.yml`.
