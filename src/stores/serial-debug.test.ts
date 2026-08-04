@@ -597,8 +597,8 @@ describe("useSerialDebugStore port-manager integration", () => {
 
     expect(showConfirmDialog).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(showConfirmDialog).mock.calls[0][0];
-    // The hint (💡 marker, present in both locales) is appended for flash.
-    expect(opts.message).toContain("💡");
+    // The hint is appended for flash (body + "\n\n" separator + hint text).
+    expect(opts.message).toContain("\n\n");
     // The body (requester) is still present.
     expect(opts.message).toContain("flash");
   });
@@ -625,7 +625,7 @@ describe("useSerialDebugStore port-manager integration", () => {
 
     expect(showConfirmDialog).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(showConfirmDialog).mock.calls[0][0];
-    expect(opts.message).not.toContain("💡");
+    expect(opts.message).not.toContain("\n\n");
   });
 });
 
