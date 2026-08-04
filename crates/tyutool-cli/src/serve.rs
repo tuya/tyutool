@@ -214,6 +214,57 @@ impl SerialDebugChunkBridgeHandle {
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
+/// Create the serial-debug archive + filter index without panicking on a
+/// locked/unwritable preferred dir. Returns the directory actually used (so
+/// historical lookups point at the right place), falling back to a per-process
+/// subdirectory with a logged warning. Panics only if every attempt fails.
+fn create_serial_debug_state_resilient(
+    primary: &std::path::Path,
+) -> (
+    std::path::PathBuf,
+    SerialDebugArchive,
+    SerialDebugFilterIndex,
+) {
+    match (
+        SerialDebugArchive::create(primary),
+        SerialDebugFilterIndex::create(primary),
+    ) {
+        (Ok(a), Ok(f)) => return (primary.to_path_buf(), a, f),
+        (a_res, f_res) => {
+            log::warn!(
+                "[serve] serial-debug dir {:?} unavailable \
+                 (archive={:?}, filters={:?}); retrying in a per-process dir",
+                primary,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+    let fallback = primary.join(format!("pid-{}", std::process::id()));
+    match (
+        SerialDebugArchive::create(&fallback),
+        SerialDebugFilterIndex::create(&fallback),
+    ) {
+        (Ok(a), Ok(f)) => {
+            log::warn!(
+                "[serve] serial-debug archive initialised in fallback dir {:?}",
+                fallback
+            );
+            (fallback, a, f)
+        }
+        (a_res, f_res) => {
+            panic!(
+                "serial-debug archive could not be created in {:?} or {:?}: \
+                 archive={:?}, filters={:?}",
+                primary,
+                fallback,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+}
+
 pub async fn run_serve(port: u16) -> anyhow::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(&addr)
@@ -279,12 +330,10 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         Arc::new(Mutex::new(None));
     let debug_generation = Arc::new(SerialDebugGeneration::default());
     let serial_debug_dir = std::env::temp_dir().join("tyutool").join("serial-debug");
-    let debug_archive = Arc::new(Mutex::new(
-        SerialDebugArchive::create(&serial_debug_dir).expect("create serial-debug archive"),
-    ));
-    let debug_filters = Arc::new(Mutex::new(
-        SerialDebugFilterIndex::create(&serial_debug_dir).expect("create serial-debug filters"),
-    ));
+    let (serial_debug_dir, debug_archive_inner, debug_filters_inner) =
+        create_serial_debug_state_resilient(&serial_debug_dir);
+    let debug_archive = Arc::new(Mutex::new(debug_archive_inner));
+    let debug_filters = Arc::new(Mutex::new(debug_filters_inner));
 
     while let Some(Ok(msg)) = stream.next().await {
         let text = match msg {
