@@ -16,7 +16,7 @@ Download the latest CLI binary from the [GitHub Releases page](https://github.co
 | macOS aarch64 (Apple silicon) | `tyutool-cli_macos_aarch64_<ver>.tar.gz` |
 | Windows x86_64 | `tyutool-cli_windows_x86_64_<ver>.zip` |
 
-`<ver>` is the release version (e.g. `3.2.7`). Each release also publishes a `latest.json` manifest whose `cli.<platform>.sha256` field gives the SHA-256 of the matching asset — verify it if your download channel is untrusted.
+`<ver>` is the release version (e.g. `3.2.8`). Each release also publishes a `latest.json` manifest whose `cli.<platform>.sha256` field gives the SHA-256 of the matching asset — verify it if your download channel is untrusted.
 
 Extract the binary and put it on your `PATH`:
 
@@ -304,7 +304,7 @@ Device names are case-insensitive (`--device T5AI`, `--device t5AI`, and `--devi
 
 Plain mode output example:
 ```
-tyutool v3.2.7  linux/x86_64
+tyutool v3.2.8  linux/x86_64
 
 write  BK7231N  /dev/ttyUSB0  921600
   File   firmware.bin  1.8 MiB

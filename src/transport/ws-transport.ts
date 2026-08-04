@@ -293,11 +293,20 @@ export class WsTransport {
       let pendingFileContent: { name: string; content: string } | null = null;
 
       const handler = (ev: MessageEvent) => {
-        const msg = JSON.parse(ev.data as string) as {
+        let msg: {
           type: string;
           payload?: Record<string, unknown>;
           message?: string;
         };
+        try {
+          msg = JSON.parse(ev.data as string) as {
+            type: string;
+            payload?: Record<string, unknown>;
+            message?: string;
+          };
+        } catch {
+          return;
+        }
 
         if (msg.type === "error") {
           ws.removeEventListener("message", handler);
