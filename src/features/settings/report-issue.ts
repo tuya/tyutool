@@ -123,7 +123,7 @@ export async function exportLogsAndReport(
 
   await showConfirmDialog({
     title: t("settings.reportIssue.title"),
-    message: `${t("settings.reportIssue.savedTo", { path: dest })}\n\n${t("settings.reportIssue.linkCopied")}`,
+    message: `${t("settings.reportIssue.savedTo", { path: dest })}\n\n${t("settings.reportIssue.linkCopied")}\n\n${t("settings.reportIssue.privacyReminder")}`,
     kind: "info",
     okLabel: t("common.ok"),
     showCancel: false,
