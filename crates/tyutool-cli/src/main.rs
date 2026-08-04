@@ -21,7 +21,7 @@ mod update;
 #[derive(Parser)]
 #[command(name = "tyutool", version, about = "Tuya Uart Tool.")]
 struct Cli {
-    /// Also write developer logs to stderr (always writes to log file)
+    /// Also write developer diagnostic logs to stderr (always written to log file)
     #[arg(long, global = true)]
     verbose: bool,
 
@@ -411,22 +411,19 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
         ))
     };
 
-    let mut dispatch = fern::Dispatch::new()
-        .format(fmt)
-        .level(log::LevelFilter::Info)
+    // File sink captures full developer diagnostics (Trace+) so debug/trace
+    // logs persist per the Logging Contract; the top-level filter stays Info so
+    // stderr (when enabled) is not flooded by trace frames.
+    let file_dispatch = fern::Dispatch::new()
+        .level(log::LevelFilter::Trace)
         .chain(Box::new(session_writer) as Box<dyn std::io::Write + Send>);
+
+    let mut dispatch = fern::Dispatch::new().format(fmt).chain(file_dispatch);
 
     if verbose {
         dispatch = dispatch.chain(
             fern::Dispatch::new()
-                .format(|out, message, record| {
-                    out.finish(format_args!(
-                        "[{} {}] {}",
-                        record.level(),
-                        record.target(),
-                        message
-                    ))
-                })
+                .level(log::LevelFilter::Info)
                 .chain(std::io::stderr()),
         );
         eprintln!("[log] Writing to: {}", log_path.display());
