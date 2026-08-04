@@ -569,7 +569,10 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   function portConflictMessage(requester: string): string {
     const body = t("serialDebug.confirm.releaseForFlashBody", { requester });
     if (requester === "flash") {
-      return `${body}\n\n${t("serialDebug.confirm.releaseForFlashHint")}`;
+      return `${body}\n\n${t("serialDebug.confirm.releaseForFlashHint", {
+        settings: t("serialDebug.conn.settings"),
+        autoRelease: t("serialDebug.conn.autoRelease"),
+      })}`;
     }
     return body;
   }

@@ -573,7 +573,7 @@
     "confirm": {
       "releaseForFlashTitle": "Port conflict",
       "releaseForFlashBody": "{requester} is requesting this port. Release?",
-      "releaseForFlashHint": "💡 To skip this prompt on every flash, go to Serial Debug → Settings (gear icon, top-right) and enable \"Auto-release for flash\".",
+      "releaseForFlashHint": "💡 To skip this prompt on every flash, go to the Serial Debug page and open {settings} (gear icon, top-right), then enable \"{autoRelease}\".",
       "releaseOk": "Release",
       "releaseCancel": "Cancel"
     },
