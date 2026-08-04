@@ -313,7 +313,7 @@ describe("listPorts", () => {
     await expect(p).resolves.toEqual([]);
   });
 
-  it("closes any existing connection first (forces a reconnect)", async () => {
+  it("reuses an open connection instead of closing it (keeps serial-debug alive)", async () => {
     const t = new WsTransport();
     // Establish an initial open connection.
     const a = t.isAvailable();
@@ -322,10 +322,30 @@ describe("listPorts", () => {
     first.open();
     await a;
 
-    // listPorts should close `first` and open a fresh socket.
+    // listPorts must reuse the live socket — closing it would orphan any
+    // active serial-debug chunk handler bound via addEventListener.
     const p = t.listPorts();
     await flush();
-    expect(first.closed).toBe(true);
+    expect(first.closed).toBe(false);
+    expect(MockWebSocket.instances.length).toBe(1);
+    first.recv({ type: "ports", ports: [] });
+    await expect(p).resolves.toEqual([]);
+  });
+
+  it("forces a reconnect when the socket is in a bad state (closed)", async () => {
+    const t = new WsTransport();
+    // Establish an initial open connection, then drop it (server closed).
+    const a = t.isAvailable();
+    await flush();
+    const first = latest();
+    first.open();
+    await a;
+    first.fireClose(); // onclose clears this.ws → bad state
+    await flush();
+
+    // listPorts should detect the dead socket and open a fresh one.
+    const p = t.listPorts();
+    await flush();
     expect(MockWebSocket.instances.length).toBe(2);
     const second = latest();
     second.open();

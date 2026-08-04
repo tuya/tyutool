@@ -195,7 +195,20 @@ export class WsTransport {
   }
 
   async listPorts(): Promise<TauriSerialPortRow[]> {
-    this.closeCurrentConnection();
+    // Reuse an open socket instead of forcibly resetting it. A previous
+    // implementation called closeCurrentConnection() here, which tore down the
+    // shared WebSocket and orphaned the active serial-debug chunk handler
+    // (registered via addEventListener on the old socket — it was never
+    // re-attached on reconnect), silently stopping serial-debug RX/TX after a
+    // device refresh. Only reset when the socket is in a bad (non-OPEN,
+    // non-CONNECTING) state; otherwise connect() returns the live one.
+    if (
+      !this.ws ||
+      (this.ws.readyState !== WebSocket.OPEN &&
+        this.ws.readyState !== WebSocket.CONNECTING)
+    ) {
+      this.closeCurrentConnection();
+    }
     const ws = await this.connect();
     return new Promise<TauriSerialPortRow[]>((resolve, reject) => {
       const timeout = setTimeout(() => {
