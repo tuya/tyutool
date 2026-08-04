@@ -257,6 +257,7 @@
     "authKey": "AuthKey",
     "authKeyPh": "32-character AuthKey",
     "copyCredentials": "Copy UUID & AuthKey",
+    "rememberAuth": "Remember authorization (stored locally on this device)",
     "authOfficialIntro": "",
     "authOfficialDocLink": "TuyaOpen docs: device authorization",
     "authTuyaOpenOnly": "TuyaOpen authorization only: use your {link}. Do not substitute keys from TuyaOS products.",
