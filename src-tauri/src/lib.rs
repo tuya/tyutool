@@ -804,6 +804,33 @@ fn batch_auth_start(
 
     // Phase 3: spawn threads — auth code allocation happens lazily inside each thread,
     // after reading the device's existing auth status.
+    //
+    // One shared .trace writer per batch run captures plaintext verify data
+    // (UUID/AuthKey comparison values) for local diagnosis. The file is
+    // `batch-auth-<ts>.trace` — never collected into any export/archive zip.
+    let trace_writer = match app.path().app_log_dir() {
+        Ok(log_dir) => {
+            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+            match BatchAuthTraceWriter::open(&log_dir, &ts) {
+                Ok(w) => Some(std::sync::Arc::new(std::sync::Mutex::new(w))),
+                Err(e) => {
+                    log::warn!("[batch-auth] trace writer unavailable: {e}");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("[batch-auth] log dir unavailable, trace disabled: {e}");
+            None
+        }
+    };
+    // Trim old .trace files alongside the run (bounded growth, independent of .log pruning).
+    if let Some(log_dir) = trace_writer
+        .as_ref()
+        .and_then(|_| app.path().app_log_dir().ok())
+    {
+        prune_trace_files(&log_dir);
+    }
     for port in ports {
         // Set up cancel + spawn thread
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -813,6 +840,7 @@ fn batch_auth_start(
         let config_clone = config.clone();
         let alloc_clone = allocator.clone();
         let session_clone = state.session.clone();
+        let trace_clone = trace_writer.clone();
 
         let handle = std::thread::spawn(move || {
             // Must be the first statement: every exit path (early returns,
@@ -1023,6 +1051,13 @@ fn batch_auth_start(
                         "batch-auth-progress",
                         serde_json::json!({ "port": port_clone, "step": step_str }),
                     );
+                },
+                |line: &str| {
+                    if let Some(tw) = &trace_clone {
+                        if let Ok(mut w) = tw.lock() {
+                            w.writeln(line);
+                        }
+                    }
                 },
             );
 
@@ -2237,6 +2272,10 @@ fn append_text_file(path: String, content: String) -> Result<(), String> {
 
 const MAX_LOG_FILES: usize = 100;
 const MAX_LOG_BYTES_TOTAL: u64 = 100 * 1024 * 1024; // 100 MB
+/// Bounded growth for `.trace` files (plaintext batch-auth interaction data).
+/// Independent from `.log` limits — `.trace` is never collected into any
+/// export/archive zip (it has no `tyutool-` prefix and a non-`.log` extension).
+const MAX_TRACE_FILES: usize = 20;
 
 /// Delete the oldest per-session log files until the collection is within both
 /// the file-count and total-size limits. Only manages files whose stem starts
@@ -2274,6 +2313,61 @@ fn prune_log_files(log_dir: &std::path::Path) {
         let _ = std::fs::remove_file(path);
         count -= 1;
         total = total.saturating_sub(*size);
+    }
+}
+
+/// Plaintext writer for batch-auth device-interaction data (auth-read raw lines,
+/// auth-write responses, verify comparison values). Lives in its own
+/// `batch-auth-<ts>.trace` file — deliberately NOT a `.log` file and NOT
+/// `tyutool-`-prefixed, so `collect_log_files` / `prune_log_files` /
+/// `list_log_files_impl` / `pick_active_log` all ignore it. The export-for-report
+/// zip therefore can never contain it; only the operator's local machine keeps it.
+struct BatchAuthTraceWriter {
+    file: std::fs::File,
+}
+
+impl BatchAuthTraceWriter {
+    /// Create `<log_dir>/batch-auth-<ts>.trace` (append mode). `ts` should be a
+    /// sortable timestamp stem (matching the `tyutool-<ts>.log` convention).
+    fn open(log_dir: &std::path::Path, ts: &str) -> std::io::Result<Self> {
+        let path = log_dir.join(format!("batch-auth-{ts}.trace"));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        Ok(Self { file })
+    }
+
+    /// Append one line (trailing newline added). Errors are swallowed — trace
+    /// logging is best-effort and must never break a batch run.
+    fn writeln(&mut self, line: &str) {
+        use std::io::Write;
+        let _ = writeln!(self.file, "{line}");
+    }
+}
+
+/// Delete the oldest `batch-auth-*.trace` files until at most `MAX_TRACE_FILES`
+/// remain. Independent from `prune_log_files` (different prefix/extension).
+fn prune_trace_files(log_dir: &std::path::Path) {
+    let mut files: Vec<std::path::PathBuf> = match std::fs::read_dir(log_dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().map(|x| x == "trace").unwrap_or(false)
+                    && p.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.starts_with("batch-auth-"))
+                        .unwrap_or(false)
+            })
+            .collect(),
+        Err(_) => return,
+    };
+    // Timestamped filenames are lexicographically chronological; oldest first.
+    files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    while files.len() > MAX_TRACE_FILES.saturating_sub(1) {
+        let removed = files.remove(0);
+        let _ = std::fs::remove_file(removed);
     }
 }
 
@@ -3828,6 +3922,58 @@ mod log_tools_tests {
         assert!(zipped.contains("tyutool v3.2.8 starting"));
         assert!(zipped.contains("port=COM3 opened"));
         assert!(zipped.contains("mac=AA:BB"));
+    }
+
+    #[test]
+    fn batch_auth_trace_writer_creates_dot_trace_file_with_plaintext() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = BatchAuthTraceWriter::open(dir.path(), "20260804-120000").unwrap();
+        w.writeln("[verify] wrote uuid=real-uuid authkey=real-secret-key");
+        drop(w);
+        let path = dir.path().join("batch-auth-20260804-120000.trace");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("uuid=real-uuid"));
+        assert!(content.contains("authkey=real-secret-key"));
+    }
+
+    #[test]
+    fn batch_auth_trace_file_not_collected_by_collect_log_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tyutool.log"), b"x").unwrap();
+        std::fs::write(
+            dir.path().join("batch-auth-20260804-120000.trace"),
+            b"secret",
+        )
+        .unwrap();
+        let files = collect_log_files(dir.path());
+        assert!(files
+            .iter()
+            .all(|p| { p.extension().map(|x| x == "log").unwrap_or(false) }));
+        assert!(!files
+            .iter()
+            .any(|p| p.to_string_lossy().contains("batch-auth")));
+    }
+
+    #[test]
+    fn prune_trace_files_keeps_newest_and_ignores_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        // 25 trace files + 1 unrelated log file.
+        for i in 0..25 {
+            let name = format!("batch-auth-202601{:02}-000000.trace", i + 1);
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        std::fs::write(dir.path().join("tyutool-old.log"), b"x").unwrap();
+        prune_trace_files(dir.path());
+        let traces: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "trace").unwrap_or(false))
+            .collect();
+        // Keeps the newest MAX_TRACE_FILES-1 (the latest by lexicographic order).
+        assert_eq!(traces.len(), MAX_TRACE_FILES - 1);
+        // The log file is untouched.
+        assert!(dir.path().join("tyutool-old.log").exists());
     }
 
     #[test]

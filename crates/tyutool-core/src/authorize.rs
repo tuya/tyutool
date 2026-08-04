@@ -685,7 +685,18 @@ impl<T: AuthIo> AuthSession<T> {
             })
             .map(String::as_str)
             .collect();
-        log::debug!("[serial] auth-read raw={:?} relevant={:?}", lines, relevant);
+        // Summary only — the raw lines carry plaintext UUID/AuthKey and now live
+        // in the dedicated .trace sink (see run_batch_auth_slot verify logging).
+        // Do NOT log raw/relevant contents here; that would leak into tyutool-*.log
+        // and thus into the export-for-report zip.
+        log::debug!(
+            "[serial] auth-read lines={} relevant={} failure_echo={}",
+            lines.len(),
+            relevant.len(),
+            relevant
+                .iter()
+                .any(|l| l.to_lowercase().contains("authorization read failure"))
+        );
         for pair in relevant.windows(2) {
             let uuid = pair[0].trim();
             let authkey = pair[1].trim();
@@ -1431,7 +1442,7 @@ pub fn wait_after_firmware_flash(port: &str, baud_rate: u32, chip_id: &str, canc
 /// - `update_row(row_idx, mac, update)` — notify caller of per-step state changes.
 /// - `cancel` / `progress` — unchanged semantics.
 #[allow(clippy::too_many_arguments)]
-pub fn run_batch_auth_slot<F, B, A, U>(
+pub fn run_batch_auth_slot<F, B, A, U, Tr>(
     port: &str,
     chip_id: &str,
     config: &BatchAuthSlotConfig,
@@ -1440,12 +1451,14 @@ pub fn run_batch_auth_slot<F, B, A, U>(
     update_row: U,
     cancel: &AtomicBool,
     progress: F,
+    trace: Tr,
 ) -> Result<BatchAuthSlotResult, FlashError>
 where
     F: Fn(BatchAuthStep),
     B: Fn(&str) -> Option<(usize, String, String)>,
     A: FnOnce() -> Option<(usize, String, String)>,
     U: Fn(usize, &str, BatchAuthRowUpdate),
+    Tr: Fn(&str),
 {
     macro_rules! check_cancel {
         () => {
@@ -1685,15 +1698,23 @@ where
             match verify_result {
                 Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
                     log::info!("[batch-auth] verify ok  port={port} mac={mac}");
+                    trace(&format!(
+                        "[verify ok] port={port} mac={mac} uuid={uuid} authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
                     update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
                 }
                 Some((rb_u, rb_k)) => {
+                    // Plaintext comparison goes to the .trace sink (local only,
+                    // never exported); the user-visible error + log stay masked.
+                    trace(&format!(
+                        "[verify mismatch] port={port} mac={mac} wrote_uuid={uuid} wrote_authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
                     let msg = format!(
                         "Verify failed: wrote (uuid={uuid}, authkey={}), read (uuid={rb_u}, authkey={})",
                         mask_secret(&authkey),
                         mask_secret(&rb_k),
                     );
-                    log::warn!("[batch-auth] verify-fail  port={port} mac={mac} reason={msg}");
+                    log::warn!("[batch-auth] verify-fail  port={port} mac={mac}");
                     update_row(
                         row_idx,
                         &mac,
@@ -1956,9 +1977,15 @@ where
             match verify_result {
                 Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
                     log::info!("[batch-auth] verify ok (old fw)  port={port} mac={mac}");
+                    trace(&format!(
+                        "[verify ok (old fw)] port={port} mac={mac} uuid={uuid} authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
                     update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
                 }
                 Some((rb_u, rb_k)) => {
+                    trace(&format!(
+                        "[verify mismatch (old fw)] port={port} mac={mac} wrote_uuid={uuid} wrote_authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
                     let msg = format!(
                         "Verify failed: wrote (uuid={uuid}, authkey={}), read (uuid={rb_u}, authkey={})",
                         mask_secret(&authkey),
