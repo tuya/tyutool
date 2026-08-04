@@ -562,6 +562,18 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
+  /** Confirm-dialog body when another feature requests a port that
+   *  serial-debug currently owns. When the requester is flash, appends a hint
+   *  pointing to the "auto-release for flash" toggle so the user can avoid
+   *  this prompt on every future flash. */
+  function portConflictMessage(requester: string): string {
+    const body = t("serialDebug.confirm.releaseForFlashBody", { requester });
+    if (requester === "flash") {
+      return `${body}\n\n${t("serialDebug.confirm.releaseForFlashHint")}`;
+    }
+    return body;
+  }
+
   async function openPort(): Promise<void> {
     if (open.value || opening.value) return;
     if (!port.value.trim() || currentBaud() <= 0) {
@@ -579,9 +591,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
           ? true
           : await showConfirmDialog({
               title: t("serialDebug.confirm.releaseForFlashTitle"),
-              message: t("serialDebug.confirm.releaseForFlashBody", {
-                requester,
-              }),
+              message: portConflictMessage(requester),
               okLabel: t("serialDebug.confirm.releaseOk"),
               cancelLabel: t("serialDebug.confirm.releaseCancel"),
               kind: "warning",
