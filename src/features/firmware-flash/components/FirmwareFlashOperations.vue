@@ -423,6 +423,16 @@ const { message: readAddrError } = useAddrRangeError(
                 no-copy
               />
             </div>
+            <label
+              class="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--ty-text-muted)]"
+            >
+              <input
+                v-model="ctx.rememberAuth"
+                type="checkbox"
+                class="size-3 rounded border-[var(--ty-border)]"
+              />
+              {{ t("flash.rememberAuth") }}
+            </label>
             <button
               type="button"
               class="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1.5 text-sm transition-colors hover:bg-[var(--ty-surface-muted)] disabled:opacity-40"

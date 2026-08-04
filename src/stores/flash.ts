@@ -135,6 +135,8 @@ export const useFlashStore = defineStore("flash", () => {
   const readFileNameModified = ref(false);
   const authorizeUuid = ref("");
   const authorizeAuthKey = ref("");
+  /** Opt-in: only when true are authorizeUuid/authorizeAuthKey persisted. */
+  const rememberAuth = ref(false);
   const autoConnected = ref(false);
 
   let progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -874,9 +876,10 @@ export const useFlashStore = defineStore("flash", () => {
       readDir: readDir.value,
       readFileName: readFileName.value,
       readFileNameModified: readFileNameModified.value,
-      authorizeUuid: authorizeUuid.value,
-      authorizeAuthKey: authorizeAuthKey.value,
+      authorizeUuid: rememberAuth.value ? authorizeUuid.value : "",
+      authorizeAuthKey: rememberAuth.value ? authorizeAuthKey.value : "",
       authBaudRate: selectedAuthBaudRate.value,
+      rememberAuth: rememberAuth.value,
     };
   }
 
@@ -913,8 +916,9 @@ export const useFlashStore = defineStore("flash", () => {
       readDir.value = data.readDir;
       readFileName.value = data.readFileName;
       readFileNameModified.value = data.readFileNameModified;
-      authorizeUuid.value = data.authorizeUuid;
-      authorizeAuthKey.value = data.authorizeAuthKey;
+      authorizeUuid.value = data.rememberAuth ? data.authorizeUuid : "";
+      authorizeAuthKey.value = data.rememberAuth ? data.authorizeAuthKey : "";
+      rememberAuth.value = data.rememberAuth;
       selectedAuthBaudRate.value = data.authBaudRate;
       selectedSerialPort.value = data.selectedSerialPort;
     } finally {
@@ -971,6 +975,7 @@ export const useFlashStore = defineStore("flash", () => {
         authorizeUuid: authorizeUuid.value,
         authorizeAuthKey: authorizeAuthKey.value,
         authBaudRate: selectedAuthBaudRate.value,
+        rememberAuth: rememberAuth.value,
       }),
       debounced,
       { deep: true },
@@ -1057,6 +1062,7 @@ export const useFlashStore = defineStore("flash", () => {
     readFilePath,
     authorizeUuid,
     authorizeAuthKey,
+    rememberAuth,
     flashProgress,
     flashPhase,
     flashMessage,
