@@ -25,6 +25,14 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/**/*.d.ts', 'src/main.ts', 'src/vite-env.d.ts'],
+      // Set just below the current baseline (Stmts 80%, Branch 83%, Funcs 78%,
+      // Lines 80%) so obvious regressions fail CI without flaking on noise.
+      thresholds: {
+        statements: 80,
+        branches: 83,
+        functions: 78,
+        lines: 80,
+      },
     },
   },
 });

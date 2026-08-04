@@ -16,6 +16,7 @@ import type {
 } from "@/features/serial-debug/types";
 import type { TauriSerialPortRow } from "@/utils/serial-port-label";
 import { platform } from "@/platform";
+import { i18n } from "@/i18n";
 
 const WS_PORT = "9527";
 
@@ -105,11 +106,7 @@ export class WsTransport {
 
       const timeout = setTimeout(() => {
         ws.removeEventListener("message", handler);
-        reject(
-          new Error(
-            "deviceReset timeout — 请重新编译并启动 tyutool-cli serve（需支持 device_reset），并确认 ws://127.0.0.1:9527 可达",
-          ),
-        );
+        reject(new Error(i18n.global.t("flash.log.deviceResetTimeout")));
       }, 15000);
 
       const handler = (ev: MessageEvent) => {
@@ -155,9 +152,7 @@ export class WsTransport {
       const timeout = setTimeout(() => {
         ws.removeEventListener("message", handler);
         reject(
-          new Error(
-            "serialDebugDeviceReset timeout — 请重新编译并启动 tyutool-cli serve（需支持 serial_debug_device_reset），并确认 ws://127.0.0.1:9527 可达",
-          ),
+          new Error(i18n.global.t("flash.log.serialDebugDeviceResetTimeout")),
         );
       }, 15000);
 
