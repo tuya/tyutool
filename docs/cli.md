@@ -149,7 +149,7 @@ tyutool reset [-p <PORT>] [-d <DEVICE>]
 | Flag | Short | Description | Default |
 |------|-------|-------------|---------|
 | `--port` | `-p` | Serial port | auto-detect |
-| `--device` | `-d` | Chip family (affects reset timing) | `bk7231n` |
+| `--device` | `-d` | Chip family (affects reset timing); same supported values as `write` (see [device table](#device--baud-table)) | `bk7231n` |
 
 ---
 
