@@ -704,6 +704,13 @@
         "notXlsxFormat": "Please select an .xlsx file",
         "locked": "The Excel file is open in another program — close it and retry",
         "changedWhileRunning": "Cannot switch the Excel file while ports are running"
+      },
+      "port": {
+        "inUse": "The following port(s) are in use by another feature and cannot be opened:",
+        "inUseOwner": "• {port} — held by {owner}",
+        "heldByBatch": "Port {port} is busy with an active batch authorization and cannot be taken over.",
+        "busyReason": "Port busy (in use by {owner})",
+        "lost": "Port lost (unplugged or error)"
       }
     },
     "status": {
