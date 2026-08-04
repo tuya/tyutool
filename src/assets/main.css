@@ -45,24 +45,27 @@
 }
 
 .dark {
-  --ty-canvas: #020617;
-  --ty-surface: #0f172a;
-  --ty-surface-elevated: #1e293b;
-  --ty-surface-muted: #1e293b;
-  --ty-border: #334155;
-  --ty-border-strong: #475569;
-  --ty-text: #f1f5f9;
-  --ty-text-muted: #94a3b8;
+  /* Refined blue-graphite scale: lifted off pure-black for depth,
+     4-step elevation (canvas < surface < muted < elevated), and soft
+     low-contrast borders so cards read as layered planes, not a grid. */
+  --ty-canvas: #0a0f1a;
+  --ty-surface: #111827;
+  --ty-surface-elevated: #232e48;
+  --ty-surface-muted: #1a2337;
+  --ty-border: #2b3650;
+  --ty-border-strong: #3f4c69;
+  --ty-text: #e4e8f1;
+  --ty-text-muted: #9da6b8;
   --ty-primary: #3b82f6;
   --ty-primary-hover: #2563eb;
   --ty-accent: #fb923c;
   --ty-accent-hover: #f97316;
   --ty-success: #34d399;
   --ty-danger: #f87171;
-  --ty-log-bg: #020617;
-  --ty-log-fg: #e2e8f0;
+  --ty-log-bg: #070b13;
+  --ty-log-fg: #cdd6e6;
   --ty-ring: #60a5fa;
-  --ty-ring-offset: #020617;
+  --ty-ring-offset: #0a0f1a;
 
   /* ── Progress phase colors (dark mode — full neon saturation) ── */
   --phase-erase-from: #ff2d55;
