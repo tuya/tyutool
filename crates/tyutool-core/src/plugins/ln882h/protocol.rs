@@ -456,4 +456,31 @@ mod tests {
         // Verify function uses the table correctly for a single byte
         assert_eq!(crc16(&[0x01]), 0x1021);
     }
+
+    #[test]
+    fn hex_nibble_parses_decimal_digits() {
+        assert_eq!(hex_nibble(b'0').unwrap(), 0);
+        assert_eq!(hex_nibble(b'9').unwrap(), 9);
+    }
+
+    #[test]
+    fn hex_nibble_parses_uppercase_hex() {
+        assert_eq!(hex_nibble(b'A').unwrap(), 10);
+        assert_eq!(hex_nibble(b'F').unwrap(), 15);
+    }
+
+    #[test]
+    fn hex_nibble_parses_lowercase_hex() {
+        assert_eq!(hex_nibble(b'a').unwrap(), 10);
+        assert_eq!(hex_nibble(b'f').unwrap(), 15);
+    }
+
+    #[test]
+    fn hex_nibble_rejects_non_hex_bytes() {
+        assert!(hex_nibble(b'g').is_err());
+        assert!(hex_nibble(b'G').is_err());
+        assert!(hex_nibble(b'/').is_err()); // one below '0'
+        assert!(hex_nibble(b':').is_err()); // one above '9'
+        assert!(hex_nibble(b' ').is_err());
+    }
 }

@@ -10,11 +10,14 @@
 
 ## 支持芯片
 
+支持 **4 大系列共 11 款芯片**：
+
 | 芯片系列 | 型号 |
 |---------|------|
 | Tuya    | T1、T2、T3、T5AI |
 | Beken   | BK7231N |
-| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-S3 |
+| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-P4、ESP32-S3 |
+| Lightning | LN882H |
 
 ## 下载
 
@@ -98,7 +101,7 @@ tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
 tyutool write -d <设备> -p <串口> -b <波特率> -s <起始地址> --end <结束地址> -f <文件>
 ```
 
-`-d` 支持的值：`bk7231n`、`t2`、`t5ai`
+`-d` 支持的值与上方[支持芯片](#支持芯片)表一致：`bk7231n`、`t1`、`t2`、`t3`、`t5ai`（别名 `t5`）、`ln882h`、`esp32`、`esp32c3`、`esp32c6`、`esp32p4`、`esp32s3`。
 
 ### 读取 Flash
 

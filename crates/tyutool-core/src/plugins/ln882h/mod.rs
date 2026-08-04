@@ -461,3 +461,126 @@ fn resolve_segments(job: &FlashJob) -> Result<Vec<FlashSegment>, FlashError> {
 fn parse_hex_addr(s: &str) -> Result<u32, ()> {
     u32::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|_| ())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal `FlashJob` for unit tests - only `mode` varies; inert defaults elsewhere.
+    fn job(mode: FlashMode) -> FlashJob {
+        FlashJob {
+            mode,
+            chip_id: "LN882H".to_string(),
+            port: String::new(),
+            baud_rate: 115200,
+            segments: None,
+            flash_start_hex: None,
+            flash_end_hex: None,
+            erase_start_hex: None,
+            erase_end_hex: None,
+            read_start_hex: None,
+            read_end_hex: None,
+            read_file_path: None,
+            firmware_path: None,
+            authorize_uuid: None,
+            authorize_key: None,
+            authorize_storage: None,
+            confirm_overwrite: None,
+        }
+    }
+
+    #[test]
+    fn plugin_id_is_ln882h() {
+        assert_eq!(Ln882hPlugin.id(), "LN882H");
+    }
+
+    #[test]
+    fn plugin_rejects_authorize_mode_without_opening_a_port() {
+        // LN882H has no auth flow: Authorize must short-circuit before `open_port`.
+        let cancel = AtomicBool::new(false);
+        let res = Ln882hPlugin.run(&job(FlashMode::Authorize), &cancel, &|_| {});
+        assert!(matches!(
+            res,
+            Err(FlashError::Plugin(ref msg)) if msg.contains("authorize mode not supported")
+        ));
+    }
+
+    #[test]
+    fn parse_hex_addr_strips_prefix_and_parses_hex() {
+        assert_eq!(parse_hex_addr("0x1000"), Ok(0x1000));
+        assert_eq!(parse_hex_addr("0X1000"), Ok(0x1000)); // uppercase prefix
+        assert_eq!(parse_hex_addr("1000"), Ok(0x1000)); // no prefix
+        assert_eq!(parse_hex_addr("0xDEADBEEF"), Ok(0xDEAD_BEEF));
+        assert_eq!(parse_hex_addr("deadbeef"), Ok(0xDEAD_BEEF)); // lowercase, no prefix
+    }
+
+    #[test]
+    fn parse_hex_addr_rejects_invalid_input() {
+        assert!(parse_hex_addr("").is_err());
+        assert!(parse_hex_addr("0x").is_err()); // no digits after prefix
+        assert!(parse_hex_addr("xyz").is_err());
+        assert!(parse_hex_addr("0xGGGG").is_err());
+    }
+
+    #[test]
+    fn resolve_segments_passes_through_provided_segments() {
+        let mut j = job(FlashMode::Flash);
+        j.segments = Some(vec![
+            FlashSegment {
+                firmware_path: "a.bin".into(),
+                start_addr: "0x0000".into(),
+                end_addr: "0x1000".into(),
+            },
+            FlashSegment {
+                firmware_path: "b.bin".into(),
+                start_addr: "0x1000".into(),
+                end_addr: "0x2000".into(),
+            },
+        ]);
+        let segs = resolve_segments(&j).expect("provided segments should pass through");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].firmware_path, "a.bin");
+        assert_eq!(segs[1].end_addr, "0x2000");
+    }
+
+    #[test]
+    fn resolve_segments_rejects_empty_segment_list() {
+        let mut j = job(FlashMode::Flash);
+        j.segments = Some(vec![]);
+        assert!(matches!(
+            resolve_segments(&j),
+            Err(FlashError::InvalidJob(_))
+        ));
+    }
+
+    #[test]
+    fn resolve_segments_defaults_single_segment_from_firmware_path() {
+        let mut j = job(FlashMode::Flash);
+        j.firmware_path = Some("fw.bin".into());
+        let segs = resolve_segments(&j).expect("firmware_path should yield one segment");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].firmware_path, "fw.bin");
+        assert_eq!(segs[0].start_addr, "0x00000000"); // default start
+        assert_eq!(segs[0].end_addr, "0x00200000"); // default end (2 MiB)
+    }
+
+    #[test]
+    fn resolve_segments_honours_explicit_flash_range() {
+        let mut j = job(FlashMode::Flash);
+        j.firmware_path = Some("fw.bin".into());
+        j.flash_start_hex = Some("0x1000".into());
+        j.flash_end_hex = Some("0x2000".into());
+        let segs = resolve_segments(&j).unwrap();
+        assert_eq!(segs[0].start_addr, "0x1000");
+        assert_eq!(segs[0].end_addr, "0x2000");
+    }
+
+    #[test]
+    fn resolve_segments_requires_firmware_path_when_no_segments() {
+        let j = job(FlashMode::Flash); // segments=None, firmware_path=None
+        assert!(matches!(
+            resolve_segments(&j),
+            Err(FlashError::InvalidJob(_))
+        ));
+    }
+}
