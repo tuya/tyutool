@@ -165,6 +165,7 @@
       "savedTo": "Logs saved to: {path}",
       "exportFailed": "Couldn't save the logs: {error}. Please pick a writable location (e.g. your Downloads folder) and try again.",
       "linkCopied": "The report link was copied to your clipboard. If your browser didn't open, paste it into a new tab. When submitting, drag the log archive you just saved into the issue.",
+      "privacyReminder": "Authorization credentials in the logs have been auto-masked. Before submitting, please double-check the archive for any other sensitive data.",
       "webHint": "Log export is only available in the desktop app."
     }
   },
