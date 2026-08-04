@@ -145,9 +145,7 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
         }
         lastScanFingerprint = fingerprint;
       } catch {
-        deps.appendLog(
-          "WS: 无法连接到 tyutool-cli serve (ws://127.0.0.1:9527)",
-        );
+        deps.appendLog(t("flash.log.wsConnectFailed"));
         serialPortOptions.value = [];
         deps.selectedSerialPort.value = "";
         deps.connected.value = false;

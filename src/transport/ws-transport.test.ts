@@ -7,6 +7,10 @@ const { getWsUrl } = vi.hoisted(() => ({
 vi.mock("@/platform", () => ({
   platform: { getWsUrl, pickFile: vi.fn() },
 }));
+// i18n accesses localStorage at module load; mock it so node-env tests don't crash.
+vi.mock("@/i18n", () => ({
+  i18n: { global: { t: (key: string) => key } },
+}));
 
 import { WsTransport, wsTransport } from "./ws-transport";
 import type { FlashJobPayload } from "@/features/firmware-flash/flash-ipc-types";
@@ -237,7 +241,9 @@ describe("deviceReset", () => {
     await vi.advanceTimersByTimeAsync(0);
     latest().open();
     await vi.advanceTimersByTimeAsync(0);
-    const rejected = expect(p).rejects.toThrow(/deviceReset timeout/);
+    const rejected = expect(p).rejects.toThrow(
+      /flash\.log\.deviceResetTimeout/,
+    );
     await vi.advanceTimersByTimeAsync(15000);
     await rejected;
   });
