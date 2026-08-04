@@ -704,6 +704,13 @@
         "notXlsxFormat": "请选择 .xlsx 格式文件",
         "locked": "Excel 文件被其他程序占用，请关闭后重试",
         "changedWhileRunning": "任务运行中，无法切换 Excel 文件"
+      },
+      "port": {
+        "inUse": "以下串口被其他功能占用，无法打开：",
+        "inUseOwner": "• {port} — 被 {owner} 占用",
+        "heldByBatch": "串口 {port} 正在进行批量授权，无法让出。",
+        "busyReason": "串口被占用（占用者：{owner}）",
+        "lost": "串口丢失（已拔出或出错）"
       }
     },
     "status": {
