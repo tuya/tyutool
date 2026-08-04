@@ -136,6 +136,57 @@ fn serial_debug_archive_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("tyutool").join("serial-debug")
 }
 
+/// Create the serial-debug archive + filter index without panicking the GUI on
+/// startup. The preferred directory is `serial_debug_archive_dir()`; if that is
+/// not writable (permissions, a stale lock, antivirus interference) we fall back
+/// to a per-process-unique subdirectory and log a warning. Only if every attempt
+/// fails do we propagate the error — at which point the app genuinely cannot
+/// function and a controlled panic with a clear message is preferable to a
+/// silent half-initialised state.
+fn create_serial_debug_archive_resilient() -> (SerialDebugArchive, SerialDebugFilterIndex) {
+    let primary = serial_debug_archive_dir();
+    match (
+        SerialDebugArchive::create(&primary),
+        SerialDebugFilterIndex::create(&primary),
+    ) {
+        (Ok(a), Ok(f)) => return (a, f),
+        (a_res, f_res) => {
+            log::warn!(
+                "[serial-debug] archive dir {:?} unavailable \
+                 (archive={:?}, filters={:?}); retrying in a per-process dir",
+                primary,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+    // Per-process fallback so a stale/locked primary dir doesn't block startup.
+    let fallback = serial_debug_archive_dir().join(format!("pid-{}", std::process::id()));
+    match (
+        SerialDebugArchive::create(&fallback),
+        SerialDebugFilterIndex::create(&fallback),
+    ) {
+        (Ok(a), Ok(f)) => {
+            log::warn!(
+                "[serial-debug] archive initialised in fallback dir {:?} \
+                 (serial-debug persistence may be split across dirs)",
+                fallback
+            );
+            (a, f)
+        }
+        (a_res, f_res) => {
+            panic!(
+                "serial-debug archive could not be created in {:?} or {:?}: \
+                 archive={:?}, filters={:?}",
+                primary,
+                fallback,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+}
+
 fn emit_filter_update(
     app: &AppHandle,
     def: &SerialDebugFilterDefinition,
@@ -3382,18 +3433,15 @@ pub fn run() {
             cancel: StdMutex::new(Arc::new(AtomicBool::new(false))),
             thread: StdMutex::new(None),
         })
-        .manage(DebugState {
-            session: Arc::new(StdMutex::new(None)),
-            archive: Arc::new(StdMutex::new(
-                SerialDebugArchive::create(&serial_debug_archive_dir())
-                    .expect("create serial-debug archive"),
-            )),
-            filters: Arc::new(StdMutex::new(
-                SerialDebugFilterIndex::create(&serial_debug_archive_dir())
-                    .expect("create serial-debug filters"),
-            )),
-            chunk_bridge: Arc::new(StdMutex::new(None)),
-            generation: Arc::new(SerialDebugGeneration::default()),
+        .manage({
+            let (archive, filters) = create_serial_debug_archive_resilient();
+            DebugState {
+                session: Arc::new(StdMutex::new(None)),
+                archive: Arc::new(StdMutex::new(archive)),
+                filters: Arc::new(StdMutex::new(filters)),
+                chunk_bridge: Arc::new(StdMutex::new(None)),
+                generation: Arc::new(SerialDebugGeneration::default()),
+            }
         })
         .manage(BatchFlashState {
             slots: StdMutex::new(HashMap::new()),
