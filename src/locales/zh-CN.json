@@ -573,6 +573,7 @@
     "confirm": {
       "releaseForFlashTitle": "端口冲突",
       "releaseForFlashBody": "{requester} 正在请求该端口，是否让出？",
+      "releaseForFlashHint": "💡 若不希望每次烧录都弹出此提示，可前往「串口调试」页右上角的「设置」中开启「烧录时自动释放」。",
       "releaseOk": "让出",
       "releaseCancel": "取消"
     },

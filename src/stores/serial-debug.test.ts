@@ -17,6 +17,11 @@ import { nextTick } from "vue";
 import { MAX_PENDING_LINE_BYTES } from "@/features/serial-debug/constants";
 import { AUTH_ONLY_CHIP_ID } from "@/features/firmware-flash/constants";
 
+vi.mock("@/composables/confirmDialog", () => ({
+  showConfirmDialog: vi.fn(async () => true),
+}));
+import { showConfirmDialog } from "@/composables/confirmDialog";
+
 async function waitForChunkFrame(): Promise<void> {
   await new Promise((r) => setTimeout(r, 20));
   await nextTick();
@@ -567,6 +572,60 @@ describe("useSerialDebugStore port-manager integration", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(s.open).toBe(true);
     expect(s.pendingResume).toBe(false);
+  });
+
+  it("when autoRelease is off and flash requests the port, the conflict prompt includes the auto-release hint", async () => {
+    const { usePortManagerStore } = await import("@/stores/port-manager");
+    const pm = usePortManagerStore();
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    s.autoRelease = false;
+    await s.openPort();
+    expect(s.open).toBe(true);
+
+    vi.mocked(showConfirmDialog).mockClear();
+    vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+
+    // Simulate flash requesting the port — triggers serial-debug's onReleaseRequest.
+    await pm.acquire({
+      id: "flash",
+      port: "/dev/ttyUSB0",
+      onReleaseRequest: async () => false,
+      onReleased: () => {},
+    });
+
+    expect(showConfirmDialog).toHaveBeenCalledTimes(1);
+    const opts = vi.mocked(showConfirmDialog).mock.calls[0][0];
+    // The hint (💡 marker, present in both locales) is appended for flash.
+    expect(opts.message).toContain("💡");
+    // The body (requester) is still present.
+    expect(opts.message).toContain("flash");
+  });
+
+  it("does not append the auto-release hint for a non-flash requester", async () => {
+    const { usePortManagerStore } = await import("@/stores/port-manager");
+    const pm = usePortManagerStore();
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    s.autoRelease = false;
+    await s.openPort();
+    expect(s.open).toBe(true);
+
+    vi.mocked(showConfirmDialog).mockClear();
+    vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+
+    await pm.acquire({
+      id: "some-other-feature",
+      port: "/dev/ttyUSB0",
+      onReleaseRequest: async () => false,
+      onReleased: () => {},
+    });
+
+    expect(showConfirmDialog).toHaveBeenCalledTimes(1);
+    const opts = vi.mocked(showConfirmDialog).mock.calls[0][0];
+    expect(opts.message).not.toContain("💡");
   });
 });
 
