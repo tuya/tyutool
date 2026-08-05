@@ -53,8 +53,15 @@ const AUTOSTART_APP_NAME: &str = "tyutool-bridge";
 ///
 /// TODO(联调期确认): both are placeholders — swap for the real Cobuilder entry
 /// point and the bridge download/landing page once product confirms them.
-const COBUILDER_URL: &str = "https://iot.tuya.com";
-const LATEST_VERSION_URL: &str = "https://iot.tuya.com";
+/// Where "打开 Cobuilder" goes.
+///
+/// ⚠ This was `https://iot.tuya.com` until a real-machine walkthrough caught it — the
+/// IoT platform's bare front page, not Cobuilder. It had never been filled in, and the
+/// (now removed) `LATEST_VERSION_URL` carried the *same* value, which is the tell that
+/// neither was a real address. Pinned by a test now; see
+/// `tests::the_menu_opens_cobuilder_and_not_some_placeholder_host` for why the test
+/// asserts "has a cobuilder path" rather than the literal string.
+const COBUILDER_URL: &str = "https://platform.tuya.com/cobuilder";
 
 /// Session log retention for this binary, mirroring `prune_log_files` in
 /// tyutool-cli (same "delete oldest until inside the limits" rule, smaller
@@ -1212,7 +1219,6 @@ fn run_tray(choice: PromptChoice, lang: Lang) {
                 if let Some(shell) = &tray {
                     match shell.action_for(&id) {
                         Some(MenuAction::OpenCobuilder) => open_url(COBUILDER_URL),
-                        Some(MenuAction::LatestVersion) => open_url(LATEST_VERSION_URL),
                         Some(MenuAction::ToggleAutostart) => {
                             autostart_on = match &autostart {
                                 Some((preference, registration)) => autostart::toggle(
@@ -1359,7 +1365,6 @@ fn revoke_all(authority: Option<&Authority>, lang: Lang) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MenuLabels {
     open_cobuilder: &'static str,
-    latest_version: &'static str,
     autostart: &'static str,
     revoke_grants: &'static str,
     quit: &'static str,
@@ -1369,7 +1374,6 @@ fn menu_labels(lang: Lang) -> MenuLabels {
     match lang {
         Lang::Zh => MenuLabels {
             open_cobuilder: "打开 Cobuilder",
-            latest_version: "获取最新版本",
             // A checkable item, so the label states the setting rather than an
             // action ("开机自启" + a tick), the convention every platform's own
             // menus use for a toggle.
@@ -1379,7 +1383,6 @@ fn menu_labels(lang: Lang) -> MenuLabels {
         },
         Lang::En => MenuLabels {
             open_cobuilder: "Open Cobuilder",
-            latest_version: "Get the latest version",
             autostart: "Start at login",
             revoke_grants: "Revoke all authorizations",
             quit: "Quit",
@@ -1411,7 +1414,9 @@ fn revoked_notification_body(lang: Lang) -> &'static str {
 /// handling above reads as behaviour rather than id comparisons.
 enum MenuAction {
     OpenCobuilder,
-    LatestVersion,
+    // ⚠ `LatestVersion`（「获取最新版本」）已于真机走查后整条移除：它开的那个页面需要登录态，
+    // 而托盘进程没有、也不该有会话——用户点了只会落在一个登录墙上。版本提示归 Web 端
+    // （工作台读 /api/bridge/release 比对 hello 上报的版本），那里本来就有登录态。
     ToggleAutostart,
     RevokeGrants,
     Quit,
@@ -1428,7 +1433,6 @@ struct TrayShell {
     /// Held (not just its id) because the tick has to be updated after a toggle.
     autostart_item: muda::CheckMenuItem,
     open_cobuilder: muda::MenuId,
-    latest_version: muda::MenuId,
     autostart: muda::MenuId,
     revoke_grants: muda::MenuId,
     quit: muda::MenuId,
@@ -1440,7 +1444,6 @@ impl TrayShell {
         // Disabled: a status readout, not a command.
         let status_item = muda::MenuItem::new(status_text, false, None);
         let open_cobuilder = muda::MenuItem::new(labels.open_cobuilder, true, None);
-        let latest_version = muda::MenuItem::new(labels.latest_version, true, None);
         // Built from the *reconciled* state, not from a hardcoded `true`: the tick
         // is the only place the user can read what the setting currently is, so it
         // must reflect what `autostart::apply_at_startup` actually achieved —
@@ -1454,7 +1457,6 @@ impl TrayShell {
             &status_item,
             &muda::PredefinedMenuItem::separator(),
             &open_cobuilder,
-            &latest_version,
             // Grouped with the settings above rather than next to "退出": it is a
             // preference, and its neighbour on the other side is a security
             // control that must not be a mis-click away from a routine toggle.
@@ -1482,7 +1484,6 @@ impl TrayShell {
         Ok(Self {
             _icon: icon,
             open_cobuilder: open_cobuilder.id().clone(),
-            latest_version: latest_version.id().clone(),
             autostart: autostart_item.id().clone(),
             revoke_grants: revoke_grants.id().clone(),
             quit: quit.id().clone(),
@@ -1509,8 +1510,6 @@ impl TrayShell {
     fn action_for(&self, id: &muda::MenuId) -> Option<MenuAction> {
         if *id == self.open_cobuilder {
             Some(MenuAction::OpenCobuilder)
-        } else if *id == self.latest_version {
-            Some(MenuAction::LatestVersion)
         } else if *id == self.autostart {
             Some(MenuAction::ToggleAutostart)
         } else if *id == self.revoke_grants {
@@ -1653,6 +1652,38 @@ fn open_autostart() -> Option<Autostart> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The menu's only outward link must point at Cobuilder, not at a placeholder.**
+    ///
+    /// Found on a real machine: "打开 Cobuilder" opened `https://iot.tuya.com` — the IoT
+    /// platform's bare front page, not Cobuilder. The constant had never been filled in;
+    /// it shipped with whatever was typed while the menu was first wired up, and the
+    /// sibling `LATEST_VERSION_URL` carried the *same* placeholder value, which is the
+    /// tell that neither was ever a real address.
+    ///
+    /// This is the third instance of the same shape in this project (`TODO-BUCKET-ID`
+    /// in the bridge download fallback, `authKeyBuy`'s guessed commodity path): **a
+    /// guessed constant that shipped because nothing asserted it.** A bare-host URL is
+    /// exactly what a placeholder looks like, so that is what this pins down — not the
+    /// literal string, which is free to change, but the property that distinguishes a
+    /// real destination from a stand-in.
+    #[test]
+    fn the_menu_opens_cobuilder_and_not_some_placeholder_host() {
+        assert!(
+            COBUILDER_URL.starts_with("https://"),
+            "the menu link must be https, got {COBUILDER_URL}"
+        );
+        // A path is what makes it Cobuilder rather than whatever lives at the domain root.
+        let path = COBUILDER_URL
+            .trim_start_matches("https://")
+            .split_once('/')
+            .map(|(_, rest)| rest)
+            .unwrap_or("");
+        assert!(
+            path.contains("cobuilder"),
+            "the menu must land on Cobuilder, not a bare host; got {COBUILDER_URL}"
+        );
+    }
 
     /// A second instance must give up **before** it touches anything shared.
     ///
@@ -2059,14 +2090,12 @@ mod tests {
     fn the_tray_menu_items_follow_the_system_language() {
         let zh = menu_labels(Lang::Zh);
         assert_eq!(zh.open_cobuilder, "打开 Cobuilder");
-        assert_eq!(zh.latest_version, "获取最新版本");
         assert_eq!(zh.autostart, "开机自启");
         assert_eq!(zh.revoke_grants, "撤销所有授权");
         assert_eq!(zh.quit, "退出");
 
         let en = menu_labels(Lang::En);
         assert_eq!(en.open_cobuilder, "Open Cobuilder");
-        assert_eq!(en.latest_version, "Get the latest version");
         assert_eq!(en.autostart, "Start at login");
         // The security control in the menu: it has to name what it withdraws,
         // not just say "reset".
@@ -2076,13 +2105,7 @@ mod tests {
         // Same guard the notification strings carry: an English build that kept
         // one Chinese label is the realistic translation mistake, and the tray
         // menu is where it is most visible.
-        for label in [
-            en.open_cobuilder,
-            en.latest_version,
-            en.autostart,
-            en.revoke_grants,
-            en.quit,
-        ] {
+        for label in [en.open_cobuilder, en.autostart, en.revoke_grants, en.quit] {
             assert!(!has_chinese(label), "{label}");
         }
     }
