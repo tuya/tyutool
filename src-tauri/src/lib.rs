@@ -126,8 +126,6 @@ struct SerialDebugFilterAddArgs {
 
 const DEFAULT_MAIN_WINDOW_WIDTH: f64 = 1280.0;
 const DEFAULT_MAIN_WINDOW_HEIGHT: f64 = 800.0;
-const MIN_MAIN_WINDOW_WIDTH: f64 = 1024.0;
-const MIN_MAIN_WINDOW_HEIGHT: f64 = 680.0;
 const SERIAL_DEBUG_CHUNK_FLUSH_MS: u64 = 12;
 const SERIAL_DEBUG_CHUNK_FLUSH_BYTES: usize = 32 * 1024;
 const SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY: usize = 256;
@@ -397,7 +395,7 @@ fn detect_install_type() -> String {
         if exe_str.starts_with("/usr/") || exe_str.starts_with("/opt/") {
             return "deb/rpm (installed)".into();
         }
-        return format!("portable ({})", exe_str);
+        format!("portable ({})", exe_str)
     }
 
     #[cfg(target_os = "macos")]
@@ -409,7 +407,7 @@ fn detect_install_type() -> String {
             }
             return format!("dmg (.app, {})", exe.parent().unwrap_or(&exe).display());
         }
-        return format!("portable ({})", exe_str);
+        format!("portable ({})", exe_str)
     }
 
     #[cfg(target_os = "windows")]
@@ -455,7 +453,7 @@ fn detect_install_type() -> String {
             }
         }
 
-        return format!("portable ({})", exe_str);
+        format!("portable ({})", exe_str)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -2182,34 +2180,29 @@ async fn download_auth_firmware(
     // generous ceiling.
     const MAX_AUTH_FW_BYTES: usize = 16 * 1024 * 1024;
     let mut resp = resp;
-    loop {
-        match resp.chunk().await.map_err(|e| e.to_string())? {
-            Some(chunk) => {
-                bytes_vec.extend_from_slice(&chunk);
-                if bytes_vec.len() > MAX_AUTH_FW_BYTES {
-                    log::warn!(
-                        "[AuthFw] download exceeded size cap: version={} bytes={} > {}",
-                        version,
-                        bytes_vec.len(),
-                        MAX_AUTH_FW_BYTES
-                    );
-                    return Err(format!(
-                        "downloaded firmware exceeds size cap ({} > {} bytes)",
-                        bytes_vec.len(),
-                        MAX_AUTH_FW_BYTES
-                    ));
-                }
-                if let Some(total) = bytes_total {
-                    let _ = app.emit(
-                        "auth-firmware-download-progress",
-                        serde_json::json!({
-                            "bytesDone": bytes_vec.len(),
-                            "bytesTotal": total
-                        }),
-                    );
-                }
-            }
-            None => break,
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        bytes_vec.extend_from_slice(&chunk);
+        if bytes_vec.len() > MAX_AUTH_FW_BYTES {
+            log::warn!(
+                "[AuthFw] download exceeded size cap: version={} bytes={} > {}",
+                version,
+                bytes_vec.len(),
+                MAX_AUTH_FW_BYTES
+            );
+            return Err(format!(
+                "downloaded firmware exceeds size cap ({} > {} bytes)",
+                bytes_vec.len(),
+                MAX_AUTH_FW_BYTES
+            ));
+        }
+        if let Some(total) = bytes_total {
+            let _ = app.emit(
+                "auth-firmware-download-progress",
+                serde_json::json!({
+                    "bytesDone": bytes_vec.len(),
+                    "bytesTotal": total
+                }),
+            );
         }
     }
     let actual = sha256_hex(&bytes_vec);
@@ -2256,17 +2249,15 @@ fn set_log_level(level: String) -> Result<(), String> {
     Ok(())
 }
 
-fn fit_logical_dimension(default: f64, min: f64, available: f64) -> f64 {
+/// Shrink `default` to fit `available`, never growing past it. No lower floor is
+/// applied on purpose: the window's `minWidth`/`minHeight` in tauri.conf.json
+/// already enforces one, and forcing a minimum here would push the window off a
+/// work area smaller than that minimum.
+fn fit_logical_dimension(default: f64, available: f64) -> f64 {
     if !available.is_finite() || available <= 0.0 {
         return default;
     }
-    if available >= default {
-        default
-    } else if available >= min {
-        available
-    } else {
-        available
-    }
+    default.min(available)
 }
 
 fn default_main_window_logical_size(
@@ -2282,16 +2273,8 @@ fn default_main_window_logical_size(
     let available_height = f64::from(work_area.height) / scale_factor;
 
     LogicalSize::new(
-        fit_logical_dimension(
-            DEFAULT_MAIN_WINDOW_WIDTH,
-            MIN_MAIN_WINDOW_WIDTH,
-            available_width,
-        ),
-        fit_logical_dimension(
-            DEFAULT_MAIN_WINDOW_HEIGHT,
-            MIN_MAIN_WINDOW_HEIGHT,
-            available_height,
-        ),
+        fit_logical_dimension(DEFAULT_MAIN_WINDOW_WIDTH, available_width),
+        fit_logical_dimension(DEFAULT_MAIN_WINDOW_HEIGHT, available_height),
     )
 }
 
@@ -2547,9 +2530,9 @@ fn prune_log_files(log_dir: &std::path::Path) {
                     .map(|s| s.starts_with("tyutool-"))
                     .unwrap_or(false)
         })
-        .filter_map(|p| {
+        .map(|p| {
             let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-            Some((p, size))
+            (p, size)
         })
         .collect();
 
@@ -3735,7 +3718,7 @@ pub fn run() {
                 RunEvent::Ready => {
                     // After the event loop is ready: layout, then show (window starts `visible: false`
                     // so the compositor / session restore does not paint a wrong geometry first).
-                    let _ = apply_default_main_window_layout(&app_handle);
+                    let _ = apply_default_main_window_layout(app_handle);
                     if let Some(win) = app_handle.get_webview_window("main") {
                         let _ = win.show();
                     }
