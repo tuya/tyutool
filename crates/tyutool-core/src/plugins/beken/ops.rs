@@ -601,6 +601,7 @@ pub fn erase<T: IoTransport>(
     start_addr: u32,
     end_addr: u32,
     progress_cb: &dyn Fn(u32, u32),
+    warn_cb: Option<&dyn Fn(&str)>,
 ) -> Result<(), ProtocolError> {
     if start_addr >= end_addr {
         return Ok(());
@@ -675,6 +676,14 @@ pub fn erase<T: IoTransport>(
                 transport.log(&format!(
                     "falling back to 4K sector erase for block at {addr:#010x}"
                 ));
+                // User-actionable: the device is noticeably slower / a 64K block
+                // erase failed verification. Surface as a FlashEvent::Warning so
+                // the user sees it (not just the developer log file).
+                if let Some(warn) = warn_cb {
+                    warn(&format!(
+                        "64K erase verify failed at {addr:#010x}; falling back to slower 4K sector erase."
+                    ));
+                }
                 for sector_offset in (0..block_size).step_by(SECTOR_SIZE as usize) {
                     let sector_addr = addr + sector_offset;
                     let erase_4k_cmd = if chip.use_extended_erase() {
@@ -683,19 +692,47 @@ pub fn erase<T: IoTransport>(
                         command::ERASE_CMD_4K
                     };
                     let payload_4k = build::flash_erase(erase_4k_cmd, sector_addr);
-                    if chip.use_extended_flash_ops() {
+                    let erase_rx_4k = if chip.use_extended_flash_ops() {
                         transport.send_recv_extended(
                             command::CMD_SET_BAUD_RATE,
                             &payload_4k,
                             5_000,
-                        )?;
+                        )?
                     } else {
                         transport.send_recv_standard(
                             command::CMD_SET_BAUD_RATE,
                             &payload_4k,
                             5_000,
-                        )?;
+                        )?
+                    };
+                    // Check each 4K fallback erase response status, mirroring the
+                    // primary 64K path and the regular 4K path. Previously the
+                    // response was discarded, so a device that NAKed every 4K
+                    // fallback erase was silently reported as erased-OK.
+                    if erase_rx_4k.status != 0x00 {
+                        transport.log(&format!(
+                            "4K fallback erase at {sector_addr:#010x} FAILED: status={:#04x}",
+                            erase_rx_4k.status
+                        ));
+                        return Err(ProtocolError::DeviceError(erase_rx_4k.status));
                     }
+                }
+                // Re-verify the whole block after the 4K fallback. The primary
+                // 64K path verified the first 4K; a fallback only happens because
+                // that verify failed, so a re-check is required before reporting
+                // the block as erased. Previously success was reported unverified.
+                let verify_end = addr + SECTOR_SIZE - 1;
+                let crc_payload = build::check_crc(addr, verify_end);
+                let crc_rx =
+                    transport.send_recv_standard(command::CMD_CHECK_CRC, &crc_payload, 3000)?;
+                let device_crc = parse::crc32_from_standard(crc_rx.status, &crc_rx.data)?;
+                if device_crc != blank_crc {
+                    transport.log(&format!(
+                        "4K fallback erase at {addr:#010x} VERIFY FAILED: CRC={device_crc:#010x} expected_blank={blank_crc:#010x}"
+                    ));
+                    return Err(ProtocolError::Protocol(format!(
+                        "erase verify failed at {addr:#010x} after 4K fallback: CRC={device_crc:#010x} expected_blank={blank_crc:#010x}"
+                    )));
                 }
             }
 
@@ -957,6 +994,7 @@ pub fn read<T: IoTransport>(
     start_addr: u32,
     length: u32,
     progress_cb: &dyn Fn(u32, u32),
+    warn_cb: Option<&dyn Fn(&str)>,
 ) -> Result<Vec<u8>, ProtocolError> {
     if length == 0 {
         return Ok(Vec::new());
@@ -1097,6 +1135,12 @@ pub fn read<T: IoTransport>(
                         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                             transport
                                 .log("read failure too many times. You can try other baudrate.");
+                            // User-actionable: the user can retry with a lower
+                            // baud rate. Surface as a FlashEvent::Warning so it
+                            // is visible (not just the developer log file).
+                            if let Some(warn) = warn_cb {
+                                warn("Read failed too many times. You can try a lower baud rate.");
+                            }
                             return Err(ProtocolError::Protocol(format!(
                                 "read failed at {addr:#010x} after {MAX_CONSECUTIVE_FAILURES} consecutive failures"
                             )));
@@ -1599,6 +1643,7 @@ mod tests {
             0x1000,
             0x1000,
             &|_, _| {},
+            None,
         );
         assert!(r.is_ok());
         assert!(transport.io.sent.is_empty());
@@ -1618,6 +1663,7 @@ mod tests {
             0x1000,
             0x2000, // 4 KiB, not 64K aligned/sized → sector erase
             &|_, _| {},
+            None,
         );
         assert!(r.is_ok());
         assert_eq!(transport.io.sent.len(), 1);
@@ -1635,6 +1681,7 @@ mod tests {
             0x1000,
             0x2000,
             &|_, _| {},
+            None,
         );
         assert!(matches!(r, Err(ProtocolError::DeviceError(0x05))));
     }
@@ -1654,6 +1701,7 @@ mod tests {
             0x0,
             64 * 1024,
             &|_, _| {},
+            None,
         );
         assert!(r.is_ok());
         // erase frame + crc frame
@@ -1662,13 +1710,15 @@ mod tests {
 
     #[test]
     fn erase_64k_block_crc_fail_falls_back_to_4k() {
-        // CRC verify fails → 16× 4K sector erase fallback.
+        // CRC verify fails → 16× 4K sector erase fallback, then re-verify CRC.
+        let blank_crc = crc32_ver2(&[0xFFu8; 4096]);
         let mut mock = MockIo::new();
         mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 64K erase ack
         mock.add_response(crc_resp(0x1234_5678)); // wrong CRC → fallback
         for _ in 0..16 {
             mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 4K acks
         }
+        mock.add_response(crc_resp(blank_crc)); // re-verify matches blank → success
         let mut transport = make_transport(mock);
         let r = erase(
             &mut transport,
@@ -1677,10 +1727,90 @@ mod tests {
             0x0,
             64 * 1024,
             &|_, _| {},
+            None,
         );
         assert!(r.is_ok());
-        // 1 block erase + 1 crc + 16 sector erases = 18 frames
-        assert_eq!(transport.io.sent.len(), 18);
+        // 1 block erase + 1 crc + 16 sector erases + 1 re-verify crc = 19 frames
+        assert_eq!(transport.io.sent.len(), 19);
+    }
+
+    #[test]
+    fn erase_64k_fallback_emits_user_warning() {
+        // When a 64K block erase falls back to 4K sectors, the warn_cb must fire
+        // so the user actually sees it (FlashEvent::Warning), not just the dev log.
+        let blank_crc = crc32_ver2(&[0xFFu8; 4096]);
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 64K erase ack
+        mock.add_response(crc_resp(0x1234_5678)); // wrong CRC → fallback
+        for _ in 0..16 {
+            mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[]));
+        }
+        mock.add_response(crc_resp(blank_crc)); // re-verify ok
+        let mut transport = make_transport(mock);
+        let warnings = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let warnings_cb = warnings.clone();
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x0,
+            64 * 1024,
+            &|_, _| {},
+            Some(&move |msg: &str| warnings_cb.borrow_mut().push(msg.to_string())),
+        );
+        assert!(r.is_ok());
+        let w = warnings.borrow();
+        assert_eq!(w.len(), 1);
+        assert!(
+            w[0].contains("64K erase verify failed"),
+            "expected fallback warning, got: {}",
+            w[0]
+        );
+    }
+
+    #[test]
+    fn erase_64k_fallback_status_fail_surfaces_error() {
+        // 4K fallback erase that the device NAKs (non-zero status) must surface
+        // a DeviceError rather than being reported as erased-OK.
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 64K erase ack
+        mock.add_response(crc_resp(0x1234_5678)); // wrong CRC → fallback
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x09, &[])); // first 4K NAK
+        let mut transport = make_transport(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x0,
+            64 * 1024,
+            &|_, _| {},
+            None,
+        );
+        assert!(matches!(r, Err(ProtocolError::DeviceError(0x09))));
+    }
+
+    #[test]
+    fn erase_64k_fallback_reverify_fail_surfaces_error() {
+        // 16× 4K fallback erases all succeed, but the re-verify CRC still does
+        // not match blank → must surface an error, not report success.
+        let mut mock = MockIo::new();
+        mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 64K erase ack
+        mock.add_response(crc_resp(0x1234_5678)); // wrong CRC → fallback
+        for _ in 0..16 {
+            mock.add_response(ext_resp(command::CMD_SET_BAUD_RATE, 0x00, &[])); // 4K acks
+        }
+        mock.add_response(crc_resp(0xDEAD_BEEF)); // re-verify still wrong → fail
+        let mut transport = make_transport(mock);
+        let r = erase(
+            &mut transport,
+            &params_no_wp(),
+            &Bk7231nSpec,
+            0x0,
+            64 * 1024,
+            &|_, _| {},
+            None,
+        );
+        assert!(r.is_err());
     }
 
     #[test]
@@ -1696,6 +1826,7 @@ mod tests {
             0x1000,
             0x2000,
             &|done, _total| done_cell.set(done),
+            None,
         );
         assert!(r.is_ok());
         assert_eq!(done_cell.get(), 0x1000);
@@ -1821,6 +1952,7 @@ mod tests {
             0x0,
             0,
             &|_, _| {},
+            None,
         );
         assert_eq!(r.unwrap(), Vec::<u8>::new());
     }
@@ -1841,6 +1973,7 @@ mod tests {
             0x10000,
             4096,
             &|_, _| {},
+            None,
         )
         .unwrap();
         assert_eq!(r.len(), 4096);
@@ -1864,6 +1997,7 @@ mod tests {
             0x10010,
             256,
             &|_, _| {},
+            None,
         )
         .unwrap();
         assert_eq!(r.len(), 256);
@@ -1885,6 +2019,7 @@ mod tests {
             0x10000,
             4096,
             &|_, _| {},
+            None,
         )
         .unwrap();
         assert_eq!(r, sector);
@@ -1908,6 +2043,7 @@ mod tests {
             0x10000,
             4096,
             &|_, _| {},
+            None,
         );
         assert!(matches!(r, Err(ProtocolError::Protocol(_))));
     }
@@ -1925,6 +2061,7 @@ mod tests {
             0x10000,
             4096,
             &|_, _| {},
+            None,
         );
         assert!(matches!(r, Err(ProtocolError::Protocol(_))));
     }
@@ -1943,6 +2080,7 @@ mod tests {
             0x1000,
             0x2000,
             &|_, _| {},
+            None,
         );
         assert!(matches!(r, Err(ProtocolError::Cancelled)));
     }
@@ -1972,6 +2110,7 @@ mod tests {
             0x10000,
             4096,
             &|_, _| {},
+            None,
         );
         assert!(matches!(r, Err(ProtocolError::Cancelled)));
     }
