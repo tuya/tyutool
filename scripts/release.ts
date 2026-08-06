@@ -13,6 +13,7 @@ import {
 } from './lib/changelog.js';
 import { evaluatePreEditChecks, type PreflightState } from './lib/preflight.js';
 import { getRepoRoot } from './lib/repo-root.js';
+import { VERSION_FILES } from './lib/version-files.mjs';
 
 const EXPECTED_BRANCH = 'refactor/v3';
 const ROOT = getRepoRoot(import.meta.url);
@@ -155,16 +156,9 @@ console.log('==> changelog 后置检查通过');
 // ── Bump + lockfile + commit + tag + push ────────────────────────────────────
 step('node', ['scripts/bump-version.mjs', version]);
 step('cargo', ['update', '--workspace']);
-step('git', [
-  'add',
-  'package.json',
-  'src-tauri/tauri.conf.json',
-  'src-tauri/Cargo.toml',
-  'crates/tyutool-core/Cargo.toml',
-  'crates/tyutool-cli/Cargo.toml',
-  'Cargo.lock',
-  'CHANGELOG.md',
-]);
+// Stage exactly what bump-version.mjs rewrote, plus the lockfile and changelog.
+// Sourcing the paths from VERSION_FILES keeps this in step with the bump script.
+step('git', ['add', ...VERSION_FILES.map((f) => f.path), 'Cargo.lock', 'CHANGELOG.md']);
 step('git', ['commit', '-m', `chore(release): ${tag}`]);
 step('git', ['tag', tag]);
 step('git', ['push', 'origin', EXPECTED_BRANCH]);
