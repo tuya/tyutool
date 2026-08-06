@@ -1,25 +1,17 @@
 #!/usr/bin/env node
 // ──────────────────────────────────────────────────────────────────────────────
-// bump-version.mjs — Synchronize version across all project files (cross-platform)
+// bump-version.mjs — Synchronize the version across all project files (CI entry)
 //
 // Usage:
 //   node scripts/bump-version.mjs 0.2.0    # Set exact version (release)
 //   node scripts/bump-version.mjs beta     # Use base version as-is (beta label added to file names in CI)
 //
-// Files updated:
-//   package.json                   "version": "..."
-//   src-tauri/tauri.conf.json      "version": "..."
-//   src-tauri/Cargo.toml           version = "..."
-//   crates/tyutool-core/Cargo.toml version = "..."
-//   crates/tyutool-cli/Cargo.toml  version = "..."
+// Called by release.yml before any pnpm/node setup, so it must run under bare
+// node. The file list and rewrite logic live in lib/version-files.mjs, shared
+// with bump-version.ts — add new version-bearing files there.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { readFileSync, writeFileSync } from 'fs';
-import { resolve, relative, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
+import { readCurrentVersion, syncVersionFiles } from './lib/version-files.mjs';
 
 // ── Argument handling ────────────────────────────────────────────────────────
 
@@ -33,58 +25,26 @@ if (!input) {
   process.exit(1);
 }
 
-// ── Read current version from package.json ───────────────────────────────────
-
-const pkgPath = resolve(ROOT, 'package.json');
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-const current = pkg.version;
+const current = readCurrentVersion();
 console.log(`Current version: ${current}`);
 
 // ── Compute target version ───────────────────────────────────────────────────
 
-let version;
-if (input === 'beta') {
-  // Beta builds use the base version without prerelease suffix.
-  // This keeps the version MSI-compatible (no semver prerelease identifier).
-  // The "beta" label is added to file names in CI instead.
-  version = current.replace(/-.*$/, '');
-} else {
-  version = input;
-}
+// Beta builds use the base version without prerelease suffix. This keeps the
+// version MSI-compatible (no semver prerelease identifier); the "beta" label is
+// added to file names in CI instead.
+const version = input === 'beta' ? current.replace(/-.*$/, '') : input;
 
 console.log(`Target version:  ${version}`);
-
-// ── Update functions ─────────────────────────────────────────────────────────
-
-function updateJson(filePath) {
-  const content = JSON.parse(readFileSync(filePath, 'utf-8'));
-  content.version = version;
-  writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n', 'utf-8');
-  console.log(`  ✓ ${relative(ROOT, filePath)}`);
-}
-
-function updateCargoToml(filePath) {
-  let content = readFileSync(filePath, 'utf-8');
-  let replaced = false;
-  content = content.replace(/^version\s*=\s*"[^"]*"/m, (match) => {
-    if (replaced) return match;
-    replaced = true;
-    return `version = "${version}"`;
-  });
-  writeFileSync(filePath, content, 'utf-8');
-  console.log(`  ✓ ${relative(ROOT, filePath)}`);
-}
 
 // ── Apply updates ────────────────────────────────────────────────────────────
 
 console.log('');
 console.log('Updating files:');
 
-updateJson(resolve(ROOT, 'package.json'));
-updateJson(resolve(ROOT, 'src-tauri', 'tauri.conf.json'));
-updateCargoToml(resolve(ROOT, 'src-tauri', 'Cargo.toml'));
-updateCargoToml(resolve(ROOT, 'crates', 'tyutool-core', 'Cargo.toml'));
-updateCargoToml(resolve(ROOT, 'crates', 'tyutool-cli', 'Cargo.toml'));
+for (const path of syncVersionFiles(version)) {
+  console.log(`  ✓ ${path}`);
+}
 
 console.log('');
 console.log(`Done. All files set to: ${version}`);
