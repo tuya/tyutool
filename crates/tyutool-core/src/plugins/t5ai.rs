@@ -1,6 +1,6 @@
 //! T5AI flash plugin — real hardware implementation.
 //!
-//! Reuses the shared Beken protocol layer via [`super::bk7231n::run_beken`],
+//! Reuses the shared Beken driver via [`super::beken::driver::run_beken`],
 //! with `T5AISpec` providing the T5AI-specific behaviour differences.
 
 use std::sync::atomic::AtomicBool;
@@ -26,9 +26,8 @@ impl FlashPlugin for T5AIPlugin {
         cancel: &AtomicBool,
         progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
-        log::info!("T5AI plugin delegating to run_beken (is_t5ai=true)");
         let chip = T5AISpec;
-        super::bk7231n::run_beken(job, cancel, progress, &chip, true)
+        super::beken::driver::run_beken(job, cancel, progress, &chip, true)
     }
 }
 

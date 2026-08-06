@@ -1,8 +1,8 @@
 //! T3 flash plugin — real hardware implementation.
 //!
 //! T3 uses the T5AI protocol variant (extended reset sequence, per-sector CRC,
-//! skip blank sectors). Reuses the shared Beken protocol layer via
-//! [`super::bk7231n::run_beken`] with `is_t5ai=true`.
+//! skip blank sectors). Reuses the shared Beken driver via
+//! [`super::beken::driver::run_beken`] with `is_t5ai=true`.
 //!
 //! The Python reference (`FlashInterface.SocList`) confirms T3 maps to
 //! `T5AIFlashHandler`, not `BK7231NFlashHandler`.
@@ -30,9 +30,8 @@ impl FlashPlugin for T3Plugin {
         cancel: &AtomicBool,
         progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
-        log::info!("T3 plugin delegating to run_beken (is_t5ai=true)");
         let chip = T3Spec;
-        super::bk7231n::run_beken(job, cancel, progress, &chip, true)
+        super::beken::driver::run_beken(job, cancel, progress, &chip, true)
     }
 }
 
