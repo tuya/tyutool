@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
+import VueI18nPlugin from "@intlify/unplugin-vue-i18n/vite";
 import { devOpenAppLogDirPlugin } from "./vite/plugin-dev-open-app-log-dir";
 
 // @ts-expect-error process is a nodejs global
@@ -37,7 +38,16 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  plugins: [vue(), tailwindcss(), devOpenAppLogDirPlugin()],
+  plugins: [
+    vue(),
+    tailwindcss(),
+    // Pre-compile locale JSON at build time so the runtime never uses
+    // `new Function` (which the production CSP forbids after 7f44219).
+    VueI18nPlugin({
+      include: [path.resolve(__dirname, "./src/locales/**")],
+    }),
+    devOpenAppLogDirPlugin(),
+  ],
 
   build: {
     rollupOptions: {
