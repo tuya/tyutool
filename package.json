@@ -8,6 +8,7 @@
     "prebuild": "pnpm run clean",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "preview": "vite preview",

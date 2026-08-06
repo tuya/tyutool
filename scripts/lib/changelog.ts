@@ -2,7 +2,19 @@ export const DRAFT_MARKER = '<!-- 润色后删除本行 / remove this line after
 
 const HEADER = '# Changelog\n\n本项目所有重要变更记录于此 / All notable changes are documented here.\n';
 
-export function buildDraftSection(version: string, date: string): string {
+/**
+ * Build the bilingual draft section for `version`.
+ *
+ * `cliffBody` is the English body git-cliff derives from conventional commits
+ * (see cliff.toml). When supplied it replaces the empty English skeleton — it
+ * already carries its own group headings — leaving only the Chinese half to
+ * write by hand. Omitted (e.g. from `pnpm version:set`), both halves are empty.
+ */
+export function buildDraftSection(version: string, date: string, cliffBody?: string): string {
+  const english = cliffBody?.trim()
+    ? cliffBody.trim().split('\n')
+    : ['### Features', '', '- ', '', '### Bug Fixes', '', '- '];
+
   return [
     `## [${version}] - ${date}`,
     '',
@@ -18,13 +30,7 @@ export function buildDraftSection(version: string, date: string): string {
     '',
     '---',
     '',
-    '### Features',
-    '',
-    '- ',
-    '',
-    '### Bug Fixes',
-    '',
-    '- ',
+    ...english,
     '',
   ].join('\n');
 }
