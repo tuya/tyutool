@@ -1823,13 +1823,57 @@ fn check_file_exists(path: String) -> bool {
     exists
 }
 
+/// Hosts the Tauri backend is allowed to fetch from on behalf of the renderer
+/// (fetch_url) and to download auth firmware from (download_auth_firmware).
+/// These mirror the legitimate update/auth-firmware sources enumerated in
+/// `update_endpoint`, `tauri.conf.json` `plugins.updater.endpoints`, and
+/// `src/features/batch-flash-auth/auth-firmware.ts` AUTH_FIRMWARE_SOURCES.
+/// Keep in sync when adding a source.
+const ALLOWED_FETCH_HOSTS: &[&str] = &[
+    "github.com",
+    "objects.githubusercontent.com", // GitHub release asset CDN redirect target
+    "gitee.com",
+    "airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com",
+];
+
+/// Validate that `url` is https and points at an allowlisted host. Prevents the
+/// Tauri bridge from being used as an open SSRF proxy (e.g. fetching cloud
+/// metadata endpoints) by a compromised renderer / XSS.
+fn assert_allowed_fetch_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| {
+        log::warn!("[Update] rejected malformed URL: {}", e);
+        format!("invalid URL: {e}")
+    })?;
+    if parsed.scheme() != "https" {
+        log::warn!("[Update] rejected non-https scheme: {}", parsed.scheme());
+        return Err(format!(
+            "only https URLs are allowed, got {}",
+            parsed.scheme()
+        ));
+    }
+    let host = parsed.host_str().unwrap_or("");
+    if !ALLOWED_FETCH_HOSTS.contains(&host) {
+        log::warn!("[Update] rejected host not in allowlist: {}", host);
+        return Err(format!("host '{host}' is not allowed"));
+    }
+    Ok(())
+}
+
 /// Fetch a URL and return body as string. Used by the frontend update checker
 /// to bypass WebView CSP restrictions on cross-origin fetch.
 #[tauri::command]
 async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, String> {
     log::info!("[Update] fetch_url: url={}, timeout_ms={}", url, timeout_ms);
+    assert_allowed_fetch_url(&url)?;
+    // Bound the renderer-supplied timeout so a compromised page can't pin a
+    // connection open indefinitely. 30 s is ample for a small JSON manifest.
+    let capped_timeout = timeout_ms.min(30_000);
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms))
+        .timeout(std::time::Duration::from_millis(capped_timeout))
+        // Limit redirects so a malicious redirect chain can't be used to reach
+        // a non-allowlisted host via the follow; assert_allowed_fetch_url only
+        // inspects the initial URL.
+        .redirect(reqwest::redirect::Policy::limited(3))
         .build()
         .map_err(|e| {
             log::error!("[Update] fetch_url: failed to build client: {}", e);
@@ -1845,10 +1889,25 @@ async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, String> {
         log::warn!("[Update] fetch_url: HTTP error {}", status);
         return Err(format!("HTTP {}", status));
     }
+    // Cap the body so a malicious/buggy source can't exhaust memory. The update
+    // manifest is a small JSON document; 8 MiB is a generous ceiling.
+    const MAX_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
     let body = resp.text().await.map_err(|e| {
         log::warn!("[Update] fetch_url: failed to read body: {}", e);
         e.to_string()
     })?;
+    if body.len() > MAX_MANIFEST_BYTES {
+        log::warn!(
+            "[Update] fetch_url: body too large: {} > {}",
+            body.len(),
+            MAX_MANIFEST_BYTES
+        );
+        return Err(format!(
+            "response body too large ({} > {} bytes)",
+            body.len(),
+            MAX_MANIFEST_BYTES
+        ));
+    }
     log::info!("[Update] fetch_url: body length={}", body.len());
     Ok(body)
 }
@@ -2074,6 +2133,7 @@ async fn download_auth_firmware(
         version,
         url
     );
+    assert_allowed_fetch_url(&url)?;
     let dir = app
         .path()
         .app_cache_dir()
@@ -2117,11 +2177,28 @@ async fn download_auth_firmware(
     }
     let bytes_total = resp.content_length();
     let mut bytes_vec: Vec<u8> = Vec::new();
+    // Cap the download so a malicious/buggy source can't exhaust memory before
+    // the SHA-256 check runs. Auth firmware binaries are small; 16 MiB is a
+    // generous ceiling.
+    const MAX_AUTH_FW_BYTES: usize = 16 * 1024 * 1024;
     let mut resp = resp;
     loop {
         match resp.chunk().await.map_err(|e| e.to_string())? {
             Some(chunk) => {
                 bytes_vec.extend_from_slice(&chunk);
+                if bytes_vec.len() > MAX_AUTH_FW_BYTES {
+                    log::warn!(
+                        "[AuthFw] download exceeded size cap: version={} bytes={} > {}",
+                        version,
+                        bytes_vec.len(),
+                        MAX_AUTH_FW_BYTES
+                    );
+                    return Err(format!(
+                        "downloaded firmware exceeds size cap ({} > {} bytes)",
+                        bytes_vec.len(),
+                        MAX_AUTH_FW_BYTES
+                    ));
+                }
                 if let Some(total) = bytes_total {
                     let _ = app.emit(
                         "auth-firmware-download-progress",
@@ -2301,21 +2378,146 @@ fn reset_main_window_layout(app: AppHandle) -> Result<(), String> {
     apply_default_main_window_layout(&app)
 }
 
-#[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
+/// Registry of filesystem paths the renderer may write to.
+///
+/// `write_text_file` / `append_text_file` are arbitrary-path write primitives
+/// reachable from the renderer. Without a gate, a compromised renderer / XSS
+/// could overwrite arbitrary files (`~/.bashrc`, startup scripts, ...). The
+/// legitimate callers all write to paths the user picked via a Tauri dialog
+/// (serial-debug auto-save dir, log-export save-as). Those callers register the
+/// dialog-chosen path here; the write commands then refuse any path that is not
+/// the registered path itself or a descendant of a registered directory.
+///
+/// Entries are TTL-bounded (a write is allowed within `TTL` of registration) so
+/// a leaked/old entry cannot be reused later. The map is capped to bound memory.
+struct DialogPathRegistry {
+    entries: StdMutex<Vec<(std::path::PathBuf, std::time::Instant)>>,
+}
+
+/// How long a registered path stays authorized for writes.
+const DIALOG_PATH_TTL: Duration = Duration::from_secs(600); // 10 min
+
+/// Maximum number of registered paths kept at once (LRU eviction on insert).
+const DIALOG_PATH_MAX_ENTRIES: usize = 32;
+
+impl DialogPathRegistry {
+    fn new() -> Self {
+        Self {
+            entries: StdMutex::new(Vec::new()),
+        }
+    }
+
+    /// Register a dialog-chosen path (file or directory). Refreshes the TTL if
+    /// already present; evicts the oldest entry when at capacity.
+    fn register(&self, path: &std::path::Path) {
+        let now = std::time::Instant::now();
+        let mut entries = self.entries.lock().expect("DialogPathRegistry poisoned");
+        // Refresh TTL if already present.
+        if let Some(slot) = entries.iter_mut().find(|(p, _)| p == path) {
+            slot.1 = now;
+            return;
+        }
+        // Evict oldest (and any expired) when at capacity.
+        if entries.len() >= DIALOG_PATH_MAX_ENTRIES {
+            Self::prune_locked(&mut entries, now);
+            while entries.len() >= DIALOG_PATH_MAX_ENTRIES {
+                // Remove the single oldest.
+                if let Some(idx) = Self::oldest_index(&entries) {
+                    entries.remove(idx);
+                } else {
+                    break;
+                }
+            }
+        }
+        entries.push((path.to_path_buf(), now));
+    }
+
+    /// Returns true if `path` may be written: it equals a registered path, or it
+    /// lives beneath a registered directory, within the TTL. Expired entries are
+    /// pruned as a side effect.
+    fn is_authorized(&self, path: &std::path::Path) -> bool {
+        let now = std::time::Instant::now();
+        let mut entries = match self.entries.lock() {
+            Ok(e) => e,
+            Err(p) => p.into_inner(),
+        };
+        Self::prune_locked(&mut entries, now);
+        entries.iter().any(|(registered, ts)| {
+            if now.duration_since(*ts) > DIALOG_PATH_TTL {
+                return false;
+            }
+            // Authorized if the write target is the registered path itself, or a
+            // descendant of a registered directory.
+            path == registered || path.starts_with(registered)
+        })
+    }
+
+    fn prune_locked(
+        entries: &mut Vec<(std::path::PathBuf, std::time::Instant)>,
+        now: std::time::Instant,
+    ) {
+        entries.retain(|(_, ts)| now.duration_since(*ts) <= DIALOG_PATH_TTL);
+    }
+
+    fn oldest_index(entries: &[(std::path::PathBuf, std::time::Instant)]) -> Option<usize> {
+        entries
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (_, ts))| *ts)
+            .map(|(i, _)| i)
+    }
 }
 
 #[tauri::command]
-fn append_text_file(path: String, content: String) -> Result<(), String> {
+fn register_dialog_path(
+    path: String,
+    registry: State<'_, DialogPathRegistry>,
+) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    registry.register(p);
+    log::debug!("[DialogPath] registered: {}", p.display());
+    Ok(())
+}
+
+#[tauri::command]
+fn write_text_file(
+    path: String,
+    content: String,
+    registry: State<'_, DialogPathRegistry>,
+) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !registry.is_authorized(p) {
+        log::warn!(
+            "[DialogPath] write_text_file rejected unauthorized path: {}",
+            p.display()
+        );
+        return Err("path is not authorized for writing".into());
+    }
+    std::fs::write(p, content.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn append_text_file(
+    path: String,
+    content: String,
+    registry: State<'_, DialogPathRegistry>,
+) -> Result<(), String> {
     use std::io::Write;
-    if let Some(parent) = std::path::Path::new(&path).parent() {
+    let p = std::path::Path::new(&path);
+    if !registry.is_authorized(p) {
+        log::warn!(
+            "[DialogPath] append_text_file rejected unauthorized path: {}",
+            p.display()
+        );
+        return Err("path is not authorized for writing".into());
+    }
+    if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
-        .open(&path)
+        .open(p)
         .map_err(|e| e.to_string())?;
     file.write_all(content.as_bytes())
         .map_err(|e| e.to_string())
@@ -2452,24 +2654,11 @@ fn read_log_tail_impl(dir: &std::path::Path, max_bytes: u64) -> std::io::Result<
     tail_bytes(&path, max_bytes)
 }
 
-fn read_named_log_impl(
-    dir: &std::path::Path,
-    filename: &str,
-    max_bytes: u64,
-) -> std::io::Result<String> {
-    if filename.contains('/') || filename.contains('\\') {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "filename must not contain path separators",
-        ));
-    }
-    tail_bytes(&dir.join(filename), max_bytes)
-}
-
-fn resolve_log_open_path(
-    dir: &std::path::Path,
-    filename: &str,
-) -> std::io::Result<std::path::PathBuf> {
+/// Validate a user-supplied log filename against the same gate used by the
+/// log viewer / opener: no path separators, must end in `.log`, and must carry
+/// the `tyutool` prefix. This keeps the read path from ever returning the
+/// plaintext `.trace` credential files (which share `app_log_dir`).
+fn validate_log_filename(filename: &str) -> std::io::Result<()> {
     if filename.contains('/') || filename.contains('\\') {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -2488,6 +2677,23 @@ fn resolve_log_open_path(
             "only tyutool log files can be opened",
         ));
     }
+    Ok(())
+}
+
+fn read_named_log_impl(
+    dir: &std::path::Path,
+    filename: &str,
+    max_bytes: u64,
+) -> std::io::Result<String> {
+    validate_log_filename(filename)?;
+    tail_bytes(&dir.join(filename), max_bytes)
+}
+
+fn resolve_log_open_path(
+    dir: &std::path::Path,
+    filename: &str,
+) -> std::io::Result<std::path::PathBuf> {
+    validate_log_filename(filename)?;
     let path = dir.join(filename);
     if !path.is_file() {
         return Err(std::io::Error::new(
@@ -3459,6 +3665,7 @@ pub fn run() {
         .manage(UpdateState {
             pending: StdMutex::new(None),
         })
+        .manage(DialogPathRegistry::new())
         .setup(|app| {
             let version = app.package_info().version.to_string();
             let install_type = detect_install_type();
@@ -3512,6 +3719,7 @@ pub fn run() {
             serial_debug_session_read_page,
             write_text_file,
             append_text_file,
+            register_dialog_path,
             list_log_files,
             list_log_file_openers,
             read_log_tail,
@@ -4131,6 +4339,22 @@ mod log_tools_tests {
     }
 
     #[test]
+    fn read_named_log_impl_rejects_trace_credential_files() {
+        // `.trace` files (batch-auth plaintext UUID/AuthKey) share app_log_dir
+        // but must never be readable via read_named_log_impl. They fail both the
+        // `.log` suffix gate and the `tyutool` prefix gate.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("batch-auth-20260805-120000.trace"),
+            b"secret",
+        )
+        .unwrap();
+        let err =
+            read_named_log_impl(dir.path(), "batch-auth-20260805-120000.trace", 100).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
     fn resolve_log_open_path_accepts_tyutool_log_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("tyutool-20260708.log"), b"hello").unwrap();
@@ -4292,5 +4516,115 @@ mod auth_firmware_tests {
             "auth-fw-.._etc_passwd.bin"
         );
         assert_eq!(auth_firmware_filename("a/b\\c"), "auth-fw-a_b_c.bin");
+    }
+}
+
+#[cfg(test)]
+mod fetch_allowlist_tests {
+    use super::assert_allowed_fetch_url;
+
+    #[test]
+    fn allows_github_gitee_and_tuya_oss() {
+        assert!(assert_allowed_fetch_url(
+            "https://github.com/tuya/tyutool/releases/latest/download/latest.json"
+        )
+        .is_ok());
+        assert!(assert_allowed_fetch_url(
+            "https://gitee.com/tuya-open/tyutool/releases/download/auth-firmware/auth-firmware.json"
+        )
+        .is_ok());
+        assert!(assert_allowed_fetch_url(
+            "https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/latest/release.json"
+        )
+        .is_ok());
+        assert!(assert_allowed_fetch_url(
+            "https://objects.githubusercontent.com/tyutool/auth-fw-1.0.0.bin"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_non_https_scheme() {
+        let err =
+            assert_allowed_fetch_url("http://github.com/tuya/tyutool/latest.json").unwrap_err();
+        assert!(err.contains("https"), "got: {err}");
+        // SSRF: file:// and cloud-metadata http must be refused.
+        assert!(assert_allowed_fetch_url("file:///etc/passwd").is_err());
+        assert!(assert_allowed_fetch_url("http://169.254.169.254/latest/meta-data/").is_err());
+    }
+
+    #[test]
+    fn rejects_unlisted_host() {
+        let err = assert_allowed_fetch_url("https://evil.example.com/x.json").unwrap_err();
+        assert!(err.contains("evil.example.com"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_malformed_url() {
+        assert!(assert_allowed_fetch_url("not a url at all").is_err());
+        assert!(assert_allowed_fetch_url("ht!tp://broken").is_err());
+    }
+}
+
+#[cfg(test)]
+mod dialog_path_registry_tests {
+    use super::DialogPathRegistry;
+    use std::path::Path;
+
+    #[test]
+    fn rejects_unregistered_path() {
+        let reg = DialogPathRegistry::new();
+        assert!(!reg.is_authorized(Path::new("/tmp/evil.txt")));
+    }
+
+    #[test]
+    fn accepts_exact_registered_file() {
+        let reg = DialogPathRegistry::new();
+        reg.register(Path::new("/tmp/export.txt"));
+        assert!(reg.is_authorized(Path::new("/tmp/export.txt")));
+        // sibling is not authorized
+        assert!(!reg.is_authorized(Path::new("/tmp/other.txt")));
+    }
+
+    #[test]
+    fn accepts_descendant_of_registered_directory() {
+        // serial-debug auto-save registers a directory and writes files beneath it.
+        let reg = DialogPathRegistry::new();
+        reg.register(Path::new("/tmp/serial-debug"));
+        assert!(reg.is_authorized(Path::new("/tmp/serial-debug/ttyUSB0/log.txt")));
+        assert!(reg.is_authorized(Path::new("/tmp/serial-debug/nested/deep/log.txt")));
+        // outside the directory is rejected
+        assert!(!reg.is_authorized(Path::new("/tmp/other.txt")));
+    }
+
+    #[test]
+    fn refreshes_ttl_on_re_register() {
+        let reg = DialogPathRegistry::new();
+        reg.register(Path::new("/tmp/export.txt"));
+        // immediately re-register (simulating the auto-save dir staying active)
+        reg.register(Path::new("/tmp/export.txt"));
+        assert!(reg.is_authorized(Path::new("/tmp/export.txt")));
+    }
+
+    #[test]
+    fn evicts_oldest_when_at_capacity() {
+        let reg = DialogPathRegistry::new();
+        // Fill to capacity with distinct paths.
+        for i in 0..super::DIALOG_PATH_MAX_ENTRIES {
+            reg.register(Path::new(&format!("/tmp/file-{i}.txt")));
+        }
+        assert!(reg.is_authorized(Path::new("/tmp/file-0.txt")));
+        // Adding one more evicts the oldest (file-0 was registered first).
+        reg.register(Path::new("/tmp/extra.txt"));
+        assert!(reg.is_authorized(Path::new("/tmp/extra.txt")));
+        assert!(
+            !reg.is_authorized(Path::new("/tmp/file-0.txt")),
+            "oldest entry should have been evicted"
+        );
+        // a later-inserted one should still be present
+        assert!(reg.is_authorized(Path::new(&format!(
+            "/tmp/file-{}.txt",
+            super::DIALOG_PATH_MAX_ENTRIES - 1
+        ))));
     }
 }

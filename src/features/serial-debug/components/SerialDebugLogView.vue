@@ -361,6 +361,8 @@ async function saveLog(): Promise<void> {
       filters: [{ name: "TXT", extensions: ["txt"] }],
     });
     if (!path) return;
+    // Authorize this dialog-chosen save path for the chunked writes below.
+    await invoke("register_dialog_path", { path });
     await streamExportChunks(async (chunk, isFirstChunk) => {
       if (isFirstChunk) {
         await invoke("write_text_file", { path, content: chunk });
