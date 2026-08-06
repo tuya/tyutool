@@ -109,8 +109,8 @@ git checkout -b hotfix/uart-baud-crash
 
 # Step 2: fix & bump version manually (v2 has no CI write-back)
 node scripts/bump-version.mjs 2.3.3
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
-        crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml
+git add -u   # stage exactly what the script rewrote; the file list lives in
+             # scripts/lib/version-files.mjs, not here
 git commit -m "chore: bump version to 2.3.3"
 
 git add crates/tyutool-core/src/serial.rs
