@@ -76,6 +76,7 @@
     "aboutHint": "查看当前版本信息与项目许可，保留更轻量的底部信息区。",
     "version": "tyutool · v{version}",
     "opensource": "查看开源许可",
+    "docs": "使用文档",
     "resetDisclaimer": "重新显示批量授权风险提示",
     "resetDisclaimerDone": "已重置，下次进入批量授权将再次显示风险提示",
     "updateEntryHint": "打开更新中心，查看版本说明并手动触发检查。",

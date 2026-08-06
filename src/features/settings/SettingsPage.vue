@@ -107,6 +107,22 @@ async function openOpensourceLicenses(): Promise<void> {
   }
 }
 
+/** TuyaOpen tyutool documentation — locale-specific path when available. */
+const tyutoolDocsUrl = computed(() =>
+  locale.value.toLowerCase().startsWith("zh")
+    ? "https://tuyaopen.ai/zh/docs/tyutool"
+    : "https://tuyaopen.ai/docs/tyutool",
+);
+
+async function openDocumentation(): Promise<void> {
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(tyutoolDocsUrl.value);
+  } catch (_e) {
+    window.open(tyutoolDocsUrl.value, "_blank");
+  }
+}
+
 // Show inline "done" feedback after resetting the batch-auth disclaimer;
 // there is no general-purpose toast, so this transient flag is enough.
 const disclaimerReset = ref(false);
@@ -514,6 +530,13 @@ function resetBatchAuthDisclaimer(): void {
           @click="openOpensourceLicenses"
         >
           {{ t("settings.opensource") }}
+        </button>
+        <button
+          type="button"
+          class="ty-btn-secondary settings-inline-action w-full justify-center sm:w-auto"
+          @click="openDocumentation"
+        >
+          {{ t("settings.docs") }}
         </button>
         <button
           v-if="isTauriRuntime()"

@@ -76,6 +76,7 @@
     "aboutHint": "Keep version and license information in a lighter footer-style information area.",
     "version": "tyutool · v{version}",
     "opensource": "Open-source licenses",
+    "docs": "Documentation",
     "resetDisclaimer": "Show batch-auth risk notice again",
     "resetDisclaimerDone": "Reset — the risk notice will reappear next time you enter Batch Auth",
     "updateEntryHint": "Open the update center to review release notes and run a manual check.",
