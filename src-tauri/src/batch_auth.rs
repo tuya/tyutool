@@ -237,11 +237,11 @@ impl ExcelRowAllocator {
             }
 
             let authkey = get(authkey_col);
-            let status_str = status_col.map(|i| get(i)).unwrap_or_default();
-            let step_str = step_col.map(|i| get(i)).unwrap_or_default();
-            let error_str = error_col.map(|i| get(i)).filter(|s| !s.is_empty());
-            let mac = mac_col.map(|i| get(i)).filter(|s| !s.is_empty());
-            let timestamp = timestamp_col.map(|i| get(i)).filter(|s| !s.is_empty());
+            let status_str = status_col.map(get).unwrap_or_default();
+            let step_str = step_col.map(get).unwrap_or_default();
+            let error_str = error_col.map(get).filter(|s| !s.is_empty());
+            let mac = mac_col.map(get).filter(|s| !s.is_empty());
+            let timestamp = timestamp_col.map(get).filter(|s| !s.is_empty());
 
             let status = match status_str.to_uppercase().as_str() {
                 "MACREAD" => RowStatus::MacRead,
