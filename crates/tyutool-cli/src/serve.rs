@@ -16,7 +16,15 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::time::Duration;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{
+    accept_hdr_async_with_config,
+    tungstenite::{
+        handshake::server::{Request, Response},
+        http::{header, status::StatusCode},
+        protocol::WebSocketConfig,
+        Message,
+    },
+};
 use tyutool_core::{
     device_reset_dtr_rts, list_serial_ports, run_job, serial_debug_fail_backfill_if_current,
     serial_debug_finish_backfill_if_current, serial_debug_scan_filter_matches, DebugChunk,
@@ -287,8 +295,82 @@ pub async fn run_serve(port: u16) -> anyhow::Result<()> {
 
 // ── Per-connection handler ───────────────────────────────────────────────────
 
+/// Hosts considered local enough to drive the dev-serve WS. Any cross-origin
+/// browser page (e.g. `https://evil.com`) reaching `ws://127.0.0.1:<port>` must
+/// be refused so it cannot run flash/erase/reset on the user's hardware.
+const LOCAL_WS_HOSTS: &[&str] = &["127.0.0.1", "localhost", "[::1]"];
+
+/// Validate the WebSocket handshake request's `Origin` and `Host` headers.
+///
+/// - `Host` must be a loopback host (`127.0.0.1` / `localhost` / `[::1]`),
+///   defeating DNS-rebinding attacks where `evil.com` resolves to 127.0.0.1.
+/// - `Origin`, when present, must be absent (non-browser client) or point at a
+///   local scheme/host, so a malicious web page can't connect.
+///
+/// Returns `Ok(response)` to accept, or `Err(error_response)` to reject with
+/// HTTP 403.
+///
+/// `clippy::result_large_err`: the `Err` variant (`ErrorResponse =
+/// Response<Option<String>>`) is ~136 bytes, but its type is fixed by
+/// tungstenite's `Callback` trait, so it cannot be boxed here.
+#[allow(clippy::result_large_err)]
+fn validate_ws_origin(
+    req: &Request,
+    response: Response,
+) -> Result<Response, tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
+    let headers = req.headers();
+
+    // Host check — reject DNS rebinding.
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let host_lower = host.to_lowercase();
+    let host_ok = LOCAL_WS_HOSTS
+        .iter()
+        .any(|allowed| host_lower == *allowed || host_lower.starts_with(&format!("{allowed}:")));
+    if !host_ok {
+        log::warn!("WS reject: non-loopback Host header: {host:?}");
+        return Err(forbidden("host not allowed"));
+    }
+
+    // Origin check — if a browser sends it, it must be a local origin.
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+        let origin_lower = origin.to_lowercase();
+        let origin_ok = origin_lower.starts_with("tauri://")
+            || LOCAL_WS_HOSTS.iter().any(|allowed| {
+                origin_lower == format!("http://{allowed}")
+                    || origin_lower.starts_with(&format!("http://{allowed}:"))
+                    || origin_lower == format!("https://{allowed}")
+                    || origin_lower.starts_with(&format!("https://{allowed}:"))
+            });
+        if !origin_ok {
+            log::warn!("WS reject: cross-origin request: Origin={origin:?}");
+            return Err(forbidden("origin not allowed"));
+        }
+    }
+    // No Origin header → non-browser client (e.g. the Vite dev proxy). Allowed.
+
+    Ok(response)
+}
+
+/// Build an HTTP 403 error response to reject a WS handshake.
+fn forbidden(reason: &str) -> tokio_tungstenite::tungstenite::http::Response<Option<String>> {
+    tokio_tungstenite::tungstenite::http::Response::builder()
+        .status(StatusCode::FORBIDDEN)
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(Some(reason.to_string()))
+        .expect("building a static 403 response cannot fail")
+}
+
 async fn handle_connection(stream: tokio::net::TcpStream) {
-    let ws = match tokio_tungstenite::accept_async(stream).await {
+    // Cap WS message size at 16 MiB (default is 64 MiB) to bound per-connection
+    // memory amplification from a malicious client streaming a large base64 blob.
+    let ws_config = WebSocketConfig {
+        max_message_size: Some(16 * 1024 * 1024),
+        ..Default::default()
+    };
+    let ws = match accept_hdr_async_with_config(stream, validate_ws_origin, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(e) => {
             log::warn!("WS handshake failed: {e}");
@@ -1094,6 +1176,9 @@ fn temp_path(prefix: &str, ext: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_tungstenite::tungstenite::http::{
+        header, Request as HttpRequest, Response as HttpResponse,
+    };
 
     #[test]
     fn deserialize_list_ports() {
@@ -1429,5 +1514,68 @@ mod tests {
         );
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // ──────────────── WS origin/host validation ─────────────────────────
+
+    fn make_request(host: &str, origin: Option<&str>) -> Request {
+        let mut builder = HttpRequest::builder()
+            .method("GET")
+            .uri("/")
+            .header(header::HOST, host);
+        if let Some(o) = origin {
+            builder = builder.header(header::ORIGIN, o);
+        }
+        builder.body(()).unwrap()
+    }
+
+    fn ok_response() -> Response {
+        HttpResponse::new(())
+    }
+
+    #[test]
+    fn ws_accepts_loopback_host_without_origin() {
+        // Non-browser client (no Origin), loopback Host → accept.
+        let req = make_request("127.0.0.1:9527", None);
+        assert!(validate_ws_origin(&req, ok_response()).is_ok());
+    }
+
+    #[test]
+    fn ws_accepts_localhost_origin() {
+        let req = make_request("localhost:9527", Some("http://localhost:5173"));
+        assert!(validate_ws_origin(&req, ok_response()).is_ok());
+    }
+
+    #[test]
+    fn ws_accepts_tauri_origin() {
+        let req = make_request("127.0.0.1:9527", Some("tauri://localhost"));
+        assert!(validate_ws_origin(&req, ok_response()).is_ok());
+    }
+
+    #[test]
+    fn ws_rejects_cross_origin_browser_page() {
+        // A malicious web page (evil.com) connecting to the local WS.
+        let req = make_request("127.0.0.1:9527", Some("https://evil.example.com"));
+        let err = validate_ws_origin(&req, ok_response()).unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn ws_rejects_dns_rebinding_host() {
+        // evil.com resolves to 127.0.0.1 but the Host header betrays it.
+        let req = make_request("evil.example.com:9527", None);
+        let err = validate_ws_origin(&req, ok_response()).unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn ws_rejects_missing_host_header() {
+        let req = HttpRequest::builder()
+            .method("GET")
+            .uri("/")
+            .body(())
+            .unwrap();
+        let err = validate_ws_origin(&req, ok_response()).unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
     }
 }
