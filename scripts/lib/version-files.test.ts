@@ -11,27 +11,39 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+function workspaceMembers(): string[] {
+  const workspace = readFileSync(resolve(ROOT, 'Cargo.toml'), 'utf-8');
+  const members = /members\s*=\s*\[([^\]]*)\]/s.exec(workspace)?.[1] ?? '';
+  return [...members.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
 describe('VERSION_FILES', () => {
   // The regression this guards: bump-version.mjs (CI) and bump-version.ts
   // (local) used to carry separate hardcoded copies of this list, so adding a
   // crate could leave the release path bumping only some of them.
-  it('covers the Cargo.toml of every cargo workspace member', () => {
-    const workspace = readFileSync(resolve(ROOT, 'Cargo.toml'), 'utf-8');
-    const members = [...workspace.matchAll(/"([^"]+)"/g)]
-      .map((m) => m[1])
-      .filter((m) => m.includes('/') || m === 'src-tauri');
-
-    expect(members.length).toBeGreaterThan(0);
-    const listed = VERSION_FILES.map((f) => f.path);
-    for (const member of members) {
-      expect(listed).toContain(`${member}/Cargo.toml`);
-    }
-  });
-
-  it('covers package.json and tauri.conf.json', () => {
+  it('covers package.json, tauri.conf.json, and the workspace Cargo.toml', () => {
     const listed = VERSION_FILES.map((f) => f.path);
     expect(listed).toContain('package.json');
     expect(listed).toContain('src-tauri/tauri.conf.json');
+    expect(listed).toContain('Cargo.toml');
+  });
+
+  // Crates are covered transitively through [workspace.package]. A member that
+  // declares its own literal version silently escapes the bump, so require
+  // inheritance rather than listing each crate.
+  it('every workspace member inherits its version instead of declaring one', () => {
+    const members = workspaceMembers();
+    expect(members.length).toBeGreaterThan(0);
+
+    for (const member of members) {
+      const toml = readFileSync(resolve(ROOT, member, 'Cargo.toml'), 'utf-8');
+      expect(toml, `${member} must use version.workspace = true`).toMatch(
+        /^version\.workspace\s*=\s*true/m,
+      );
+      expect(toml, `${member} declares a literal version`).not.toMatch(
+        /^version\s*=\s*"/m,
+      );
+    }
   });
 
   it('every listed file exists and already carries the current version', () => {

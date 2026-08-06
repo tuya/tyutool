@@ -8,8 +8,9 @@
 // scripts/bump-version.ts imports it through tsx.
 //
 // Add a new version-bearing file HERE, not in either entry point — that is the
-// whole reason this module exists. version-files.test.ts checks this list still
-// covers every crate in the cargo workspace.
+// whole reason this module exists. Cargo crates need no entry: they inherit
+// from [workspace.package] in the root Cargo.toml. version-files.test.ts
+// enforces both halves of that.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -18,13 +19,14 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** Files whose version field is kept in lockstep, relative to the repo root. */
+/**
+ * Files whose version field is kept in lockstep, relative to the repo root.
+ * The root Cargo.toml covers all three crates via [workspace.package].
+ */
 export const VERSION_FILES = [
   { path: 'package.json', kind: 'json' },
   { path: 'src-tauri/tauri.conf.json', kind: 'json' },
-  { path: 'src-tauri/Cargo.toml', kind: 'cargo' },
-  { path: 'crates/tyutool-core/Cargo.toml', kind: 'cargo' },
-  { path: 'crates/tyutool-cli/Cargo.toml', kind: 'cargo' },
+  { path: 'Cargo.toml', kind: 'cargo' },
 ];
 
 /** Set the top-level "version" key, preserving 2-space indent and trailing newline. */

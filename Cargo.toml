@@ -1,3 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["crates/tyutool-core", "crates/tyutool-cli", "src-tauri"]
+
+# Single source of truth for the crate version. Every member sets
+# `version.workspace = true`, so the three Cargo.toml files cannot drift apart.
+# scripts/lib/version-files.mjs rewrites this key; see that module before adding
+# a new version-bearing file.
+[workspace.package]
+version = "3.2.8"
