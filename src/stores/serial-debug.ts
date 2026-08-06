@@ -964,6 +964,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     logFontSize.value = data.logFontSize ?? 12;
     autoSave.value = data.autoSave ?? false;
     autoSaveDir.value = data.autoSaveDir ?? "";
+    // Re-authorize the restored auto-save directory so writes work after a
+    // workspace restore (the registry is in-memory and does not persist).
+    if (autoSaveDir.value && isTauriRuntime()) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("register_dialog_path", { path: autoSaveDir.value });
+      } catch {
+        // Non-fatal: writes will be rejected and surfaced via autoSave.errWrite.
+      }
+    }
     autoSaveTimestamp.value = data.autoSaveTimestamp ?? true;
     showTimestamp.value = data.showTimestamp ?? true;
     showDirBadge.value = data.showDirBadge ?? true;
@@ -1033,8 +1043,13 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   async function pickAutoSaveDir(): Promise<void> {
     if (!isTauriRuntime()) return;
     const { open } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") {
+      // Authorize this dialog-chosen directory (and its descendants) for the
+      // auto-save file writes. The backend write commands refuse unregistered
+      // paths, so a compromised renderer cannot write arbitrary files.
+      await invoke("register_dialog_path", { path: selected });
       autoSaveDir.value = selected;
     } else if (!autoSaveDir.value) {
       // User cancelled and no path was previously set — roll back the switch
