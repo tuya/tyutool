@@ -29,7 +29,7 @@ impl FlashPlugin for T2Plugin {
         progress: &dyn Fn(FlashEvent),
     ) -> Result<(), FlashError> {
         let chip = T2Spec;
-        super::bk7231n::run_beken(job, cancel, progress, &chip, false)
+        super::beken::driver::run_beken(job, cancel, progress, &chip, false)
     }
 }
 
