@@ -6074,6 +6074,7 @@ dependencies = [
  "tao",
  "tokio",
  "tokio-tungstenite",
+ "toml 0.8.2",
  "tray-icon",
  "tyutool-core",
  "windows-sys 0.60.2",

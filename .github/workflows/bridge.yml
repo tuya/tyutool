@@ -212,6 +212,17 @@ jobs:
             cargo build --release -p tyutool-bridge --target "$T"
           done
 
+      # Proves `+crt-static` from the workspace `.cargo/config.toml` actually
+      # took effect on a real MSVC build: tests/build_config.rs has a
+      # cfg-gated test asserting `cfg!(target_feature = "crt-static")`, and an
+      # MSVC target is the only place it can run. The ubuntu `check` job can
+      # only assert the config file's *content* — without this step a silently
+      # non-applying flag would ship a VCRUNTIME140.dll-dependent exe again.
+      - name: Verify static CRT (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo test -p tyutool-bridge --target x86_64-pc-windows-msvc --test build_config
+
       # ── Stage the binary into out/ ──
       - name: Stage binary (macOS universal)
         if: matrix.arch == 'universal'

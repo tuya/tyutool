@@ -60,6 +60,12 @@ tyutool-core = { path = "../tyutool-core" }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = ["Win32_System_Console"] }
 
+[dev-dependencies]
+# tests/build_config.rs parses the workspace `.cargo/config.toml` to guard the
+# `+crt-static` flag for MSVC targets (VCRUNTIME140.dll field failure). 0.8 is
+# already in the workspace lock (pulled by the Tauri side) — no new version.
+toml = "0.8"
+
 # ── Installer packaging (cargo-packager 0.11) ────────────────────────────────
 #
 # Turns the staged binary into a real installer per platform: a `.dmg` to drag
