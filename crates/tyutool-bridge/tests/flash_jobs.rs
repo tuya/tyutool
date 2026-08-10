@@ -87,6 +87,7 @@ impl FlashBackend for FakeBackend {
         PortProbe {
             available: true,
             reason: None,
+                occupied_by: None,
         }
     }
 }

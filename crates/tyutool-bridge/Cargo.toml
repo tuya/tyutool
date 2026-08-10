@@ -176,3 +176,10 @@ appdataPaths = ["$APPDATA\\tyutool-bridge"]
 # package refuse to install on systems that can in fact run it. Revisit the day
 # the bridge wants richer USB metadata on Linux.
 depends = ["libgtk-3-0", "libayatana-appindicator3-1", "libxdo3"]
+# udev 规则：让 ModemManager / brltty 放过烧录用的 USB 串口（VID 与 VID_ALLOWLIST 同源）。
+# 不装它的话，Ubuntu 上插 T5AI（枚举成 /dev/ttyACM*）后 ModemManager 会自动 AT 探测并
+# TIOCEXCL 独占数秒~数十秒，用户点烧录只会看到「串口被其他程序占用」而不知该关谁
+# ——真机现场实证。规则文件自带完整 rationale。
+# ⚠ 装包只是把文件放进去；对**已插着**的设备要 `udevadm control --reload-rules && udevadm trigger`
+# 或重插一次才生效（deb 的 postinstall 钩子由 cargo-packager 管，这里不额外造脚本）。
+files = { "/usr/lib/udev/rules.d/99-tyutool-bridge.rules" = "packaging/linux/99-tyutool-bridge.rules" }

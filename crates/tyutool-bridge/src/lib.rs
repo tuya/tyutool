@@ -250,6 +250,10 @@ pub trait DebugSessionHandle: Send {
 pub struct PortProbe {
     pub available: bool,
     pub reason: Option<String>,
+    /// 人类可读的占用者（`"ModemManager (812)"`）；认不出来时 None。
+    /// Ubuntu 上占住 /dev/ttyACM* 的常是 ModemManager 这类系统服务，
+    /// 只回一个 `occupied_by_other_process` 机器码，用户在界面上无从下手。
+    pub occupied_by: Option<String>,
 }
 
 /// Injectable flash execution surface: production wires tyutool-core
@@ -1343,6 +1347,9 @@ enum ServerFrame {
         available: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// 占用者名字（可选，老 Web 端忽略即可）。见 PortProbe::occupied_by。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        occupied_by: Option<String>,
     },
     // ── B5 serial monitor ────────────────────────────────────────────────────
     //
@@ -2426,10 +2433,12 @@ impl FlashBackend for RealFlashBackend {
             return PortProbe {
                 available: true,
                 reason: None,
+                occupied_by: None,
             };
         }
-        // `reason` is a stable machine code for the web UI; the OS error text
-        // and the offending process stay in the developer log channel.
+        // `reason` 是给 Web 端的稳定机器码；OS 原始错误文本与 fuser/lsof 的完整输出
+        // 仍只进开发者日志。**但占用者的名字要下发**——它是用户唯一能据以行动的信息
+        // （Ubuntu 上多半是 ModemManager），埋在日志里等于没有。
         log::info!(
             "bridge probe: {port} unavailable ({:?}, process {:?})",
             checked.error_message,
@@ -2438,6 +2447,7 @@ impl FlashBackend for RealFlashBackend {
         PortProbe {
             available: false,
             reason: Some("occupied_by_other_process".to_string()),
+            occupied_by: checked.holders,
         }
     }
 }
@@ -4062,6 +4072,8 @@ async fn check_port_task(ctx: Arc<ConnContext>, port: String) {
             port,
             available: false,
             reason: Some("occupied_by_bridge_job".to_string()),
+            // 本进程内另一个任务占着——Web 端有专门文案，不需要进程名
+            occupied_by: None,
         });
         return;
     }
@@ -4076,6 +4088,7 @@ async fn check_port_task(ctx: Arc<ConnContext>, port: String) {
             PortProbe {
                 available: false,
                 reason: Some("probe_failed".to_string()),
+                occupied_by: None,
             }
         }
     };
@@ -4084,6 +4097,7 @@ async fn check_port_task(ctx: Arc<ConnContext>, port: String) {
         port,
         available: probe.available,
         reason: probe.reason,
+        occupied_by: probe.occupied_by,
     });
 }
 

@@ -59,6 +59,23 @@ tyutool usb-port-survey   # 输出原始 USB 元数据，便于跨系统排错</
         <li>若希望 tyutool 在你切走时自动放手，在<strong>设置</strong>里开启<strong>自动释放串口</strong>（auto-release）。</li>
       </ul>
 
+      <h4 id="port-busy-linux">Linux 专属：占用者往往是系统服务（ModemManager / brltty）</h4>
+      <p><strong>症状：</strong>Ubuntu 等发行版上，板子刚插好就报占用，但你并没有开任何串口工具；设备节点通常是 <code>/dev/ttyACM0</code>。同一块板在 macOS / Windows 上正常。</p>
+      <p><strong>原因：</strong><code>ModemManager</code> 会把新出现的 CDC-ACM 节点当调制解调器，插上就自动发 AT 指令探测，期间以 <code>TIOCEXCL</code> 独占该串口数秒到数十秒。它是系统服务，界面上看不出来。<code>brltty</code>（盲文终端）在 Ubuntu 22.04+ 也会误抢 CH340 设备。</p>
+      <p><strong>先确诊是谁占的：</strong></p>
+      <pre>sudo fuser -v /dev/ttyACM0     # 或 sudo lsof /dev/ttyACM0</pre>
+      <p><strong>临时验证：</strong>停掉后若立刻能烧，即可确认。</p>
+      <pre>sudo systemctl stop ModemManager</pre>
+      <p><strong>推荐的永久处置</strong>——不要整体禁用 ModemManager（你可能真的在用移动网络），只让它放过烧录用的串口芯片。<strong>安装烧录助手的 deb 包会自动带上这条规则</strong>（<code>/usr/lib/udev/rules.d/99-tyutool-bridge.rules</code>）；手工安装 tyutool 时可自行创建：</p>
+      <pre># /etc/udev/rules.d/99-tyutool-bridge.rules
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+
+sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</pre>
+      <p>三个 VID 分别是 WCH（CH340/CH341/CH343）、Silicon Labs（CP210x）、FTDI，与烧录助手认得的芯片名单一致。规则装好后<strong>重插一次设备</strong>（或执行上面的 <code>udevadm trigger</code>）才对已插着的设备生效。</p>
+      <p>若停掉 ModemManager 仍然报占用，再查 brltty：<code>systemctl status brltty</code>，确认后 <code>sudo systemctl mask brltty</code>。</p>
+
       <h2 id="flashing">2. 烧录</h2>
 
       <h3 id="flash-fails">烧录失败 / 握手失败（handshake error）</h3>

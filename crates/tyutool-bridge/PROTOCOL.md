@@ -215,8 +215,20 @@ CoBuilder 没有表格，适配层把查表回调写成了 `|_mac| None`，但 M
 { "type": "check_port_result", "port": "/dev/tty.xxx", "available": false, "reason": "occupied_by_bridge_job" }
 ```
 
+```json
+{ "type": "check_port_result", "port": "/dev/ttyACM0", "available": false,
+  "reason": "occupied_by_other_process", "occupied_by": "ModemManager (812)" }
+```
+
 - bridge 自身持有 → `reason: "occupied_by_bridge_job"`（不做 OS 探测）。
 - 否则 OS 级探测（tyutool-core `check_port_available`，实际尝试打开）：不可用 → `reason: "occupied_by_other_process"`；可用 → `available: true` 且 **省略 reason 字段**。
+- `occupied_by`（可选）：**人类可读的占用者名字**，如 `"ModemManager (812)"`、`"picocom"`；
+  多个占用者用 `, ` 连接。认不出来时**省略该字段**（绝不编造）。
+  - 取名方式：Linux 用 `fuser` 拿 PID 再读 `/proc/<pid>/comm`；macOS 用 `lsof` 首列；Windows 拿不到。
+  - 存在的理由：Ubuntu 上占住 `/dev/ttyACM*` 的多半是 **ModemManager**（对 CDC-ACM 设备自动
+    发 AT 探测并 `TIOCEXCL` 独占），只回一个机器码时用户在界面上看到「被其他程序占用」
+    却根本不知道该关谁。原始 OS 错误文本与 fuser/lsof 完整输出仍只进开发者日志。
+  - 兼容：老 Web 端忽略该字段即可；老 bridge 不下发时前端回退通用文案。
 - 探测任务本身失败（阻塞线程 join 失败等内部错误）→ `available: false, reason: "probe_failed"`（罕见兜底分支）。
 - **reason 取值全集：`occupied_by_bridge_job` / `occupied_by_other_process` / `probe_failed`**；前端遇到未识别的 reason 按「占用」处理即可。
 - ⚠ 不存在的串口也报 `occupied_by_other_process`（core 不区分 not_found；细分粒度联调期再定）。

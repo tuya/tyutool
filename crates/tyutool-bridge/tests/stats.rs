@@ -36,6 +36,7 @@ impl FlashBackend for NoopBackend {
         PortProbe {
             available: true,
             reason: None,
+                occupied_by: None,
         }
     }
 }
