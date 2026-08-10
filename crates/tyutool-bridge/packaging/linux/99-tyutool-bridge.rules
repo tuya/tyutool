@@ -25,6 +25,9 @@ ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ENV{ID_MM_DEVIC
 ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
 
 # brltty（盲文终端服务）在 Ubuntu 22.04+ 会误认 CH340 为盲文显示器并抢占设备。
-# 它自带的 /usr/lib/udev/rules.d/85-brltty.rules 用 ENV{BRLTTY_BRAILLE_DRIVER} 匹配；
-# 这里对同一批 VID 显式清空该变量，规则文件名 99- 保证在 85- 之后执行、能覆盖它。
+# ⚠ 下面这条**未在真机验证过**（二次 CR 指出）：brltty 自带的 85-brltty.rules 在匹配后会
+# `GOTO` 到自己的标签并触发 SYSTEMD_WANTS，那些副作用是否发生在 99- 规则执行之前，
+# 静态读规则文件判不出来。业界文档记载的确定做法是「mask brltty-udev.service」或
+# 「改 85-brltty.rules 注释掉对应 ENV{PRODUCT} 行」——FAQ 给的是这两条。
+# 这条留着是低成本的额外尝试（生效则省事，不生效也无副作用），别当成已验证的方案。
 ACTION=="add|change", SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ENV{BRLTTY_BRAILLE_DRIVER}=""

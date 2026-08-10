@@ -74,7 +74,9 @@ ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVIC
 
 sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</pre>
       <p>The three VIDs are WCH (CH340/CH341/CH343), Silicon Labs (CP210x) and FTDI — the same list the flashing helper recognises. After installing the rule, <strong>re-plug the device</strong> (or run the <code>udevadm trigger</code> above) for it to take effect on an already-connected board.</p>
-      <p>If stopping ModemManager does not help, check brltty next: <code>systemctl status brltty</code>, then <code>sudo systemctl mask brltty</code>.</p>
+      <p>If stopping ModemManager does not help, check brltty next (Ubuntu 22.04+ mistakes CH340 for a braille display): <code>systemctl status brltty-udev.service</code>. The unit that actually grabs devices is <strong>brltty-udev.service</strong>, not the <code>brltty</code> main service:</p>
+      <pre>sudo systemctl mask brltty-udev.service</pre>
+      <p>If you genuinely use a braille device and cannot mask it wholesale, edit <code>/usr/lib/udev/rules.d/85-brltty.rules</code> instead and comment out the line matching your board (looks like <code>ENV{PRODUCT}=="1a86/7523/*"</code>), then reload the rules.</p>
 
       <h2 id="flashing">2. Flashing</h2>
 

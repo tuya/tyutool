@@ -74,7 +74,9 @@ ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVIC
 
 sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</pre>
       <p>三个 VID 分别是 WCH（CH340/CH341/CH343）、Silicon Labs（CP210x）、FTDI，与烧录助手认得的芯片名单一致。规则装好后<strong>重插一次设备</strong>（或执行上面的 <code>udevadm trigger</code>）才对已插着的设备生效。</p>
-      <p>若停掉 ModemManager 仍然报占用，再查 brltty：<code>systemctl status brltty</code>，确认后 <code>sudo systemctl mask brltty</code>。</p>
+      <p>若停掉 ModemManager 仍然报占用，再查 brltty（Ubuntu 22.04+ 会把 CH340 误认成盲文显示器）：<code>systemctl status brltty-udev.service</code>。真正逐设备抢占的是 <strong>brltty-udev.service</strong>（不是 <code>brltty</code> 主服务），确认后：</p>
+      <pre>sudo systemctl mask brltty-udev.service</pre>
+      <p>若你确实要用盲文设备、不能整体屏蔽，可改为编辑 <code>/usr/lib/udev/rules.d/85-brltty.rules</code>，把匹配到你板子的那行（形如 <code>ENV{PRODUCT}=="1a86/7523/*"</code>）注释掉后重载规则。</p>
 
       <h2 id="flashing">2. 烧录</h2>
 
