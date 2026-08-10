@@ -72,7 +72,8 @@ toml = "0.8"
 #
 # Turns the staged binary into a real installer per platform: a `.dmg` to drag
 # into /Applications, an NSIS `.exe` that writes shortcuts and an uninstall entry,
-# and `.deb` / `.AppImage` on Linux. cargo-packager only *packages* — it does not
+# and a `.deb` on Linux (rpm comes from cargo-generate-rpm, at the bottom of this
+# file). cargo-packager only *packages* — it does not
 # build — so CI keeps its existing `cargo build` + `lipo` steps and points
 # `--binaries-dir` at the same `out/` they already stage into.
 #
@@ -167,7 +168,10 @@ appdataPaths = ["$APPDATA\\tyutool-bridge"]
 
 # ── RPM（Fedora / RHEL / openSUSE 系）────────────────────────────────────────
 # cargo-packager **不支持 rpm**（0.11.8 只有 app/appimage/deb/dmg/nsis/pacman/wix），
-# 所以 rpm 走 cargo-generate-rpm 单独出一发，与 deb/AppImage 并列上传。
+# 所以 rpm 走 cargo-generate-rpm 单独出一发，与 deb 并列上传。
+# ⚠ Linux 只发 deb + rpm，**AppImage 已下线**：它要求用户机器上有 libfuse2，而
+# Ubuntu 22.04+ 默认不装，表现是下下来双击没反应、报错也不提 FUSE（真机现场）。
+# 换句话说这不是打包配置能修的，只能换分发格式。
 #
 # ⚠ assets 的 source 路径相对 **workspace root** 解析（cargo-generate-rpm 走 cargo metadata），
 # 与上面 packager 的 deb.files（相对本 Cargo.toml）**不是一个基准**，别照抄。
@@ -178,7 +182,8 @@ appdataPaths = ["$APPDATA\\tyutool-bridge"]
 #   libgtk-3-0                 → gtk3
 #   libayatana-appindicator3-1 → libayatana-appindicator-gtk3
 #   libxdo3                    → libxdo
-# 名字按 Fedora/RHEL 口径；openSUSE 个别名字有出入，装不上时用 --nodeps 或换 AppImage。
+# 名字按 Fedora/RHEL 口径；openSUSE 个别名字有出入，装不上时用 --nodeps，
+# 或改用同 release 里的 tar.gz 裸二进制（bare binaries 那一栏）自行放置。
 [package.metadata.generate-rpm]
 assets = [
   { source = "target/release/tyutool-bridge", dest = "/usr/bin/tyutool-bridge", mode = "755" },

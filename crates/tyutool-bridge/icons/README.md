@@ -25,7 +25,7 @@ regenerating one must never overwrite the other.
 |---|---|
 | `icon.icns` | the macOS `.app` bundle (Finder, the `.dmg` window, ⌘-Tab) |
 | `icon.ico` | the Windows `.exe` resource (`build.rs`), and therefore both shortcuts, the taskbar and the "Programs and Features" entry |
-| `128x128.png`, `128x128@2x.png`, `64x64.png`, `32x32.png` | Linux `hicolor` theme directories in the `.deb`/`.AppImage`; `cargo-packager` files each one by its real pixel size |
+| `128x128.png`, `128x128@2x.png`, `64x64.png`, `32x32.png` | Linux `hicolor` theme directories in the `.deb`/`.rpm`; `cargo-packager` files each one by its real pixel size |
 
 ## The tray glyph is a separate pair of assets
 

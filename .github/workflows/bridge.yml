@@ -330,12 +330,10 @@ jobs:
       # (`crates/tyutool-bridge/`) before packaging — anything relative would
       # resolve from there rather than the workspace root.
       #
-      # Every external tool it needs (NSIS, `create-dmg`, `linuxdeploy`) is
-      # downloaded and SHA-checked at run time, so there is nothing to pre-install
-      # on the runners. Two CI-specific quirks it already handles by itself:
-      # `create-dmg` hanging on a headless runner (it passes `--skip-jenkins` when
-      # `CI` is set) and AppImage needing libfuse2 (it uses
-      # `--appimage-extract-and-run`).
+      # Every external tool it needs (NSIS, `create-dmg`) is downloaded and
+      # SHA-checked at run time, so there is nothing to pre-install on the
+      # runners. One CI-specific quirk it already handles by itself: `create-dmg`
+      # hanging on a headless runner (it passes `--skip-jenkins` when `CI` is set).
       #
       # `cargo install`, not `taiki-e/install-action` — that action's tool list
       # does not include cargo-packager (checked against its TOOLS.md), so asking
@@ -358,12 +356,21 @@ jobs:
         env:
           # macOS: dmg. Windows: nsis (the installer with shortcuts + an
           # uninstall entry) — not wix, which produces an .msi with neither.
-          # Linux: both a .deb for apt-managed machines and an .AppImage for
-          # everything else.
+          # Linux: deb only from this tool; rpm comes from cargo-generate-rpm
+          # below. The two together cover the distro families we ship to.
+          #
+          # ⚠ AppImage was dropped deliberately (真机现场：Ubuntu LTS 上打出来的包
+          # 用户跑不起来). It is not a packaging bug we can fix from here — an
+          # AppImage needs libfuse2 on the *user's* machine, which Ubuntu 22.04+
+          # no longer installs by default, so the file downloads fine and then
+          # fails to launch with an error that says nothing about FUSE. A format
+          # whose failure mode is "nothing happens" is worse than not offering it:
+          # deb and rpm install through the system package manager, which reports
+          # missing dependencies by name.
           FORMATS: >-
             ${{ runner.os == 'macOS' && 'dmg'
              || runner.os == 'Windows' && 'nsis'
-             || 'deb,appimage' }}
+             || 'deb' }}
           # Empty on the macOS row (it builds two triples and merges them), set on
           # Linux/Windows. Drives which of the two cases below applies.
           PACKAGER_TARGET: ${{ matrix.target }}
@@ -404,11 +411,7 @@ jobs:
       # Renamed into the same `<platform>_<arch>_<label>` scheme as the archives so
       # a release page lists one coherent set of names rather than a mix of ours
       # and the packager's own (which are inconsistent between formats: `.dmg` and
-      # `-setup.exe` use the product name, `.deb`/`.AppImage` the binary name).
-      #
-      # `*.AppImage` is safe to glob despite the tool also downloading
-      # `linuxdeploy-*.AppImage` helpers: those go to `dirs::cache_dir()`, never
-      # into the out-dir.
+      # `-setup.exe` use the product name, `.deb` the binary name).
       - name: Collect installers into dist
         shell: bash
         run: |
@@ -419,8 +422,7 @@ jobs:
           for f in "$GITHUB_WORKSPACE"/installers/*.dmg \
                    "$GITHUB_WORKSPACE"/installers/*setup.exe \
                    "$GITHUB_WORKSPACE"/installers/*.deb \
-                   "$GITHUB_WORKSPACE"/installers/*.rpm \
-                   "$GITHUB_WORKSPACE"/installers/*.AppImage; do
+                   "$GITHUB_WORKSPACE"/installers/*.rpm; do
             ext="${f##*.}"
             # `*-setup.exe` keeps the "this is an installer, not the app" signal
             # that a bare `.exe` next to a `.zip` of the same name would lose.
@@ -436,19 +438,19 @@ jobs:
             exit 1
           fi
 
-          # Linux 要的是**三件套**（deb / rpm / AppImage）：只查 found>0 的话，rpm 那一发
-          # 挂了而 deb 成功时 found 仍是 2，会静默发出一个缺包的 release——正是「没人发现，
+          # Linux 要的是**两件套**（deb / rpm）：只查 found>0 的话，rpm 那一发挂了而
+          # deb 成功时 found 仍是 1，会静默发出一个缺包的 release——正是「没人发现，
           # 直到用户点了下载链接」那类事故。逐个点名，缺哪个报哪个。
           if [ "$RUNNER_OS" = "Linux" ]; then
             # 用数组判空而不是 compgen/ls：脚本开头开了 nullglob，无匹配时通配符会展开成
             # **空**，`ls dist/*.rpm` 会退化成无参数 ls（列当前目录、返回 0）而漏判
             missing=""
-            for ext in deb rpm AppImage; do
+            for ext in deb rpm; do
               hits=(dist/*."${ext}")
               [ "${#hits[@]}" -gt 0 ] || missing="${missing} ${ext}"
             done
             if [ -n "$missing" ]; then
-              echo "::error::Linux installers missing:${missing} (expected deb + rpm + AppImage)"
+              echo "::error::Linux installers missing:${missing} (expected deb + rpm)"
               exit 1
             fi
           fi
@@ -497,8 +499,8 @@ jobs:
           |---|---|---|
           | macOS (Intel + Apple Silicon) | `tyutool-bridge_macos_universal_*.dmg` | Drag **Cobuilder Bridge** into Applications. Runs in the menu bar only — no Dock icon. |
           | Windows x86_64 | `tyutool-bridge_windows_x86_64_*-setup.exe` | Per-user install (no admin needed): Start-menu + desktop shortcuts, and an entry in Settings ▸ Apps for uninstalling. |
-          | Linux x86_64 (deb) | `tyutool-bridge_linux_x86_64_*.deb` | `sudo apt install ./…deb` — adds a desktop entry. |
-          | Linux x86_64 (portable) | `tyutool-bridge_linux_x86_64_*.AppImage` | `chmod +x` and run; no install. |
+          | Linux x86_64 (Debian/Ubuntu) | `tyutool-bridge_linux_x86_64_*.deb` | `sudo apt install ./…deb` — adds a desktop entry and the serial udev rules. |
+          | Linux x86_64 (Fedora/RHEL/openSUSE) | `tyutool-bridge_linux_x86_64_*.rpm` | `sudo dnf install ./…rpm` (or `zypper`) — same contents as the deb. |
 
           Autostart at login is **on by default** and can be turned off from the
           tray menu ("开机自启" / "Start at login").
