@@ -435,6 +435,23 @@ jobs:
             echo "::error::cargo packager produced no installer for ${{ matrix.platform }}"
             exit 1
           fi
+
+          # Linux 要的是**三件套**（deb / rpm / AppImage）：只查 found>0 的话，rpm 那一发
+          # 挂了而 deb 成功时 found 仍是 2，会静默发出一个缺包的 release——正是「没人发现，
+          # 直到用户点了下载链接」那类事故。逐个点名，缺哪个报哪个。
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # 用数组判空而不是 compgen/ls：脚本开头开了 nullglob，无匹配时通配符会展开成
+            # **空**，`ls dist/*.rpm` 会退化成无参数 ls（列当前目录、返回 0）而漏判
+            missing=""
+            for ext in deb rpm AppImage; do
+              hits=(dist/*."${ext}")
+              [ "${#hits[@]}" -gt 0 ] || missing="${missing} ${ext}"
+            done
+            if [ -n "$missing" ]; then
+              echo "::error::Linux installers missing:${missing} (expected deb + rpm + AppImage)"
+              exit 1
+            fi
+          fi
           ls -lh dist/
 
       - uses: actions/upload-artifact@v7
