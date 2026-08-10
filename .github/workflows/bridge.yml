@@ -346,6 +346,13 @@ jobs:
         shell: bash
         run: cargo install cargo-packager --locked --version 0.11.8
 
+
+      # rpm 走单独的工具：cargo-packager 0.11.8 不支持 rpm（只有
+      # app/appimage/deb/dmg/nsis/pacman/wix）。配置在 crates/tyutool-bridge/Cargo.toml
+      # 的 [package.metadata.generate-rpm]（含 udev 规则与 Fedora 系依赖名）。
+      - name: Install cargo-generate-rpm (Linux only)
+        if: runner.os == 'Linux'
+        run: cargo install cargo-generate-rpm --locked --version 0.21.0
       - name: Build installers
         shell: bash
         env:
@@ -382,6 +389,15 @@ jobs:
           cargo packager "${args[@]}" \
             --out-dir "$GITHUB_WORKSPACE/installers" \
             --verbose
+
+          # rpm：cargo-packager 打不了，单独出一发放进同一个 out-dir，后续收集/上传一视同仁。
+          # --target 让它去 target/<triple>/release/ 找二进制（与上面 cargo build 的落点一致）；
+          # 产物默认写 target/generate-rpm/，拷过去即可。
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cargo generate-rpm -p crates/tyutool-bridge --target "$PACKAGER_TARGET"
+            cp target/"$PACKAGER_TARGET"/generate-rpm/*.rpm "$GITHUB_WORKSPACE/installers/"
+          fi
+
           echo "── Installers ──────────────────────────────────"
           ls -lh "$GITHUB_WORKSPACE/installers"
 
@@ -403,6 +419,7 @@ jobs:
           for f in "$GITHUB_WORKSPACE"/installers/*.dmg \
                    "$GITHUB_WORKSPACE"/installers/*setup.exe \
                    "$GITHUB_WORKSPACE"/installers/*.deb \
+                   "$GITHUB_WORKSPACE"/installers/*.rpm \
                    "$GITHUB_WORKSPACE"/installers/*.AppImage; do
             ext="${f##*.}"
             # `*-setup.exe` keeps the "this is an installer, not the app" signal

@@ -3,6 +3,8 @@ name = "tyutool-bridge"
 version = "0.2.5"
 edition = "2021"
 description = "Cobuilder Bridge — resident local WebSocket flash helper with a tray shell (--headless for CI)"
+# rpm 打包必填（cargo-generate-rpm 要它写进 spec 的 License 字段）；取值同仓库 LICENSE.txt
+license = "Apache-2.0"
 
 [[bin]]
 name = "tyutool-bridge"
@@ -162,6 +164,31 @@ appdataPaths = ["$APPDATA\\tyutool-bridge"]
 # and the tray toggle removes it properly *before* uninstalling. Whoever revisits
 # this should weigh a template fork against shipping a tiny uninstall helper —
 # not add a second place that decides where autostart lives.
+
+# ── RPM（Fedora / RHEL / openSUSE 系）────────────────────────────────────────
+# cargo-packager **不支持 rpm**（0.11.8 只有 app/appimage/deb/dmg/nsis/pacman/wix），
+# 所以 rpm 走 cargo-generate-rpm 单独出一发，与 deb/AppImage 并列上传。
+#
+# ⚠ assets 的 source 路径相对 **workspace root** 解析（cargo-generate-rpm 走 cargo metadata），
+# 与上面 packager 的 deb.files（相对本 Cargo.toml）**不是一个基准**，别照抄。
+# 二进制那条用 target/release：CI 在 Linux 行带 --target 构建，随后 `cargo generate-rpm --target`
+# 会把前缀补上（见 .github/workflows/bridge.yml）。
+#
+# requires 是 deb depends 的 rpm 对应物——两边包名不同，逐个对：
+#   libgtk-3-0                 → gtk3
+#   libayatana-appindicator3-1 → libayatana-appindicator-gtk3
+#   libxdo3                    → libxdo
+# 名字按 Fedora/RHEL 口径；openSUSE 个别名字有出入，装不上时用 --nodeps 或换 AppImage。
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/tyutool-bridge", dest = "/usr/bin/tyutool-bridge", mode = "755" },
+  { source = "crates/tyutool-bridge/packaging/linux/99-tyutool-bridge.rules", dest = "/usr/lib/udev/rules.d/99-tyutool-bridge.rules", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk3 = "*"
+libayatana-appindicator-gtk3 = "*"
+libxdo = "*"
 
 [package.metadata.packager.deb]
 # Derived from what the tray actually links, one package per reason — the same
