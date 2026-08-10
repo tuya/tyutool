@@ -1,6 +1,6 @@
 [package]
 name = "tyutool-bridge"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 description = "Cobuilder Bridge — resident local WebSocket flash helper with a tray shell (--headless for CI)"
 # rpm 打包必填（cargo-generate-rpm 要它写进 spec 的 License 字段）；取值同仓库 LICENSE.txt
