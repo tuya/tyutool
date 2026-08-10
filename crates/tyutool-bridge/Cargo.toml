@@ -182,4 +182,8 @@ depends = ["libgtk-3-0", "libayatana-appindicator3-1", "libxdo3"]
 # ——真机现场实证。规则文件自带完整 rationale。
 # ⚠ 装包只是把文件放进去；对**已插着**的设备要 `udevadm control --reload-rules && udevadm trigger`
 # 或重插一次才生效（deb 的 postinstall 钩子由 cargo-packager 管，这里不额外造脚本）。
-files = { "/usr/lib/udev/rules.d/99-tyutool-bridge.rules" = "packaging/linux/99-tyutool-bridge.rules" }
+# ⚠ 方向是 **{ 源 = 目标 }**，别写反（0.2.4 首发就栽在这，Linux 打包 I/O Error）：
+# cargo-packager 0.11.8 的 copy_custom_files 是 `for (src, target) in files`，
+# 键被当成源去 canonicalize。源路径相对**本 Cargo.toml 所在目录**解析
+# （packager 在读配置前会 cd 到配置所在目录，见其 cli/mod.rs 的注释）。
+files = { "packaging/linux/99-tyutool-bridge.rules" = "/usr/lib/udev/rules.d/99-tyutool-bridge.rules" }
