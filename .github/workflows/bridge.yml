@@ -17,24 +17,31 @@
 #      bridge releases   → `bridge-v*`   (this file)
 #  Neither side's tags can trigger the other side's pipeline.
 #
-#  ── ⚠ These are UNSIGNED builds ────────────────────────────────────────────
-#  A fork does not inherit upstream repository secrets. The Apple / Tauri
-#  signing secrets referenced in `release.yml` (APPLE_CERTIFICATE, APPLE_ID,
-#  APPLE_TEAM_ID, TAURI_SIGNING_PRIVATE_KEY, …) are empty here, so this
-#  workflow references NO secrets at all and signs nothing. Consequences:
+#  ── 签名：有证书就签，没有就照常出未签名包 ─────────────────────────────────
+#  macOS 签名与公证走**与 release.yml 相同的 secrets**（APPLE_CERTIFICATE /
+#  APPLE_CERTIFICATE_PASSWORD / APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID）。
+#  bridge 是同一个产品的另一个可执行文件，用同一张 Developer ID 证书签是对的，
+#  上游也不必再维护第二套凭据。
 #
-#    • macOS   — Gatekeeper blocks the downloaded binary. Users must either
-#                right-click → Open, or run:
+#  开关是**自动**的，不需要为 fork 和上游各留一套配置：
+#    · 有 APPLE_CERTIFICATE  → 构建前把 `signing_identity` 写进 Cargo.toml
+#                              → cargo-packager 签名并公证；
+#    · 没有（fork 的常态）    → 不写那一行 → cargo-packager 整段跳过签名（不报错），
+#                              产出未签名包，与本次改动前的行为完全一致。
+#  实现细节与「为什么不能用 --config 注入」的查证记录，见下方 build job 里
+#  「Enable macOS signing」那一步的注释。
+#
+#  ⚠ 未签名包（fork 构建、或上游 secret 未配时）的后果：
+#    • macOS   — Gatekeeper 拦截。用户需右键 → 打开，或执行：
 #                    xattr -d com.apple.quarantine ./tyutool-bridge
-#    • Windows — SmartScreen shows "Windows protected your PC"; users must
-#                click "More info" → "Run anyway".
-#    • Linux   — unaffected (no OS-level signature gate).
+#    • Windows — SmartScreen 提示「Windows 已保护你的电脑」，需点「更多信息」→
+#                「仍要运行」。**Windows 侧本工作流目前不做签名**，与 release.yml
+#                一致（那边也只有 Apple + Tauri updater，没有 signtool）。
+#                要加 Windows 签名需要另外的证书与 secret，届时在这里补。
+#    • Linux   — 不受影响（无系统级签名门）。
 #
-#  This is fine for internal integration testing. It is NOT fine for public
-#  distribution. To get signed builds, hand this workflow to upstream together
-#  with the signing-secret configuration — do NOT put signing credentials into
-#  the fork's secrets, since fork secrets are visible to anyone who can push a
-#  workflow change here.
+#  ⚠ **绝不要把签名凭据放进 fork 的 secrets**：fork 的 secret 对任何能改本文件的人
+#  都是可读的（改一行 workflow 就能把它 echo 出来）。签名只应在上游仓库发生。
 #
 #  ── TODO: macOS `.app` bundle? ─────────────────────────────────────────────
 #  This workflow ships a BARE BINARY (tar.gz), not a `.app` bundle. Verified
@@ -47,7 +54,11 @@
 #      LaunchAgent-based autostart really want.
 #  Decision for now: bare binary is enough for integration testing, and a
 #  bundle without a signing identity would still be Gatekeeper-blocked, so it
-#  buys little until signing exists. Revisit together with signing.
+#  buys little until signing exists.
+#  ⚠ 这条 TODO 的前提**已经变了**（签名已接上，见文件开头）：dmg 里的 `.app` 现在
+#  会被签名与公证，所以「没有身份、签了也白签」这条理由不再成立。剩下的取舍只是
+#  bare binary（tar.gz，给 CI/守护进程用）要不要继续与 dmg 并行发——两者本就并行，
+#  真正待办是**给 bare binary 也补 LSUIElement**，那需要它自己成为 .app。
 #
 #  ── TODO: Windows console window ───────────────────────────────────────────
 #  `crates/tyutool-bridge/src/main.rs` has no `#![windows_subsystem = "windows"]`,
@@ -61,8 +72,33 @@ name: Bridge
 on:
   push:
     tags: ["bridge-v*"] # disjoint from upstream's `v*.*.*`
-    branches: [bridge/main]
+    branches: [bridge/main] # fork-only branch; never exists upstream, so inert there
+  # ⚠ PR 触发按 paths 收窄——但**它真正影响的只有 `check` 这一个 job**，别把功劳记错
+  # （二次 CR 更正）：`prepare` 自带 `if: tag 或 workflow_dispatch`，而 `build` / `release`
+  # 都 `needs: [prepare]`，依赖被跳过时 `success()` 为假，所以三平台构建**在 PR 上本来就
+  # 不会跑**。裸 `pull_request:` 的实际代价是每个无关 PR 上多跑一次 `check`（clippy +
+  # 单测，单机几分钟），不是三平台打包。
+  #
+  # 那为什么还要留 PR 触发？因为上游 `ci.yml` 只编译/测试 `tyutool-core` 与 `tyutool-cli`
+  # ——**不含本 crate**。删掉 PR 触发，bridge 就完全没有合并前验证了。按 path 收窄既保住
+  # 这道网，又对无关 PR 隐形。（把本 crate 加进 `ci.yml` 是另一条路，但那要改上游拥有的
+  # 文件；本特性刻意收在这一个文件里——见文件开头。）
+  #
+  # ⚠ 由此派生一条**验证纪律**：新增签名逻辑无法靠开 PR 或往 bridge/main 推普通提交来验，
+  # 那两种事件都到不了 `build`。只能用 workflow_dispatch，或真打一个 bridge-v* tag。
   pull_request:
+    paths:
+      - "crates/tyutool-bridge/**"
+      - "crates/tyutool-core/**" # the bridge links it; a core change can break us
+      - ".github/workflows/bridge.yml"
+      # ⚠ workspace 级的两份清单也要算进来（二次 CR）：
+      #   · .cargo/config.toml 供着 Windows MSVC 的 +crt-static，且 bridge 自己的
+      #     tests/build_config.rs 就是守它的——它不在 crates/ 下，漏了就等于守卫失效；
+      #   · 根 Cargo.toml 改 [workspace] 成员/resolver 会静默改变本 crate 的解析结果。
+      - ".cargo/**"
+      - "Cargo.toml"
+      # 粗了一点：core/cli 的依赖变动也会顺带触发本流水线。精确区分成本高、收益低，接受。
+      - "Cargo.lock"
   workflow_dispatch:
 
 concurrency:
@@ -351,9 +387,77 @@ jobs:
       - name: Install cargo-generate-rpm (Linux only)
         if: runner.os == 'Linux'
         run: cargo install cargo-generate-rpm --locked --version 0.21.0
+      # ── macOS 代码签名与公证（S46 接上）───────────────────────────────────
+      #
+      # 与 release.yml **共用同一套 secrets**，不新增 secret 名：上游那边已经配好
+      # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_ID / APPLE_PASSWORD /
+      # APPLE_TEAM_ID，bridge 是同一个产品的另一个可执行文件，用同一张 Developer ID
+      # 证书签是正确的（同 team、同 identity），也免得上游再维护第二套凭据。
+      #
+      # ⚠ 与 release.yml 的写法不同，这里**不需要**手工建临时 keychain、导入 p12、
+      # 再 `security find-identity` 捞身份：cargo-packager 自己就消费
+      # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD（源码 codesign/macos.rs 的
+      # `packager_keychain` 分支），公证也内建（notarytool）。照抄 release.yml 那段
+      # 反而会和它自己建的 keychain 打架。
+      #
+      # ⚠ 但**签不签**由配置里的 `signing_identity` 是否存在决定
+      # （`if let Some(identity) = config.macos().and_then(|m| m.signing_identity...)`，
+      # package/app/mod.rs:146）——环境变量里**没有** APPLE_SIGNING_IDENTITY 这一项，
+      # 而 `--config` 是**整体替换**而非合并（cli/config.rs:231 的 match 直接返回，
+      # 根本不去读 Cargo.toml 元数据），用它注入会把打包配置全丢掉。
+      # 所以只能在构建时把这一行写进 Cargo.toml。
+      #
+      # ⚠ 这也正好是 fork 的降级开关：secret 为空 → 不写这一行 → signing_identity
+      # 缺席 → 整段签名被跳过（不是报错）。fork 里照常产出未签名包，合入上游后
+      # 自动开始签名+公证，**不需要改任何代码**。
+      # ⚠ 「有没有证书」的判断放在**脚本里**而不是 step 的 `if:`。
+      # step 级 `if` 能否读到该 step 自己 `env:` 里的值，是 GitHub Actions 里一个有名的
+      # 歧义点（`secrets` 上下文在 step 级 `if` 里则明确不可用）。赌错的两种后果都很糟：
+      # 恒 false → 上游永远不签名却没人发现；恒 true → fork 每次构建都在这一步炸。
+      # 写在脚本里是无歧义的，代价只是多跑一个空步骤。
+      - name: Enable macOS signing (only when the certificate secret exists)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          # 只要 APPLE_CERTIFICATE 这一个——本步骤只判断「有没有证书」，不做签名本身。
+          # 多递一个 secret 就是多一份无谓的暴露面（二次 CR）。真正签名/公证用的那 5 个
+          # 在下面 Build installers 那步。
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "No APPLE_CERTIFICATE secret (fork build) — skipping signing; packages will be unsigned."
+            exit 0
+          fi
+          MANIFEST=crates/tyutool-bridge/Cargo.toml
+          # 身份取「Developer ID Application: <team>」的通配形式：cargo-packager 会把它
+          # 交给 codesign 做前缀匹配，无需把带 TEAM_ID 的全名硬编码进仓库。
+          IDENTITY="Developer ID Application"
+          # 追加到 [package.metadata.packager.macos] 段末尾。用 awk 定位段落而不是
+          # 盲目 append：append 到文件末尾会落进后面的 [package.metadata.generate-rpm]，
+          # rpm 那段不认这个键，会直接报 unknown field。
+          awk -v id="$IDENTITY" '
+            /^\[package\.metadata\.packager\.macos\]/ { print; print "signing_identity = \"" id "\""; next }
+            { print }
+          ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+          # 断言插入确实发生：段头存在但形态意外时，awk 会安静地什么都不做，
+          # 而后续打包一样"成功"、只是没签名——那正是最难发现的一类失败（二次 CR）。
+          grep -q '^signing_identity' "$MANIFEST" \
+            || { echo "::error::signing_identity was not injected into $MANIFEST"; exit 1; }
+          grep -A 2 '^\[package\.metadata\.packager\.macos\]' "$MANIFEST"
+          echo "macOS signing enabled"
+
       - name: Build installers
         shell: bash
         env:
+          # 签名与公证凭据：cargo-packager 直接消费这几个变量（见上一步的说明）。
+          # 空值时它不会尝试签名/公证——降级由 signing_identity 缺席保证，这里只是把
+          # 凭据递进去。⚠ 绝不要把这些值 echo 出来或写进日志。
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # macOS: dmg. Windows: nsis (the installer with shortcuts + an
           # uninstall entry) — not wix, which produces an .msi with neither.
           # Linux: deb only from this tool; rpm comes from cargo-generate-rpm
@@ -489,6 +593,10 @@ jobs:
           ls -lh release-assets/
 
       - name: Write release body
+        env:
+          # 本次构建到底签没签，由「secret 在不在」决定（与 build job 里那道开关同源）。
+          # release 页面的说明必须跟着分岔——签了还教用户去 xattr 去隔离属性，是假话。
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         run: |
           cat > release-body.md <<'EOF'
           `tyutool-bridge` — resident local WebSocket flash helper with a system tray.
@@ -516,12 +624,32 @@ jobs:
           | Windows x86_64 | `tyutool-bridge_windows_x86_64_*.zip` |
           | Linux x86_64 (glibc) | `tyutool-bridge_linux_x86_64_*.tar.gz` |
 
+          EOF
+
+          # ── 签名相关的说明按实际情况追加，别把两种情形写成一种 ──
+          if [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            cat >> release-body.md <<'EOF'
+
+          ## Signing
+
+          macOS builds are **code-signed with a Developer ID certificate and
+          notarized** — drag into Applications and launch; no right-click-Open and
+          no `xattr` dance.
+
+          - **Windows** — the installer is **not** signed yet, so SmartScreen may
+            still warn: "More info" → "Run anyway".
+          - **Linux** — no OS-level signature gate.
+          EOF
+          else
+            cat >> release-body.md <<'EOF'
+
           ## ⚠ Unsigned builds
 
-          Nothing here is **code-signed or notarized**, and packaging does not
-          change that — an unsigned `.dmg` is if anything *harder* to get past
-          Gatekeeper than a loose binary was, because the block applies to the
-          whole `.app`.
+          This build was produced **without signing credentials** (a fork does not
+          inherit the upstream signing secrets), so nothing here is code-signed or
+          notarized. An unsigned `.dmg` is if anything *harder* to get past
+          Gatekeeper than a loose binary, because the block applies to the whole
+          `.app`.
 
           - **macOS** — after dragging it in, the first launch is refused. Either
             right-click the app → Open (then confirm), or:
@@ -533,9 +661,8 @@ jobs:
           - **Linux** — no additional step needed.
 
           Intended for internal integration testing, not public distribution.
-          A Developer ID signature + notarization is what removes the macOS step;
-          until then the drag-and-drop experience stops one click short.
           EOF
+          fi
 
       - uses: softprops/action-gh-release@v3
         with:
