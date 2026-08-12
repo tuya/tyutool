@@ -26,7 +26,7 @@
   <div class="layout">
     <main class="content">
       <h1>Settings</h1>
-      <p class="lead">This page is the complete reference for the <code>/settings</code> page: every configurable option in one place, covering the update center, appearance &amp; language, diagnostics &amp; logs, serial logs, about, and how settings themselves persist.</p>
+      <p class="lead">This page is the complete reference for the <strong>Settings</strong> page: every configurable option in one place, covering the update center, appearance &amp; language, diagnostics &amp; logs, serial logs, about, and how settings themselves persist.</p>
 
       <h2 id="update">1. Update center</h2>
       <p>The update center is the most prominent entry at the top of the Settings page, centralizing version checks and background update cadence:</p>
@@ -43,9 +43,9 @@
           </ul>
         </li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/settings-update.png" alt="Update center: installed-build badge, 'Check for updates' entry, automatic-check interval" loading="lazy">
         <figcaption>Update center: installed-build badge, "Check for updates" entry, automatic-check interval</figcaption>
-        <!-- capture: settings-update.png -->
       </figure>
       <div class="callout note">
         <span class="title">No auto-update on the web</span>
@@ -69,6 +69,10 @@
         </li>
         <li><strong>Serial port indicators</strong>: toggles the <strong>colored serial activity dots</strong> in the sidebar and toolbox entries, so you can see at a glance whether a port is actively sending or receiving.</li>
       </ul>
+      <figure class="shot">
+        <img src="../assets/images/settings-appearance.png" alt="Appearance &amp; language: theme, language, serial port indicators" loading="lazy">
+        <figcaption>Appearance &amp; language: theme (Light/Dark/System), language (Auto/简体中文/English), serial-port indicator toggle</figcaption>
+      </figure>
       <div class="callout tip">
         <span class="title">Advanced UART settings aren't here</span>
         Baud and other <strong>advanced UART parameters</strong> live in the settings modal on the Serial Debug page, not on Settings; see <a href="serial-debug.html#connect">Serial Debug · Connect &amp; UART config</a>.
@@ -91,9 +95,9 @@
         <li><strong>View logs</strong>: opens the in-app <strong>LogViewerDialog</strong>, so you can browse and search logs without leaving the app.</li>
         <li><strong>Export Logs &amp; Report Issue</strong>: located inside the log viewer. Bundles the logs into a zip and opens a <strong>GitHub issue form pre-filled with the version and OS fields</strong> (desktop only).</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/settings-diagnostics.png" alt="Diagnostics &amp; logs: debug-log toggle, log level, open log folder, view logs" loading="lazy">
         <figcaption>Diagnostics &amp; logs: debug-log toggle, log level, open log folder, view logs</figcaption>
-        <!-- capture: settings-diagnostics.png -->
       </figure>
       <h3>How log files are written</h3>
       <p>On the desktop app, logs are written to the <strong>log directory</strong> by <code>tauri-plugin-log</code>, behaving the same as the CLI (see <a href="cli.html">CLI</a>):</p>
@@ -153,7 +157,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — firmware flashing tool for Tuya ecosystem IoT devices</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

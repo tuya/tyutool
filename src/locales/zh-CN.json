@@ -76,6 +76,7 @@
     "aboutHint": "查看当前版本信息与项目许可，保留更轻量的底部信息区。",
     "version": "tyutool · v{version}",
     "opensource": "查看开源许可",
+    "docs": "使用文档",
     "resetDisclaimer": "重新显示批量授权风险提示",
     "resetDisclaimerDone": "已重置，下次进入批量授权将再次显示风险提示",
     "updateEntryHint": "打开更新中心，查看版本说明并手动触发检查。",
@@ -165,6 +166,7 @@
       "savedTo": "日志已保存到：{path}",
       "exportFailed": "保存日志失败：{error}。请改选一个可写入的位置（如“下载”文件夹）后重试。",
       "linkCopied": "反馈页链接已复制到剪贴板。若浏览器未自动打开，请新建标签页粘贴访问；提交时把刚保存的日志压缩包拖入 issue 即可。",
+      "privacyReminder": "日志中的授权凭据已自动掩码。提交前请再次确认压缩包内无其它敏感信息。",
       "webHint": "日志导出仅在桌面版中可用。"
     }
   },
@@ -257,6 +259,7 @@
     "authKey": "AuthKey",
     "authKeyPh": "32 位 AuthKey",
     "copyCredentials": "复制 UUID & AuthKey",
+    "rememberAuth": "记住授权信息（保存在本机）",
     "authOfficialIntro": "",
     "authOfficialDocLink": "TuyaOpen 官方文档：设备授权",
     "authTuyaOpenOnly": "仅支持 TuyaOpen 授权：请使用 {link} ，勿与 tuyaos 产品密钥混用。",
@@ -356,6 +359,9 @@
       "portsFound": "发现可用串口：{list}",
       "noPortsFound": "未发现可用串口，请检查设备连接后点击刷新。",
       "noPortsFoundWebServeHint": "浏览器预览通过本机 tyutool-cli serve（默认 ws://127.0.0.1:9527）枚举串口。若在 macOS 上使用 USB 转串口，仅会列出 /dev/cu.* 设备。",
+      "wsConnectFailed": "WS：无法连接到 tyutool-cli serve (ws://127.0.0.1:9527)",
+      "deviceResetTimeout": "deviceReset 超时 — 请重新编译并启动 tyutool-cli serve（需支持 device_reset），并确认 ws://127.0.0.1:9527 可达",
+      "serialDebugDeviceResetTimeout": "serialDebugDeviceReset 超时 — 请重新编译并启动 tyutool-cli serve（需支持 serial_debug_device_reset），并确认 ws://127.0.0.1:9527 可达",
       "disconnected": "已断开连接。",
       "connected": "已连接。",
       "deviceResetOk": "设备复位（DTR/RTS）已发送：{port}",
@@ -579,6 +585,7 @@
     "confirm": {
       "releaseForFlashTitle": "端口冲突",
       "releaseForFlashBody": "{requester} 正在请求该端口，是否让出？",
+      "releaseForFlashHint": "提示：若不希望每次烧录都弹出此确认，可前往「串口调试」页右上角的「{settings}」中开启「{autoRelease}」。",
       "releaseOk": "让出",
       "releaseCancel": "取消"
     },
@@ -704,6 +711,13 @@
         "notXlsxFormat": "请选择 .xlsx 格式文件",
         "locked": "Excel 文件被其他程序占用，请关闭后重试",
         "changedWhileRunning": "任务运行中，无法切换 Excel 文件"
+      },
+      "port": {
+        "inUse": "以下串口被其他功能占用，无法打开：",
+        "inUseOwner": "• {port} — 被 {owner} 占用",
+        "heldByBatch": "串口 {port} 正在进行批量授权，无法让出。",
+        "busyReason": "串口被占用（占用者：{owner}）",
+        "lost": "串口丢失（已拔出或出错）"
       }
     },
     "status": {

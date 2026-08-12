@@ -142,15 +142,6 @@ tyutool authorize -p &lt;端口&gt; -d esp32   # 按芯片时序读取</pre></li
 
       <h2 id="platform">4. 平台</h2>
 
-      <h3 id="macos-gatekeeper">macOS 无法打开 / Gatekeeper 拦截</h3>
-      <p><strong>症状：</strong>双击 tyutool.app 提示“无法打开，因为无法验证开发者”或被 Gatekeeper 拦截。</p>
-      <p>tyutool 的 macOS 构建未做 Apple 公证签名（这是预期行为）。任选一种解除方式：</p>
-      <ol class="steps">
-        <li><strong>图形界面</strong>：在 Finder 里按住 Control 点击 <code>tyutool.app</code> → <strong>打开</strong>，在弹窗里再次点<strong>打开</strong>；或进入<strong>系统设置 → 隐私与安全性</strong>，找到关于 tyutool 的提示点<strong>仍要打开</strong>。</li>
-        <li><strong>命令行</strong>：移除扩展属性（quarantine 标记）：<pre>xattr -dr com.apple.quarantine /path/to/tyutool.app</pre> 之后即可正常双击打开。</li>
-      </ol>
-      <p>详见 <a href="../../../README.md">README 的 Troubleshooting 表</a>。</p>
-
       <h3 id="linux-blank-window">Linux 窗口空白（WebKit 合成失败）</h3>
       <p><strong>症状：</strong>Linux 下（尤其虚拟机 / 无独显环境）窗口打开后<strong>一片空白</strong>，或只有菜单没有内容。</p>
       <p>WebKit2GTK 在某些 GPU 驱动下合成模式会失败。启动前设置环境变量禁用合成即可：</p>
@@ -182,7 +173,7 @@ tyutool authorize -p &lt;端口&gt; -d esp32   # 按芯片时序读取</pre></li
             <li><strong>CLI</strong>：日志路径在启动横幅的 <code>log:</code> 行里，每次运行生成独立文件，如 <code>~/.local/share/tyutool/tyutool-&lt;时间戳&gt;.log</code>（macOS：<code>~/Library/Application Support/tyutool/</code>；Windows：<code>%APPDATA%\tyutool\</code>）。加 <code>--verbose</code> 可把诊断日志也打到 stderr。</li>
           </ul>
         </li>
-        <li><strong>使用 issue 模板</strong>：到仓库的 <a href="https://github.com/ZingerLight/tyutool/issues/new/choose">Issues → New issue</a>，选 <strong>🐞 Bug 报告 / Bug report</strong>（模板：<a href="https://github.com/ZingerLight/tyutool/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml"><code>.github/ISSUE_TEMPLATE/bug_report.yml</code></a>）。</li>
+        <li><strong>使用 issue 模板</strong>：到仓库的 <a href="https://github.com/tuya/tyutool/issues/new/choose">Issues → New issue</a>，选 <strong>🐞 Bug 报告 / Bug report</strong>（模板：<a href="https://github.com/tuya/tyutool/blob/refactor/v3/.github/ISSUE_TEMPLATE/bug_report.yml"><code>.github/ISSUE_TEMPLATE/bug_report.yml</code></a>）。</li>
         <li><strong>务必填全关键字段</strong>：
           <ul>
             <li><strong>版本 / Version</strong>（设置 → 关于）</li>
@@ -208,7 +199,7 @@ tyutool authorize -p &lt;端口&gt; -d esp32   # 按芯片时序读取</pre></li
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

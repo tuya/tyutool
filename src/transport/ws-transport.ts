@@ -16,6 +16,7 @@ import type {
 } from "@/features/serial-debug/types";
 import type { TauriSerialPortRow } from "@/utils/serial-port-label";
 import { platform } from "@/platform";
+import { i18n } from "@/i18n";
 
 const WS_PORT = "9527";
 
@@ -105,11 +106,7 @@ export class WsTransport {
 
       const timeout = setTimeout(() => {
         ws.removeEventListener("message", handler);
-        reject(
-          new Error(
-            "deviceReset timeout — 请重新编译并启动 tyutool-cli serve（需支持 device_reset），并确认 ws://127.0.0.1:9527 可达",
-          ),
-        );
+        reject(new Error(i18n.global.t("flash.log.deviceResetTimeout")));
       }, 15000);
 
       const handler = (ev: MessageEvent) => {
@@ -155,9 +152,7 @@ export class WsTransport {
       const timeout = setTimeout(() => {
         ws.removeEventListener("message", handler);
         reject(
-          new Error(
-            "serialDebugDeviceReset timeout — 请重新编译并启动 tyutool-cli serve（需支持 serial_debug_device_reset），并确认 ws://127.0.0.1:9527 可达",
-          ),
+          new Error(i18n.global.t("flash.log.serialDebugDeviceResetTimeout")),
         );
       }, 15000);
 
@@ -200,7 +195,20 @@ export class WsTransport {
   }
 
   async listPorts(): Promise<TauriSerialPortRow[]> {
-    this.closeCurrentConnection();
+    // Reuse an open socket instead of forcibly resetting it. A previous
+    // implementation called closeCurrentConnection() here, which tore down the
+    // shared WebSocket and orphaned the active serial-debug chunk handler
+    // (registered via addEventListener on the old socket — it was never
+    // re-attached on reconnect), silently stopping serial-debug RX/TX after a
+    // device refresh. Only reset when the socket is in a bad (non-OPEN,
+    // non-CONNECTING) state; otherwise connect() returns the live one.
+    if (
+      !this.ws ||
+      (this.ws.readyState !== WebSocket.OPEN &&
+        this.ws.readyState !== WebSocket.CONNECTING)
+    ) {
+      this.closeCurrentConnection();
+    }
     const ws = await this.connect();
     return new Promise<TauriSerialPortRow[]>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -285,11 +293,20 @@ export class WsTransport {
       let pendingFileContent: { name: string; content: string } | null = null;
 
       const handler = (ev: MessageEvent) => {
-        const msg = JSON.parse(ev.data as string) as {
+        let msg: {
           type: string;
           payload?: Record<string, unknown>;
           message?: string;
         };
+        try {
+          msg = JSON.parse(ev.data as string) as {
+            type: string;
+            payload?: Record<string, unknown>;
+            message?: string;
+          };
+        } catch {
+          return;
+        }
 
         if (msg.type === "error") {
           ws.removeEventListener("message", handler);

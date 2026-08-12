@@ -46,6 +46,8 @@ export interface FlashWorkspaceSerialized {
   readFileNameModified: boolean;
   authorizeUuid: string;
   authorizeAuthKey: string;
+  /** When false, credentials are never persisted (saved as empty strings). */
+  rememberAuth: boolean;
 }
 
 const OP_KINDS: OpKind[] = ["flash", "erase", "read", "authorize"];
@@ -191,6 +193,7 @@ export function parseFlashWorkspaceJson(
       authorizeAuthKey:
         typeof rec.authorizeAuthKey === "string" ? rec.authorizeAuthKey : "",
       authBaudRate: authBaud,
+      rememberAuth: rec.rememberAuth === true,
     };
   } catch {
     return null;

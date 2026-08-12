@@ -18,7 +18,9 @@ const MSI_ARTIFACT_RE = /^tyutool_[^/\\]+_[^/\\]+_[a-z]{2}-[A-Z]{2}\.msi$/i;
 export const debugBuildRepoRoot = getRepoRoot(import.meta.url);
 const ROOT = debugBuildRepoRoot;
 const ROOT_CARGO_LOCK = resolve(ROOT, 'Cargo.lock');
-const TAURI_CARGO = resolve(ROOT, 'src-tauri', 'Cargo.toml');
+// The crate version lives in the root [workspace.package]; src-tauri/Cargo.toml
+// only inherits it, so patching that file here would silently do nothing.
+const WORKSPACE_CARGO = resolve(ROOT, 'Cargo.toml');
 const TAURI_CONF = resolve(ROOT, 'src-tauri', 'tauri.conf.json');
 
 type FileSnapshot = {
@@ -179,10 +181,10 @@ export function main(args = process.argv.slice(2)): void {
   const stamp = makeDebugBuildStamp(new Date());
   const { cargoTargetDir, outputDir } = getDebugBuildPaths(ROOT, version, stamp);
   const cargoLockBefore = readFileSync(ROOT_CARGO_LOCK, 'utf-8');
-  const cargoTomlBefore = readFileSync(TAURI_CARGO, 'utf-8');
+  const cargoTomlBefore = readFileSync(WORKSPACE_CARGO, 'utf-8');
   const tauriConfBefore = readFileSync(TAURI_CONF, 'utf-8');
   const snapshots: FileSnapshot[] = [
-    { path: TAURI_CARGO, contents: cargoTomlBefore, encoding: 'utf-8' },
+    { path: WORKSPACE_CARGO, contents: cargoTomlBefore, encoding: 'utf-8' },
     { path: TAURI_CONF, contents: tauriConfBefore, encoding: 'utf-8' },
     { path: ROOT_CARGO_LOCK, contents: cargoLockBefore, encoding: 'utf-8' },
   ];
@@ -195,11 +197,17 @@ export function main(args = process.argv.slice(2)): void {
   console.log(`==> output dir: ${relative(ROOT, outputDir)}`);
 
   try {
-    writeFileSync(
-      TAURI_CARGO,
-      cargoTomlBefore.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`),
-      'utf-8',
+    const patchedCargo = cargoTomlBefore.replace(
+      /^version\s*=\s*"[^"]*"/m,
+      `version = "${version}"`,
     );
+    if (patchedCargo === cargoTomlBefore) {
+      throw new Error(
+        `failed to patch the version in ${relative(ROOT, WORKSPACE_CARGO)} — ` +
+          'expected a [workspace.package] version key',
+      );
+    }
+    writeFileSync(WORKSPACE_CARGO, patchedCargo, 'utf-8');
 
     const tauriConf = JSON.parse(tauriConfBefore) as Record<string, unknown>;
     tauriConf.version = version;

@@ -1726,3 +1726,223 @@ describe("startAuth — flash-only in Tauri mode", () => {
     });
   });
 });
+
+// ── Port-manager integration ───────────────────────────────────────────────
+// batch-auth must claim ports via usePortManagerStore before opening them in
+// Rust, and release them once a slot reaches a terminal state. These tests
+// drive the real port-manager store (no Tauri dependency) through the public
+// store methods and assert ownership transitions.
+describe("port-manager integration", () => {
+  let authProgressCb:
+    | ((ev: { payload: { port: string; step: string } }) => void)
+    | null = null;
+
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+    authProgressCb = null;
+  });
+
+  /** Build a fresh store in Tauri mode with core+event mocked. Returns the
+   *  store, the invoke spy, and a helper to emit an auth-progress event. */
+  async function setupStore() {
+    const invoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "validate_excel_cmd")
+        return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
+      return undefined;
+    });
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/composables/confirmDialog", () => ({
+      showConfirmDialog: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock("@tauri-apps/api/event", () => ({
+      listen: vi.fn(async (_ev: string, cb: (e: unknown) => void) => {
+        // Capture the auth-progress callback so tests can drive terminal states.
+        if (_ev === "batch-auth-progress") {
+          authProgressCb = cb as typeof authProgressCb;
+        }
+        return () => {};
+      }),
+    }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const { usePortManagerStore: usePM } =
+      await import("@/stores/port-manager");
+    const store = useStore();
+    const pm = usePM();
+    store.addPorts(["COM3", "COM5"]);
+    store.chipId = "esp32";
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+    await import("@tauri-apps/api/core");
+    await new Promise((r) => setTimeout(r, 0));
+    return { store, pm, invoke };
+  }
+
+  it("startAuth acquires free ports before invoking batch_auth_start", async () => {
+    const { store, pm, invoke } = await setupStore();
+    await store.startBatch();
+    expect(pm.currentOwner("COM3")).toBe("batch-auth");
+    expect(pm.currentOwner("COM5")).toBe("batch-auth");
+    expect(invoke).toHaveBeenCalledWith(
+      "batch_auth_start",
+      expect.objectContaining({ ports: ["COM3", "COM5"] }),
+    );
+  });
+
+  it("startAuth skips ports held by another owner and does not preempt them", async () => {
+    const { store, pm, invoke } = await setupStore();
+    // Simulate serial-debug already owning COM5.
+    await pm.acquire({
+      id: "serial-debug",
+      port: "COM5",
+      onReleaseRequest: async () => true,
+      onReleased: async () => {},
+    });
+    await store.startBatch();
+    // COM3 acquired by batch-auth; COM5 left to serial-debug (not preempted).
+    expect(pm.currentOwner("COM3")).toBe("batch-auth");
+    expect(pm.currentOwner("COM5")).toBe("serial-debug");
+    expect(invoke).toHaveBeenCalledWith(
+      "batch_auth_start",
+      expect.objectContaining({ ports: ["COM3"] }),
+    );
+    // COM5 was marked skipped, not started.
+    const com5 = store.slots.find((s) => s.port === "COM5");
+    expect(com5?.status).toBe("skipped");
+  });
+
+  it("releases a port when its slot reaches a terminal auth state", async () => {
+    const { store, pm } = await setupStore();
+    await store.startBatch();
+    expect(pm.currentOwner("COM3")).toBe("batch-auth");
+    // Register listeners (captures the auth-progress callback), then drive the
+    // slot to terminal "done".
+    await store.ensureListener();
+    expect(authProgressCb).not.toBeNull();
+    authProgressCb!({ payload: { port: "COM3", step: "done" } });
+    await nextTick();
+    expect(pm.currentOwner("COM3")).toBeNull();
+  });
+
+  it("never yields a claimed port to a preempting requester", async () => {
+    const { store, pm } = await setupStore();
+    await store.startBatch();
+    // Another owner tries to take COM3 from batch-auth — must be denied.
+    const outcome = await pm.acquire({
+      id: "flash",
+      port: "COM3",
+      onReleaseRequest: async () => true,
+      onReleased: async () => {},
+    });
+    expect(outcome).toBe("denied");
+    expect(pm.currentOwner("COM3")).toBe("batch-auth");
+  });
+
+  it("releases ports when batch_auth_start rejects", async () => {
+    const invoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "batch_auth_start") throw "excel.locked";
+      if (cmd === "validate_excel_cmd")
+        return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
+      return undefined;
+    });
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/composables/confirmDialog", () => ({
+      showConfirmDialog: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const { usePortManagerStore: usePM } =
+      await import("@/stores/port-manager");
+    const store = useStore();
+    const pm = usePM();
+    store.addPorts(["COM3"]);
+    store.chipId = "esp32";
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+    await import("@tauri-apps/api/core");
+    await new Promise((r) => setTimeout(r, 0));
+    await store.startBatch();
+    // Acquired then released on rejection — no claim leaked.
+    expect(pm.currentOwner("COM3")).toBeNull();
+    expect(store.slots[0].status).toBe("failed");
+  });
+
+  it("readPort acquires the port transiently and releases when the probe ends", async () => {
+    let readCb:
+      | ((ev: { payload: { port: string; step: string } }) => void)
+      | null = null;
+    const invoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "validate_excel_cmd")
+        return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
+      return undefined;
+    });
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    vi.doMock("@/composables/confirmDialog", () => ({
+      showConfirmDialog: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock("@tauri-apps/api/event", () => ({
+      listen: vi.fn(async (_ev: string, cb: (e: unknown) => void) => {
+        if (_ev === "batch-auth-read-progress") {
+          readCb = cb as typeof readCb;
+        }
+        return () => {};
+      }),
+    }));
+    vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
+      loadBatchFlashAuthWorkspace: vi.fn(),
+      saveBatchFlashAuthCumulative: vi.fn(),
+      saveBatchFlashAuthFilterConfig: vi.fn(),
+      saveBatchFlashAuthFirmwareConfig: vi.fn(),
+      saveBatchFlashAuthConfig: vi.fn(),
+      saveBatchFlashAuthSharedConfig: vi.fn(),
+    }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const { usePortManagerStore: usePM } =
+      await import("@/stores/port-manager");
+    const store = useStore();
+    const pm = usePM();
+    store.addPorts(["COM3"]);
+    store.chipId = "esp32";
+    await store.ensureListener();
+    await store.readPort("COM3");
+    expect(pm.currentOwner("COM3")).toBe("batch-auth");
+    // Probe completes → port released.
+    readCb!({ payload: { port: "COM3", step: "done" } });
+    await nextTick();
+    expect(pm.currentOwner("COM3")).toBeNull();
+  });
+});

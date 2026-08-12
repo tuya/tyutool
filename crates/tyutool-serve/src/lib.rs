@@ -16,7 +16,15 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::time::Duration;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{
+    accept_hdr_async_with_config,
+    tungstenite::{
+        handshake::server::{Request, Response},
+        http::{header, status::StatusCode},
+        protocol::WebSocketConfig,
+        Message,
+    },
+};
 use tyutool_core::{
     device_reset_dtr_rts, list_serial_ports, run_job, serial_debug_fail_backfill_if_current,
     serial_debug_finish_backfill_if_current, serial_debug_scan_filter_matches, DebugChunk,
@@ -234,10 +242,158 @@ pub async fn run_serve(port: u16) -> anyhow::Result<()> {
     }
 }
 
+// ── WS 握手来源校验（自上游 tyutool a2fa599 移植）────────────────────────────
+//
+// ⚠ 这段是**逐字取自上游**的，不要重写：它挡的是一个真实攻击面——任意网页
+// （如 https://evil.com）都能向 ws://127.0.0.1:<port> 发起连接，连上之后就能驱动
+// 刷写 / 擦除 / 复位用户手上的硬件。安全代码自己重写等于重新引入 bug。
+//
+// 为什么在这里而不是在 crates/tyutool-cli/src/serve.rs：本 fork 把 dev-serve 的实现
+// 抽成了这个共享 crate（cli 那侧只剩一行 re-export），上游那笔补丁打在原文件上，
+// 合并时落不进来。**这类「上游改了原文件、而我们把实现搬走了」的补丁，每次同步
+// 上游都要单独核对一遍**，自动合并不会替你发现。
+// 上游对应提交：a2fa599 fix(cli): gate dev-serve WebSocket by Origin/Host and cap message size
+
+/// Hosts considered local enough to drive the dev-serve WS. Any cross-origin
+/// browser page (e.g. `https://evil.com`) reaching `ws://127.0.0.1:<port>` must
+/// be refused so it cannot run flash/erase/reset on the user's hardware.
+const LOCAL_WS_HOSTS: &[&str] = &["127.0.0.1", "localhost", "[::1]"];
+
+/// Validate the WebSocket handshake request's `Origin` and `Host` headers.
+///
+/// - `Host` must be a loopback host (`127.0.0.1` / `localhost` / `[::1]`),
+///   defeating DNS-rebinding attacks where `evil.com` resolves to 127.0.0.1.
+/// - `Origin`, when present, must be absent (non-browser client) or point at a
+///   local scheme/host, so a malicious web page can't connect.
+///
+/// Returns `Ok(response)` to accept, or `Err(error_response)` to reject with
+/// HTTP 403.
+///
+/// `clippy::result_large_err`: the `Err` variant (`ErrorResponse =
+/// Response<Option<String>>`) is ~136 bytes, but its type is fixed by
+/// tungstenite's `Callback` trait, so it cannot be boxed here.
+#[allow(clippy::result_large_err)]
+fn validate_ws_origin(
+    req: &Request,
+    response: Response,
+) -> Result<Response, tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
+    let headers = req.headers();
+
+    // Host check — reject DNS rebinding.
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let host_lower = host.to_lowercase();
+    let host_ok = LOCAL_WS_HOSTS
+        .iter()
+        .any(|allowed| host_lower == *allowed || host_lower.starts_with(&format!("{allowed}:")));
+    if !host_ok {
+        log::warn!("WS reject: non-loopback Host header: {host:?}");
+        return Err(forbidden("host not allowed"));
+    }
+
+    // Origin check — if a browser sends it, it must be a local origin.
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+        let origin_lower = origin.to_lowercase();
+        let origin_ok = origin_lower.starts_with("tauri://")
+            || LOCAL_WS_HOSTS.iter().any(|allowed| {
+                origin_lower == format!("http://{allowed}")
+                    || origin_lower.starts_with(&format!("http://{allowed}:"))
+                    || origin_lower == format!("https://{allowed}")
+                    || origin_lower.starts_with(&format!("https://{allowed}:"))
+            });
+        if !origin_ok {
+            log::warn!("WS reject: cross-origin request: Origin={origin:?}");
+            return Err(forbidden("origin not allowed"));
+        }
+    }
+    // No Origin header → non-browser client (e.g. the Vite dev proxy). Allowed.
+
+    Ok(response)
+}
+
+/// Build an HTTP 403 error response to reject a WS handshake.
+fn forbidden(reason: &str) -> tokio_tungstenite::tungstenite::http::Response<Option<String>> {
+    tokio_tungstenite::tungstenite::http::Response::builder()
+        .status(StatusCode::FORBIDDEN)
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(Some(reason.to_string()))
+        .expect("building a static 403 response cannot fail")
+}
+
+// ── serial-debug 归档的可用性兜底（自上游 tyutool 4e16523 移植）─────────────
+//
+// ⚠ 同样是逐字取自上游。原先我方写的是 `.expect("create serial-debug archive")`——
+// 归档目录不可写（只读挂载、权限不足、同名文件占位、多实例抢同一目录）时
+// **直接 panic 掉整个 serve 进程**，而 serial-debug 只是个附属能力，
+// 不该有权力把主服务带走。上游那笔修的正是这个。
+//
+// 移植原因同上：这笔补丁打在 crates/tyutool-cli/src/serve.rs 上，而本 fork 已把实现
+// 搬到本 crate，自动合并落不进来。上游对应提交：
+//   4e16523 fix(serial-debug): avoid startup panic when archive dir is unwritable
+
+/// Create the serial-debug archive + filter index without panicking on a
+/// locked/unwritable preferred dir. Returns the directory actually used (so
+/// historical lookups point at the right place), falling back to a per-process
+/// subdirectory with a logged warning. Panics only if every attempt fails.
+fn create_serial_debug_state_resilient(
+    primary: &std::path::Path,
+) -> (
+    std::path::PathBuf,
+    SerialDebugArchive,
+    SerialDebugFilterIndex,
+) {
+    match (
+        SerialDebugArchive::create(primary),
+        SerialDebugFilterIndex::create(primary),
+    ) {
+        (Ok(a), Ok(f)) => return (primary.to_path_buf(), a, f),
+        (a_res, f_res) => {
+            log::warn!(
+                "[serve] serial-debug dir {:?} unavailable \
+                 (archive={:?}, filters={:?}); retrying in a per-process dir",
+                primary,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+    let fallback = primary.join(format!("pid-{}", std::process::id()));
+    match (
+        SerialDebugArchive::create(&fallback),
+        SerialDebugFilterIndex::create(&fallback),
+    ) {
+        (Ok(a), Ok(f)) => {
+            log::warn!(
+                "[serve] serial-debug archive initialised in fallback dir {:?}",
+                fallback
+            );
+            (fallback, a, f)
+        }
+        (a_res, f_res) => {
+            panic!(
+                "serial-debug archive could not be created in {:?} or {:?}: \
+                 archive={:?}, filters={:?}",
+                primary,
+                fallback,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+}
+
 // ── Per-connection handler ───────────────────────────────────────────────────
 
 async fn handle_connection(stream: tokio::net::TcpStream) {
-    let ws = match tokio_tungstenite::accept_async(stream).await {
+    // Cap WS message size at 16 MiB (default is 64 MiB) to bound per-connection
+    // memory amplification from a malicious client streaming a large base64 blob.
+    let ws_config = WebSocketConfig {
+        max_message_size: Some(16 * 1024 * 1024),
+        ..Default::default()
+    };
+    let ws = match accept_hdr_async_with_config(stream, validate_ws_origin, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(e) => {
             log::warn!("WS handshake failed: {e}");
@@ -279,12 +435,13 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         Arc::new(Mutex::new(None));
     let debug_generation = Arc::new(SerialDebugGeneration::default());
     let serial_debug_dir = std::env::temp_dir().join("tyutool").join("serial-debug");
-    let debug_archive = Arc::new(Mutex::new(
-        SerialDebugArchive::create(&serial_debug_dir).expect("create serial-debug archive"),
-    ));
-    let debug_filters = Arc::new(Mutex::new(
-        SerialDebugFilterIndex::create(&serial_debug_dir).expect("create serial-debug filters"),
-    ));
+    // ⚠ 用 resilient 版本而不是 .expect()：见该函数上方的移植说明。
+    // 返回值里的目录是**实际用上的那个**（可能是 pid- 兜底子目录），后续历史查询要用它，
+    // 别再用上面那个 primary。
+    let (serial_debug_dir, debug_archive_inner, debug_filters_inner) =
+        create_serial_debug_state_resilient(&serial_debug_dir);
+    let debug_archive = Arc::new(Mutex::new(debug_archive_inner));
+    let debug_filters = Arc::new(Mutex::new(debug_filters_inner));
 
     while let Some(Ok(msg)) = stream.next().await {
         let text = match msg {
@@ -1044,6 +1201,75 @@ fn temp_path(prefix: &str, ext: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    // ── WS 来源校验用例（随实现一并自上游 a2fa599 移植）──────────────────────
+    // ⚠ 实现移植了、用例没移植 = 防护没有任何证明，下次重构谁都不知道自己破坏了什么。
+    // 六条覆盖：放行（无 Origin 的非浏览器客户端 / localhost / tauri://）与
+    // 拒绝（跨源网页 / DNS rebinding 的 Host / 缺 Host 头）。
+    use tokio_tungstenite::tungstenite::http::{
+        header, Request as HttpRequest, Response as HttpResponse,
+    };
+
+    fn make_request(host: &str, origin: Option<&str>) -> Request {
+        let mut builder = HttpRequest::builder()
+            .method("GET")
+            .uri("/")
+            .header(header::HOST, host);
+        if let Some(o) = origin {
+            builder = builder.header(header::ORIGIN, o);
+        }
+        builder.body(()).unwrap()
+    }
+
+    fn ok_response() -> Response {
+        HttpResponse::new(())
+    }
+
+    #[test]
+    fn ws_accepts_loopback_host_without_origin() {
+        // Non-browser client (no Origin), loopback Host → accept.
+        let req = make_request("127.0.0.1:9527", None);
+        assert!(validate_ws_origin(&req, ok_response()).is_ok());
+    }
+
+    #[test]
+    fn ws_accepts_localhost_origin() {
+        let req = make_request("localhost:9527", Some("http://localhost:5173"));
+        assert!(validate_ws_origin(&req, ok_response()).is_ok());
+    }
+
+    #[test]
+    fn ws_accepts_tauri_origin() {
+        let req = make_request("127.0.0.1:9527", Some("tauri://localhost"));
+        assert!(validate_ws_origin(&req, ok_response()).is_ok());
+    }
+
+    #[test]
+    fn ws_rejects_cross_origin_browser_page() {
+        // A malicious web page (evil.com) connecting to the local WS.
+        let req = make_request("127.0.0.1:9527", Some("https://evil.example.com"));
+        let err = validate_ws_origin(&req, ok_response()).unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn ws_rejects_dns_rebinding_host() {
+        // evil.com resolves to 127.0.0.1 but the Host header betrays it.
+        let req = make_request("evil.example.com:9527", None);
+        let err = validate_ws_origin(&req, ok_response()).unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn ws_rejects_missing_host_header() {
+        let req = HttpRequest::builder()
+            .method("GET")
+            .uri("/")
+            .body(())
+            .unwrap();
+        let err = validate_ws_origin(&req, ok_response()).unwrap_err();
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
     use super::*;
 
     #[test]

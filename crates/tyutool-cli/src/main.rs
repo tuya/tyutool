@@ -21,7 +21,7 @@ mod update;
 #[derive(Parser)]
 #[command(name = "tyutool", version, about = "Tuya Uart Tool.")]
 struct Cli {
-    /// Also write developer logs to stderr (always writes to log file)
+    /// Also write developer diagnostic logs to stderr (always written to log file)
     #[arg(long, global = true)]
     verbose: bool,
 
@@ -109,7 +109,7 @@ enum Commands {
         #[arg(short = 'p', long = "port")]
         port: Option<String>,
         /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5ai/t3/t1); ESP32* uses espflash hard_reset
-        #[arg(short = 'd', long = "device", default_value = "bk7231n")]
+        #[arg(short = 'd', long = "device", default_value = "bk7231n", value_parser = chip_value_parser())]
         device: String,
     },
     /// Check for updates and self-update the binary
@@ -411,22 +411,19 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
         ))
     };
 
-    let mut dispatch = fern::Dispatch::new()
-        .format(fmt)
-        .level(log::LevelFilter::Info)
+    // File sink captures full developer diagnostics (Trace+) so debug/trace
+    // logs persist per the Logging Contract; the top-level filter stays Info so
+    // stderr (when enabled) is not flooded by trace frames.
+    let file_dispatch = fern::Dispatch::new()
+        .level(log::LevelFilter::Trace)
         .chain(Box::new(session_writer) as Box<dyn std::io::Write + Send>);
+
+    let mut dispatch = fern::Dispatch::new().format(fmt).chain(file_dispatch);
 
     if verbose {
         dispatch = dispatch.chain(
             fern::Dispatch::new()
-                .format(|out, message, record| {
-                    out.finish(format_args!(
-                        "[{} {}] {}",
-                        record.level(),
-                        record.target(),
-                        message
-                    ))
-                })
+                .level(log::LevelFilter::Info)
                 .chain(std::io::stderr()),
         );
         eprintln!("[log] Writing to: {}", log_path.display());
@@ -940,6 +937,34 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         // 0x100 + 16 = 0x110, formatted as 8-wide upper hex.
         assert_eq!(end, "0x00000110");
+    }
+
+    #[test]
+    fn reset_rejects_unknown_device() {
+        // `reset -d <unknown>` must be rejected at parse time, like every other
+        // subcommand — previously `reset` accepted any string and only failed
+        // (or used the wrong reset pulse) at runtime.
+        let result = Cli::try_parse_from(["tyutool", "reset", "--device", "nope"]);
+        assert!(
+            result.is_err(),
+            "reset should reject an unknown --device value"
+        );
+    }
+
+    #[test]
+    fn reset_accepts_known_device_and_default() {
+        // Explicit known device.
+        let cli = Cli::try_parse_from(["tyutool", "reset", "--device", "t5ai"]).unwrap();
+        match cli.command {
+            Commands::Reset { device, .. } => assert_eq!(device, "t5ai"),
+            _ => panic!("expected Commands::Reset"),
+        }
+        // Default value ("bk7231n") also passes the parser.
+        let cli = Cli::try_parse_from(["tyutool", "reset"]).unwrap();
+        match cli.command {
+            Commands::Reset { device, .. } => assert_eq!(device, "bk7231n"),
+            _ => panic!("expected Commands::Reset"),
+        }
     }
 }
 

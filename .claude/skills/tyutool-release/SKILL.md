@@ -63,9 +63,9 @@ pnpm version:set 3.1.4
 cargo update --workspace
 
 # 4. Commit
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
-        crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml \
-        Cargo.lock CHANGELOG.md
+# -u stages every tracked file already modified above: the version files (whose
+# list lives in scripts/lib/version-files.mjs, not here), Cargo.lock, CHANGELOG.md
+git add -u
 git commit -m "chore(release): bump version to 3.1.4 and update changelog"
 
 # 5. Push the branch and open a PR → refactor/v3

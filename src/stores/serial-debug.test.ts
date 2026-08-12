@@ -17,6 +17,11 @@ import { nextTick } from "vue";
 import { MAX_PENDING_LINE_BYTES } from "@/features/serial-debug/constants";
 import { AUTH_ONLY_CHIP_ID } from "@/features/firmware-flash/constants";
 
+vi.mock("@/composables/confirmDialog", () => ({
+  showConfirmDialog: vi.fn(async () => true),
+}));
+import { showConfirmDialog } from "@/composables/confirmDialog";
+
 async function waitForChunkFrame(): Promise<void> {
   await new Promise((r) => setTimeout(r, 20));
   await nextTick();
@@ -27,6 +32,7 @@ function fakeTransport(): SerialDebugTransport & {
   emitChunkBatch: (chunks: DebugChunk[]) => void;
   emitDisconnect: (reason: string) => void;
   emitFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void;
+  setFilterPage: (filterId: string, page: SerialDebugFilterPage) => void;
   readFilterMatchesCalls: Array<{
     filterId: string;
     start?: number;
@@ -142,6 +148,10 @@ function fakeTransport(): SerialDebugTransport & {
     },
     emitFilterUpdated(payload) {
       filterListeners.forEach((l) => l(payload));
+    },
+    setFilterPage(filterId, page) {
+      const entry = filters.get(filterId);
+      if (entry) entry.page = page;
     },
   };
 }
@@ -563,6 +573,60 @@ describe("useSerialDebugStore port-manager integration", () => {
     expect(s.open).toBe(true);
     expect(s.pendingResume).toBe(false);
   });
+
+  it("when autoRelease is off and flash requests the port, the conflict prompt includes the auto-release hint", async () => {
+    const { usePortManagerStore } = await import("@/stores/port-manager");
+    const pm = usePortManagerStore();
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    s.autoRelease = false;
+    await s.openPort();
+    expect(s.open).toBe(true);
+
+    vi.mocked(showConfirmDialog).mockClear();
+    vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+
+    // Simulate flash requesting the port — triggers serial-debug's onReleaseRequest.
+    await pm.acquire({
+      id: "flash",
+      port: "/dev/ttyUSB0",
+      onReleaseRequest: async () => false,
+      onReleased: () => {},
+    });
+
+    expect(showConfirmDialog).toHaveBeenCalledTimes(1);
+    const opts = vi.mocked(showConfirmDialog).mock.calls[0][0];
+    // The hint is appended for flash (body + "\n\n" separator + hint text).
+    expect(opts.message).toContain("\n\n");
+    // The body (requester) is still present.
+    expect(opts.message).toContain("flash");
+  });
+
+  it("does not append the auto-release hint for a non-flash requester", async () => {
+    const { usePortManagerStore } = await import("@/stores/port-manager");
+    const pm = usePortManagerStore();
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    s.autoRelease = false;
+    await s.openPort();
+    expect(s.open).toBe(true);
+
+    vi.mocked(showConfirmDialog).mockClear();
+    vi.mocked(showConfirmDialog).mockResolvedValueOnce(false);
+
+    await pm.acquire({
+      id: "some-other-feature",
+      port: "/dev/ttyUSB0",
+      onReleaseRequest: async () => false,
+      onReleased: () => {},
+    });
+
+    expect(showConfirmDialog).toHaveBeenCalledTimes(1);
+    const opts = vi.mocked(showConfirmDialog).mock.calls[0][0];
+    expect(opts.message).not.toContain("\n\n");
+  });
 });
 
 describe("useSerialDebugStore watch chip management", () => {
@@ -681,6 +745,82 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(s.filterPagesById).toEqual({});
     expect(s.activeFilterLoading).toBe(false);
     expect(s.activeFilterFullyLoaded).toBe(true);
+  });
+
+  it("gives every archive line in a filter page its own display id", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERR", false);
+    const id = s.watchChips[0].id;
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 3,
+      start: 0,
+      items: [
+        { lineNo: 3, tsMs: 1000, direction: "rx", text: "ERR alpha" },
+        { lineNo: 9, tsMs: 1001, direction: "rx", text: "ERR beta" },
+        { lineNo: 17, tsMs: 1002, direction: "rx", text: "ERR gamma" },
+      ],
+    });
+
+    await s.setActiveChip(id);
+
+    const items = s.activeDisplayLines;
+    expect(items.map((line) => line.text)).toEqual([
+      "ERR alpha",
+      "ERR beta",
+      "ERR gamma",
+    ]);
+    // Distinct ids per line: the log renderers cache parsed lines by id, so
+    // colliding ids make one line render in place of the others (issue: a
+    // single filtered line shown repeatedly).
+    expect(new Set(items.map((line) => line.id)).size).toBe(3);
+    expect(items.every((line) => Number.isInteger(line.id))).toBe(true);
+  });
+
+  it("keeps display ids stable when the same filter page is reloaded", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERR", false);
+    const id = s.watchChips[0].id;
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 2,
+      start: 0,
+      items: [
+        { lineNo: 3, tsMs: 1000, direction: "rx", text: "ERR alpha" },
+        { lineNo: 9, tsMs: 1001, direction: "rx", text: "ERR beta" },
+      ],
+    });
+
+    await s.setActiveChip(id);
+    const firstIds = s.activeDisplayLines.map((line) => line.id);
+    await s.setActiveChip(id);
+    expect(s.activeDisplayLines.map((line) => line.id)).toEqual(firstIds);
+  });
+
+  it("does not reuse display ids for archive line numbers of a new session", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERR", false);
+    const id = s.watchChips[0].id;
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 1,
+      start: 0,
+      items: [{ lineNo: 1, tsMs: 1000, direction: "rx", text: "ERR old" }],
+    });
+    await s.setActiveChip(id);
+    const oldId = s.activeDisplayLines[0].id;
+
+    await s.clear();
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 1,
+      start: 0,
+      items: [{ lineNo: 1, tsMs: 2000, direction: "rx", text: "ERR new" }],
+    });
+    await s.setActiveChip(id);
+
+    expect(s.activeDisplayLines[0].text).toBe("ERR new");
+    expect(s.activeDisplayLines[0].id).not.toBe(oldId);
   });
 
   it("throttles active filter tail reloads for repeated live updates", async () => {

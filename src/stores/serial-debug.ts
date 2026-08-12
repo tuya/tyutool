@@ -24,6 +24,7 @@ import {
 } from "@/features/firmware-flash/constants";
 import { useFlashStore } from "@/stores/flash";
 import { parseHexInput } from "@/features/serial-debug/hex-format";
+import { archiveLineToLogLine } from "@/features/serial-debug/utils";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { wsTransport } from "@/transport/ws-transport";
 import type {
@@ -32,7 +33,7 @@ import type {
   DebugLogLine,
   HexBytesPerRow,
   SendMode,
-  SerialDebugFilterPage,
+  SerialDebugFilterLinePage,
   SerialDebugFilterStats,
   SerialDebugFilterUpdatePayload,
   WatchChip,
@@ -177,7 +178,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const showTimestamp = ref(true);
   const showDirBadge = ref(true);
   const filterStatsById = ref<Record<string, SerialDebugFilterStats>>({});
-  const filterPagesById = ref<Record<string, SerialDebugFilterPage>>({});
+  const filterPagesById = ref<Record<string, SerialDebugFilterLinePage>>({});
   const activeFilterLoading = ref(false);
   const activeFilterFullyLoaded = ref(false);
 
@@ -195,6 +196,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
 
   let nextLineId = 1;
+  // Display id per archive line number, so reloading a filter page keeps the
+  // ids of lines that are already on screen (the log renderers cache parsed
+  // lines by id). Reset on session clear, because archive line numbers restart.
+  let archiveLineIds = new Map<number, number>();
+  const MAX_ARCHIVE_LINE_IDS = 20000;
   const pending = {
     tx: createPendingBuffer(),
     rx: createPendingBuffer(),
@@ -445,6 +451,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       ]),
     );
     filterPagesById.value = {};
+    archiveLineIds = new Map();
     activeFilterLoading.value = false;
     activeFilterFullyLoaded.value = true;
     try {
@@ -555,6 +562,21 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
+  /** Confirm-dialog body when another feature requests a port that
+   *  serial-debug currently owns. When the requester is flash, appends a hint
+   *  pointing to the "auto-release for flash" toggle so the user can avoid
+   *  this prompt on every future flash. */
+  function portConflictMessage(requester: string): string {
+    const body = t("serialDebug.confirm.releaseForFlashBody", { requester });
+    if (requester === "flash") {
+      return `${body}\n\n${t("serialDebug.confirm.releaseForFlashHint", {
+        settings: t("serialDebug.conn.settings"),
+        autoRelease: t("serialDebug.conn.autoRelease"),
+      })}`;
+    }
+    return body;
+  }
+
   async function openPort(): Promise<void> {
     if (open.value || opening.value) return;
     if (!port.value.trim() || currentBaud() <= 0) {
@@ -572,9 +594,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
           ? true
           : await showConfirmDialog({
               title: t("serialDebug.confirm.releaseForFlashTitle"),
-              message: t("serialDebug.confirm.releaseForFlashBody", {
-                requester,
-              }),
+              message: portConflictMessage(requester),
               okLabel: t("serialDebug.confirm.releaseOk"),
               cancelLabel: t("serialDebug.confirm.releaseCancel"),
               kind: "warning",
@@ -816,12 +836,31 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
+  function archiveLineId(lineNo: number): number {
+    const existing = archiveLineIds.get(lineNo);
+    if (existing !== undefined) return existing;
+    // Drop the memo rather than let it grow with the session. Lines then get
+    // fresh ids (a one-off re-parse in the renderers); ids stay unique.
+    if (archiveLineIds.size >= MAX_ARCHIVE_LINE_IDS) archiveLineIds.clear();
+    const id = nextLineId++;
+    archiveLineIds.set(lineNo, id);
+    return id;
+  }
+
   async function loadFilterPage(
     filterId: string,
     start: number,
     limit: number,
-  ): Promise<SerialDebugFilterPage> {
-    return await transport.readFilterMatches(filterId, start, limit);
+  ): Promise<SerialDebugFilterLinePage> {
+    const page = await transport.readFilterMatches(filterId, start, limit);
+    return {
+      filterId: page.filterId,
+      totalMatches: page.totalMatches,
+      start: page.start,
+      items: page.items.map((line) =>
+        archiveLineToLogLine(line, archiveLineId(line.lineNo)),
+      ),
+    };
   }
 
   async function loadActiveFilterTail(): Promise<void> {
@@ -925,6 +964,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     logFontSize.value = data.logFontSize ?? 12;
     autoSave.value = data.autoSave ?? false;
     autoSaveDir.value = data.autoSaveDir ?? "";
+    // Re-authorize the restored auto-save directory so writes work after a
+    // workspace restore (the registry is in-memory and does not persist).
+    if (autoSaveDir.value && isTauriRuntime()) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("register_dialog_path", { path: autoSaveDir.value });
+      } catch {
+        // Non-fatal: writes will be rejected and surfaced via autoSave.errWrite.
+      }
+    }
     autoSaveTimestamp.value = data.autoSaveTimestamp ?? true;
     showTimestamp.value = data.showTimestamp ?? true;
     showDirBadge.value = data.showDirBadge ?? true;
@@ -992,9 +1041,15 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   async function pickAutoSaveDir(): Promise<void> {
+    if (!isTauriRuntime()) return;
     const { open } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") {
+      // Authorize this dialog-chosen directory (and its descendants) for the
+      // auto-save file writes. The backend write commands refuse unregistered
+      // paths, so a compromised renderer cannot write arbitrary files.
+      await invoke("register_dialog_path", { path: selected });
       autoSaveDir.value = selected;
     } else if (!autoSaveDir.value) {
       // User cancelled and no path was previously set — roll back the switch

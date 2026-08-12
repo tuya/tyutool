@@ -30,7 +30,7 @@
 
       <div class="callout note">
         <span class="title">Wrong page?</span>
-        If you are a <strong>firmware developer</strong> (you need to know what your firmware must implement to be batch-authorizable), see <a href="batch-auth-developer.html">Batch Auth · Firmware Developer Guide</a>.
+        If you are a <strong>firmware developer</strong> (you need to know what your firmware must implement to be batch-authorizable), see <a href="batch-auth-developer.html">Batch Auth · Developer Guide</a>.
       </div>
 
       <nav class="flow" aria-label="Workflow">
@@ -106,7 +106,7 @@
       <p>Open tyutool and go to <strong>Toolbox → Batch Flash &amp; Auth</strong> in the left navigation.</p>
       <div class="callout note">
         <span class="title">First time you enter</span>
-        A <strong>disclaimer dialog</strong> appears (this feature performs irreversible operations). Acknowledge it to enter; checking "don't show again" suppresses it next time. To see it again: <a href="settings.html">Settings → About</a> → <strong>"Show batch-auth risk notice again"</strong>.
+        A <strong>disclaimer dialog</strong> appears (this feature performs irreversible operations). Acknowledge it to enter; checking "don't show again" suppresses it next time. To see it again: <a href="settings.html#about">Settings → About</a> → <strong>"Show batch-auth risk notice again"</strong>.
       </div>
 
       <h3 id="configure">Phase one · Configure (expand the Config panel at the top)</h3>
@@ -207,7 +207,7 @@
       <table>
         <thead><tr><th>Symptom</th><th>Fix</th></tr></thead>
         <tbody>
-          <tr><td>App won't open / blank window</td><td>Installation issues: Linux blank window, see <a href="faq.html#linux-blank-window">FAQ · Linux blank window</a>; macOS "developer cannot be verified", see <a href="faq.html#macos-gatekeeper">FAQ · Gatekeeper block</a>.</td></tr>
+          <tr><td>App won't open / blank window</td><td>Installation issues: Linux blank window, see <a href="faq.html#linux-blank-window">FAQ · Linux blank window</a>.</td></tr>
           <tr><td>Port doesn't appear / won't open</td><td>Try another USB cable or USB port; make sure the driver is installed; <strong>close other programs holding the serial port</strong> (serial-debug tools, Arduino IDE, etc.). More in <a href="faq.html#ports">FAQ · Ports &amp; connection</a>.</td></tr>
           <tr><td>All failures / lots of failures</td><td><strong>Get a single device working first</strong>, then commit the batch; lower the baud to <code>115200</code>; check USB power, use external power if needed.</td></tr>
           <tr><td>Excel says "file locked"</td><td><strong>Close Excel / WPS</strong> first, then reselect the sheet (tyutool locks the file during a batch run to prevent conflicts).</td></tr>
@@ -250,7 +250,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — firmware flashing tool for Tuya ecosystem IoT devices</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

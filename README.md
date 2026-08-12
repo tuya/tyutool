@@ -10,11 +10,14 @@ Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform de
 
 ## Supported Chips
 
-| Family | Chips |
-|--------|-------|
-| Tuya   | T1, T2, T3, T5AI |
-| Beken  | BK7231N |
-| Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-S3 |
+Supports **11 chips** across 4 families:
+
+| Family    | Chips |
+|-----------|-------|
+| Tuya      | T1, T2, T3, T5AI |
+| Beken     | BK7231N |
+| Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-P4, ESP32-S3 |
+| Lightning | LN882H |
 
 ## Download
 
@@ -47,7 +50,6 @@ Grab the latest release from [GitHub Releases](https://github.com/tuya/tyutool/r
 
 | Issue | Platform | Fix |
 |-------|----------|-----|
-| "cannot be opened because the developer cannot be verified" / Gatekeeper block | macOS | Builds are not Apple-signed — this is expected. **System Settings → Privacy & Security → Open Anyway**; or Control-click `tyutool.app` in Finder → **Open** |
 | No serial port listed | macOS | **System Settings → Privacy & Security → Accessories** (label varies by macOS version) |
 | Blank / white window (common in VMs) | Linux | WebKit2GTK GPU compositing failure. Set the environment variable before launching: `export WEBKIT_DISABLE_COMPOSITING_MODE=1`, then run `./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
@@ -99,7 +101,7 @@ tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
 tyutool write -d <DEVICE> -p <PORT> -b <BAUD> -s <START_ADDR> --end <END_ADDR> -f <FILE>
 ```
 
-Supported `-d` values: `bk7231n`, `t2`, `t5ai`
+Supported `-d` values (same as the [Supported Chips](#supported-chips) table above): `bk7231n`, `t1`, `t2`, `t3`, `t5ai` (alias `t5`), `ln882h`, `esp32`, `esp32c3`, `esp32c6`, `esp32p4`, `esp32s3`.
 
 ### Read flash
 
@@ -159,8 +161,12 @@ tyutool update --source tuya
 ### Verbose logging
 
 ```bash
-RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
+tyutool --verbose write -d bk7231n -f firmware.bin
 ```
+
+`--verbose` writes developer diagnostic logs (protocol frames, retry counts) to
+stderr in addition to the always-on log file. The CLI does **not** read the
+`RUST_LOG` environment variable.
 
 ## Build from Source
 

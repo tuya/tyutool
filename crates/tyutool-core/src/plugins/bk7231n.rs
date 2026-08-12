@@ -113,6 +113,11 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
 ) -> Result<(), FlashError> {
     let pct = |v: u8| progress(FlashEvent::Percent { value: v });
     let phase = |p: FlashPhase| progress(FlashEvent::Phase { phase: p });
+    let warn = |msg: &str| {
+        progress(FlashEvent::Warning {
+            message: msg.to_string(),
+        })
+    };
 
     // Collect segments: either from job.segments or from legacy fields
     let segments = if let Some(ref s) = job.segments {
@@ -186,6 +191,7 @@ fn run_flash_mode<T: super::beken::transport::IoTransport>(
             &|done, total| {
                 pct((done as u64 * 100 / total.max(1) as u64) as u8);
             },
+            Some(&warn),
         )
         .map_err(to_flash_err)?;
         pct(100); // explicitly mark Erase complete before transitioning
@@ -268,6 +274,11 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
 ) -> Result<(), FlashError> {
     let pct = |v: u8| progress(FlashEvent::Percent { value: v });
     let phase = |p: FlashPhase| progress(FlashEvent::Phase { phase: p });
+    let warn = |msg: &str| {
+        progress(FlashEvent::Warning {
+            message: msg.to_string(),
+        })
+    };
 
     let start = ops::parse_hex_addr(job.erase_start_hex.as_deref()).map_err(to_flash_err)?;
     let end = ops::parse_hex_addr(job.erase_end_hex.as_deref()).map_err(to_flash_err)?;
@@ -303,6 +314,7 @@ fn run_erase_mode<T: super::beken::transport::IoTransport>(
         &|done, total| {
             pct((done as u64 * 100 / total.max(1) as u64) as u8);
         },
+        Some(&warn),
     )
     .map_err(to_flash_err)?;
     pct(100);
@@ -328,6 +340,11 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
 ) -> Result<(), FlashError> {
     let pct = |v: u8| progress(FlashEvent::Percent { value: v });
     let phase = |p: FlashPhase| progress(FlashEvent::Phase { phase: p });
+    let warn = |msg: &str| {
+        progress(FlashEvent::Warning {
+            message: msg.to_string(),
+        })
+    };
 
     let start = ops::parse_hex_addr(job.read_start_hex.as_deref()).unwrap_or(0);
     let end = ops::parse_hex_addr(job.read_end_hex.as_deref()).map_err(to_flash_err)?;
@@ -362,6 +379,7 @@ fn run_read_mode<T: super::beken::transport::IoTransport>(
         &|done, total| {
             pct((done as u64 * 100 / total.max(1) as u64) as u8);
         },
+        Some(&warn),
     )
     .map_err(to_flash_err)?;
 

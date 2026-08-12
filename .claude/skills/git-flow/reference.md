@@ -84,8 +84,8 @@ git commit -m "fix(serial): guard against zero baud rate in port open"
 
 # Step 3: bump version manually (v2 has no CI write-back)
 node scripts/bump-version.mjs 2.3.3
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
-        crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml
+git add -u   # stage exactly what the script rewrote; the file list lives in
+             # scripts/lib/version-files.mjs, not here
 git commit -m "chore: bump version to 2.3.3"
 
 # Step 4: validate
@@ -185,9 +185,10 @@ git push origin v3.1.0
 
 All version files must match. Check:
 ```bash
-grep '"version"' package.json src-tauri/tauri.conf.json
-grep '^version' src-tauri/Cargo.toml crates/tyutool-core/Cargo.toml crates/tyutool-cli/Cargo.toml
+pnpm exec vitest run scripts/lib/version-files.test.ts
 ```
+This asserts every file in `scripts/lib/version-files.mjs` carries the current
+version, and that the list still covers every cargo workspace member.
 
 Fix manually:
 ```bash

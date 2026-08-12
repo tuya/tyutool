@@ -5,6 +5,9 @@ import type {
   BatchFirmwareSource,
   BatchAuthConfigData,
 } from "@/features/batch-flash-auth/types";
+import { BATCH_AUTH_TOOL_CHIP_OPTIONS } from "@/features/batch-flash-auth/types";
+import { BAUD_RATE_OPTIONS } from "@/features/firmware-flash/constants";
+import { chipManifest } from "@/features/firmware-flash/chip-manifests";
 
 export interface BatchFirmwareConfig {
   source: BatchFirmwareSource;
@@ -28,6 +31,62 @@ const SHARED_CONFIG_KEY = "batch-flash-auth-shared-config";
 const LEGACY_CUMULATIVE_KEY = "batch-flash-cumulative";
 const LEGACY_FILTER_KEY = "batch-flash-port-filter";
 const STORE_FILE = "settings.json";
+
+/** Safe default chip for the batch-auth tool when a persisted chipId is invalid. */
+const DEFAULT_BATCH_CHIP_ID = "esp32";
+
+/**
+ * Parse and validate a persisted shared-config record (already deserialized by
+ * the Tauri store). Mirrors the strict validators in flash-workspace.ts /
+ * serial-debug-workspace.ts: each field is checked against its legal enum / type
+ * and repaired to a safe default when corrupted, so a stale or damaged record
+ * can never crash the UI (e.g. an unknown chipId throwing inside chipManifest).
+ * Returns null for non-object input, indicating "no shared config" / first run.
+ */
+export function parseBatchSharedConfig(rec: unknown): BatchSharedConfig | null {
+  if (!rec || typeof rec !== "object") return null;
+  const r = rec as Record<string, unknown>;
+  try {
+    const bool = (v: unknown, fallback: boolean): boolean =>
+      typeof v === "boolean" ? v : fallback;
+    const numOrNull = (v: unknown): number | null =>
+      typeof v === "number" && Number.isFinite(v) ? v : null;
+
+    // chipId must be a valid batch-auth chip option; otherwise fall back.
+    const chipId =
+      typeof r.chipId === "string" &&
+      (BATCH_AUTH_TOOL_CHIP_OPTIONS as readonly string[]).includes(r.chipId)
+        ? r.chipId
+        : DEFAULT_BATCH_CHIP_ID;
+
+    // Baud rates must be recognized options; otherwise fall back to the chip's
+    // manifest defaults (chipManifest throws on unknown chips — guarded above).
+    const baudRaw = numOrNull(r.baudRate);
+    const baudRate =
+      baudRaw !== null &&
+      (BAUD_RATE_OPTIONS as readonly number[]).includes(baudRaw)
+        ? baudRaw
+        : chipManifest(chipId).defaultBaudRate;
+
+    const authBaudRaw = numOrNull(r.authBaudRate);
+    const authBaudRate =
+      authBaudRaw !== null &&
+      (BAUD_RATE_OPTIONS as readonly number[]).includes(authBaudRaw)
+        ? authBaudRaw
+        : chipManifest(chipId).defaultAuthBaudRate;
+
+    return {
+      chipId,
+      baudRate,
+      authBaudRate,
+      flashFirmware: bool(r.flashFirmware, true),
+      authorizeEnabled: bool(r.authorizeEnabled, true),
+    };
+  } catch {
+    // chipManifest or any other unexpected throw → treat as no shared config.
+    return null;
+  }
+}
 
 export async function loadBatchFlashAuthWorkspace(): Promise<{
   cumulative: CumulativeStats | null;
@@ -74,8 +133,9 @@ export async function loadBatchFlashAuthWorkspace(): Promise<{
     const authConfig =
       (await store.get<BatchAuthConfigData>(AUTH_CONFIG_KEY)) ?? null;
 
-    const sharedConfig =
-      (await store.get<BatchSharedConfig>(SHARED_CONFIG_KEY)) ?? null;
+    const sharedConfig = parseBatchSharedConfig(
+      await store.get<BatchSharedConfig>(SHARED_CONFIG_KEY),
+    );
 
     return { cumulative, filter, firmware, authConfig, sharedConfig };
   } catch (e) {

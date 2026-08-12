@@ -6083,7 +6083,7 @@ dependencies = [
 
 [[package]]
 name = "tyutool-cli"
-version = "3.2.7"
+version = "3.2.8"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6113,7 +6113,7 @@ dependencies = [
 
 [[package]]
 name = "tyutool-core"
-version = "3.2.7"
+version = "3.2.8"
 dependencies = [
  "crc32fast",
  "espflash",
@@ -6143,7 +6143,7 @@ dependencies = [
 
 [[package]]
 name = "tyutool_gui"
-version = "3.2.7"
+version = "3.2.8"
 dependencies = [
  "calamine",
  "chrono",

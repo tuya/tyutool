@@ -36,33 +36,29 @@
       <h2 id="prerequisites">前置准备</h2>
       <p>动手前请确认以下清单均已就绪——烧录需要软硬件齐备，缺一不可。</p>
       <ul>
-        <li><strong>一台受支持的设备</strong>：tyutool 面向涂鸦生态IoT 设备，具体支持的芯片型号见<a href="flash.html">固件烧录</a>页。</li>
+        <li><strong>一台受支持的设备</strong>：tyutool 面向涂鸦生态IoT 设备，具体支持的芯片型号见<a href="flash.html#chip">固件烧录</a>页。</li>
         <li><strong>一个 USB 转串口适配器</strong>：正确接到设备的 UART（TX/RX/GND，视情况再接电源）。接线时必须<strong>交叉</strong>：电脑端 TX 接设备端 RX，反之亦然。</li>
         <li><strong>设备进入下载/烧录模式</strong>：不同设备进入方式各异（按键组合、短接焊点、上电时序等）。</li>
       </ul>
       <div class="callout warn">
         <span class="title">注意</span>
-        接线方式与进入下载模式的方法是<strong>设备相关</strong>的，没有通用步骤——请先查阅你的设备说明或<a href="faq.html">常见问题</a>。tyutool <strong>无法</strong>替你把设备切进下载模式，这一步必须由你手动完成；设备没进下载模式时，tyutool 会一直等待握手并最终超时。相关概念（UART / 下载模式 / 波特率）见<a href="concepts.html">基础概念</a>。
+        接线方式与进入下载模式的方法是<strong>设备相关</strong>的，没有通用步骤——请先查阅你的设备说明或<a href="faq.html#port-not-listed">常见问题</a>。tyutool <strong>无法</strong>替你把设备切进下载模式，这一步必须由你手动完成；设备没进下载模式时，tyutool 会一直等待握手并最终超时。相关概念（UART / 下载模式 / 波特率）见<a href="concepts.html#serial">基础概念</a>。
       </div>
 
       <h2 id="download">下载与安装</h2>
       <p>tyutool 为 Windows、macOS、Linux 提供预编译安装包。请到项目的 README 下载表，按你的操作系统选择对应版本，下载后照常规方式安装即可。各平台的常见坑点如下（完整说明见<a href="faq.html">常见问题</a>）。</p>
 
       <div class="callout warn">
-        <span class="title">macOS Gatekeeper</span>
-        首次打开未签名 App 时，系统会拦截「无法验证开发者」。可在终端执行 <code>xattr -dr com.apple.quarantine /path/to/tyutool.app</code> 移除隔离属性后再启动。详见 <a href="faq.html">常见问题</a>。
-      </div>
-      <div class="callout warn">
         <span class="title">macOS 串口权限</span>
-        macOS 默认禁止普通用户访问串口设备。请把当前用户加入 <code>dialout</code> 组：<code>sudo dseditgroup -o edit -a $USER -t user dialout</code>，然后<strong>注销重新登录</strong>生效。详见 <a href="faq.html">常见问题</a>。
+        macOS 默认禁止普通用户访问串口设备。请把当前用户加入 <code>dialout</code> 组：<code>sudo dseditgroup -o edit -a $USER -t user dialout</code>，然后<strong>注销重新登录</strong>生效。详见 <a href="faq.html#macos-serial-perm">常见问题</a>。
       </div>
       <div class="callout warn">
         <span class="title">Linux 白屏</span>
-        部分 Linux 桌面下，tyutool 启动后窗口空白不渲染。以 <code>WEBKIT_DISABLE_COMPOSITING_MODE=1 tyutool</code> 方式启动可绕过。详见 <a href="faq.html">常见问题</a>。
+        部分 Linux 桌面下，tyutool 启动后窗口空白不渲染。在启动命令前加上该环境变量可绕过：<code>WEBKIT_DISABLE_COMPOSITING_MODE=1 ./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage</code>。详见 <a href="faq.html#linux-blank-window">常见问题</a>。
       </div>
       <div class="callout tip">
         <span class="title">小提示</span>
-        三个平台的小坑都属于<strong>环境</strong>问题，与 tyutool 本身无关；解决后通常一劳永逸，之后不会再遇到。
+        上面这些小坑都属于<strong>环境</strong>问题，与 tyutool 本身无关；解决后通常一劳永逸，之后不会再遇到。
       </div>
 
       <h2 id="first-launch">首次启动</h2>
@@ -75,9 +71,10 @@
       </ul>
       <p>本页剩下的步骤都在 <strong>Flash</strong> 页完成——它是你第一次烧录时唯一需要关心的入口。</p>
 
-      <figure class="shot todo">
-        <figcaption>截图：tyutool 主窗口停在 Flash 页，串口下拉框展开、显示已检测到的端口，状态点为绿色。</figcaption>
-        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports, status dot green -->
+      <figure class="shot">
+        <img src="../assets/images/getting-started-connect.png" alt="tyutool 主窗口停在 Flash 页，串口下拉框展开、显示已检测到的端口" loading="lazy">
+        <figcaption>tyutool 主窗口停在 Flash 页，串口下拉框展开、显示已检测到的端口。</figcaption>
+        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports -->
       </figure>
 
       <h2 id="connect">连接设备</h2>
@@ -88,11 +85,12 @@
         <li>在列出的端口里选择你的适配器（如 <code>COM3</code> / <code>/dev/ttyUSB0</code> / <code>/dev/cu.SLAB_USBtoUART</code>）。</li>
         <li>留意旁边的<strong>状态点</strong>：绿色表示已连接并就绪；灰色或红色表示未连上或握手失败。</li>
       </ol>
-      <p>选好端口后，波特率与芯片型号会由 tyutool <strong>自动建议</strong>一个合理默认值，多数情况下可直接采用；需要调整时也可手动覆盖。</p>
+      <p>选好端口后，波特率与芯片型号由 tyutool <strong>自动填入推荐值</strong>，可直接采用。<strong>调高</strong>更快但易失稳失败，<strong>调低</strong>更慢更稳。详见 <a href="flash.html#flash">固件烧录</a>。</p>
 
-      <figure class="shot todo">
-        <figcaption>截图：Flash 页顶部连接栏——已选中端口、状态点绿色、波特率与芯片已自动填入。</figcaption>
-        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports, status dot green -->
+      <figure class="shot">
+        <img src="../assets/images/getting-started-connect.png" alt="Flash 页顶部连接栏——串口下拉框展开、显示已检测到的端口，波特率与芯片选项" loading="lazy">
+        <figcaption>Flash 页顶部连接栏——串口下拉框展开、显示已检测到的端口，波特率与芯片选项。</figcaption>
+        <!-- capture spec: getting-started-connect.png — Flash page, serial-port dropdown open showing detected ports -->
       </figure>
 
       <div class="callout tip">
@@ -113,7 +111,7 @@
       <p>各步骤的进阶选项（地址微调、擦除策略、校验、保存日志等）请见<a href="flash.html">固件烧录</a>页。</p>
       <div class="callout danger">
         <span class="title">重要</span>
-        烧录期间<strong>切勿</strong>拔掉 USB 线或断电，否则可能写坏数据。万一烧录失败，先降到 <code>115200</code> 波特率重试；仍不行则参考<a href="faq.html">常见问题</a>。
+        烧录期间<strong>切勿</strong>拔掉 USB 线或断电，否则可能写坏数据。万一烧录失败，先降到 <code>115200</code> 波特率重试；仍不行则参考<a href="faq.html#flash-fails">常见问题</a>。
       </div>
 
       <h2 id="next-steps">下一步</h2>
@@ -149,7 +147,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

@@ -15,9 +15,10 @@ env:
 
 jobs:
   # ── Rust core + CLI tests ───────────────────────────────────────────────────
-  # Only tyutool-core and tyutool-cli are tested here: they hold the flash logic
-  # and have no GTK/WebKit system dependency, so the job stays fast. src-tauri is
-  # exercised by the GUI build in release.yml.
+  # tyutool-core and tyutool-cli hold the flash logic and need no GTK/WebKit
+  # system dependency, so this job stays fast and gates every push. The Tauri
+  # backend needs those libraries and is gated separately in the `tauri` job.
+  # `cargo fmt --all` covers every crate including src-tauri.
   rust:
     name: Rust (core + cli)
     runs-on: ubuntu-latest
@@ -33,6 +34,32 @@ jobs:
       - name: Test
         run: cargo test -p tyutool-core -p tyutool-cli
 
+  # ── Tauri backend (src-tauri) ───────────────────────────────────────────────
+  # Guards the GUI bridge: path-traversal rejection, credential redaction on the
+  # log-export path, and window-layout math all live here. Needs the GTK/WebKit
+  # dev packages, hence a job of its own. `dist/` is not required — Tauri only
+  # verifies frontendDist when bundling, not for cargo check/test.
+  tauri:
+    name: Rust (tauri backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev libudev-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "ci-tauri" }
+      - name: Clippy
+        run: cargo clippy -p tyutool_gui --all-targets -- -D warnings
+      - name: Test
+        run: cargo test -p tyutool_gui
+
   # ── Frontend lint + tests + type-checked build ──────────────────────────────
   frontend:
     name: Frontend (lint + test + build)
@@ -45,5 +72,11 @@ jobs:
         with: { node-version: "22", cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
-      - run: pnpm run test
+      # `pnpm run build` type-checks src/ only. scripts/ drives releases and was
+      # never checked, which is how a 3-arg call to a 2-param function survived
+      # there long enough to silently drop the git-cliff changelog body.
+      - run: pnpm run typecheck:scripts
+      # test:coverage, not test — this is what enforces the thresholds in
+      # vitest.config.ts. Plain `pnpm run test` leaves them unchecked.
+      - run: pnpm run test:coverage
       - run: pnpm run build

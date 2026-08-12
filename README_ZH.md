@@ -10,11 +10,14 @@
 
 ## 支持芯片
 
+支持 **4 大系列共 11 款芯片**：
+
 | 芯片系列 | 型号 |
 |---------|------|
 | Tuya    | T1、T2、T3、T5AI |
 | Beken   | BK7231N |
-| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-S3 |
+| Espressif | ESP32、ESP32-C3、ESP32-C6、ESP32-P4、ESP32-S3 |
+| Lightning | LN882H |
 
 ## 下载
 
@@ -47,7 +50,6 @@
 
 | 问题 | 平台 | 处理方式 |
 |------|------|----------|
-| 「无法验证开发者」或被 Gatekeeper 拦截 | macOS | 安装包未做 Apple 代码签名，属正常安全策略。**系统设置 → 隐私与安全性 → 仍要打开**；或在 Finder 中右键 `tyutool.app` → **打开** |
 | 串口不出现 | macOS | **系统设置 → 隐私与安全性 → 配件**（或「允许配件连接」等，文案随系统版本而异） |
 | 窗口异常 / 空白（虚拟机常见） | Linux | WebKit2GTK GPU 合成失败所致，启动前设置环境变量：`export WEBKIT_DISABLE_COMPOSITING_MODE=1`，然后运行 `./tyutool-gui_linux_x86_64_appimage_x.x.x.AppImage` |
 
@@ -99,7 +101,7 @@ tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
 tyutool write -d <设备> -p <串口> -b <波特率> -s <起始地址> --end <结束地址> -f <文件>
 ```
 
-`-d` 支持的值：`bk7231n`、`t2`、`t5ai`
+`-d` 支持的值与上方[支持芯片](#支持芯片)表一致：`bk7231n`、`t1`、`t2`、`t3`、`t5ai`（别名 `t5`）、`ln882h`、`esp32`、`esp32c3`、`esp32c6`、`esp32p4`、`esp32s3`。
 
 ### 读取 Flash
 
@@ -159,8 +161,11 @@ tyutool update --source tuya
 ### 详细日志
 
 ```bash
-RUST_LOG=debug tyutool write -d bk7231n -f firmware.bin
+tyutool --verbose write -d bk7231n -f firmware.bin
 ```
+
+`--verbose` 将开发者诊断日志（协议帧、重试计数等）输出到 stderr，日志文件照常写入。
+CLI **不**读取 `RUST_LOG` 环境变量。
 
 ## 从源码构建
 

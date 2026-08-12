@@ -26,14 +26,14 @@
   <div class="layout">
     <main class="content">
       <h1>串口调试</h1>
-      <p class="lead">本页是 <code>/serial-debug</code> 页面的完整参考：一个完整的串口终端 / 日志监视器，覆盖连接与 UART 配置、设备复位、ASCII / Hex 日志视图、发送栏、Hex 弹窗、关键词过滤标签，以及自动释放与自动保存。</p>
+      <p class="lead">本页是<strong>串口调试</strong>页的完整参考：一个完整的串口终端 / 日志监视器，覆盖连接与 UART 配置、设备复位、ASCII / Hex 日志视图、发送栏、Hex 弹窗、关键词过滤标签，以及自动释放与自动保存。</p>
 
       <h2 id="overview">1. 总览</h2>
-      <p><code>/serial-debug</code> 是一个<strong>完整的串口终端</strong>，既可以用来观察设备实时打印的日志，也可以向设备发送指令或数据。整个界面由顶部连接栏、中间的日志视图、底部的发送栏，以及右侧的过滤标签/设置区组成。</p>
+      <p>串口调试是一个<strong>完整的串口终端</strong>，既可以用来观察设备实时打印的日志，也可以向设备发送指令或数据。整个界面由顶部连接栏、中间的日志视图、底部的发送栏，以及右侧的过滤标签/设置区组成。</p>
       <p>页面带有一个<strong>保活（keep-alive）</strong>机制：当你从串口调试页跳到其他页面（例如去 <a href="flash.html">固件烧录</a>看一下进度）再回来时，后台的 RX 接收流不会中断，<strong>回来后仍能继续看到</strong>设备在这段时间打印的内容，不会因为切换页面而丢数据。</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-overview.png" alt="串口调试页总览：连接栏、日志视图、发送栏、过滤标签" loading="lazy">
         <figcaption>串口调试页总览：连接栏、日志视图、发送栏、过滤标签</figcaption>
-        <!-- capture: serial-debug-overview.png -->
       </figure>
       <div class="callout note">
         <span class="title">与固件烧录页共用串口</span>
@@ -47,7 +47,7 @@
         <li><strong>连接 / 断开</strong>：手动打开或关闭与所选串口的链路。</li>
         <li><strong>状态指示</strong>：显示当前端口是已连接 / 未连接 / 被其他页面占用。</li>
       </ul>
-      <p>常规参数（波特率等）直接在连接栏选择；<strong>高级 UART 设置</strong>则放在<a href="settings.html">设置</a>弹窗里，包含：</p>
+      <p>常规参数（波特率等）直接在连接栏选择；<strong>高级 UART 设置</strong>则放在本页的<strong>串口设置</strong>弹窗里，包含：</p>
       <table>
         <thead><tr><th>参数</th><th>可选值</th><th>说明</th></tr></thead>
         <tbody>
@@ -84,9 +84,9 @@
         <li><strong>清空（clear）</strong>：清掉当前可见缓冲区。</li>
         <li><strong>导出（export）</strong>：把当前日志导出为文件。</li>
       </ul>
-      <figure class="shot todo">
-        <figcaption>Hex 视图：每行字节数、方向徽标、时间戳</figcaption>
-        <!-- capture: serial-debug-hex-view.png -->
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-log-view.png" alt="日志视图：方向徽标、时间戳（图中的弹窗为串口设置）" loading="lazy">
+        <figcaption>日志视图：方向徽标、时间戳（图中的弹窗为串口设置）</figcaption>
       </figure>
       <div class="callout warn">
         <span class="title">可见窗口上限 3000 行</span>
@@ -101,9 +101,9 @@
         <li><strong>回车发送</strong>：按 <kbd>Enter</kbd> 即发送当前输入框内容。</li>
         <li><strong>发送历史</strong>：最多保留 <strong>20 条</strong>历史；用 <kbd>↑</kbd> / <kbd>↓</kbd> 在历史条目之间快速翻选，无需重复输入。</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-send-bar.png" alt="发送栏：ASCII/Hex 切换、\r\n 选项、历史下拉" loading="lazy">
         <figcaption>发送栏：ASCII/Hex 切换、<code>\r\n</code> 选项、历史下拉</figcaption>
-        <!-- capture: serial-debug-send-bar.png -->
       </figure>
 
       <h2 id="hex-popup">6. Hex 弹窗</h2>
@@ -123,13 +123,13 @@
         <li><strong>“加载更早（load older）”</strong>：匹配结果较多时分页加载更早的命中行。</li>
       </ul>
       <p>过滤是在<strong>服务端、针对整个会话</strong>执行的，而不是只过滤当前可见窗口——因此即便旧数据已经从 3000 行视口里被移除，过滤结果仍能把它找回来。</p>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/serial-debug-filter-tabs.png" alt="过滤标签：关键词、6 色徽标、实时计数、&ldquo;全部&rdquo;标签" loading="lazy">
         <figcaption>过滤标签：关键词、6 色徽标、实时计数、“全部”标签</figcaption>
-        <!-- capture: serial-debug-filter-tabs.png -->
       </figure>
 
       <h2 id="auto">8. 自动释放 / 自动保存</h2>
-      <p>这两项功能都在<a href="settings.html">设置</a>里配置，用来让长时间挂着的串口调试会话更省心。</p>
+      <p>这两项功能都用来让长时间挂着的串口调试会话更省心；其中<strong>自动保存</strong>也可在<a href="settings.html#serial-logs">设置 · 串口日志</a>里配置。</p>
       <h3>自动释放（Auto-release）</h3>
       <p>自动释放解决的是<strong>端口争用</strong>问题：</p>
       <ul>
@@ -156,7 +156,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

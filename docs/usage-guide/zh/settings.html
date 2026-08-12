@@ -26,7 +26,7 @@
   <div class="layout">
     <main class="content">
       <h1>设置</h1>
-      <p class="lead">本页是 <code>/settings</code> 页面的完整参考：把所有可配置项集中在一处，覆盖更新中心、外观与语言、诊断与日志、串口日志、关于，以及设置本身的持久化方式。</p>
+      <p class="lead">本页是<strong>设置</strong>页的完整参考：把所有可配置项集中在一处，覆盖更新中心、外观与语言、诊断与日志、串口日志、关于，以及设置本身的持久化方式。</p>
 
       <h2 id="update">1. 更新中心</h2>
       <p>更新中心是设置页顶部最显眼的入口，集中管理版本检查与后台更新节奏：</p>
@@ -43,9 +43,9 @@
           </ul>
         </li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/settings-update.png" alt="更新中心：当前版本徽标、检查更新入口、自动检查间隔" loading="lazy">
         <figcaption>更新中心：当前版本徽标、检查更新入口、自动检查间隔</figcaption>
-        <!-- capture: settings-update.png -->
       </figure>
       <div class="callout note">
         <span class="title">Web 端无自动更新</span>
@@ -69,6 +69,10 @@
         </li>
         <li><strong>串口指示器（Serial port indicators）</strong>：开关侧边栏与工具箱条目里的<strong>彩色串口活动小圆点</strong>，用于一眼看出某个端口是否在收发数据。</li>
       </ul>
+      <figure class="shot">
+        <img src="../assets/images/settings-appearance.png" alt="外观与语言：主题、语言、串口指示器" loading="lazy">
+        <figcaption>外观与语言：主题（Light/Dark/System）、语言（Auto/简体中文/English）、串口指示器开关</figcaption>
+      </figure>
       <div class="callout tip">
         <span class="title">高级 UART 设置不在这里</span>
         波特率等<strong>高级 UART 参数</strong>放在串口调试页的设置弹窗里，而非设置页；详见<a href="serial-debug.html#connect">串口调试 · 连接与串口配置</a>。
@@ -91,9 +95,9 @@
         <li><strong>查看日志（View logs）</strong>：打开<strong>应用内日志查看器（LogViewerDialog）</strong>，无需离开应用即可浏览、搜索日志。</li>
         <li><strong>导出日志并报告问题（Export Logs &amp; Report Issue）</strong>：位于日志查看器内。会把日志打包成 zip，并打开一个<strong>预填好版本号和操作系统字段的 GitHub issue</strong> 表单（仅桌面端）。</li>
       </ul>
-      <figure class="shot todo">
+      <figure class="shot">
+        <img src="../assets/images/settings-diagnostics.png" alt="诊断与日志：调试日志开关、日志级别、打开日志文件夹、查看日志" loading="lazy">
         <figcaption>诊断与日志：调试日志开关、日志级别、打开日志文件夹、查看日志</figcaption>
-        <!-- capture: settings-diagnostics.png -->
       </figure>
       <h3>日志文件如何落地</h3>
       <p>桌面端的日志由 <code>tauri-plugin-log</code> 写入<strong>日志目录</strong>，行为与命令行一致（见<a href="cli.html">命令行</a>）：</p>
@@ -153,7 +157,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — 涂鸦生态 IoT 设备固件烧录工具</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

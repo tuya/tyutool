@@ -76,6 +76,7 @@
     "aboutHint": "Keep version and license information in a lighter footer-style information area.",
     "version": "tyutool · v{version}",
     "opensource": "Open-source licenses",
+    "docs": "Documentation",
     "resetDisclaimer": "Show batch-auth risk notice again",
     "resetDisclaimerDone": "Reset — the risk notice will reappear next time you enter Batch Auth",
     "updateEntryHint": "Open the update center to review release notes and run a manual check.",
@@ -165,6 +166,7 @@
       "savedTo": "Logs saved to: {path}",
       "exportFailed": "Couldn't save the logs: {error}. Please pick a writable location (e.g. your Downloads folder) and try again.",
       "linkCopied": "The report link was copied to your clipboard. If your browser didn't open, paste it into a new tab. When submitting, drag the log archive you just saved into the issue.",
+      "privacyReminder": "Authorization credentials in the logs have been auto-masked. Before submitting, please double-check the archive for any other sensitive data.",
       "webHint": "Log export is only available in the desktop app."
     }
   },
@@ -257,6 +259,7 @@
     "authKey": "AuthKey",
     "authKeyPh": "32-character AuthKey",
     "copyCredentials": "Copy UUID & AuthKey",
+    "rememberAuth": "Remember authorization (stored locally on this device)",
     "authOfficialIntro": "",
     "authOfficialDocLink": "TuyaOpen docs: device authorization",
     "authTuyaOpenOnly": "TuyaOpen authorization only: use your {link}. Do not substitute keys from TuyaOS products.",
@@ -356,6 +359,9 @@
       "portsFound": "Available ports: {list}",
       "noPortsFound": "No serial ports found. Check device connection and click Refresh.",
       "noPortsFoundWebServeHint": "Browser preview lists ports from local tyutool-cli serve (default ws://127.0.0.1:9527). On macOS, only /dev/cu.* USB serial devices are shown.",
+      "wsConnectFailed": "WS: could not connect to tyutool-cli serve (ws://127.0.0.1:9527)",
+      "deviceResetTimeout": "deviceReset timed out — recompile and start tyutool-cli serve (must support device_reset), and confirm ws://127.0.0.1:9527 is reachable",
+      "serialDebugDeviceResetTimeout": "serialDebugDeviceReset timed out — recompile and start tyutool-cli serve (must support serial_debug_device_reset), and confirm ws://127.0.0.1:9527 is reachable",
       "disconnected": "Disconnected.",
       "connected": "Connected.",
       "deviceResetOk": "Device reset (DTR/RTS) sent on {port}",
@@ -579,6 +585,7 @@
     "confirm": {
       "releaseForFlashTitle": "Port conflict",
       "releaseForFlashBody": "{requester} is requesting this port. Release?",
+      "releaseForFlashHint": "Tip: To skip this prompt on every flash, go to the Serial Debug page and open {settings} (gear icon, top-right), then enable \"{autoRelease}\".",
       "releaseOk": "Release",
       "releaseCancel": "Cancel"
     },
@@ -704,6 +711,13 @@
         "notXlsxFormat": "Please select an .xlsx file",
         "locked": "The Excel file is open in another program — close it and retry",
         "changedWhileRunning": "Cannot switch the Excel file while ports are running"
+      },
+      "port": {
+        "inUse": "The following port(s) are in use by another feature and cannot be opened:",
+        "inUseOwner": "• {port} — held by {owner}",
+        "heldByBatch": "Port {port} is busy with an active batch authorization and cannot be taken over.",
+        "busyReason": "Port busy (in use by {owner})",
+        "lost": "Port lost (unplugged or error)"
       }
     },
     "status": {

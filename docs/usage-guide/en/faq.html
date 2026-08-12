@@ -142,15 +142,6 @@ tyutool authorize -p &lt;port&gt; -d esp32   # read with chip-specific timing</p
 
       <h2 id="platform">4. Platform</h2>
 
-      <h3 id="macos-gatekeeper">Can't open on macOS / Gatekeeper block</h3>
-      <p><strong>Symptom:</strong> double-clicking tyutool.app shows "cannot be opened because the developer cannot be verified," or it's blocked by Gatekeeper.</p>
-      <p>The macOS build of tyutool is not Apple-notarized (this is expected). Pick either way to clear it:</p>
-      <ol class="steps">
-        <li><strong>GUI</strong>: in Finder, Control-click <code>tyutool.app</code> → <strong>Open</strong>, then click <strong>Open</strong> again in the dialog; or go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong> on the tyutool prompt.</li>
-        <li><strong>Command line</strong>: strip the extended attributes (quarantine flag):<pre>xattr -dr com.apple.quarantine /path/to/tyutool.app</pre> After that you can double-click to open normally.</li>
-      </ol>
-      <p>See the <a href="../../../README.md">README troubleshooting table</a>.</p>
-
       <h3 id="linux-blank-window">Linux blank / white window</h3>
       <p><strong>Symptom:</strong> on Linux (especially VMs / machines without a dedicated GPU) the window opens <strong>completely blank</strong>, or shows menus but no content.</p>
       <p>WebKit2GTK's compositing mode fails on some GPU drivers. Set an environment variable to disable compositing before launch:</p>
@@ -182,7 +173,7 @@ tyutool authorize -p &lt;port&gt; -d esp32   # read with chip-specific timing</p
             <li><strong>CLI</strong>: the log path is printed in the startup banner's <code>log:</code> line; each run produces a separate file such as <code>~/.local/share/tyutool/tyutool-&lt;timestamp&gt;.log</code> (macOS: <code>~/Library/Application Support/tyutool/</code>; Windows: <code>%APPDATA%\tyutool\</code>). Add <code>--verbose</code> to mirror diagnostics to stderr.</li>
           </ul>
         </li>
-        <li><strong>Use the issue template</strong>: go to the repo's <a href="https://github.com/ZingerLight/tyutool/issues/new/choose">Issues → New issue</a> and pick <strong>🐞 Bug report</strong> (template: <a href="https://github.com/ZingerLight/tyutool/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml"><code>.github/ISSUE_TEMPLATE/bug_report.yml</code></a>).</li>
+        <li><strong>Use the issue template</strong>: go to the repo's <a href="https://github.com/tuya/tyutool/issues/new/choose">Issues → New issue</a> and pick <strong>🐞 Bug report</strong> (template: <a href="https://github.com/tuya/tyutool/blob/refactor/v3/.github/ISSUE_TEMPLATE/bug_report.yml"><code>.github/ISSUE_TEMPLATE/bug_report.yml</code></a>).</li>
         <li><strong>Fill in the key fields</strong>:
           <ul>
             <li><strong>Version</strong> (Settings → About)</li>
@@ -208,7 +199,7 @@ tyutool authorize -p &lt;port&gt; -d esp32   # read with chip-specific timing</p
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — flashing tool for Tuya ecosystem IoT device firmware</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

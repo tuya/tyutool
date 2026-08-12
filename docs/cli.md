@@ -6,7 +6,37 @@
 
 ## Installation
 
-Download the latest release binary from the GitHub Releases page. Place it on your `PATH`.
+Download the latest CLI binary from the [GitHub Releases page](https://github.com/tuya/tyutool/releases). Each release ships five prebuilt binaries:
+
+| Platform | Asset |
+|----------|-------|
+| Linux x86_64 | `tyutool-cli_linux_x86_64_<ver>.tar.gz` |
+| Linux aarch64 | `tyutool-cli_linux_aarch64_<ver>.tar.gz` |
+| macOS x86_64 (Intel) | `tyutool-cli_macos_x86_64_<ver>.tar.gz` |
+| macOS aarch64 (Apple silicon) | `tyutool-cli_macos_aarch64_<ver>.tar.gz` |
+| Windows x86_64 | `tyutool-cli_windows_x86_64_<ver>.zip` |
+
+`<ver>` is the release version (e.g. `3.2.8`). Each release also publishes a `latest.json` manifest whose `cli.<platform>.sha256` field gives the SHA-256 of the matching asset — verify it if your download channel is untrusted.
+
+Extract the binary and put it on your `PATH`:
+
+```bash
+# Linux / macOS (tar.gz)
+tar -xzf tyutool-cli_linux_x86_64_*.tar.gz
+sudo mv tyutool_cli /usr/local/bin/tyutool
+chmod +x /usr/local/bin/tyutool
+
+# Windows (.zip): extract tyutool_cli.exe and add its folder to PATH
+```
+
+Verify the install:
+
+```bash
+tyutool --version    # prints the version banner
+tyutool list-ports   # lists detected serial ports
+```
+
+> Tip: the CLI can self-update — run `tyutool update` to fetch and replace the binary in place.
 
 ## Global Options
 
@@ -119,7 +149,7 @@ tyutool reset [-p <PORT>] [-d <DEVICE>]
 | Flag | Short | Description | Default |
 |------|-------|-------------|---------|
 | `--port` | `-p` | Serial port | auto-detect |
-| `--device` | `-d` | Chip family (affects reset timing) | `bk7231n` |
+| `--device` | `-d` | Chip family (affects reset timing); same supported values as `write` (see [device table](#device--baud-table)) | `bk7231n` |
 
 ---
 
@@ -200,7 +230,7 @@ tyutool update [--check] [--source <github|tuya>]
 | Flag | Description |
 |------|-------------|
 | `--check` | Only check version, do not download |
-| `--source` | Update source (`github` default, `tuya` = Tuya OSS for mainland China) |
+| `--source` | Update source: omit (or `github`) to try GitHub first and fall back to the Tuya OSS mirror; `tuya` to force the mainland-China mirror only |
 
 ---
 
@@ -274,7 +304,7 @@ Device names are case-insensitive (`--device T5AI`, `--device t5AI`, and `--devi
 
 Plain mode output example:
 ```
-tyutool v3.0.7  linux/x86_64
+tyutool v3.2.8  linux/x86_64
 
 write  BK7231N  /dev/ttyUSB0  921600
   File   firmware.bin  1.8 MiB

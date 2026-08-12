@@ -1,17 +1,21 @@
 #!/usr/bin/env tsx
 // ──────────────────────────────────────────────────────────────────────────────
 // bump-version.ts — Synchronize version across all project files and insert a
-//                   draft CHANGELOG section (cross-platform)
+//                   draft CHANGELOG section (local entry, cross-platform)
 //
 // Usage:
 //   pnpm version:set 3.1.4          # Bump to 3.1.4, insert CHANGELOG draft
 //   pnpm version:set 3.1.4 --beta   # Bump to 3.1.4, skip CHANGELOG (beta build)
+//
+// The file list and rewrite logic live in lib/version-files.mjs, shared with
+// bump-version.mjs (the CI entry) — add new version-bearing files there.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve, relative, dirname } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDraftSection, insertSection } from './lib/changelog.js';
+import { readCurrentVersion, syncVersionFiles } from './lib/version-files.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -38,41 +42,16 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
 
 // ── Read current version ─────────────────────────────────────────────────────
 
-const pkgPath = resolve(ROOT, 'package.json');
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-console.log(`Current version: ${pkg.version}`);
+console.log(`Current version: ${readCurrentVersion()}`);
 console.log(`Target version:  ${version}`);
 console.log('');
-
-// ── Update functions ─────────────────────────────────────────────────────────
-
-function updateJson(filePath: string) {
-  const content = JSON.parse(readFileSync(filePath, 'utf-8'));
-  content.version = version;
-  writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n', 'utf-8');
-  console.log(`  ✓ ${relative(ROOT, filePath)}`);
-}
-
-function updateCargoToml(filePath: string) {
-  let content = readFileSync(filePath, 'utf-8');
-  let replaced = false;
-  content = content.replace(/^version\s*=\s*"[^"]*"/m, (match) => {
-    if (replaced) return match;
-    replaced = true;
-    return `version = "${version}"`;
-  });
-  writeFileSync(filePath, content, 'utf-8');
-  console.log(`  ✓ ${relative(ROOT, filePath)}`);
-}
 
 // ── Apply version bumps ───────────────────────────────────────────────────────
 
 console.log('Updating version files:');
-updateJson(resolve(ROOT, 'package.json'));
-updateJson(resolve(ROOT, 'src-tauri', 'tauri.conf.json'));
-updateCargoToml(resolve(ROOT, 'src-tauri', 'Cargo.toml'));
-updateCargoToml(resolve(ROOT, 'crates', 'tyutool-core', 'Cargo.toml'));
-updateCargoToml(resolve(ROOT, 'crates', 'tyutool-cli', 'Cargo.toml'));
+for (const path of syncVersionFiles(version)) {
+  console.log(`  ✓ ${path}`);
+}
 
 // ── Insert CHANGELOG draft ────────────────────────────────────────────────────
 

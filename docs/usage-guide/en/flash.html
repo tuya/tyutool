@@ -77,7 +77,7 @@
         On first launch tyutool defaults to <code>t5ai</code>. The legacy <code>t5</code> / <code>T5</code> ids are aliases of <code>t5ai</code> and are normalized to <code>t5ai</code> automatically.
       </div>
       <div class="callout tip">
-        <span class="title">Can I change the flash baud rate?</span>
+        <span class="title">Adjusting the flash baud rate</span>
         You can raise the flash baud rate above each chip's default — the higher the baud, the faster the flash. Past a certain point, though, signal quality on the serial line drops and flashing may start to fail. As a rule of thumb, do not exceed <code>2000000</code>.
       </div>
       <div class="callout tip">
@@ -140,6 +140,10 @@
         <li><strong>End address</strong>: defaults to the chip's <strong>full flash size</strong> (see the <a href="#chip">chip table</a>), i.e. a full-chip read by default.</li>
       </ul>
       <p>If the target file <strong>already exists</strong>, a dialog asks you to choose: <strong>Overwrite</strong> or <strong>Append-timestamp</strong> (appends a timestamp suffix to the filename so the old file is not clobbered).</p>
+      <div class="callout note">
+        <span class="title">Some chips do not support reading</span>
+        Reading is not supported on every chip; when a chip does not support it, tyutool shows a clear message.
+      </div>
       <figure class="shot">
         <img src="../assets/images/flash-read-tab.png" alt="Read tab: save directory, filename, start/end addresses" loading="lazy">
         <figcaption>Read tab: save directory, filename, start/end addresses</figcaption>
@@ -181,7 +185,7 @@
       <p>The Firmware Flash page and <strong>Serial Debug</strong> <strong>share the same ports</strong>. They cannot hold the same port at the same time.</p>
       <div class="callout warn">
         <span class="title">When the port is held</span>
-        If Serial Debug is currently holding a port, operating on that port from the Flash page will prompt you to <strong>release it first</strong>; you can also enable <strong>auto-release</strong> in Serial Debug's settings so it yields the port automatically when another page needs it. See the <a href="serial-debug.html">Serial Debug</a> page.
+        If Serial Debug is currently holding a port, operating on that port from the Flash page will prompt you to <strong>release it first</strong>; you can also enable <strong>auto-release</strong> in Serial Debug's settings so it yields the port automatically when another page needs it. See the <a href="serial-debug.html#auto">Serial Debug</a> page.
       </div>
 
       <nav class="pager">
@@ -192,7 +196,7 @@
   </div>
   <footer class="site-footer"><div class="inner">
     <span>tyutool — firmware flashing tool for Tuya ecosystem IoT devices</span>
-    <a href="https://github.com/ZingerLight/tyutool">GitHub</a>
+    <a href="https://github.com/tuya/tyutool">GitHub</a>
   </div></footer>
 </body>
 </html>

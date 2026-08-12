@@ -24,6 +24,7 @@ import { EXPORT_PAGE_SIZE } from "@/features/serial-debug/constants";
 import type {
   DebugLogLine,
   HexBytesPerRow,
+  SerialDebugLine,
 } from "@/features/serial-debug/types";
 import SerialDebugChipBar from "./SerialDebugChipBar.vue";
 
@@ -305,7 +306,7 @@ async function writeFile(
   URL.revokeObjectURL(url);
 }
 
-function formatExportLine(line: DebugLogLine): string {
+function formatExportLine(line: SerialDebugLine): string {
   const dir =
     line.direction === "tx" ? "TX " : line.direction === "rx" ? "RX " : "SYS";
   return `[${formatTs(line.tsMs)}] [${dir}] ${stripAnsi(line.text)}`;
@@ -360,6 +361,8 @@ async function saveLog(): Promise<void> {
       filters: [{ name: "TXT", extensions: ["txt"] }],
     });
     if (!path) return;
+    // Authorize this dialog-chosen save path for the chunked writes below.
+    await invoke("register_dialog_path", { path });
     await streamExportChunks(async (chunk, isFirstChunk) => {
       if (isFirstChunk) {
         await invoke("write_text_file", { path, content: chunk });

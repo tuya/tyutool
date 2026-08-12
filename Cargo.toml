@@ -7,3 +7,13 @@ members = [
     "crates/tyutool-bridge",
     "src-tauri",
 ]
+
+# Single source of truth for the crate version. Every member sets
+# `version.workspace = true`, so the three Cargo.toml files cannot drift apart.
+# scripts/lib/version-files.mjs rewrites this key; see that module before adding
+# a new version-bearing file.
+# ⚠ fork 新增的 tyutool-serve / tyutool-bridge **不跟这个版本号**：bridge 有自己的
+# 版本线（tag 前缀 bridge-v*，与上游 v*.*.* 不相交），serve 是从 cli 抽出来的内部 crate。
+# 上游注释里那句「三个 Cargo.toml」说的是它自己那三个成员，合并后成员变多但语义不变。
+[workspace.package]
+version = "3.2.8"

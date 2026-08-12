@@ -412,6 +412,25 @@ pub fn validate_auth_credentials(uuid: &str, authkey: &str) -> Result<(), FlashE
     Ok(())
 }
 
+/// Mask a secret for safe display in error/log messages.
+///
+/// Reveals only the first 4 and last 4 characters - enough to confirm which
+/// credential was used without exposing it in full. Empty -> `(empty)`;
+/// secrets of 8 chars or fewer -> fully masked `****(len=N)`.
+fn mask_secret(secret: &str) -> String {
+    let len = secret.chars().count();
+    if len == 0 {
+        return "(empty)".to_string();
+    }
+    if len <= 8 {
+        return format!("****(len={len})");
+    }
+    let chars: Vec<char> = secret.chars().collect();
+    let head: String = chars[..4].iter().collect();
+    let tail: String = chars[len - 4..].iter().collect();
+    format!("{head}****{tail}(len={len})")
+}
+
 // ── Serial I/O abstraction ──────────────────────────────────────────────────
 
 /// Byte-level serial I/O the [`AuthSession`] needs. Mirrors the proven
@@ -798,7 +817,18 @@ impl<T: AuthIo> AuthSession<T> {
             })
             .map(String::as_str)
             .collect();
-        log::debug!("[serial] auth-read raw={:?} relevant={:?}", lines, relevant);
+        // Summary only — the raw lines carry plaintext UUID/AuthKey and now live
+        // in the dedicated .trace sink (see run_batch_auth_slot verify logging).
+        // Do NOT log raw/relevant contents here; that would leak into tyutool-*.log
+        // and thus into the export-for-report zip.
+        log::debug!(
+            "[serial] auth-read lines={} relevant={} failure_echo={}",
+            lines.len(),
+            relevant.len(),
+            relevant
+                .iter()
+                .any(|l| l.to_lowercase().contains("authorization read failure"))
+        );
         for pair in relevant.windows(2) {
             let uuid = pair[0].trim();
             let authkey = pair[1].trim();
@@ -1618,7 +1648,7 @@ pub fn wait_after_firmware_flash(port: &str, baud_rate: u32, chip_id: &str, canc
 /// - `update_row(row_idx, mac, update)` — notify caller of per-step state changes.
 /// - `cancel` / `progress` — unchanged semantics.
 #[allow(clippy::too_many_arguments)]
-pub fn run_batch_auth_slot<F, B, A, U>(
+pub fn run_batch_auth_slot<F, B, A, U, Tr>(
     port: &str,
     chip_id: &str,
     config: &BatchAuthSlotConfig,
@@ -1627,12 +1657,14 @@ pub fn run_batch_auth_slot<F, B, A, U>(
     update_row: U,
     cancel: &AtomicBool,
     progress: F,
+    trace: Tr,
 ) -> Result<BatchAuthSlotResult, FlashError>
 where
     F: Fn(BatchAuthStep),
     B: Fn(&str) -> Option<(usize, String, String)>,
     A: FnOnce() -> Option<(usize, String, String)>,
     U: Fn(usize, &str, BatchAuthRowUpdate),
+    Tr: Fn(&str),
 {
     macro_rules! check_cancel {
         () => {
@@ -1872,12 +1904,23 @@ where
             match verify_result {
                 Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
                     log::info!("[batch-auth] verify ok  port={port} mac={mac}");
+                    trace(&format!(
+                        "[verify ok] port={port} mac={mac} uuid={uuid} authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
                     update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
                 }
                 Some((rb_u, rb_k)) => {
-                    let msg =
-                        format!("Verify failed: wrote ({uuid},{authkey}), read ({rb_u},{rb_k})");
-                    log::warn!("[batch-auth] verify-fail  port={port} mac={mac} reason={msg}");
+                    // Plaintext comparison goes to the .trace sink (local only,
+                    // never exported); the user-visible error + log stay masked.
+                    trace(&format!(
+                        "[verify mismatch] port={port} mac={mac} wrote_uuid={uuid} wrote_authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
+                    let msg = format!(
+                        "Verify failed: wrote (uuid={uuid}, authkey={}), read (uuid={rb_u}, authkey={})",
+                        mask_secret(&authkey),
+                        mask_secret(&rb_k),
+                    );
+                    log::warn!("[batch-auth] verify-fail  port={port} mac={mac}");
                     update_row(
                         row_idx,
                         &mac,
@@ -2140,11 +2183,20 @@ where
             match verify_result {
                 Some((rb_u, rb_k)) if rb_u == uuid && rb_k == authkey => {
                     log::info!("[batch-auth] verify ok (old fw)  port={port} mac={mac}");
+                    trace(&format!(
+                        "[verify ok (old fw)] port={port} mac={mac} uuid={uuid} authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
                     update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
                 }
                 Some((rb_u, rb_k)) => {
-                    let msg =
-                        format!("Verify failed: wrote ({uuid},{authkey}), read ({rb_u},{rb_k})");
+                    trace(&format!(
+                        "[verify mismatch (old fw)] port={port} mac={mac} wrote_uuid={uuid} wrote_authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
+                    ));
+                    let msg = format!(
+                        "Verify failed: wrote (uuid={uuid}, authkey={}), read (uuid={rb_u}, authkey={})",
+                        mask_secret(&authkey),
+                        mask_secret(&rb_k),
+                    );
                     log::warn!("[batch-auth] verify-fail (old fw)  port={port} mac={mac}");
                     update_row(
                         row_idx,
@@ -2278,6 +2330,46 @@ pub fn read_auth_probe(
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    #[test]
+    fn mask_secret_reveals_head_tail_and_length() {
+        let key = "abcd1234567890efgh5678wxyz"; // 26 chars
+        assert_eq!(mask_secret(key), "abcd****wxyz(len=26)");
+    }
+
+    #[test]
+    fn mask_secret_for_typical_32_char_key() {
+        let key = "0123456789abcdef0123456789abcdef";
+        assert_eq!(mask_secret(key), "0123****cdef(len=32)");
+    }
+
+    #[test]
+    fn mask_secret_short_is_fully_masked() {
+        assert_eq!(mask_secret("short"), "****(len=5)");
+    }
+
+    #[test]
+    fn mask_secret_empty() {
+        assert_eq!(mask_secret(""), "(empty)");
+    }
+
+    #[test]
+    fn mask_secret_boundary_eight_chars() {
+        assert_eq!(mask_secret("12345678"), "****(len=8)");
+    }
+
+    #[test]
+    fn mask_secret_nine_chars_reveals_head_tail() {
+        assert_eq!(mask_secret("123456789"), "1234****6789(len=9)");
+    }
+
+    #[test]
+    fn mask_secret_counts_chars_not_bytes() {
+        // U+00E9 is two bytes in UTF-8; masking must count chars, not bytes.
+        let key = "\u{e9}".repeat(10); // 10 chars, 20 bytes
+        let frag = "\u{e9}".repeat(4);
+        assert_eq!(mask_secret(&key), format!("{f}****{f}(len=10)", f = frag));
+    }
 
     /// Mock serial I/O for `AuthSession` unit tests.
     ///

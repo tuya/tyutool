@@ -133,8 +133,14 @@ describe("exportLogsAndReport", () => {
       "open_external_url",
       expect.objectContaining({ url: copied }),
     );
-    // final success confirmation dialog
-    expect(showConfirmDialog).toHaveBeenCalled();
+    // final success confirmation dialog includes the privacy reminder
+    expect(showConfirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "settings.reportIssue.privacyReminder",
+        ),
+      }),
+    );
   });
 
   it("Tauri mode: clipboard failure is swallowed and the flow still opens the URL", async () => {

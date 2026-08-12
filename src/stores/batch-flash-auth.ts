@@ -46,6 +46,15 @@ import {
   saveBatchFlashAuthConfig,
   saveBatchFlashAuthSharedConfig,
 } from "@/stores/batch-flash-auth-workspace";
+import { usePortManagerStore } from "@/stores/port-manager";
+import { showConfirmDialog } from "@/composables/confirmDialog";
+
+/** Owner id under which batch-auth claims serial ports in the port-manager. */
+const PORT_OWNER = "batch-auth";
+/** Ports currently claimed by batch-auth and not yet released back to the
+ *  port-manager. Tracked so terminal-state releases only touch our own claims
+ *  and cleanup() can release any stragglers. */
+const claimedPorts = new Set<string>();
 
 const ACTIVE_STATUSES: BatchSlotStatus[] = [
   "reading",
@@ -185,6 +194,107 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   function updateSlot(port: string, patch: Partial<BatchSlotState>) {
     const slot = findSlot(port);
     if (slot) Object.assign(slot, patch);
+  }
+
+  // ── Port-manager integration ─────────────────────────────────────────────
+  /**
+   * Release a port back to the port-manager, but only if batch-auth currently
+   * claims it. Safe to call on every terminal-state transition; ports we never
+   * acquired (or already released) are a no-op.
+   */
+  function releasePortIfClaimed(port: string): void {
+    if (!claimedPorts.has(port)) return;
+    usePortManagerStore().release(port, PORT_OWNER);
+    claimedPorts.delete(port);
+  }
+
+  /**
+   * Release every still-claimed port. Used on teardown (cleanup) to avoid
+   * leaking claims if a terminal event never arrived.
+   */
+  function releaseAllClaimedPorts(): void {
+    const pm = usePortManagerStore();
+    for (const port of claimedPorts) pm.release(port, PORT_OWNER);
+    claimedPorts.clear();
+  }
+
+  /**
+   * Pre-check ownership and acquire free ports for a batch operation. Ports
+   * already held by another feature are NOT preempted: they are collected and
+   * surfaced to the user via a single summary dialog (the operator decides
+   * whether to release them elsewhere and retry), then omitted from the
+   * returned list. Each acquired port is registered in `claimedPorts`.
+   *
+   * Returns the subset of `ports` that batch-auth may now open.
+   */
+  async function acquireBatchPorts(ports: string[]): Promise<string[]> {
+    const pm = usePortManagerStore();
+    const busy: Array<{ port: string; owner: string }> = [];
+    const free: string[] = [];
+    for (const port of ports) {
+      const owner = pm.currentOwner(port);
+      if (owner && owner !== PORT_OWNER) {
+        busy.push({ port, owner });
+      } else {
+        free.push(port);
+      }
+    }
+
+    if (busy.length > 0) {
+      const lines = busy
+        .map((b) => t("batchFlashAuth.errors.port.inUseOwner", b))
+        .join("\n");
+      // Informative dialog only (no preemption, no cancel decision): the user
+      // must release the ports from the owning feature themselves.
+      void showConfirmDialog({
+        title: t("batchFlashAuth.errors.port.inUse"),
+        message: lines,
+        kind: "warning",
+        showCancel: false,
+      });
+    }
+
+    const acquired: string[] = [];
+    for (const port of free) {
+      // Same-owner (batch-auth) acquire is an idempotent refresh; a fresh free
+      // port takes the synchronous fast path. Either way the result is "ok".
+      const outcome = await pm.acquire({
+        id: PORT_OWNER,
+        port,
+        onReleaseRequest: async (requester) => {
+          // Batch-auth never yields a port mid-operation: a preempted handle
+          // would leave the device in an undefined state. Tell the requester
+          // why, then deny.
+          void showConfirmDialog({
+            title: t("batchFlashAuth.errors.port.heldByBatch", { port }),
+            message: t("batchFlashAuth.errors.port.busyReason", {
+              owner: requester,
+            }),
+            kind: "warning",
+            showCancel: false,
+          });
+          return false;
+        },
+        onReleased: (reason) => {
+          // Reached only for involuntary reasons (e.g. hotplug) since
+          // onReleaseRequest always denies. Drop our bookkeeping so a later
+          // retry can re-acquire cleanly.
+          claimedPorts.delete(port);
+          if (reason !== "requested") {
+            updateSlot(port, {
+              status: "failed",
+              error: t("batchFlashAuth.errors.port.lost"),
+            });
+            checkBatchCompletion();
+          }
+        },
+      });
+      if (outcome === "ok") {
+        claimedPorts.add(port);
+        acquired.push(port);
+      }
+    }
+    return acquired;
   }
 
   // ── Port management ───────────────────────────────────────────────────────
@@ -364,6 +474,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     rLog.error(`[batch-auth] batch_auth_start rejected: ${raw}`);
     for (const port of ports) {
       updateSlot(port, { status: "failed", error: msg, currentPhase: "" });
+      releasePortIfClaimed(port);
     }
     checkBatchCompletion();
   }
@@ -398,8 +509,23 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     const idlePorts = slots.value
       .filter((s) => s.status === "idle")
       .map((s) => s.port);
-    currentBatchPorts.value = idlePorts;
-    for (const port of idlePorts) {
+
+    // Acquire ports through the port-manager before opening them in Rust.
+    // Ports held by another feature are reported to the user (dialog) and
+    // skipped — batch-auth never preempts an active owner.
+    const acquiredPorts = await acquireBatchPorts(idlePorts);
+    const blockedPorts = idlePorts.filter((p) => !acquiredPorts.includes(p));
+    for (const port of blockedPorts) {
+      const owner = usePortManagerStore().currentOwner(port) ?? "?";
+      updateSlot(port, {
+        status: "skipped",
+        currentPhase: "",
+        error: t("batchFlashAuth.errors.port.busyReason", { owner }),
+      });
+    }
+
+    currentBatchPorts.value = acquiredPorts;
+    for (const port of acquiredPorts) {
       updateSlot(port, {
         // Flash-only slots never read a MAC; show them as flashing right away.
         status: authorizeEnabled.value ? "reading_mac" : "flashing",
@@ -409,6 +535,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         excelError: undefined,
         cancelledAfterWrite: undefined,
       });
+    }
+
+    if (acquiredPorts.length === 0) {
+      checkBatchCompletion();
+      return;
     }
 
     const { invoke } = await import("@tauri-apps/api/core");
@@ -437,9 +568,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       authorizeEnabled: authorizeEnabled.value,
     };
     try {
-      await invoke("batch_auth_start", { config, ports: idlePorts });
+      await invoke("batch_auth_start", { config, ports: acquiredPorts });
     } catch (e) {
-      failPortsOnStartError(idlePorts, e);
+      failPortsOnStartError(acquiredPorts, e);
     }
   }
 
@@ -480,6 +611,21 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelError: undefined,
     });
     batchEndTime.value = null;
+    // Acquire the single retry port; if it's now held elsewhere, abort cleanly.
+    const acquired = await acquireBatchPorts([port]);
+    if (!acquired.includes(port)) {
+      const owner = usePortManagerStore().currentOwner(port) ?? "?";
+      updateSlot(port, {
+        status: "failed",
+        error: t("batchFlashAuth.errors.port.busyReason", { owner }),
+      });
+      checkBatchCompletion();
+      return;
+    }
+    updateSlot(port, {
+      status: authorizeEnabled.value ? "reading_mac" : "flashing",
+      currentPhase: authorizeEnabled.value ? "reading_mac" : "",
+    });
     const { invoke } = await import("@tauri-apps/api/core");
     const fw =
       canFlash.value && flashFirmware.value
@@ -528,6 +674,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     if (!isTauriRuntime()) return;
     const slot = findSlot(port);
     if (!slot || ACTIVE_STATUSES.includes(slot.status)) return;
+    // read_auth_probe opens the serial port in Rust, so it must go through the
+    // port-manager like any real port-open. Aborted probe rolls back to idle.
+    const acquired = await acquireBatchPorts([port]);
+    if (!acquired.includes(port)) return;
     updateSlot(port, { status: "reading", readError: undefined });
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("batch_auth_read_ports", {
@@ -546,8 +696,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       (s) => !ACTIVE_STATUSES.includes(s.status),
     );
     if (!readable.length) return;
-    for (const s of readable) {
-      updateSlot(s.port, { status: "reading", readError: undefined });
+    const allPorts = readable.map((s) => s.port);
+    // Acquire all readable ports; only probe the subset we now own.
+    const acquired = await acquireBatchPorts(allPorts);
+    if (acquired.length === 0) return;
+    for (const p of acquired) {
+      updateSlot(p, { status: "reading", readError: undefined });
     }
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("batch_auth_read_ports", {
@@ -556,7 +710,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         baudRate: authBaudRate.value,
         authStorage: authConfig.value.authStorage,
       },
-      ports: readable.map((s) => s.port),
+      ports: acquired,
     });
   }
 
@@ -680,6 +834,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         // cancelled — not counted in cumulative
         updateSlot(port, { status: "idle", progress: 0, currentPhase: "" });
       }
+      releasePortIfClaimed(port);
       scheduleSaveStats();
       checkBatchCompletion();
     }
@@ -713,6 +868,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.success++;
+      releasePortIfClaimed(port);
       scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "failed") {
@@ -732,6 +888,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         : cumulativeStats.value.flash;
       failStats.total++;
       failStats.fail++;
+      releasePortIfClaimed(port);
       scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "no_code") {
@@ -746,6 +903,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         authUuid: undefined,
         isAuthorized: undefined,
       });
+      releasePortIfClaimed(port);
       checkBatchCompletion();
     } else if (step === "skipped") {
       updateSlot(port, {
@@ -759,6 +917,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         readError: undefined,
         excelError: ev.excelError,
       });
+      releasePortIfClaimed(port);
       checkBatchCompletion();
     } else if (step === "cancelled") {
       // Rust cancelled the slot (e.g. user hit cancel mid-flight).
@@ -770,6 +929,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: undefined,
         excelError: undefined,
       });
+      releasePortIfClaimed(port);
       checkBatchCompletion();
     } else if (step === "cancelled_after_write") {
       // auth_write was sent but cancel arrived before verify. The credential
@@ -785,6 +945,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.fail++;
+      releasePortIfClaimed(port);
       scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "default_mac") {
@@ -800,6 +961,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       });
       cumulativeStats.value.auth.total++;
       cumulativeStats.value.auth.fail++;
+      releasePortIfClaimed(port);
       scheduleSaveStats();
       checkBatchCompletion();
     } else if (step === "flashing" && ev.event) {
@@ -835,6 +997,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
           });
           cumulativeStats.value.flash.total++;
           cumulativeStats.value.flash.success++;
+          releasePortIfClaimed(port);
           scheduleSaveStats();
           checkBatchCompletion();
         }
@@ -865,6 +1028,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } else if (step === "cancelled") {
       updateSlot(port, { status: "idle" });
     }
+    // The read probe opens the port transiently; release it now that the
+    // probe is over (done/failed/cancelled are all terminal for the probe).
+    releasePortIfClaimed(port);
   }
 
   function checkBatchCompletion() {
@@ -1071,6 +1237,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   function cleanup() {
     clearTimeout(_saveStatsTimer);
     _saveStatsTimer = undefined;
+    releaseAllClaimedPorts();
     unlisten?.();
     unlisten = undefined;
     unlistenAuth?.();

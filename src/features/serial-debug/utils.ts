@@ -1,6 +1,27 @@
 /**
  * Serial-debug helpers shared across components.
  */
+import type { DebugLogLine, SerialDebugLine } from "./types";
+
+/**
+ * Maps an archive-backed line onto a display line. The caller supplies `id`
+ * because archive `lineNo`s restart at 1 on every session, while display ids
+ * must stay unique for the whole store lifetime — the log renderers cache
+ * parsed lines by id, so a reused id would render the wrong content.
+ */
+export function archiveLineToLogLine(
+  line: SerialDebugLine,
+  id: number,
+): DebugLogLine {
+  return {
+    id,
+    tsMs: line.tsMs,
+    direction: line.direction,
+    text: line.text,
+    rawBytes: line.rawBytes ? Uint8Array.from(line.rawBytes) : undefined,
+  };
+}
+
 export function sanitizePortName(port: string): string {
   const stripped = port.startsWith("/") ? port.slice(1) : port;
   return stripped.replace(/[/\\:*?"<>|.]/g, "_");

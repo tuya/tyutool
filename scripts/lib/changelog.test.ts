@@ -20,6 +20,31 @@ describe('buildDraftSection', () => {
     expect(s).toContain('### Bug Fixes');
     expect(s).toContain('\n---\n'); // the inter-language separator
   });
+
+  // release.ts runs `git cliff --unreleased` and passes the result here. Before
+  // this argument existed the call passed it anyway and it was silently dropped,
+  // so the operator always got an empty skeleton to fill in by hand.
+  it('uses the git-cliff body as the English half when one is supplied', () => {
+    const cliff = '#### Features\n\n- Add T5AI support\n\n#### Bug Fixes\n\n- Fix baud rate';
+
+    const s = buildDraftSection('3.0.14', '2026-06-18', cliff);
+
+    expect(s).toContain('- Add T5AI support');
+    expect(s).toContain('- Fix baud rate');
+    // Chinese half still awaits manual polish, and the marker still blocks release.
+    expect(s).toContain('### 新功能');
+    expect(s).toContain(DRAFT_MARKER);
+    // The empty English placeholders are gone.
+    expect(s).not.toContain('### Features\n\n- \n');
+  });
+
+  it('falls back to the empty English skeleton for a blank cliff body', () => {
+    for (const body of [undefined, '', '   \n  ']) {
+      const s = buildDraftSection('3.0.14', '2026-06-18', body);
+      expect(s).toContain('### Features');
+      expect(s).toContain('### Bug Fixes');
+    }
+  });
 });
 
 describe('insertSection', () => {
