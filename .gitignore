@@ -8,6 +8,12 @@ package-lock.json
 # ── Rust / Cargo ──────────────────────────────────────────────────────────────
 target/
 
+# Bridge packaging scratch: `out/` is where the workflow stages the built binary
+# for cargo-packager to consume, `installers/` is where the .dmg/.exe/.deb land.
+# Both are reproducible build output and are recreated on every run.
+out/
+installers/
+
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc

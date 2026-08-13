@@ -376,7 +376,10 @@ fn run_batch_auth_slot(
             log::info!("[batch-auth] flash done  port={port}");
             if config.authorize_enabled {
                 // Wait for the device to boot naturally after flash before the auth
-                // slot issues a hardware reset. Non-fatal: times out after 3 s max.
+                // slot issues a hardware reset. Non-fatal, and passive: it exits as
+                // soon as the device answers, so only a silent device pays the full
+                // WAIT_AFTER_FLASH_MAX window. Each port has its own thread, so a
+                // longer worst case does not accumulate across the batch.
                 tyutool_core::wait_after_firmware_flash(
                     &port,
                     config.auth_baud_rate,

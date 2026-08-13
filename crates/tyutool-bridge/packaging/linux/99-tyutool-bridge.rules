@@ -1,0 +1,33 @@
+# tyutool-bridge —— 让 ModemManager 放过烧录用的 USB 串口，并给用户放开读写权限。
+#
+# 为什么需要这条规则（真机现场，Ubuntu）：
+#   T5AI 等开发板在 Linux 上枚举成 /dev/ttyACM* 或 /dev/ttyUSB*，而 Ubuntu 默认运行的
+#   ModemManager 会把新出现的 CDC-ACM 节点当调制解调器，插上就自动发 AT 指令探测，
+#   期间用 TIOCEXCL 独占该串口数秒~数十秒。烧录助手此刻 open() 直接拿到 EBUSY，
+#   如实报「串口被其他程序占用」——判断没错，但占用者是系统服务，用户在界面上
+#   完全看不出该关谁。macOS / Windows 没有这个服务，所以只有 Linux 复现。
+#
+# 处置口径：**不禁用整个 ModemManager**（用户可能真的在用移动网络），只对
+# 烧录助手认得的三家 USB-串口桥芯片打 ID_MM_DEVICE_IGNORE，让它别碰这些设备。
+#
+# VID 与 tyutool-bridge 的 VID_ALLOWLIST 同源（crates/tyutool-bridge/src/lib.rs）：
+#   1a86 = WCH（CH340 / CH341 / CH343，涂鸦开发板最常见）
+#   10c4 = Silicon Labs（CP210x）
+#   0403 = FTDI（FT232 系列）
+# ⚠ 改动 VID_ALLOWLIST 时这里要同步，否则新支持的芯片仍会被 ModemManager 抢。
+#
+# 手工安装（不装 deb 时）：
+#   sudo cp 99-tyutool-bridge.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+
+# brltty（盲文终端服务）在 Ubuntu 22.04+ 会误认 CH340 为盲文显示器并抢占设备。
+# ⚠ 下面这条**未在真机验证过**（二次 CR 指出）：brltty 自带的 85-brltty.rules 在匹配后会
+# `GOTO` 到自己的标签并触发 SYSTEMD_WANTS，那些副作用是否发生在 99- 规则执行之前，
+# 静态读规则文件判不出来。业界文档记载的确定做法是「mask brltty-udev.service」或
+# 「改 85-brltty.rules 注释掉对应 ENV{PRODUCT} 行」——FAQ 给的是这两条。
+# 这条留着是低成本的额外尝试（生效则省事，不生效也无副作用），别当成已验证的方案。
+ACTION=="add|change", SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ENV{BRLTTY_BRAILLE_DRIVER}=""

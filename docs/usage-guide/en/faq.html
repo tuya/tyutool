@@ -59,6 +59,25 @@ tyutool usb-port-survey   # dumps raw USB metadata, handy for cross-OS debugging
         <li>If you want tyutool to let go when you switch away, enable <strong>auto-release serial port</strong> in <strong>Settings</strong>.</li>
       </ul>
 
+      <h4 id="port-busy-linux">Linux only: the holder is usually a system service (ModemManager / brltty)</h4>
+      <p><strong>Symptom:</strong> on Ubuntu and friends the port reports busy right after you plug the board in, even though you have no serial tool open; the node is typically <code>/dev/ttyACM0</code>. The same board works on macOS and Windows.</p>
+      <p><strong>Cause:</strong> <code>ModemManager</code> treats a new CDC-ACM node as a modem, probes it with AT commands on plug-in, and holds the port exclusively (<code>TIOCEXCL</code>) for seconds to tens of seconds. It is a system service, so nothing on screen points at it. <code>brltty</code> (braille terminal) also grabs CH340 devices on Ubuntu 22.04+.</p>
+      <p><strong>Identify the holder first:</strong></p>
+      <pre>sudo fuser -v /dev/ttyACM0     # or: sudo lsof /dev/ttyACM0</pre>
+      <p><strong>Quick check</strong> — if flashing works right after stopping it, that was the cause:</p>
+      <pre>sudo systemctl stop ModemManager</pre>
+      <p><strong>Recommended permanent fix</strong> — do not disable ModemManager wholesale (you may actually use mobile broadband); just tell it to ignore the USB-serial bridges used for flashing. <strong>Installing the flashing helper's deb package ships this rule for you</strong> (<code>/usr/lib/udev/rules.d/99-tyutool-bridge.rules</code>); with a manual tyutool install, create it yourself:</p>
+      <pre># /etc/udev/rules.d/99-tyutool-bridge.rules
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+
+sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</pre>
+      <p>The three VIDs are WCH (CH340/CH341/CH343), Silicon Labs (CP210x) and FTDI — the same list the flashing helper recognises. After installing the rule, <strong>re-plug the device</strong> (or run the <code>udevadm trigger</code> above) for it to take effect on an already-connected board.</p>
+      <p>If stopping ModemManager does not help, check brltty next (Ubuntu 22.04+ mistakes CH340 for a braille display): <code>systemctl status brltty-udev.service</code>. The unit that actually grabs devices is <strong>brltty-udev.service</strong>, not the <code>brltty</code> main service:</p>
+      <pre>sudo systemctl mask brltty-udev.service</pre>
+      <p>If you genuinely use a braille device and cannot mask it wholesale, edit <code>/usr/lib/udev/rules.d/85-brltty.rules</code> instead and comment out the line matching your board (looks like <code>ENV{PRODUCT}=="1a86/7523/*"</code>), then reload the rules.</p>
+
       <h2 id="flashing">2. Flashing</h2>
 
       <h3 id="flash-fails">Flash fails / handshake error</h3>

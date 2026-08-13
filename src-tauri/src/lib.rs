@@ -275,6 +275,12 @@ async fn check_port_available_cmd(port: String) -> tyutool_core::PortCheckResult
             error_message: Some("Port check task panicked".to_string()),
             process_info: None,
             kill_hint: None,
+            // 探测任务自己 panic 了，拿不到任何占用者信息——None 是如实，不是偷懒。
+            // （`holders` 是 fork 侧新增字段：Linux 上按 fuser/lsof 的来源分派解析出
+            //  占用进程名；见 tyutool-core/src/serial.rs 的 describe_port_holders。
+            //  这行是合并上游后补的——上游新写的调用点不知道有这个字段，
+            //  属于自动合并发现不了的语义冲突。）
+            holders: None,
         },
     }
 }

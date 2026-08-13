@@ -219,13 +219,30 @@ describe("useFlashProgress reducer", () => {
 
   // ── milestones ──────────────────────────────────────────────────
 
+  // `verify_passed` is deliberately un-translated here: it must stay a milestone
+  // with no `flash.log.milestone.*` key so the fallback path keeps being tested.
+  // (`handshake_complete` used to play this role until it got a real key.)
   it("string milestone with no i18n key logs a bracketed fallback", () => {
+    const { p, appendLog } = make();
+    p.handleFlashProgressPayload({
+      kind: "milestone",
+      milestone: "verify_passed",
+    } as never);
+    expect(appendLog).toHaveBeenCalledWith("[verify_passed]");
+  });
+
+  it("string milestone with an i18n key logs the translated text", () => {
     const { p, appendLog } = make();
     p.handleFlashProgressPayload({
       kind: "milestone",
       milestone: "handshake_complete",
     } as never);
-    expect(appendLog).toHaveBeenCalledWith("[handshake_complete]");
+    // Not the `[handshake_complete]` fallback — a real translation. (Locale
+    // resolves from the environment, so compare against the same lookup the
+    // other tests in this file use.)
+    expect(appendLog).toHaveBeenCalledWith(
+      i18n.global.t("flash.log.milestone.handshake_complete"),
+    );
   });
 
   it("object milestone (connected) logs its first-key fallback", () => {

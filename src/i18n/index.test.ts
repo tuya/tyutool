@@ -79,6 +79,28 @@ describe("dynamic key families", () => {
       expect(i18n.global.te(`batchFlashAuth.phase.${phase}`, "en")).toBe(true);
     }
   });
+
+  // useFlashProgress builds `flash.log.milestone.${key}` dynamically and falls
+  // back to a bare `[key]` when the key is missing — which is what shipped for
+  // the Beken milestones. These are the ones plugins emit and the log panel is
+  // expected to render as prose; variants handled by a dedicated UI path
+  // (auth_read_complete/empty, auth_conflict) or not emitted by any plugin
+  // (connected, verify_passed, segment_written) are deliberately absent.
+  it("flash.log.milestone.* keys are defined for every rendered milestone", () => {
+    const milestones = [
+      "handshake_complete",
+      "flash_id_read",
+      "erase_complete",
+      "write_complete",
+      "rebooted",
+      "auth_write_skipped",
+      "auth_write_sent",
+    ];
+    for (const m of milestones) {
+      expect(i18n.global.te(`flash.log.milestone.${m}`, "en")).toBe(true);
+      expect(i18n.global.te(`flash.log.milestone.${m}`, "zh-CN")).toBe(true);
+    }
+  });
 });
 
 describe("i18n key coverage", () => {

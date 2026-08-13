@@ -471,7 +471,13 @@
         "authorizeNotSupported": "该芯片不支持授权操作。"
       },
       "milestone": {
-        "auth_write_skipped": "设备授权信息与待写入内容一致，无需重复写入。"
+        "handshake_complete": "握手完成。",
+        "flash_id_read": "已读取 Flash ID。",
+        "erase_complete": "擦除完成。",
+        "write_complete": "写入完成。",
+        "rebooted": "重启命令已发出。",
+        "auth_write_skipped": "设备授权信息与待写入内容一致，无需重复写入。",
+        "auth_write_sent": "授权写入命令已发送到设备。"
       }
     }
   },

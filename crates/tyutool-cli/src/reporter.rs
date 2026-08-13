@@ -346,6 +346,7 @@ fn milestone_text(m: &FlashMilestone) -> String {
         FlashMilestone::AuthWriteSkipped => {
             "Device already has matching credentials — write skipped".into()
         }
+        FlashMilestone::AuthWriteSent => "Authorization write sent".into(),
     }
 }
 

@@ -251,6 +251,11 @@ pub struct PortCheckResult {
     pub error_message: Option<String>,
     pub process_info: Option<String>,
     pub kill_hint: Option<String>,
+    /// 人类可读的占用者，如 `"ModemManager (812)"`；认不出来时 None（不许编）。
+    /// 与 `process_info`（原始 fuser/lsof 输出，只进日志）分开：这一条是要给
+    /// 用户看的——Ubuntu 上占口的往往是 ModemManager 这类系统服务，
+    /// 只说「被其他程序占用」用户根本无从下手。
+    pub holders: Option<String>,
 }
 
 /// Check if a serial port can be opened. If not, attempt to identify
@@ -269,24 +274,94 @@ pub fn check_port_available(port: &str) -> PortCheckResult {
                 error_message: None,
                 process_info: None,
                 kill_hint: None,
+                holders: None,
             }
         }
         Err(e) => {
             log::warn!("Port {} unavailable: {}", port, e);
             let error_message = format!("{}", e);
-            let (process_info, kill_hint) = detect_port_usage(port);
+            let (usage, kill_hint) = detect_port_usage(port);
+            let holders =
+                describe_port_holders(usage.as_ref().map(|(src, raw)| (*src, raw.as_str())));
             PortCheckResult {
                 available: false,
                 error_message: Some(error_message),
-                process_info,
+                // 原始输出仍原样进日志（诊断用），只是现在带着来源标签
+                process_info: usage.map(|(_, raw)| raw),
                 kill_hint,
+                holders,
             }
         }
     }
 }
 
+/// 占用信息是哪个工具产出的——**解析方式必须由来源决定，不能靠猜**。
+///
+/// ⚠ 二次 CR 抓到的真缺陷：早先版本不记来源，对任何 raw 都先按 fuser 解析。
+/// 而 lsof 表格里的 FD(`9u`) / DEVICE(`166,0`) / NODE(`221`) 全是数字列，
+/// 会被当成 PID 去读 `/proc/<n>/comm`——在真机上有些号真能解析出**无关的真实进程名**。
+/// 报错名字比不报名字更坏（用户会去关一个无辜的进程），直接违背本模块「绝不编造」的承诺。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// 各变体的构造点分散在 cfg 平台分支里（Fuser 只在 Linux、Opaque 只在 Windows），
+// 单平台构建下必有变体「未被构造」——测试里三个都用得到
+#[allow(dead_code)]
+pub(crate) enum PortUsageSource {
+    /// `fuser <port>`：只给 PID，名字要再读 `/proc/<pid>/comm`
+    Fuser,
+    /// `lsof <port>`：表格首列就是进程名
+    Lsof,
+    /// 平台拿不到真实占用者（Windows 的静态提示语）——不许当名字用
+    Opaque,
+}
+
+/// 按来源决定「这串文本里能读出什么」。纯函数，便于单测钉住上面那条 CR 缺陷。
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub(crate) fn holder_hint(source: PortUsageSource, raw: &str) -> HolderHint {
+    match source {
+        PortUsageSource::Fuser => HolderHint::Pids(parse_fuser_pids(raw)),
+        PortUsageSource::Lsof => HolderHint::Names(parse_lsof_commands(raw)),
+        PortUsageSource::Opaque => HolderHint::Names(Vec::new()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub(crate) enum HolderHint {
+    Pids(Vec<u32>),
+    Names(Vec<String>),
+}
+
+/// 把 `detect_port_usage` 的原始输出提炼成用户看得懂的占用者名字。
+/// Linux：fuser 只给 PID，名字要再读 `/proc/<pid>/comm`（纯文件读，无额外依赖）；
+/// 进程已退出 / 无权限读时该条静默丢弃（宁可少报，绝不编）。
+/// macOS：lsof 首列就是进程名。Windows：拿不到，返回 None 让上层用通用文案。
+#[allow(unused_variables)]
+fn describe_port_holders(usage: Option<(PortUsageSource, &str)>) -> Option<String> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let (source, raw) = usage?;
+        let entries: Vec<(String, Option<u32>)> = match holder_hint(source, raw) {
+            HolderHint::Pids(pids) => pids
+                .into_iter()
+                .filter_map(|pid| {
+                    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                        .ok()
+                        .map(|name| (name.trim().to_string(), Some(pid)))
+                        .filter(|(name, _)| !name.is_empty())
+                })
+                .collect(),
+            HolderHint::Names(names) => names.into_iter().map(|name| (name, None)).collect(),
+        };
+        format_holders(&entries)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
+}
+
 /// Detect which process is using a serial port (platform-specific).
-fn detect_port_usage(port: &str) -> (Option<String>, Option<String>) {
+fn detect_port_usage(port: &str) -> (Option<(PortUsageSource, String)>, Option<String>) {
     #[cfg(target_os = "linux")]
     {
         // Try fuser first
@@ -295,14 +370,20 @@ fn detect_port_usage(port: &str) -> (Option<String>, Option<String>) {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             let combined = if stdout.is_empty() { stderr } else { stdout };
             if !combined.is_empty() {
-                return (Some(combined), Some(format!("sudo fuser -k {}", port)));
+                return (
+                    Some((PortUsageSource::Fuser, combined)),
+                    Some(format!("sudo fuser -k {}", port)),
+                );
             }
         }
         // Fallback to lsof
         if let Ok(output) = std::process::Command::new("lsof").arg(port).output() {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !stdout.is_empty() {
-                return (Some(stdout), Some(format!("sudo fuser -k {}", port)));
+                return (
+                    Some((PortUsageSource::Lsof, stdout)),
+                    Some(format!("sudo fuser -k {}", port)),
+                );
             }
         }
         (None, None)
@@ -313,7 +394,7 @@ fn detect_port_usage(port: &str) -> (Option<String>, Option<String>) {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !stdout.is_empty() {
                 return (
-                    Some(stdout),
+                    Some((PortUsageSource::Lsof, stdout)),
                     Some(format!(
                         "lsof {} | awk 'NR>1 {{print $2}}' | xargs kill",
                         port
@@ -327,7 +408,11 @@ fn detect_port_usage(port: &str) -> (Option<String>, Option<String>) {
     {
         let _ = port; // suppress unused warning
         (
-            Some("Another program may be using this port.".into()),
+            // Opaque：这是一句提示语，不是占用者名字——holder_hint 会拒绝拿它当名字用
+            Some((
+                PortUsageSource::Opaque,
+                "Another program may be using this port.".to_string(),
+            )),
             Some("Close the other program or check Device Manager.".into()),
         )
     }
@@ -713,5 +798,145 @@ mod macos_serial_list_tests {
             "/dev/cu.URT0",
             &SerialPortType::PciPort
         ));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Port holder naming — turn `fuser` / `lsof` raw output into names a user
+// can act on (Ubuntu's ModemManager being the case that motivated this).
+// ─────────────────────────────────────────────────────────────────────────
+
+/// PIDs out of `fuser <port>` output (`"/dev/ttyACM0: 1234 5678"` or bare
+/// `"1234 5678"`; fuser writes the port label to stderr and PIDs to stdout,
+/// and callers may hand us either stream — so tolerate both shapes).
+// 只在 Linux 分支有调用方（测试里两平台都跑），macOS/Windows 构建下豁免 dead_code
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn parse_fuser_pids(raw: &str) -> Vec<u32> {
+    raw.split(|c: char| c == ':' || c.is_whitespace())
+        .filter_map(|tok| {
+            // fuser appends access-type letters to PIDs (`1234c`, `5678f`)
+            let digits: String = tok.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() {
+                None
+            } else {
+                digits.parse::<u32>().ok()
+            }
+        })
+        .collect()
+}
+
+/// Process names out of `lsof <port>` table output (first column, header row
+/// and blank lines dropped, de-duplicated, order preserved).
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub(crate) fn parse_lsof_commands(raw: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for line in raw.lines() {
+        let Some(first) = line.split_whitespace().next() else {
+            continue;
+        };
+        if first == "COMMAND" {
+            continue;
+        }
+        if !names.iter().any(|n| n == first) {
+            names.push(first.to_string());
+        }
+    }
+    names
+}
+
+/// Human-readable holder list: `"ModemManager (1234)"`, joined by `, `.
+/// `None` when nothing could be named — callers must not invent a name.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub(crate) fn format_holders(entries: &[(String, Option<u32>)]) -> Option<String> {
+    if entries.is_empty() {
+        return None;
+    }
+    let text = entries
+        .iter()
+        .map(|(name, pid)| match pid {
+            Some(pid) => format!("{name} ({pid})"),
+            None => name.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(text)
+}
+
+#[cfg(test)]
+mod port_holder_tests {
+    use super::{format_holders, parse_fuser_pids, parse_lsof_commands};
+
+    #[test]
+    fn fuser_pids_parse_from_labelled_and_bare_output() {
+        // 真实 fuser 输出：端口标签在 stderr、PID 在 stdout，调用方两股都可能递过来
+        assert_eq!(
+            parse_fuser_pids("/dev/ttyACM0: 1234 5678"),
+            vec![1234, 5678]
+        );
+        assert_eq!(parse_fuser_pids(" 1234\n"), vec![1234]);
+        // 访问类型后缀（c=cwd, f=open file…）必须剥掉，否则 parse 失败整条丢
+        assert_eq!(
+            parse_fuser_pids("/dev/ttyACM0: 1234c 5678f"),
+            vec![1234, 5678]
+        );
+        assert!(parse_fuser_pids("").is_empty());
+        assert!(parse_fuser_pids("/dev/ttyACM0:").is_empty());
+    }
+
+    #[test]
+    fn lsof_commands_drop_header_and_dedupe() {
+        let raw = "COMMAND     PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\n\
+                   ModemManager 812  root    9u   CHR 166,0      0t0  221 /dev/ttyACM0\n\
+                   ModemManager 812  root   10u   CHR 166,0      0t0  221 /dev/ttyACM0\n\
+                   picocom     4021 user    3u   CHR 166,0      0t0  221 /dev/ttyACM0";
+        assert_eq!(
+            parse_lsof_commands(raw),
+            vec!["ModemManager".to_string(), "picocom".to_string()]
+        );
+        assert!(parse_lsof_commands("").is_empty());
+    }
+
+    /// 二次 CR 抓到的真缺陷的回归护栏：lsof 表格**绝不能**按 fuser 解析。
+    /// 它的 FD(`9u`) / DEVICE(`166,0`) / NODE(`221`) 都是数字列，按 PID 解析会去读
+    /// `/proc/9/comm` 之类，真机上有些号能读出**无关的真实进程名**——
+    /// 报错名字比不报名字更坏（用户会去关一个无辜的进程）。
+    #[test]
+    fn holder_hint_is_decided_by_source_not_guessed() {
+        use super::{holder_hint, HolderHint, PortUsageSource};
+        let lsof = "COMMAND     PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\n\
+                    ModemManager 812  root    9u   CHR 166,0      0t0  221 /dev/ttyACM0";
+        // lsof 来源 → 只读首列名字，一个数字都不许当 PID
+        assert_eq!(
+            holder_hint(PortUsageSource::Lsof, lsof),
+            HolderHint::Names(vec!["ModemManager".to_string()])
+        );
+        // fuser 来源 → 才按 PID 解析
+        assert_eq!(
+            holder_hint(PortUsageSource::Fuser, "/dev/ttyACM0: 812"),
+            HolderHint::Pids(vec![812])
+        );
+        // Windows 的静态提示语不是名字，不许拿去当占用者
+        assert_eq!(
+            holder_hint(
+                PortUsageSource::Opaque,
+                "Another program may be using this port."
+            ),
+            HolderHint::Names(Vec::new())
+        );
+    }
+
+    #[test]
+    fn holders_format_with_and_without_pid() {
+        assert_eq!(
+            format_holders(&[("ModemManager".into(), Some(812))]).as_deref(),
+            Some("ModemManager (812)")
+        );
+        assert_eq!(
+            format_holders(&[("ModemManager".into(), Some(812)), ("brltty".into(), None)])
+                .as_deref(),
+            Some("ModemManager (812), brltty")
+        );
+        // 一个都没认出来时不许编：宁可回退到通用文案
+        assert_eq!(format_holders(&[]), None);
     }
 }

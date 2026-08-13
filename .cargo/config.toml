@@ -1,0 +1,22 @@
+# Workspace-wide cargo config.
+#
+# ── Static CRT on Windows MSVC ───────────────────────────────────────────────
+# Without this, every `*-pc-windows-msvc` binary links the VC++ C runtime
+# *dynamically* and refuses to start on machines that never installed the VC++
+# Redistributable — the exact field failure behind Lean
+# e57e59798eed4e5bb5390384649fb2d7 ("cannot find VCRUNTIME140.dll" for
+# tyutool-bridge.exe on a clean Windows 11, reinstalling does not help).
+# `+crt-static` bakes the CRT into the exe so it carries its own runtime.
+#
+# Scoped by `cfg`, not by triple, so an eventual `aarch64-pc-windows-msvc`
+# build is covered too. This applies to the whole workspace on purpose:
+# the Tauri GUI exe (release.yml) has the same latent dependency, and static
+# CRT is Tauri's own recommendation for Windows distribution.
+#
+# Guarded by `crates/tyutool-bridge/tests/build_config.rs` — deleting or
+# weakening this section fails the bridge CI `check` job.
+#
+# ⚠ CI must not export a `RUSTFLAGS` env var for Windows jobs: the env var
+# would *replace* (not merge with) these config rustflags.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
