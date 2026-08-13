@@ -28,15 +28,34 @@ describe('VERSION_FILES', () => {
     expect(listed).toContain('Cargo.toml');
   });
 
+  // Members that version independently of the workspace, each with a reason:
+  //  · tyutool-bridge — Cobuilder Bridge ships on its own release cadence
+  //    (0.x, bumped by hand per release), and bridge.yml labels artifacts by
+  //    grepping the literal `version = "…"` line out of its Cargo.toml.
+  //    Inheriting the workspace version would break that grep and yoke the
+  //    bridge to the upstream release train.
+  // Adding an entry here requires the same kind of documented reason.
+  const INDEPENDENT_VERSION_MEMBERS = ['crates/tyutool-bridge'];
+
   // Crates are covered transitively through [workspace.package]. A member that
   // declares its own literal version silently escapes the bump, so require
   // inheritance rather than listing each crate.
   it('every workspace member inherits its version instead of declaring one', () => {
     const members = workspaceMembers();
     expect(members.length).toBeGreaterThan(0);
+    // A stale exemption (member renamed or removed) must fail, not silently skip.
+    expect(members).toEqual(expect.arrayContaining(INDEPENDENT_VERSION_MEMBERS));
 
     for (const member of members) {
       const toml = readFileSync(resolve(ROOT, member, 'Cargo.toml'), 'utf-8');
+      if (INDEPENDENT_VERSION_MEMBERS.includes(member)) {
+        // If an exempted member ever switches to inheritance, its entry above
+        // is stale and must be removed.
+        expect(toml, `${member} is exempt but declares no literal version`).toMatch(
+          /^version\s*=\s*"/m,
+        );
+        continue;
+      }
       expect(toml, `${member} must use version.workspace = true`).toMatch(
         /^version\.workspace\s*=\s*true/m,
       );

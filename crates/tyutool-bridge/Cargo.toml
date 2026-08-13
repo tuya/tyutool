@@ -3,7 +3,8 @@ name = "tyutool-bridge"
 version = "0.2.7"
 edition = "2021"
 description = "Cobuilder Bridge — resident local WebSocket flash helper with a tray shell (--headless for CI)"
-# rpm 打包必填（cargo-generate-rpm 要它写进 spec 的 License 字段）；取值同仓库 LICENSE.txt
+# Required by rpm packaging (cargo-generate-rpm writes it into the spec's
+# License field); the value matches the repo's LICENSE.txt.
 license = "Apache-2.0"
 
 [[bin]]
@@ -166,24 +167,31 @@ appdataPaths = ["$APPDATA\\tyutool-bridge"]
 # this should weigh a template fork against shipping a tiny uninstall helper —
 # not add a second place that decides where autostart lives.
 
-# ── RPM（Fedora / RHEL / openSUSE 系）────────────────────────────────────────
-# cargo-packager **不支持 rpm**（0.11.8 只有 app/appimage/deb/dmg/nsis/pacman/wix），
-# 所以 rpm 走 cargo-generate-rpm 单独出一发，与 deb 并列上传。
-# ⚠ Linux 只发 deb + rpm，**AppImage 已下线**：它要求用户机器上有 libfuse2，而
-# Ubuntu 22.04+ 默认不装，表现是下下来双击没反应、报错也不提 FUSE（真机现场）。
-# 换句话说这不是打包配置能修的，只能换分发格式。
+# ── RPM (Fedora / RHEL / openSUSE family) ────────────────────────────────────
+# cargo-packager does **not** support rpm (0.11.8 only does
+# app/appimage/deb/dmg/nsis/pacman/wix), so the rpm is produced separately by
+# cargo-generate-rpm and uploaded alongside the deb.
+# ⚠ Linux ships deb + rpm only — **AppImage is retired**: it needs libfuse2 on
+# the user's machine, which Ubuntu 22.04+ no longer installs by default. The
+# symptom is a download that does nothing on double-click, with an error that
+# never mentions FUSE (seen on real hardware). No packaging option fixes that;
+# the only fix is a different distribution format.
 #
-# ⚠ assets 的 source 路径相对 **workspace root** 解析（cargo-generate-rpm 走 cargo metadata），
-# 与上面 packager 的 deb.files（相对本 Cargo.toml）**不是一个基准**，别照抄。
-# 二进制那条用 target/release：CI 在 Linux 行带 --target 构建，随后 `cargo generate-rpm --target`
-# 会把前缀补上（见 .github/workflows/bridge.yml）。
+# ⚠ `assets` source paths resolve against the **workspace root**
+# (cargo-generate-rpm goes through cargo metadata) — a different base from
+# packager's deb.files below (relative to this Cargo.toml). Don't copy one
+# into the other. The binary entry says target/release because the Linux CI
+# job builds with --target, and the subsequent `cargo generate-rpm --target`
+# re-adds that prefix (see .github/workflows/bridge.yml).
 #
-# requires 是 deb depends 的 rpm 对应物——两边包名不同，逐个对：
+# `requires` is the rpm counterpart of the deb `depends` — the two sides use
+# different package names, mapped one by one:
 #   libgtk-3-0                 → gtk3
 #   libayatana-appindicator3-1 → libayatana-appindicator-gtk3
 #   libxdo3                    → libxdo
-# 名字按 Fedora/RHEL 口径；openSUSE 个别名字有出入，装不上时用 --nodeps，
-# 或改用同 release 里的 tar.gz 裸二进制（bare binaries 那一栏）自行放置。
+# Names follow Fedora/RHEL; a few differ on openSUSE — if the rpm refuses to
+# install there, use --nodeps, or place the bare binary from the same
+# release's tar.gz (the "bare binaries" row) by hand.
 [package.metadata.generate-rpm]
 assets = [
   { source = "target/release/tyutool-bridge", dest = "/usr/bin/tyutool-bridge", mode = "755" },
@@ -208,14 +216,21 @@ libxdo = "*"
 # package refuse to install on systems that can in fact run it. Revisit the day
 # the bridge wants richer USB metadata on Linux.
 depends = ["libgtk-3-0", "libayatana-appindicator3-1", "libxdo3"]
-# udev 规则：让 ModemManager / brltty 放过烧录用的 USB 串口（VID 与 VID_ALLOWLIST 同源）。
-# 不装它的话，Ubuntu 上插 T5AI（枚举成 /dev/ttyACM*）后 ModemManager 会自动 AT 探测并
-# TIOCEXCL 独占数秒~数十秒，用户点烧录只会看到「串口被其他程序占用」而不知该关谁
-# ——真机现场实证。规则文件自带完整 rationale。
-# ⚠ 装包只是把文件放进去；对**已插着**的设备要 `udevadm control --reload-rules && udevadm trigger`
-# 或重插一次才生效（deb 的 postinstall 钩子由 cargo-packager 管，这里不额外造脚本）。
-# ⚠ 方向是 **{ 源 = 目标 }**，别写反（0.2.4 首发就栽在这，Linux 打包 I/O Error）：
-# cargo-packager 0.11.8 的 copy_custom_files 是 `for (src, target) in files`，
-# 键被当成源去 canonicalize。源路径相对**本 Cargo.toml 所在目录**解析
-# （packager 在读配置前会 cd 到配置所在目录，见其 cli/mod.rs 的注释）。
+# udev rule: keeps ModemManager / brltty away from the USB serial ports used
+# for flashing (VIDs share their source with VID_ALLOWLIST). Without it,
+# plugging a T5AI on Ubuntu (enumerates as /dev/ttyACM*) gets AT-probed by
+# ModemManager, which holds the port via TIOCEXCL for seconds to tens of
+# seconds — the user just sees "port occupied by another program" with no hint
+# of what to close (seen on real hardware). The rules file carries the full
+# rationale.
+# ⚠ Installing the package only drops the file in place; devices **already
+# plugged in** need `udevadm control --reload-rules && udevadm trigger` or a
+# replug before it applies (deb postinstall hooks belong to cargo-packager —
+# no extra script here).
+# ⚠ The direction is **{ source = target }** — don't flip it (the 0.2.4 debut
+# shipped it flipped: Linux packaging I/O Error). cargo-packager 0.11.8's
+# copy_custom_files is `for (src, target) in files`, so the key is what gets
+# canonicalized as the source. Source paths resolve relative to **this
+# Cargo.toml's directory** (the packager cds to the config's directory before
+# reading it — see the comment in its cli/mod.rs).
 files = { "packaging/linux/99-tyutool-bridge.rules" = "/usr/lib/udev/rules.d/99-tyutool-bridge.rules" }
