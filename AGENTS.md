@@ -104,8 +104,11 @@ pnpm run tauri:build
 ```
 tyutool/
 ├── crates/
-│   ├── tyutool-core/   # Rust library — all flash logic, chip plugins, serial utils
-│   └── tyutool-cli/    # Standalone CLI binary (uses tyutool-core only)
+│   ├── tyutool-core/   # Rust library — all flash logic, chip plugins, serial utils, authorize, serial-debug engine
+│   ├── tyutool-cli/    # Standalone CLI binary; the `serve` subcommand lives in tyutool-serve
+│   ├── tyutool-serve/  # WS dev-serve backend for `tyutool-cli serve` (port 9527, dev only — no auth, localhost only)
+│   ├── tyutool-bridge/ # Resident tray + WS helper "Cobuilder Bridge" (port 18730; Origin allowlist + token grants) — see crates/tyutool-bridge/CLAUDE.md
+│   └── (see Cargo.toml [workspace].members — 5 crates total)
 ├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
 │   └── src/lib.rs      # Tauri commands bridging the WebView to tyutool-core
 ├── scripts/            # Build/release orchestration only (not runtime shared code)
@@ -124,7 +127,19 @@ tyutool/
 
 **Layer boundaries:** `scripts/` orchestrates cargo/pnpm/tauri for CI and release — do not put frontend-importable application constants there. Dev-only Vite plugins and Node helpers live under `vite/`; shared dev constants (e.g. middleware paths) stay in `src/config/`.
 
-**`tyutool-core` is the single source of truth for flash logic** — it is shared by both the CLI and the GUI Tauri backend. Flash logic must never be duplicated into the frontend.
+**`tyutool-core` is the single source of truth for flash logic** — it is shared by the CLI, the GUI Tauri backend, and `tyutool-bridge`. Flash logic must never be duplicated into the frontend or into the other crates' binaries.
+
+**Crate responsibilities (5 workspace members):**
+
+| Crate | Binary / lib | Role |
+|-------|--------------|------|
+| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine. **No binaries.** |
+| `tyutool-cli` | bin `tyutool_cli` | Interactive CLI. The `serve` subcommand delegates to `tyutool-serve`. |
+| `tyutool-serve` | lib (used by `tyutool-cli serve`) | WS dev-serve backend for `pnpm run dev:web` — **localhost:9527, dev-only, no auth, no Origin gate**. Not shipped to end users. |
+| `tyutool-bridge` | bin `tyutool-bridge` ("Cobuilder Bridge") | Resident tray + WS helper for cobuilder-web — **localhost:18730, Origin allowlist + per-connection token grants, single-execution lock, audit log**. Independent release line (`bridge-v*` tags). See `crates/tyutool-bridge/CLAUDE.md` and `PROTOCOL.md`. |
+| `src-tauri` | bin `tyutool_gui` | Tauri 2 desktop GUI backend; bridges the WebView to `tyutool-core`. |
+
+> **`tyutool-serve` vs `tyutool-bridge`** are easy to confuse: both expose `tyutool-core` over a localhost WebSocket, but they are different crates with different consumers, ports, and security models. `serve` is the in-repo dev shim (no humans are flashed in `dev:web`); `bridge` is a shipped, resident, security-hardened helper for a remote web client. They share no protocol — bridge frames are independent and documented in `crates/tyutool-bridge/PROTOCOL.md`.
 
 #### Chip plugin system (Rust)
 
