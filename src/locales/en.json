@@ -542,7 +542,9 @@
       "next": "Next",
       "close": "Close",
       "count": "{current} / {total}",
-      "noMatch": "No matches"
+      "noMatch": "No matches",
+      "scopeHistory": "Loaded history window only",
+      "wholeSession": "Search whole session"
     },
     "log": {
       "archiveCapped": "[tyutool] The session archive reached its {mib} MiB limit. Lines from here on are shown live but not archived, so history, filters and export stop at this point.",
@@ -559,6 +561,14 @@
       "saveLog": "Save log",
       "loadOlderMatches": "Load older matches",
       "loadingOlderMatches": "Loading…",
+      "historyBanner": "Session history",
+      "historyPosition": "Lines {from}–{to} of {total}",
+      "loadOlderLines": "Load older lines",
+      "loadingOlderLines": "Loading…",
+      "atSessionStart": "Start of session",
+      "jumpToSessionStart": "Jump to start",
+      "backToLive": "Back to live",
+      "historyLoadFailed": "Could not read the session archive: {msg}",
       "fontDecrease": "Smaller",
       "fontIncrease": "Larger",
       "fontSize": "Font",

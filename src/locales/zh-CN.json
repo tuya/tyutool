@@ -542,7 +542,9 @@
       "next": "下一个",
       "close": "关闭",
       "count": "{current} / {total}",
-      "noMatch": "无匹配"
+      "noMatch": "无匹配",
+      "scopeHistory": "仅搜索已加载的历史窗口",
+      "wholeSession": "搜索整个会话"
     },
     "log": {
       "archiveCapped": "[tyutool] 会话归档已达到 {mib} MiB 上限，之后的日志仅实时显示、不再归档，历史、筛选和导出到此为止。",
@@ -559,6 +561,14 @@
       "saveLog": "保存日志",
       "loadOlderMatches": "加载更早匹配",
       "loadingOlderMatches": "加载中…",
+      "historyBanner": "会话历史",
+      "historyPosition": "第 {from} – {to} 行 / 共 {total} 行",
+      "loadOlderLines": "加载更早的日志",
+      "loadingOlderLines": "加载中…",
+      "atSessionStart": "已到会话开头",
+      "jumpToSessionStart": "跳到会话开头",
+      "backToLive": "回到实时",
+      "historyLoadFailed": "读取会话归档失败：{msg}",
       "fontDecrease": "缩小字体",
       "fontIncrease": "放大字体",
       "fontSize": "字体",

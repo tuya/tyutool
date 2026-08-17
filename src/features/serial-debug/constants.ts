@@ -31,6 +31,17 @@ export const MIN_ARCHIVE_LIMIT_MIB = 16;
 export const MAX_ARCHIVE_LIMIT_MIB = 4096;
 export const ARCHIVE_LIMIT_PRESETS = [64, 128, 256, 512, 1024] as const;
 export const FILTER_PAGE_SIZE = 400;
+// Archive lines per request while the "All" tab pages back through the session
+// archive. Deliberately the same order as FILTER_PAGE_SIZE and *not*
+// EXPORT_PAGE_SIZE: `serial_debug_session_read_page` costs four syscalls plus a
+// JSON parse per line and holds the Rust-side archive lock for the whole
+// request, so a read issued while the user is scrolling has to stay short
+// enough not to stall the serial writer.
+export const HISTORY_PAGE_SIZE = 400;
+// Pages fetched when history mode is entered (or when jumping to the session
+// start): enough to fill a screen and leave room to scroll before the next
+// request, while the window still grows on demand up to `logWindowLines`.
+export const HISTORY_ENTRY_PAGES = 3;
 export const EXPORT_PAGE_SIZE = 1000;
 export const FILTER_LIVE_REFRESH_MS = 120;
 export const MAX_PENDING_LINE_BYTES = 4096;

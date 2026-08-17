@@ -289,11 +289,176 @@ function onScroll(): void {
   scrollTop.value = el.scrollTop;
   if (el.clientHeight > 0) viewportHeight.value = el.clientHeight;
   lockAutoScroll.value = maxScrollTop.value - scrollTop.value >= 80;
+  void onScrollEdge();
 }
 
 async function resumeScroll(): Promise<void> {
+  // Without this the badge would scroll to the bottom of the *history window*
+  // instead of to the live tail — the buffer under the pane is a different one.
+  if (s.historyMode) s.exitHistoryMode();
   lockAutoScroll.value = false;
   await scrollToBottom();
+}
+
+// ── full-session scrollback ("All" tab) ─────────────────────────────────
+// Scrolling past the top of the live ring buffer switches the pane over to a
+// bounded sliding window on the Rust session archive; scrolling back past its
+// end switches back. The two buffers are never concatenated — see
+// `useSerialDebugHistory` for why that is not merely a simplification.
+
+/**
+ * How far the content above the viewport moved when `prepended` lines were
+ * added at the head. In the ASCII view a row *is* a log line, so it is the line
+ * count; in the hex view a row is `bytesPerRow` bytes of the concatenated byte
+ * stream, so the answer is the row the previous first line — now at index
+ * `prepended` — starts on.
+ *
+ * Read off the *new* buffer rather than as a `totalRows` delta on purpose: the
+ * same step may also trim the window's tail to stay within budget, and a tail
+ * trim shortens contentHeight below the viewport, where it must not be
+ * compensated for. When nothing is trimmed the two agree to within the ≤1 row
+ * of jitter a non-row-aligned byte prefix causes anyway.
+ */
+function headRowsForPrepend(prepended: number): number {
+  return props.hexView
+    ? hexViewRenderer.rowOfLine(displayLines(), props.hexBytesPerRow, prepended)
+    : prepended;
+}
+
+/** Keep the line that was at `beforeTop` where it is after a head-side change. */
+function compensateScroll(
+  el: HTMLElement,
+  beforeTop: number,
+  rows: number,
+): void {
+  // Clamp at the call site: applyScrollTop writes the *requested* value into the
+  // model, so asking for more than the DOM will accept desynchronizes the two.
+  applyScrollTop(
+    el,
+    Math.min(
+      Math.max(beforeTop + rows * rowHeight.value, 0),
+      maxScrollTop.value,
+    ),
+  );
+}
+
+async function enterHistory(): Promise<void> {
+  const el = scrollRef.value;
+  if (!el) return;
+  const wasLocked = lockAutoScroll.value;
+  // Explicit, not incidental: the mode switch changes the id of the last line,
+  // which is exactly what the follow-tail watcher tracks, so it fires once on
+  // the switch. `scrollToBottom` bails out while the lock is set.
+  lockAutoScroll.value = true;
+  const entered = await s.enterHistoryMode(s.lines.length);
+  if (!entered) {
+    lockAutoScroll.value = wasLocked;
+    return;
+  }
+  await nextTick();
+  const offset = s.historyEntryOffsetLines;
+  const row = props.hexView
+    ? hexViewRenderer.rowOfLine(displayLines(), props.hexBytesPerRow, offset)
+    : offset;
+  applyScrollTop(
+    el,
+    Math.min(row * rowHeight.value + insetTop.value, maxScrollTop.value),
+  );
+}
+
+async function loadOlderHistoryAtTop(): Promise<void> {
+  const el = scrollRef.value;
+  if (!el) return;
+  const beforeTop = scrollTop.value;
+  const { prepended, reanchored } = await s.loadOlderHistory();
+  if (!prepended && !reanchored) return;
+  await nextTick();
+  // A re-anchor replaced the window instead of extending it, so there is no
+  // old position to preserve; show the top of what was loaded.
+  if (reanchored) {
+    applyScrollTop(el, 0);
+    return;
+  }
+  compensateScroll(el, beforeTop, headRowsForPrepend(prepended));
+}
+
+async function loadNewerHistoryAtBottom(): Promise<void> {
+  const el = scrollRef.value;
+  if (!el) return;
+  const beforeTop = scrollTop.value;
+  const before = displayLines();
+  const dropped = await s.loadNewerHistory();
+  // Appended rows land below the viewport; only what left the head moves it.
+  if (dropped <= 0) return;
+  const rows = props.hexView
+    ? hexViewRenderer.rowOfLine(before, props.hexBytesPerRow, dropped)
+    : dropped;
+  await nextTick();
+  compensateScroll(el, beforeTop, -rows);
+}
+
+async function jumpToSessionStart(): Promise<void> {
+  if (!(await s.jumpToSessionStart())) return;
+  await nextTick();
+  const el = scrollRef.value;
+  if (el) applyScrollTop(el, 0);
+}
+
+async function loadOlderFilterMatchesAtTop(): Promise<void> {
+  const el = scrollRef.value;
+  const beforeTop = scrollTop.value;
+  const prepended = await s.loadOlderActiveFilterMatches();
+  if (prepended <= 0 || !el) return;
+  await nextTick();
+  compensateScroll(el, beforeTop, headRowsForPrepend(prepended));
+}
+
+/**
+ * Infinite scroll for the "All" tab. Re-entry is blocked three ways: by
+ * `historyLoading` while a read is in flight, by the compensation having moved
+ * `scrollTop` away from the edge once it lands, and by the
+ * `historyAtSessionStart` / `historyAtArchiveEnd` end stops.
+ */
+async function onScrollEdge(): Promise<void> {
+  if (s.activeChipId !== null || s.historyLoading) return;
+  // Not scrollable at all: there is no "the user scrolled up" to react to, and
+  // entering history mode here would lock auto-scroll for no reason.
+  if (maxScrollTop.value <= 0) return;
+  if (scrollTop.value <= rowHeight.value) {
+    if (!s.historyMode) {
+      await enterHistory();
+    } else if (!s.historyAtSessionStart) {
+      await loadOlderHistoryAtTop();
+    }
+    return;
+  }
+  if (!s.historyMode) return;
+  if (maxScrollTop.value - scrollTop.value > rowHeight.value) return;
+  if (s.historyAtArchiveEnd) {
+    await resumeScroll();
+  } else {
+    await loadNewerHistoryAtBottom();
+  }
+}
+
+/**
+ * Ctrl+F keeps its "within the buffer currently on screen" meaning in history
+ * mode. Whole-session search already exists as a filter chip (it is archive
+ * backed, with an authoritative count and its own tab), so offer that instead of
+ * building a second scan pipeline.
+ */
+async function searchWholeSession(): Promise<void> {
+  const keyword = searchText.value.trim();
+  if (!keyword) return;
+  const existing = s.watchChips.find(
+    (c) => c.keyword === keyword && !c.useRegex,
+  );
+  if (existing) {
+    await s.setActiveChip(existing.id);
+  } else if ((await s.addChip(keyword, false)) !== "ok") {
+    return;
+  }
+  closeSearch();
 }
 
 // Only the windowed rows are formatted, and the result is byte-identical to the
@@ -752,7 +917,7 @@ async function saveLog(): Promise<void> {
         type="button"
         class="btn-tool"
         :disabled="s.activeFilterLoading"
-        @click="s.loadOlderActiveFilterMatches"
+        @click="loadOlderFilterMatchesAtTop"
       >
         <FontAwesomeIcon :icon="['fas', 'arrow-up']" class="size-3 shrink-0" />
         {{
@@ -761,6 +926,62 @@ async function saveLog(): Promise<void> {
             : t("serialDebug.log.loadOlderMatches")
         }}
       </button>
+    </div>
+
+    <!-- history mode banner: the scrollbar only spans the loaded window, so the
+         position readout is what tells the user where in the session they are -->
+    <div
+      v-if="!activeChip && s.historyMode"
+      class="history-bar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1"
+    >
+      <FontAwesomeIcon
+        :icon="['fas', 'clock-rotate-left']"
+        class="size-3 shrink-0"
+      />
+      <span class="history-title">{{
+        t("serialDebug.log.historyBanner")
+      }}</span>
+      <span class="history-position">{{
+        t("serialDebug.log.historyPosition", {
+          from: s.historyStartLineNo,
+          to: s.historyEndLineNo,
+          total: s.historyTotalLines,
+        })
+      }}</span>
+      <button
+        v-if="!s.historyAtSessionStart"
+        type="button"
+        class="btn-tool"
+        :disabled="s.historyLoading"
+        @click="loadOlderHistoryAtTop"
+      >
+        <FontAwesomeIcon :icon="['fas', 'arrow-up']" class="size-3 shrink-0" />
+        {{
+          s.historyLoading
+            ? t("serialDebug.log.loadingOlderLines")
+            : t("serialDebug.log.loadOlderLines")
+        }}
+      </button>
+      <span v-else class="history-position">{{
+        t("serialDebug.log.atSessionStart")
+      }}</span>
+      <div class="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          class="btn-tool"
+          :disabled="s.historyLoading || s.historyAtSessionStart"
+          @click="jumpToSessionStart"
+        >
+          {{ t("serialDebug.log.jumpToSessionStart") }}
+        </button>
+        <button type="button" class="btn-tool" @click="resumeScroll">
+          <FontAwesomeIcon
+            :icon="['fas', 'arrow-down']"
+            class="size-3 shrink-0"
+          />
+          {{ t("serialDebug.log.backToLive") }}
+        </button>
+      </div>
     </div>
 
     <!-- Ctrl+F search bar -->
@@ -789,6 +1010,21 @@ async function saveLog(): Promise<void> {
           {{ t("serialDebug.search.noMatch") }}
         </template>
       </span>
+      <!-- In history mode the pane holds a window on the archive, not the live
+           buffer, so say so rather than let the count read as session-wide. -->
+      <span v-if="!activeChip && s.historyMode" class="search-scope-hint">
+        {{ t("serialDebug.search.scopeHistory") }}
+      </span>
+      <button
+        v-if="searchText.trim()"
+        type="button"
+        class="btn-tool"
+        :aria-label="t('serialDebug.search.wholeSession')"
+        @click="searchWholeSession"
+      >
+        <FontAwesomeIcon :icon="['fas', 'filter']" class="size-3 shrink-0" />
+        {{ t("serialDebug.search.wholeSession") }}
+      </button>
       <button
         type="button"
         class="btn-tool"
@@ -1091,6 +1327,27 @@ async function saveLog(): Promise<void> {
   color: var(--ty-text-muted);
   white-space: nowrap;
   min-width: 5rem;
+}
+.search-scope-hint {
+  font-size: 0.75rem;
+  color: var(--ty-text-muted);
+  white-space: nowrap;
+}
+/* history mode banner */
+.history-bar {
+  background: var(--ty-surface);
+}
+.history-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ty-text);
+  white-space: nowrap;
+}
+.history-position {
+  font-size: 0.75rem;
+  color: var(--ty-text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 /* virtualized line window: the spacer carries the full scroll height, the
    window holds the mounted slice and is offset to the slice's first row. */
