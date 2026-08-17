@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -27,11 +27,12 @@ use tokio_tungstenite::{
 };
 use tyutool_core::{
     device_reset_dtr_rts, list_serial_ports, run_job, serial_debug_fail_backfill_if_current,
-    serial_debug_finish_backfill_if_current, serial_debug_scan_filter_matches, DebugChunk,
-    DebugConfig, FlashJob, SerialDebugArchive, SerialDebugArchiveReader,
-    SerialDebugChunkBatchBuffer, SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition,
-    SerialDebugFilterIndex, SerialDebugFilterPage, SerialDebugFilterStats, SerialDebugGeneration,
-    SerialDebugLine, SerialDebugSession, SerialDebugSessionPage, SerialPortEntry,
+    serial_debug_finish_backfill_if_current, serial_debug_now_ms, serial_debug_scan_filter_matches,
+    DebugChunk, DebugConfig, Direction, FlashJob, SerialDebugArchive, SerialDebugArchiveReader,
+    SerialDebugChunkBatchBuffer, SerialDebugDropCounter, SerialDebugDropReport,
+    SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition, SerialDebugFilterIndex,
+    SerialDebugFilterPage, SerialDebugFilterStats, SerialDebugGeneration, SerialDebugLine,
+    SerialDebugSession, SerialDebugSessionPage, SerialPortEntry,
 };
 
 const SERIAL_DEBUG_CHUNK_FLUSH_MS: u64 = 12;
@@ -170,6 +171,12 @@ pub enum ServerMessage {
     SerialDebugArchiveCapped {
         limit_mib: u64,
     },
+    /// Device output was dropped because the bridge queue was full. One message
+    /// per coalesced burst; the wording comes from
+    /// `serialDebug.log.chunksDropped`.
+    SerialDebugChunksDropped {
+        dropped_bytes: u64,
+    },
 }
 
 enum SerialDebugChunkBridgeMessage {
@@ -191,18 +198,27 @@ struct SerialDebugChunkBridgeHandle {
     generation: Arc<SerialDebugGeneration>,
     send_lock: Arc<Mutex<()>>,
     tx: SyncSender<SerialDebugChunkBridgeMessage>,
+    drops: Arc<SerialDebugDropCounter>,
 }
 
 impl SerialDebugChunkBridgeHandle {
-    fn send_chunk(
-        &self,
-        chunk: DebugChunk,
-    ) -> Result<(), std::sync::mpsc::SendError<SerialDebugChunkBridgeMessage>> {
+    /// Hand one chunk to the bridge, or account for it as lost. `try_send`, never
+    /// `send`, for the reason spelled out on the Tauri twin in
+    /// `src-tauri/src/serial_debug.rs`: blocking the serial reader thread stops
+    /// the OS receive buffer being drained, and the driver then discards bytes
+    /// silently. Dropping here keeps the loss countable and reportable.
+    fn send_chunk(&self, chunk: DebugChunk) {
         let _guard = self.send_lock.lock().unwrap();
-        self.tx.send(SerialDebugChunkBridgeMessage::Chunk {
+        let bytes = chunk.bytes.len();
+        match self.tx.try_send(SerialDebugChunkBridgeMessage::Chunk {
             generation: self.generation.current(),
             chunk,
-        })
+        }) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => self.drops.record(bytes, serial_debug_now_ms()),
+            // The bridge thread is gone; the session is being torn down.
+            Err(TrySendError::Disconnected(_)) => {}
+        }
     }
 
     fn reset(&self) -> Result<u64, String> {
@@ -550,7 +566,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 let result = SerialDebugSession::open(
                     cfg,
                     Box::new(move |chunk| {
-                        let _ = chunk_bridge_for_session.send_chunk(chunk);
+                        chunk_bridge_for_session.send_chunk(chunk);
                     }),
                     Box::new(move |reason| {
                         let _ =
@@ -930,6 +946,43 @@ fn flush_serial_debug_chunk_ws(
     let _ = sink_tx.send(ServerMessage::SerialDebugChunkBatch { chunks });
 }
 
+/// Surface one coalesced burst of dropped chunks — `log::warn!` for the
+/// developer, a gap in the archive and a `Sys` notice for the user. Twin of
+/// `report_serial_debug_drops` in `src-tauri/src/serial_debug.rs`; the two hosts
+/// must behave identically (`src/CLAUDE.md`: web and Tauri parity).
+fn report_serial_debug_drops_ws(
+    sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    archive: &Arc<Mutex<SerialDebugArchive>>,
+    filters: &Arc<Mutex<SerialDebugFilterIndex>>,
+    pending: &mut SerialDebugChunkBatchBuffer,
+    report: SerialDebugDropReport,
+) {
+    // Everything buffered arrived before the gap.
+    flush_serial_debug_chunk_ws(sink_tx, archive, filters, pending.take());
+    log::warn!(
+        "[serial-debug] chunk bridge queue full (capacity {}): dropped {} chunk(s) / {} byte(s) \
+         of device output",
+        SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY,
+        report.chunks,
+        report.bytes
+    );
+    // Only the reader thread's Rx chunks travel the bounded queue: the Tx path
+    // (`SerialDebugSend`) writes straight to the archive.
+    let lines = {
+        let mut guard = match archive.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        guard
+            .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
+            .unwrap_or_default()
+    };
+    ingest_serial_debug_lines_ws(sink_tx, filters, &lines);
+    let _ = sink_tx.send(ServerMessage::SerialDebugChunksDropped {
+        dropped_bytes: report.bytes,
+    });
+}
+
 fn spawn_serial_debug_chunk_bridge_ws(
     sink_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
     archive: Arc<Mutex<SerialDebugArchive>>,
@@ -940,15 +993,22 @@ fn spawn_serial_debug_chunk_bridge_ws(
     // when archive/filter/UI consumption temporarily lags behind the serial reader.
     let (tx, rx) =
         mpsc::sync_channel::<SerialDebugChunkBridgeMessage>(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY);
+    let drops = Arc::new(SerialDebugDropCounter::default());
     let handle = SerialDebugChunkBridgeHandle {
         generation: Arc::clone(&generation),
         send_lock: Arc::new(Mutex::new(())),
         tx: tx.clone(),
+        drops: Arc::clone(&drops),
     };
     std::thread::spawn(move || {
         let mut pending = SerialDebugChunkBatchBuffer::new();
         let mut active_generation = generation.current();
         loop {
+            // Before every receive, so `recv_timeout`'s own tick is the poll
+            // clock and no `continue` below can skip the check.
+            if let Some(report) = drops.take_report(serial_debug_now_ms()) {
+                report_serial_debug_drops_ws(&sink_tx, &archive, &filters, &mut pending, report);
+            }
             match rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)) {
                 Ok(SerialDebugChunkBridgeMessage::Chunk { generation, chunk }) => {
                     if generation != active_generation {
@@ -965,11 +1025,23 @@ fn spawn_serial_debug_chunk_bridge_ws(
                 }
                 Ok(SerialDebugChunkBridgeMessage::Reset { generation, ack }) => {
                     let _ = pending.take();
+                    // Drops from the cleared session belong to the log the user
+                    // just discarded.
+                    let _ = drops.take_pending();
                     active_generation = generation;
                     let _ = ack.send(());
                 }
                 Ok(SerialDebugChunkBridgeMessage::Shutdown { ack }) => {
                     flush_serial_debug_chunk_ws(&sink_tx, &archive, &filters, pending.take());
+                    if let Some(report) = drops.take_pending() {
+                        report_serial_debug_drops_ws(
+                            &sink_tx,
+                            &archive,
+                            &filters,
+                            &mut pending,
+                            report,
+                        );
+                    }
                     let _ = ack.send(());
                     return;
                 }
@@ -982,6 +1054,16 @@ fn spawn_serial_debug_chunk_bridge_ws(
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     flush_serial_debug_chunk_ws(&sink_tx, &archive, &filters, pending.take());
+                    // A burst still aggregating at teardown is reported anyway.
+                    if let Some(report) = drops.take_pending() {
+                        report_serial_debug_drops_ws(
+                            &sink_tx,
+                            &archive,
+                            &filters,
+                            &mut pending,
+                            report,
+                        );
+                    }
                     return;
                 }
             }
@@ -1564,6 +1646,81 @@ mod tests {
         assert!(sink_rx.try_recv().is_err());
     }
 
+    /// The web host must report dropped device output exactly like the Tauri
+    /// host: cut the open line in the archive so the bytes either side of the gap
+    /// cannot be spliced into one fake line, then announce the gap on the wire.
+    #[test]
+    fn report_serial_debug_drops_ws_cuts_the_line_and_announces_the_gap() {
+        let dir = std::env::temp_dir().join(format!(
+            "tyutool-serve-drop-report-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let (sink_tx, mut sink_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = SerialDebugChunkBatchBuffer::new();
+
+        // A line still being received when the queue overflowed.
+        archive
+            .lock()
+            .unwrap()
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"before-gap".to_vec(),
+            })
+            .unwrap();
+
+        report_serial_debug_drops_ws(
+            &sink_tx,
+            &archive,
+            &filters,
+            &mut pending,
+            SerialDebugDropReport {
+                chunks: 3,
+                bytes: 12_288,
+            },
+        );
+
+        let json = serde_json::to_string(&sink_rx.try_recv().unwrap()).unwrap();
+        assert!(
+            json.contains(r#""type":"serial_debug_chunks_dropped""#),
+            "{json}"
+        );
+        // snake_case on the wire; `ws-transport.ts` maps it to `droppedBytes`.
+        assert!(json.contains(r#""dropped_bytes":12288"#), "{json}");
+
+        // Bytes arriving after the gap must start their own line.
+        let after = archive
+            .lock()
+            .unwrap()
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 2,
+                bytes: b"after-gap\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].text, "after-gap");
+
+        let lines = archive.lock().unwrap().read_line_range(1, 10).unwrap();
+        let texts = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "before-gap",
+                tyutool_core::serial_debug_chunk_drop_sentinel(12_288).as_str(),
+                "after-gap",
+            ]
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn serialize_serial_debug_state_info_omits_cfg_when_closed() {
         let closed = serde_json::to_string(&ServerMessage::SerialDebugStateInfo {
@@ -1660,23 +1817,19 @@ mod tests {
             Arc::new(SerialDebugGeneration::default()),
         );
 
-        bridge
-            .send_chunk(DebugChunk {
-                direction: tyutool_core::Direction::Rx,
-                ts_ms: 1,
-                bytes: b"pre".to_vec(),
-            })
-            .unwrap();
+        bridge.send_chunk(DebugChunk {
+            direction: tyutool_core::Direction::Rx,
+            ts_ms: 1,
+            bytes: b"pre".to_vec(),
+        });
         bridge.reset().unwrap();
         archive.lock().unwrap().clear().unwrap();
 
-        bridge
-            .send_chunk(DebugChunk {
-                direction: tyutool_core::Direction::Rx,
-                ts_ms: 2,
-                bytes: b"post\nnew\n".to_vec(),
-            })
-            .unwrap();
+        bridge.send_chunk(DebugChunk {
+            direction: tyutool_core::Direction::Rx,
+            ts_ms: 2,
+            bytes: b"post\nnew\n".to_vec(),
+        });
         bridge.shutdown().unwrap();
 
         let page = archive.lock().unwrap().read_page(0, 10).unwrap();

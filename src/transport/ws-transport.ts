@@ -380,6 +380,9 @@ export class WsTransport {
     onArchiveCapped: (
       payload: import("@/features/serial-debug/types").ArchiveCappedPayload,
     ) => void,
+    onChunksDropped?: (
+      payload: import("@/features/serial-debug/types").ChunksDroppedPayload,
+    ) => void,
   ): Promise<void> {
     const ws = await this.connect();
     return new Promise((resolve, reject) => {
@@ -418,6 +421,7 @@ export class WsTransport {
             stats?: SerialDebugFilterUpdatePayload["stats"];
             // snake_case on the wire like every other ServerMessage field.
             limit_mib?: number;
+            dropped_bytes?: number;
           };
           if (m.type === "serial_debug_chunk" && m.chunk) onChunk(m.chunk);
           else if (m.type === "serial_debug_chunk_batch" && m.chunks)
@@ -431,6 +435,11 @@ export class WsTransport {
             typeof m.limit_mib === "number"
           )
             onArchiveCapped({ limitMib: m.limit_mib });
+          else if (
+            m.type === "serial_debug_chunks_dropped" &&
+            typeof m.dropped_bytes === "number"
+          )
+            onChunksDropped?.({ droppedBytes: m.dropped_bytes });
         } catch {
           /* ignore */
         }

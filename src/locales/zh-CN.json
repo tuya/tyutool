@@ -546,6 +546,7 @@
     },
     "log": {
       "archiveCapped": "[tyutool] 会话归档已达到 {mib} MiB 上限，之后的日志仅实时显示、不再归档，历史、筛选和导出到此为止。",
+      "chunksDropped": "[tyutool] 此处丢失了 {bytes} 字节设备输出：tyutool 处理速度跟不上串口。本行前后的日志并不连续。请降低波特率，或减少设备侧日志输出。",
       "waitingData": "等待数据…",
       "title": "日志",
       "pausedScroll": "滚动到底部",

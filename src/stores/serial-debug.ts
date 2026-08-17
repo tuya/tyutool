@@ -28,6 +28,7 @@ import { parseHexInput } from "@/features/serial-debug/hex-format";
 import { archiveLineToLogLine } from "@/features/serial-debug/utils";
 import {
   archiveCapNoticeText,
+  chunksDroppedNoticeText,
   localizeArchiveLineText,
 } from "@/features/serial-debug/archive-line-text";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
@@ -257,6 +258,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   let unsubscribeDisconnect: (() => void) | null = null;
   let unsubscribeFilterUpdated: (() => void) | null = null;
   let unsubscribeArchiveCapped: (() => void) | null = null;
+  let unsubscribeChunksDropped: (() => void) | null = null;
   let resumeAfterFlashRelease = false;
 
   const resumePortManager = usePortManagerStore();
@@ -482,6 +484,45 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     pushPreparedLines(completedLines);
   }
 
+  /**
+   * Close the line currently being assembled for `dir` and show it as its own
+   * line. Used at a gap in the chunk stream: `prepareLinesFromChunks` only cuts
+   * on `\n`, so without this the bytes before the gap and the bytes after it
+   * would be joined into one line the device never printed.
+   */
+  function finalizePendingLine(dir: "tx" | "rx"): void {
+    const p = pending[dir];
+    if (p.totalBytes === 0) return;
+    const lineBytes = takePendingBytes(p, p.totalBytes);
+    pushPreparedLines([
+      {
+        id: nextLineId++,
+        direction: dir,
+        tsMs: Date.now(),
+        text: decodeLossy(trimTrailingLineEnding(lineBytes)),
+        rawBytes: lineBytes,
+      },
+    ]);
+  }
+
+  /**
+   * Device output was dropped between two chunks. Ordered carefully: everything
+   * already queued arrived *before* the gap, so it has to be turned into lines
+   * first; then the open line is closed; only then does the notice go in, where
+   * the loss actually happened.
+   *
+   * Only `rx` is finalized — the bounded backend queue only carries the serial
+   * reader's Rx chunks, the Tx path writes straight through.
+   */
+  function handleChunksDropped(droppedBytes: number): void {
+    if (chunkFlushTimer !== null) {
+      clearTimeout(chunkFlushTimer);
+    }
+    flushQueuedChunks();
+    finalizePendingLine("rx");
+    pushLine("sys", Date.now(), chunksDroppedNoticeText(droppedBytes));
+  }
+
   async function clear(): Promise<void> {
     lines.value = [];
     resetPendingBuffer(pending.tx);
@@ -606,10 +647,12 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     unsubscribeDisconnect?.();
     unsubscribeFilterUpdated?.();
     unsubscribeArchiveCapped?.();
+    unsubscribeChunksDropped?.();
     unsubscribeChunk = null;
     unsubscribeDisconnect = null;
     unsubscribeFilterUpdated = null;
     unsubscribeArchiveCapped = null;
+    unsubscribeChunksDropped = null;
     queuedChunks.length = 0;
     if (chunkFlushTimer !== null) {
       clearTimeout(chunkFlushTimer);
@@ -710,6 +753,12 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     unsubscribeArchiveCapped = transport.onArchiveCapped(({ limitMib }) => {
       pushLine("sys", Date.now(), archiveCapNoticeText(limitMib));
     });
+    // Live view only, same as the cap notice: the archive already holds the
+    // dropped-chunk sentinel this line is the translation of.
+    unsubscribeChunksDropped =
+      transport.onChunksDropped?.(({ droppedBytes }) => {
+        handleChunksDropped(droppedBytes);
+      }) ?? null;
     unsubscribeFilterUpdated = transport.onFilterUpdated((payload) => {
       filterStatsById.value = {
         ...filterStatsById.value,
@@ -739,10 +788,12 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       unsubscribeDisconnect?.();
       unsubscribeFilterUpdated?.();
       unsubscribeArchiveCapped?.();
+      unsubscribeChunksDropped?.();
       unsubscribeChunk = null;
       unsubscribeDisconnect = null;
       unsubscribeFilterUpdated = null;
       unsubscribeArchiveCapped = null;
+      unsubscribeChunksDropped = null;
     } finally {
       opening.value = false;
     }

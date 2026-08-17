@@ -4,17 +4,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/i18n";
 import {
   archiveCapNoticeText,
+  chunksDroppedNoticeText,
   formatExportLine,
   localizeArchiveLineText,
 } from "./archive-line-text";
 import type { DebugLineDirection, SerialDebugLine } from "./types";
 
-// Pins the wire format produced by `serial_debug_archive_cap_sentinel` in
-// crates/tyutool-core/src/serial_debug.rs. Spelled with fromCharCode so this
-// file stays printable ASCII.
+// Pins the wire format produced by `serial_debug_archive_cap_sentinel` /
+// `serial_debug_chunk_drop_sentinel` in crates/tyutool-core/src/serial_debug.rs.
+// Spelled with fromCharCode so this file stays printable ASCII.
 const SOH = String.fromCharCode(1);
 const sentinel = (mib: number): string =>
   `${SOH}tyutool:archive-capped:${mib}${SOH}`;
+const dropSentinel = (bytes: number): string =>
+  `${SOH}tyutool:chunks-dropped:${bytes}${SOH}`;
 
 const originalLocale = i18n.global.locale.value;
 
@@ -68,6 +71,58 @@ describe("localizeArchiveLineText", () => {
   it("passes ordinary sys lines through untouched", () => {
     expect(localizeArchiveLineText("sys", "Port lost")).toBe("Port lost");
   });
+
+  it("translates the dropped-chunk sentinel and never leaks it verbatim", () => {
+    i18n.global.locale.value = "en";
+    const out = localizeArchiveLineText("sys", dropSentinel(12288));
+
+    expect(out).not.toContain(SOH);
+    expect(out).not.toContain("chunks-dropped");
+    expect(out).toContain("12288");
+    expect(out).toBe(chunksDroppedNoticeText(12288));
+  });
+
+  it("renders the dropped-chunk notice in the active locale", () => {
+    i18n.global.locale.value = "zh-CN";
+    const zh = localizeArchiveLineText("sys", dropSentinel(4096));
+    i18n.global.locale.value = "en";
+    const en = localizeArchiveLineText("sys", dropSentinel(4096));
+
+    expect(zh).toContain("4096");
+    expect(zh).toContain("设备输出");
+    expect(en).toContain("4096");
+    expect(en).not.toBe(zh);
+  });
+
+  it("cannot have a dropped-chunk notice forged by device output", () => {
+    expect(localizeArchiveLineText("rx", dropSentinel(4096))).toBe(
+      dropSentinel(4096),
+    );
+    expect(localizeArchiveLineText("tx", dropSentinel(4096))).toBe(
+      dropSentinel(4096),
+    );
+
+    for (const text of [
+      `boot: ${dropSentinel(4096)}`,
+      `${dropSentinel(4096)} trailing`,
+      `${SOH}tyutool:chunks-dropped:${SOH}`,
+      `${SOH}tyutool:chunks-dropped:12x${SOH}`,
+      "tyutool:chunks-dropped:4096",
+    ]) {
+      expect(localizeArchiveLineText("sys", text)).toBe(text);
+    }
+  });
+
+  it("keeps the two sentinel families apart", () => {
+    i18n.global.locale.value = "en";
+    expect(localizeArchiveLineText("sys", dropSentinel(256))).toBe(
+      chunksDroppedNoticeText(256),
+    );
+    expect(localizeArchiveLineText("sys", sentinel(256))).toBe(
+      archiveCapNoticeText(256),
+    );
+    expect(chunksDroppedNoticeText(256)).not.toBe(archiveCapNoticeText(256));
+  });
 });
 
 describe("formatExportLine", () => {
@@ -79,6 +134,16 @@ describe("formatExportLine", () => {
     expect(out).not.toContain("archive-capped");
     expect(out).toContain("[SYS]");
     expect(out).toContain("128 MiB");
+  });
+
+  it("writes the translated data-loss notice into the export", () => {
+    i18n.global.locale.value = "en";
+    const out = formatExportLine(line("sys", dropSentinel(65536)));
+
+    expect(out).not.toContain(SOH);
+    expect(out).not.toContain("chunks-dropped");
+    expect(out).toContain("[SYS]");
+    expect(out).toContain("65536");
   });
 
   it("keeps the direction tag and strips ANSI from device lines", () => {

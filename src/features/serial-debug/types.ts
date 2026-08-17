@@ -41,6 +41,16 @@ export interface ArchiveCappedPayload {
   limitMib: number;
 }
 
+/**
+ * Mirrors the `serial-debug-chunks-dropped` Tauri event and the
+ * `serial_debug_chunks_dropped` WS message (whose `dropped_bytes` is mapped to
+ * `droppedBytes` in `ws-transport.ts`). Device output the backend could not keep
+ * up with; the wording comes from `serialDebug.log.chunksDropped`.
+ */
+export interface ChunksDroppedPayload {
+  droppedBytes: number;
+}
+
 export type DebugLineDirection = "tx" | "rx" | "sys";
 
 export interface DebugLogLine {
