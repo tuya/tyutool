@@ -231,6 +231,40 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
   (CLI: `SessionLogWriter` → `tyutool-<ts>-N.log`; GUI: `tauri-plugin-log` `max_file_size` +
   `RotationStrategy::KeepAll`). Across sessions, `prune_log_files` trims old files at startup
   (≤100 files / ≤100 MB total). New log sinks must stay bounded too.
+- **Bounded growth — serial-debug session archive:** the serial-debug archive
+  (`{temp_dir}/tyutool/serial-debug/serial-debug-session-<ts>-<pid>-<seq>.ndjson`
+  plus its `.idx` sidecar) is a *third* file family with its own bounds, because
+  a 921600-baud port writes ~1.74 GiB/hour into it. Per session it is size-capped
+  (default 256 MiB, user-settable 16–4096 MiB via
+  `serial_debug_set_archive_limit` / the `serial_debug_set_archive_limit` WS
+  message). The policy is **stopWriting**: on reaching the cap the archive keeps
+  what it has, appends one `Sys` line announcing the cap, and drops everything
+  after — it never renumbers or rewrites, because line numbers are the `.idx`
+  offsets (`(line_no - 1) * 16`). `dropOldest` would require a cursor-based
+  paging contract and is deliberately not implemented. That `Sys` line is a
+  **sentinel**, not prose (`serial_debug_archive_cap_sentinel`): the wording is
+  user-visible and belongs in the frontend i18n catalogue
+  (`serialDebug.log.archiveCapped`), and translating at read time makes an
+  archive re-read after a language switch show the notice in the new language.
+  Every frontend path that surfaces archive text — filter tabs, log export,
+  auto-save — goes through the single `localizeArchiveLineText` helper in
+  `src/features/serial-debug/archive-line-text.ts`; the live view, which is fed
+  by raw chunks and never reads the archive, is told separately by the
+  `serial-debug-archive-capped` Tauri event / `serial_debug_archive_capped` WS
+  message. Across sessions,
+  `prune_serial_debug_archives` runs from `SerialDebugArchive::create` and trims
+  the directory to ≤20 file pairs / ≤1 GiB, oldest mtime first. It selects on the
+  `serial-debug-session-` **stem prefix**, never on the `.idx` extension: live
+  filter match indexes (`serial-debug-filter-*.idx`) share the directory and an
+  extension-keyed sweep would delete them mid-session.
+- **Archive isolation:** the session archive is deliberately *not* in
+  `app_log_dir()` and has neither a `.log` extension nor a `tyutool-` prefix, so
+  `pick_active_log` / `collect_log_files` / `list_log_files_impl` /
+  `export_logs_zip` / `prune_log_files` all ignore it — structurally the same
+  arrangement as `batch-auth-*.trace`. It is a paging store for the UI, not a
+  diagnostic log, and it never lands in an export or archive zip. Do not move it
+  into the log dir. Archived lines carry text only (no `rawBytes`); consumers
+  that need bytes re-encode the text.
 - **Credential isolation (two-channel model):** batch-auth plaintext interaction data
   (verify comparison UUID/AuthKey values) is written to `batch-auth-<ts>.trace` via
   `BatchAuthTraceWriter`, **never** into `tyutool-*.log`. The `.trace` file uses a non-`.log`

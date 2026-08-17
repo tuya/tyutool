@@ -716,6 +716,7 @@ pub fn run() {
             serial_debug::serial_debug_filter_remove,
             serial_debug::serial_debug_filter_read_matches,
             serial_debug::serial_debug_session_read_page,
+            serial_debug::serial_debug_set_archive_limit,
             logs::write_text_file,
             logs::append_text_file,
             logs::register_dialog_path,

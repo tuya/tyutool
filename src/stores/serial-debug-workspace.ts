@@ -7,11 +7,17 @@ import type {
 } from "@/features/serial-debug/types";
 import {
   COMMON_BAUD_RATES,
+  DEFAULT_ARCHIVE_LIMIT_MIB,
   DEFAULT_DATA_BITS,
   DEFAULT_HEX_BYTES_PER_ROW,
   DEFAULT_PARITY,
   DEFAULT_STOP_BITS,
+  DEFAULT_VISIBLE_LOG_WINDOW_LINES,
+  MAX_ARCHIVE_LIMIT_MIB,
   MAX_SEND_HISTORY,
+  MAX_VISIBLE_LOG_WINDOW_LINES,
+  MIN_ARCHIVE_LIMIT_MIB,
+  MIN_VISIBLE_LOG_WINDOW_LINES,
 } from "@/features/serial-debug/constants";
 import { isTauriRuntime } from "@/runtime";
 
@@ -53,6 +59,8 @@ export interface SerialDebugWorkspaceSerialized {
   sendHistory: string[];
   ansiEnabled?: boolean;
   logFontSize?: number;
+  logWindowLines?: number;
+  archiveLimitMib?: number;
   autoSave?: boolean;
   autoSaveDir?: string;
   autoSaveTimestamp?: boolean;
@@ -121,6 +129,22 @@ export function parseSerialDebugWorkspace(
       ? n
       : 12;
   })();
+  const logWindowLines = (() => {
+    const n = numOrNull(r.logWindowLines);
+    if (n === null) return DEFAULT_VISIBLE_LOG_WINDOW_LINES;
+    return Math.min(
+      MAX_VISIBLE_LOG_WINDOW_LINES,
+      Math.max(MIN_VISIBLE_LOG_WINDOW_LINES, Math.round(n)),
+    );
+  })();
+  const archiveLimitMib = (() => {
+    const n = numOrNull(r.archiveLimitMib);
+    if (n === null) return DEFAULT_ARCHIVE_LIMIT_MIB;
+    return Math.min(
+      MAX_ARCHIVE_LIMIT_MIB,
+      Math.max(MIN_ARCHIVE_LIMIT_MIB, Math.round(n)),
+    );
+  })();
 
   // Send history: must be an array of strings; cap length + drop non-strings.
   const sendHistory: string[] = Array.isArray(r.sendHistory)
@@ -146,6 +170,8 @@ export function parseSerialDebugWorkspace(
     ansiEnabled:
       r.ansiEnabled === undefined ? undefined : bool(r.ansiEnabled, true),
     logFontSize,
+    logWindowLines,
+    archiveLimitMib,
     autoSave: r.autoSave === undefined ? undefined : bool(r.autoSave),
     autoSaveDir: r.autoSaveDir === undefined ? undefined : str(r.autoSaveDir),
     autoSaveTimestamp:

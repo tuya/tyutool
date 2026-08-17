@@ -36,6 +36,19 @@ describe("SerialDebugHexViewRenderer", () => {
     expect(formatHexDumpFromChunksMock).toHaveBeenCalledTimes(1);
   });
 
+  it("re-encodes text for archive lines that carry no rawBytes", () => {
+    const renderer = new SerialDebugHexViewRenderer();
+    // Lines paged back from the Rust session archive have no rawBytes: the
+    // archive stores text only. The dump must show the text bytes, not blanks.
+    renderer.render([{ ...line(1), text: "AB" }], 16);
+
+    const calls = formatHexDumpFromChunksMock.mock.calls as unknown as [
+      Uint8Array[],
+    ][];
+    const [chunks] = calls[calls.length - 1];
+    expect(Array.from(chunks[0])).toEqual([0x41, 0x42, 0x0a]);
+  });
+
   it("drops byte-chunk cache entries for lines that are no longer visible", () => {
     const renderer = new SerialDebugHexViewRenderer();
     renderer.render([line(1, [0x41]), line(2, [0x42])], 16);

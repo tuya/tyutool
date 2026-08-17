@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref, watch } from "vue";
+import { computed, ref, shallowRef, triggerRef, watch } from "vue";
 import {
   CHIP_COLORS,
   COMMON_BAUD_RATES,
@@ -12,7 +12,8 @@ import {
   FILTER_PAGE_SIZE,
   MAX_PENDING_LINE_BYTES,
   MAX_SEND_HISTORY,
-  VISIBLE_LOG_WINDOW_LINES,
+  DEFAULT_VISIBLE_LOG_WINDOW_LINES,
+  DEFAULT_ARCHIVE_LIMIT_MIB,
 } from "@/features/serial-debug/constants";
 import {
   chipManifest,
@@ -25,6 +26,10 @@ import {
 import { useFlashStore } from "@/stores/flash";
 import { parseHexInput } from "@/features/serial-debug/hex-format";
 import { archiveLineToLogLine } from "@/features/serial-debug/utils";
+import {
+  archiveCapNoticeText,
+  localizeArchiveLineText,
+} from "@/features/serial-debug/archive-line-text";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { wsTransport } from "@/transport/ws-transport";
 import type {
@@ -170,11 +175,21 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const rebootChipId = ref("");
 
   // ── display ──────────────────────────────────────────────────────────
-  const lines = ref<DebugLogLine[]>([]);
+  // shallowRef: a deep ref would proxy every element, so the per-frame
+  // splice(0, n) that keeps the window at logWindowLines would re-run the
+  // Proxy traps over the whole window (~8 ms per flush at 5000 lines, ~35 ms
+  // at 20000). DebugLogLine objects are never mutated after creation, so deep
+  // reactivity buys nothing. In-place writers must call triggerRef(lines).
+  const lines = shallowRef<DebugLogLine[]>([]);
   const hexView = ref(false);
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
   const ansiEnabled = ref(true);
   const logFontSize = ref(12);
+  const logWindowLines = ref(DEFAULT_VISIBLE_LOG_WINDOW_LINES);
+  // Cap for the Rust-side session archive, in MiB. Unrelated to
+  // logWindowLines: that bounds what the UI keeps in memory, this bounds what
+  // is written to disk.
+  const archiveLimitMib = ref(DEFAULT_ARCHIVE_LIMIT_MIB);
   const showTimestamp = ref(true);
   const showDirBadge = ref(true);
   const filterStatsById = ref<Record<string, SerialDebugFilterStats>>({});
@@ -193,6 +208,12 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   > & {
     estimatedChars: number;
   };
+  // Only filled while an auto-save session file exists (sessionAutoSavePath).
+  // Without that gate nothing ever drains it when auto-save is off, so it grows
+  // for the whole session (~11 MiB/min at 921600). This queue is therefore only
+  // the *live* half of the auto-save file; lines from before the toggle are
+  // backfilled from the Rust-side session archive by
+  // `useSerialAutoSave.backfillFromArchive`, which is the full record.
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
 
   let nextLineId = 1;
@@ -235,6 +256,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   let unsubscribeChunk: (() => void) | null = null;
   let unsubscribeDisconnect: (() => void) | null = null;
   let unsubscribeFilterUpdated: (() => void) | null = null;
+  let unsubscribeArchiveCapped: (() => void) | null = null;
   let resumeAfterFlashRelease = false;
 
   const resumePortManager = usePortManagerStore();
@@ -334,6 +356,38 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     };
   }
 
+  // Does not publish the change: the push paths below trim as their last step
+  // and then trigger once, so the trim never needs its own notification.
+  function trimVisibleLines(): void {
+    if (lines.value.length > logWindowLines.value) {
+      lines.value.splice(0, lines.value.length - logWindowLines.value);
+    }
+  }
+
+  // Lowering the limit must take effect immediately, not on the next batch.
+  watch(logWindowLines, () => {
+    trimVisibleLines();
+    triggerRef(lines);
+  });
+
+  // Same shape as settings.applyLogLevel: a setting the frontend owns, pushed
+  // to Rust on load and on change. Best-effort — the archive may not be ready
+  // yet (or the backend may be a version without the command), and a failed
+  // push only means the compile-time default cap stays in force.
+  async function applyArchiveLimit(): Promise<void> {
+    try {
+      await serialDebugTransport().setArchiveLimit(
+        archiveLimitMib.value * 1024 * 1024,
+      );
+    } catch (e) {
+      rLog.warn(`[serial-debug] failed to apply archive limit: ${String(e)}`);
+    }
+  }
+
+  watch(archiveLimitMib, () => {
+    void applyArchiveLimit();
+  });
+
   function pushLine(
     direction: DebugLogLine["direction"],
     tsMs: number,
@@ -348,31 +402,33 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       rawBytes,
     };
     lines.value.push(line);
-    pendingAutoSaveLines.push({
-      direction: line.direction,
-      tsMs: line.tsMs,
-      text: line.text,
-      estimatedChars: line.text.length + 48,
-    });
-    if (lines.value.length > VISIBLE_LOG_WINDOW_LINES) {
-      lines.value.splice(0, lines.value.length - VISIBLE_LOG_WINDOW_LINES);
+    if (sessionAutoSavePath.value !== null) {
+      pendingAutoSaveLines.push({
+        direction: line.direction,
+        tsMs: line.tsMs,
+        text: line.text,
+        estimatedChars: line.text.length + 48,
+      });
     }
+    trimVisibleLines();
+    triggerRef(lines);
   }
 
   function pushPreparedLines(batch: DebugLogLine[]): void {
     if (batch.length === 0) return;
     lines.value.push(...batch);
-    pendingAutoSaveLines.push(
-      ...batch.map((line) => ({
-        direction: line.direction,
-        tsMs: line.tsMs,
-        text: line.text,
-        estimatedChars: line.text.length + 48,
-      })),
-    );
-    if (lines.value.length > VISIBLE_LOG_WINDOW_LINES) {
-      lines.value.splice(0, lines.value.length - VISIBLE_LOG_WINDOW_LINES);
+    if (sessionAutoSavePath.value !== null) {
+      pendingAutoSaveLines.push(
+        ...batch.map((line) => ({
+          direction: line.direction,
+          tsMs: line.tsMs,
+          text: line.text,
+          estimatedChars: line.text.length + 48,
+        })),
+      );
     }
+    trimVisibleLines();
+    triggerRef(lines);
   }
 
   async function appendSysLine(text: string): Promise<void> {
@@ -488,10 +544,15 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     return pendingAutoSaveLines.splice(0, count);
   }
 
-  const activeDisplayLines = computed<DebugLogLine[]>(() => {
+  // A plain getter, not a computed: on the "All" tab this returns `lines.value`
+  // unchanged, and Vue only notifies a computed's subscribers when the
+  // computed's *result* changes — an identity-stable array would swallow every
+  // triggerRef. As a getter, callers depend on `lines` / `filterPagesById`
+  // directly and are notified.
+  function activeDisplayLines(): DebugLogLine[] {
     if (activeChipId.value === null) return lines.value;
     return filterPagesById.value[activeChipId.value]?.items ?? [];
-  });
+  }
 
   function flushQueuedChunks(): void {
     chunkFlushTimer = null;
@@ -544,9 +605,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     unsubscribeChunk?.();
     unsubscribeDisconnect?.();
     unsubscribeFilterUpdated?.();
+    unsubscribeArchiveCapped?.();
     unsubscribeChunk = null;
     unsubscribeDisconnect = null;
     unsubscribeFilterUpdated = null;
+    unsubscribeArchiveCapped = null;
     queuedChunks.length = 0;
     if (chunkFlushTimer !== null) {
       clearTimeout(chunkFlushTimer);
@@ -640,6 +703,13 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       );
       pm.notifyUnplugged(port.value);
     });
+    // Live view only — deliberately not appendSysLine(): the archive already
+    // holds the sentinel this line is the translation of, and writing it back
+    // would record the same event twice (and be dropped anyway, the archive
+    // being capped).
+    unsubscribeArchiveCapped = transport.onArchiveCapped(({ limitMib }) => {
+      pushLine("sys", Date.now(), archiveCapNoticeText(limitMib));
+    });
     unsubscribeFilterUpdated = transport.onFilterUpdated((payload) => {
       filterStatsById.value = {
         ...filterStatsById.value,
@@ -668,9 +738,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       unsubscribeChunk?.();
       unsubscribeDisconnect?.();
       unsubscribeFilterUpdated?.();
+      unsubscribeArchiveCapped?.();
       unsubscribeChunk = null;
       unsubscribeDisconnect = null;
       unsubscribeFilterUpdated = null;
+      unsubscribeArchiveCapped = null;
     } finally {
       opening.value = false;
     }
@@ -857,8 +929,17 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       filterId: page.filterId,
       totalMatches: page.totalMatches,
       start: page.start,
+      // A filter tab renders straight out of the archive, so this is the third
+      // place the cap sentinel could surface — same helper as the export and
+      // the auto-save file.
       items: page.items.map((line) =>
-        archiveLineToLogLine(line, archiveLineId(line.lineNo)),
+        archiveLineToLogLine(
+          {
+            ...line,
+            text: localizeArchiveLineText(line.direction, line.text),
+          },
+          archiveLineId(line.lineNo),
+        ),
       ),
     };
   }
@@ -962,6 +1043,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     hexBytesPerRow.value = data.hexBytesPerRow;
     ansiEnabled.value = data.ansiEnabled ?? true;
     logFontSize.value = data.logFontSize ?? 12;
+    logWindowLines.value =
+      data.logWindowLines ?? DEFAULT_VISIBLE_LOG_WINDOW_LINES;
+    archiveLimitMib.value = data.archiveLimitMib ?? DEFAULT_ARCHIVE_LIMIT_MIB;
     autoSave.value = data.autoSave ?? false;
     autoSaveDir.value = data.autoSaveDir ?? "";
     // Re-authorize the restored auto-save directory so writes work after a
@@ -980,6 +1064,10 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     sendMode.value = data.sendMode;
     sendAppendCrlf.value = data.sendAppendCrlf;
     sendHistory.value = data.sendHistory;
+    // The archive is created at app start with the compile-time default, so the
+    // restored value has to be pushed down once the workspace is known. The
+    // watch above only fires when the value actually changes.
+    await applyArchiveLimit();
   }
 
   function startWorkspacePersistence(): void {
@@ -1001,6 +1089,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
             hexBytesPerRow: hexBytesPerRow.value,
             ansiEnabled: ansiEnabled.value,
             logFontSize: logFontSize.value,
+            logWindowLines: logWindowLines.value,
+            archiveLimitMib: archiveLimitMib.value,
             autoSave: autoSave.value,
             autoSaveDir: autoSaveDir.value,
             autoSaveTimestamp: autoSaveTimestamp.value,
@@ -1024,6 +1114,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
             hexBytesPerRow.value,
             ansiEnabled.value,
             logFontSize.value,
+            logWindowLines.value,
+            archiveLimitMib.value,
             sendMode.value,
             sendAppendCrlf.value,
             autoSave.value,
@@ -1072,11 +1164,12 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     rebootControlPort,
     rebootChipId,
     lines,
-    activeDisplayLines,
     hexView,
     hexBytesPerRow,
     ansiEnabled,
     logFontSize,
+    logWindowLines,
+    archiveLimitMib,
     showTimestamp,
     showDirBadge,
     filterStatsById,
@@ -1095,6 +1188,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     autoSaveTimestamp,
     sessionAutoSavePath,
     // actions
+    activeDisplayLines,
     openPort,
     closePort,
     deviceReset,

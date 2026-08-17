@@ -72,6 +72,23 @@ const MAX_PENDING_SERIAL_DEBUG_LINE_BYTES: usize = 4096;
 const FILTER_BACKFILL_READ_BATCH_LINES: u64 = 512;
 static SERIAL_DEBUG_SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Compile-time cap for one session archive. The GUI/web setting overrides this
+/// at runtime, but a device can flood the port before the setting is pushed
+/// down (~508 KiB/s at 921600 baud), so the default has to be bounded on its
+/// own. Mirrors `DEFAULT_ARCHIVE_LIMIT_MIB` in
+/// `src/features/serial-debug/constants.ts`.
+const DEFAULT_SERIAL_DEBUG_ARCHIVE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+/// Bytes reserved below `max_bytes` so the "archive full" `Sys` line always
+/// fits. Its encoded form is well under 300 B.
+const ARCHIVE_CAP_NOTICE_HEADROOM_BYTES: u64 = 512;
+/// Stem prefix shared by both halves of a session archive pair
+/// (`<prefix><session-id>.ndjson` + `<prefix><session-id>.idx`).
+const SERIAL_DEBUG_SESSION_FILE_PREFIX: &str = "serial-debug-session-";
+/// Cross-session bounds for the archive directory, in the shape of
+/// `prune_log_files`: file *pairs* and total bytes, whichever binds first.
+const MAX_ARCHIVE_SESSIONS: usize = 20;
+const MAX_ARCHIVE_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogDirection {
@@ -91,6 +108,51 @@ pub struct SerialDebugLine {
     pub raw_bytes: Option<Vec<u8>>,
 }
 
+/// Opening delimiter of the archive-cap sentinel. `\u{1}` (SOH) is a C0 control
+/// character: it never occurs in a translated UI string, which is the only other
+/// source of `Sys` lines.
+const ARCHIVE_CAP_SENTINEL_PREFIX: &str = "\u{1}tyutool:archive-capped:";
+const ARCHIVE_CAP_SENTINEL_SUFFIX: char = '\u{1}';
+
+/// Text written into the archive in place of the first line that would have
+/// broken the size cap, carrying the limit in MiB.
+///
+/// Why a sentinel rather than a finished sentence:
+/// * the notice is user-visible, so its wording must come from the frontend
+///   i18n catalogue (`serialDebug.log.archiveCapped`) — a Chinese UI must not
+///   grow an English line;
+/// * translating at read time means a session archive re-read after the user
+///   switches language shows the notice in the *new* language, which a string
+///   baked in at write time could never do.
+///
+/// Collision safety — a device log line can never be mistaken for this:
+/// 1. only `Sys` lines are ever tested ([`serial_debug_archive_cap_limit_mib`]),
+///    and device bytes always arrive as `Tx`/`Rx`, so device output cannot reach
+///    the check at all;
+/// 2. the remaining `Sys` producer is the frontend's own `appendSysLine`, which
+///    passes translated catalogue strings — none of which contain U+0001;
+/// 3. the match is on the whole string (prefix + digits + suffix), not a
+///    substring, so a longer line that merely embeds the marker is not a match.
+pub fn serial_debug_archive_cap_sentinel(limit_mib: u64) -> String {
+    format!("{ARCHIVE_CAP_SENTINEL_PREFIX}{limit_mib}{ARCHIVE_CAP_SENTINEL_SUFFIX}")
+}
+
+/// The MiB limit carried by an archive-cap sentinel line, or `None` for any
+/// other line. Mirrored in `src/features/serial-debug/archive-line-text.ts`.
+pub fn serial_debug_archive_cap_limit_mib(line: &SerialDebugLine) -> Option<u64> {
+    if line.direction != LogDirection::Sys {
+        return None;
+    }
+    let digits = line
+        .text
+        .strip_prefix(ARCHIVE_CAP_SENTINEL_PREFIX)?
+        .strip_suffix(ARCHIVE_CAP_SENTINEL_SUFFIX)?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SerialDebugArchiveMeta {
@@ -108,6 +170,12 @@ pub struct SerialDebugArchive {
     idx_writer: std::io::BufWriter<File>,
     next_offset: u64,
     next_line_no: u64,
+    /// Byte budget for `log_path`; 0 disables the cap.
+    max_bytes: u64,
+    /// Set once the budget is exhausted. Existing content is kept and new lines
+    /// are dropped (`stopWriting`) — never rewritten, so line numbers and the
+    /// `(line_no - 1) * 16` index arithmetic stay valid.
+    capped: bool,
     pending_tx: Vec<u8>,
     pending_rx: Vec<u8>,
 }
@@ -286,11 +354,86 @@ impl SerialDebugFilterIndex {
     }
 }
 
+struct ArchiveSessionFiles {
+    paths: Vec<std::path::PathBuf>,
+    bytes: u64,
+    modified: SystemTime,
+}
+
+/// Delete the oldest `serial-debug-session-*` archives until the directory is
+/// within both the pair-count and total-byte limits. Always keeps at least one.
+///
+/// Selection is keyed on the **stem prefix**, never on the extension: the same
+/// directory also holds `serial-debug-filter-<id>.idx` (and `.live.idx`) match
+/// indexes belonging to *live* filters, and an `extension == "idx"` sweep would
+/// delete those out from under a running session.
+///
+/// Both halves of a pair are removed together — an orphan `.idx` indexes
+/// nothing and an orphan `.ndjson` cannot be paged.
+///
+/// Ordering is by mtime (oldest first), not by filename as in
+/// `prune_log_files`: an archive that is still being written keeps its mtime
+/// fresh, so mtime ordering protects the live archives of this process *and* of
+/// the other `tyutool-serve` WebSocket connections that share this directory.
+fn prune_serial_debug_archives(root_dir: &std::path::Path) {
+    let mut sessions: HashMap<String, ArchiveSessionFiles> = HashMap::new();
+    let entries = match std::fs::read_dir(root_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    for path in entries.filter_map(|e| e.ok()).map(|e| e.path()) {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !stem.starts_with(SERIAL_DEBUG_SESSION_FILE_PREFIX) {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let modified = meta.modified().unwrap_or(UNIX_EPOCH);
+        let entry = sessions
+            .entry(stem.to_string())
+            .or_insert_with(|| ArchiveSessionFiles {
+                paths: Vec::new(),
+                bytes: 0,
+                modified: UNIX_EPOCH,
+            });
+        entry.paths.push(path);
+        entry.bytes = entry.bytes.saturating_add(meta.len());
+        entry.modified = entry.modified.max(modified);
+    }
+
+    let mut sessions = sessions.into_values().collect::<Vec<_>>();
+    sessions.sort_by_key(|session| session.modified);
+
+    let mut count = sessions.len();
+    let mut total = sessions
+        .iter()
+        .fold(0u64, |acc, session| acc.saturating_add(session.bytes));
+    for session in &sessions {
+        if count <= 1 || (count <= MAX_ARCHIVE_SESSIONS && total <= MAX_ARCHIVE_TOTAL_BYTES) {
+            break;
+        }
+        for path in &session.paths {
+            let _ = std::fs::remove_file(path);
+        }
+        count -= 1;
+        total = total.saturating_sub(session.bytes);
+    }
+}
+
 impl SerialDebugArchive {
     pub fn create(root_dir: &std::path::Path) -> std::io::Result<Self> {
         std::fs::create_dir_all(root_dir)?;
         let (session_id, log_path, idx_path, log_writer, idx_writer) =
             Self::create_session_files(root_dir)?;
+        // Prune after the new pair exists (same order as `prune_trace_files`):
+        // the fresh files are the newest, so they can never be the ones trimmed.
+        prune_serial_debug_archives(root_dir);
         Ok(Self {
             root_dir: root_dir.to_path_buf(),
             session_id,
@@ -300,9 +443,20 @@ impl SerialDebugArchive {
             idx_writer,
             next_offset: 0,
             next_line_no: 0,
+            max_bytes: DEFAULT_SERIAL_DEBUG_ARCHIVE_MAX_BYTES,
+            capped: false,
             pending_tx: Vec::new(),
             pending_rx: Vec::new(),
         })
+    }
+
+    /// Update the per-session byte cap (0 disables it). Raising it above the
+    /// current size resumes archiving; lowering it stops at the next line.
+    pub fn set_max_bytes(&mut self, max_bytes: u64) {
+        self.max_bytes = max_bytes;
+        if !self.would_exceed_cap(0) {
+            self.capped = false;
+        }
     }
 
     pub fn meta(&self) -> SerialDebugArchiveMeta {
@@ -331,6 +485,7 @@ impl SerialDebugArchive {
         self.idx_writer = idx_writer;
         self.next_offset = 0;
         self.next_line_no = 0;
+        self.capped = false;
         self.pending_tx.clear();
         self.pending_rx.clear();
         let _ = std::fs::remove_file(old_log_path);
@@ -366,18 +521,27 @@ impl SerialDebugArchive {
                 Direction::Tx => LogDirection::Tx,
                 Direction::Rx => LogDirection::Rx,
             };
+            // `raw_bytes` is deliberately dropped here: `text` above is already
+            // derived from it, and carrying it into the archive JSON costs
+            // ~268 B of `number[]` per 407 B line. Consumers that need bytes
+            // (the hex view on a filter tab) re-encode `text`; the live view
+            // never goes through the archive at all.
             decoded.push(SerialDebugLine {
                 line_no: 0,
                 ts_ms: chunk.ts_ms,
                 direction,
                 text,
-                raw_bytes: Some(raw_bytes),
+                raw_bytes: None,
             });
         }
 
         let mut completed = Vec::with_capacity(decoded.len());
         for line in decoded {
-            completed.push(self.append_line(line)?);
+            // `None` once the archive is capped — the drain above already
+            // consumed the bytes, so the loop still converges.
+            if let Some(line) = self.append_line(line)? {
+                completed.push(line);
+            }
         }
         if !completed.is_empty() {
             self.flush_writers()?;
@@ -386,11 +550,12 @@ impl SerialDebugArchive {
         Ok(completed)
     }
 
+    /// Returns `None` once the archive is capped (see [`Self::append_line`]).
     pub fn append_sys_line(
         &mut self,
         ts_ms: u64,
         text: String,
-    ) -> std::io::Result<SerialDebugLine> {
+    ) -> std::io::Result<Option<SerialDebugLine>> {
         let line = self.append_line(SerialDebugLine {
             line_no: 0,
             ts_ms,
@@ -463,16 +628,80 @@ impl SerialDebugArchive {
         }
     }
 
-    fn append_line(&mut self, mut line: SerialDebugLine) -> std::io::Result<SerialDebugLine> {
-        self.next_line_no += 1;
-        line.line_no = self.next_line_no;
+    /// Append one line, or drop it once the archive is capped.
+    ///
+    /// Returns the archived line; `None` means nothing was written. The line
+    /// that first crosses the cap is replaced by the cap sentinel, which *is*
+    /// returned — the callers recognise it with
+    /// [`serial_debug_archive_cap_limit_mib`] and notify the live view, so the
+    /// cap surfaces there as well as in the export and the auto-save file
+    /// rather than truncating silently.
+    ///
+    /// `next_line_no` is only incremented after the bytes are handed to the
+    /// writers. Numbering a line that never reaches the `.idx` file would put a
+    /// hole in it, and `(line_no - 1) * 16` would then read the wrong entry for
+    /// every later line — silent corruption with no error anywhere.
+    fn append_line(
+        &mut self,
+        mut line: SerialDebugLine,
+    ) -> std::io::Result<Option<SerialDebugLine>> {
+        if self.capped {
+            return Ok(None);
+        }
+        line.line_no = self.next_line_no + 1;
         let encoded = serde_json::to_vec(&line)?;
-        self.log_writer.write_all(&encoded)?;
+        if self.would_exceed_cap(encoded.len() as u64) {
+            self.capped = true;
+            let ts_ms = line.ts_ms;
+            return self.write_cap_notice(ts_ms).map(Some);
+        }
+        self.write_encoded_line(line, &encoded).map(Some)
+    }
+
+    /// Whether writing `encoded_len` more payload bytes would break the budget.
+    /// Uses `next_offset` — the authoritative logical size — and never
+    /// `metadata().len()`, which lags behind by whatever the `BufWriter` still
+    /// holds (`flush_writers` only runs once per batch).
+    fn would_exceed_cap(&self, encoded_len: u64) -> bool {
+        if self.max_bytes == 0 {
+            return false;
+        }
+        let budget = self
+            .max_bytes
+            .saturating_sub(ARCHIVE_CAP_NOTICE_HEADROOM_BYTES);
+        self.next_offset.saturating_add(encoded_len + 1) > budget
+    }
+
+    fn write_cap_notice(&mut self, ts_ms: u64) -> std::io::Result<SerialDebugLine> {
+        let line = SerialDebugLine {
+            line_no: self.next_line_no + 1,
+            ts_ms,
+            direction: LogDirection::Sys,
+            // A sentinel, not prose: the wording is a user-visible string and
+            // belongs in the frontend i18n catalogue. See
+            // `serial_debug_archive_cap_sentinel`.
+            //
+            // The UI floor is 16 MiB, so rounding up only ever shows on
+            // deliberately tiny caps (tests).
+            text: serial_debug_archive_cap_sentinel(self.max_bytes.div_ceil(1024 * 1024)),
+            raw_bytes: None,
+        };
+        let encoded = serde_json::to_vec(&line)?;
+        self.write_encoded_line(line, &encoded)
+    }
+
+    fn write_encoded_line(
+        &mut self,
+        line: SerialDebugLine,
+        encoded: &[u8],
+    ) -> std::io::Result<SerialDebugLine> {
+        self.log_writer.write_all(encoded)?;
         self.log_writer.write_all(b"\n")?;
         self.idx_writer.write_all(&self.next_offset.to_le_bytes())?;
         self.idx_writer
             .write_all(&(encoded.len() as u64).to_le_bytes())?;
         self.next_offset += encoded.len() as u64 + 1;
+        self.next_line_no += 1;
         Ok(line)
     }
 
@@ -1978,6 +2207,279 @@ mod tests {
         assert_eq!(updates.len(), 1);
         assert_eq!(updates[0].filter_id, filter.id);
         assert_eq!(updates[0].total_matches, 2);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Fill the archive until it caps, then return the number of lines written.
+    fn fill_until_capped(archive: &mut SerialDebugArchive) -> u64 {
+        for i in 0..10_000u64 {
+            let before = archive.total_lines();
+            archive
+                .append_chunk(&DebugChunk {
+                    direction: Direction::Rx,
+                    ts_ms: i,
+                    bytes: format!("line {i} padding padding padding\n").into_bytes(),
+                })
+                .unwrap();
+            if archive.total_lines() == before {
+                return archive.total_lines();
+            }
+        }
+        panic!("archive never reached its cap");
+    }
+
+    #[test]
+    fn capped_archive_stops_numbering_lines_and_keeps_index_consistent() {
+        let dir = temp_serial_debug_dir("cap-stop-writing");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive.set_max_bytes(4096);
+
+        let capped_at = fill_until_capped(&mut archive);
+        assert!(capped_at > 0, "some lines must land before the cap");
+
+        // The cap must not hand out line numbers for lines that never reached
+        // the .idx file — a hole there would make (line_no - 1) * 16 read the
+        // wrong entry for every later line, silently.
+        let idx_len = std::fs::metadata(&archive.idx_path).unwrap().len();
+        assert_eq!(idx_len, capped_at * ARCHIVE_INDEX_ENTRY_BYTES);
+        let log_len = std::fs::metadata(&archive.log_path).unwrap().len();
+        assert_eq!(log_len, archive.next_offset);
+        assert!(log_len <= 4096, "cap must bound the payload: {log_len}");
+
+        // Every numbered line is still readable at its indexed offset.
+        let all = archive.read_line_range(1, capped_at).unwrap();
+        assert_eq!(all.len() as u64, capped_at);
+        assert_eq!(all.last().unwrap().line_no, capped_at);
+
+        // The last archived line announces the cap rather than truncating
+        // silently — as a sentinel the frontend translates, never as prose.
+        let notice = all.last().unwrap();
+        assert_eq!(notice.direction, LogDirection::Sys);
+        // Pins the wire format mirrored in
+        // src/features/serial-debug/archive-line-text.ts.
+        assert_eq!(notice.text, "\u{1}tyutool:archive-capped:1\u{1}");
+        assert_eq!(serial_debug_archive_cap_limit_mib(notice), Some(1));
+
+        // Further appends change nothing at all.
+        let before = archive.total_lines();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 9,
+                bytes: b"still flowing\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(archive.total_lines(), before);
+        assert_eq!(
+            std::fs::metadata(&archive.idx_path).unwrap().len(),
+            idx_len,
+            "index must not grow after the cap"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cap_sentinel_is_only_recognised_on_an_exact_sys_line() {
+        let sentinel = |direction, text: &str| SerialDebugLine {
+            line_no: 1,
+            ts_ms: 0,
+            direction,
+            text: text.to_string(),
+            raw_bytes: None,
+        };
+
+        assert_eq!(
+            serial_debug_archive_cap_limit_mib(&sentinel(
+                LogDirection::Sys,
+                &serial_debug_archive_cap_sentinel(256)
+            )),
+            Some(256)
+        );
+
+        // A device that echoes the marker byte-for-byte still cannot forge the
+        // notice: its output is never a Sys line.
+        assert_eq!(
+            serial_debug_archive_cap_limit_mib(&sentinel(
+                LogDirection::Rx,
+                &serial_debug_archive_cap_sentinel(256)
+            )),
+            None
+        );
+
+        // Whole-string match only — an embedding line is not a sentinel.
+        for text in [
+            &format!("boot: {}", serial_debug_archive_cap_sentinel(256)),
+            &format!("{} trailing", serial_debug_archive_cap_sentinel(256)),
+            "\u{1}tyutool:archive-capped:\u{1}",
+            "\u{1}tyutool:archive-capped:12x\u{1}",
+            "tyutool:archive-capped:256",
+            "session archive reached its 256 MiB limit",
+        ] {
+            assert_eq!(
+                serial_debug_archive_cap_limit_mib(&sentinel(LogDirection::Sys, text)),
+                None,
+                "must not match: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn capped_archive_returns_no_lines_and_freezes_filter_matches() {
+        let dir = temp_serial_debug_dir("cap-filter-freeze");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let mut filters = SerialDebugFilterIndex::create(&dir).unwrap();
+        let filter = filters
+            .add_filter("line".into(), false, "#f00".into(), 0)
+            .unwrap();
+        archive.set_max_bytes(4096);
+
+        loop {
+            let completed = archive
+                .append_chunk(&DebugChunk {
+                    direction: Direction::Rx,
+                    ts_ms: 1,
+                    bytes: b"line padding padding padding padding\n".to_vec(),
+                })
+                .unwrap();
+            filters.ingest_completed_lines(&completed).unwrap();
+            if completed.is_empty() {
+                break;
+            }
+        }
+        let frozen = filters.stats(&filter.id).unwrap().total_matches;
+
+        for _ in 0..5 {
+            let completed = archive
+                .append_chunk(&DebugChunk {
+                    direction: Direction::Rx,
+                    ts_ms: 2,
+                    bytes: b"line after the cap\n".to_vec(),
+                })
+                .unwrap();
+            assert!(completed.is_empty(), "capped archive yields no lines");
+            filters.ingest_completed_lines(&completed).unwrap();
+        }
+        assert_eq!(filters.stats(&filter.id).unwrap().total_matches, frozen);
+
+        // Sys lines are dropped too, and report it.
+        assert!(archive.append_sys_line(3, "note".into()).unwrap().is_none());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn clear_resets_the_capped_state() {
+        let dir = temp_serial_debug_dir("cap-clear");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive.set_max_bytes(4096);
+        fill_until_capped(&mut archive);
+
+        archive.clear().unwrap();
+        assert_eq!(archive.total_lines(), 0);
+
+        let completed = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"after clear\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].line_no, 1);
+        assert_eq!(completed[0].text, "after clear");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn raising_the_limit_resumes_archiving_a_capped_session() {
+        let dir = temp_serial_debug_dir("cap-raise");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive.set_max_bytes(4096);
+        let capped_at = fill_until_capped(&mut archive);
+
+        archive.set_max_bytes(64 * 1024);
+        let completed = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"after raise\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].line_no, capped_at + 1);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn archive_lines_do_not_carry_raw_bytes_into_the_session_file() {
+        let dir = temp_serial_debug_dir("no-raw-bytes");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let completed = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"hello\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(completed[0].text, "hello");
+        assert!(completed[0].raw_bytes.is_none());
+
+        let raw = std::fs::read_to_string(&archive.log_path).unwrap();
+        assert!(
+            !raw.contains("rawBytes"),
+            "archive JSON must stay lean: {raw}"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn prune_removes_session_pairs_but_never_live_filter_indexes() {
+        let dir = temp_serial_debug_dir("prune-keeps-filter-idx");
+        // A live filter's match index lives in the same directory and shares the
+        // `.idx` extension — pruning by extension would delete it mid-session.
+        let filter_idx = dir.join("serial-debug-filter-filter-1.idx");
+        let filter_live_idx = dir.join("serial-debug-filter-filter-1.live.idx");
+        std::fs::write(&filter_idx, b"keep me").unwrap();
+        std::fs::write(&filter_live_idx, b"keep me too").unwrap();
+
+        let mut created = Vec::new();
+        for i in 0..(MAX_ARCHIVE_SESSIONS + 3) {
+            let ndjson = dir.join(format!(
+                "{SERIAL_DEBUG_SESSION_FILE_PREFIX}{i:04}-1-0.ndjson"
+            ));
+            let idx = dir.join(format!("{SERIAL_DEBUG_SESSION_FILE_PREFIX}{i:04}-1-0.idx"));
+            std::fs::write(&ndjson, b"{}\n").unwrap();
+            std::fs::write(&idx, [0u8; 16]).unwrap();
+            // Distinct mtimes: prune orders by mtime, oldest first.
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            created.push((ndjson, idx));
+        }
+
+        prune_serial_debug_archives(&dir);
+
+        assert!(filter_idx.exists(), "live filter match index must survive");
+        assert!(
+            filter_live_idx.exists(),
+            "pending live filter match index must survive"
+        );
+
+        let surviving = created.iter().filter(|(ndjson, _)| ndjson.exists()).count();
+        assert_eq!(surviving, MAX_ARCHIVE_SESSIONS);
+        for (ndjson, idx) in &created {
+            assert_eq!(
+                ndjson.exists(),
+                idx.exists(),
+                "both halves of a pair must go together: {ndjson:?}"
+            );
+        }
+        // The newest pairs are the ones kept.
+        assert!(created.last().unwrap().0.exists());
+        assert!(!created.first().unwrap().0.exists());
 
         std::fs::remove_dir_all(dir).unwrap();
     }

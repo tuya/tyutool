@@ -13,8 +13,12 @@ import type {
 } from "@/features/serial-debug/types";
 import { useSerialDebugStore } from "./serial-debug";
 import { useFlashStore } from "./flash";
-import { nextTick } from "vue";
-import { MAX_PENDING_LINE_BYTES } from "@/features/serial-debug/constants";
+import { nextTick, watchEffect } from "vue";
+import {
+  DEFAULT_ARCHIVE_LIMIT_MIB,
+  DEFAULT_VISIBLE_LOG_WINDOW_LINES,
+  MAX_PENDING_LINE_BYTES,
+} from "@/features/serial-debug/constants";
 import { AUTH_ONLY_CHIP_ID } from "@/features/firmware-flash/constants";
 
 vi.mock("@/composables/confirmDialog", () => ({
@@ -32,6 +36,7 @@ function fakeTransport(): SerialDebugTransport & {
   emitChunkBatch: (chunks: DebugChunk[]) => void;
   emitDisconnect: (reason: string) => void;
   emitFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void;
+  emitArchiveCapped: (limitMib: number) => void;
   setFilterPage: (filterId: string, page: SerialDebugFilterPage) => void;
   readFilterMatchesCalls: Array<{
     filterId: string;
@@ -39,6 +44,8 @@ function fakeTransport(): SerialDebugTransport & {
     limit?: number;
   }>;
   sent: Uint8Array[];
+  archiveLimitCalls: number[];
+  sysLineWrites: string[];
   opened: boolean;
 } {
   const chunkListeners = new Set<(c: DebugChunk) => void>();
@@ -47,7 +54,10 @@ function fakeTransport(): SerialDebugTransport & {
   const filterListeners = new Set<
     (p: SerialDebugFilterUpdatePayload) => void
   >();
+  const archiveCappedListeners = new Set<(p: { limitMib: number }) => void>();
   const sent: Uint8Array[] = [];
+  const archiveLimitCalls: number[] = [];
+  const sysLineWrites: string[] = [];
   const readFilterMatchesCalls: Array<{
     filterId: string;
     start?: number;
@@ -65,6 +75,8 @@ function fakeTransport(): SerialDebugTransport & {
   >();
   return {
     sent,
+    archiveLimitCalls,
+    sysLineWrites,
     readFilterMatchesCalls,
     get opened() {
       return opened;
@@ -79,7 +91,9 @@ function fakeTransport(): SerialDebugTransport & {
       sent.push(b);
     },
     async clearSession() {},
-    async appendSysLine() {},
+    async appendSysLine(_tsMs, text) {
+      sysLineWrites.push(text);
+    },
     async addFilter(keyword, useRegex, color) {
       const id = `filter-${nextFilterId++}`;
       const payload: SerialDebugFilterUpdatePayload = {
@@ -121,6 +135,9 @@ function fakeTransport(): SerialDebugTransport & {
         items: [],
       };
     },
+    async setArchiveLimit(maxBytes: number) {
+      archiveLimitCalls.push(maxBytes);
+    },
     onChunk(cb) {
       chunkListeners.add(cb);
       return () => chunkListeners.delete(cb);
@@ -137,6 +154,10 @@ function fakeTransport(): SerialDebugTransport & {
       filterListeners.add(cb);
       return () => filterListeners.delete(cb);
     },
+    onArchiveCapped(cb) {
+      archiveCappedListeners.add(cb);
+      return () => archiveCappedListeners.delete(cb);
+    },
     emitChunk(c) {
       chunkListeners.forEach((l) => l(c));
     },
@@ -148,6 +169,9 @@ function fakeTransport(): SerialDebugTransport & {
     },
     emitFilterUpdated(payload) {
       filterListeners.forEach((l) => l(payload));
+    },
+    emitArchiveCapped(limitMib) {
+      archiveCappedListeners.forEach((l) => l({ limitMib }));
     },
     setFilterPage(filterId, page) {
       const entry = filters.get(filterId);
@@ -221,9 +245,11 @@ describe("useSerialDebugStore.appendChunk", () => {
     const s = useSerialDebugStore();
     // Simulate slightly more than the visible window arriving in one batch.
     const oneLine = "x\n";
-    const bytes = [...Buffer.from(oneLine.repeat(3505))];
+    const bytes = [
+      ...Buffer.from(oneLine.repeat(DEFAULT_VISIBLE_LOG_WINDOW_LINES + 505)),
+    ];
     s.appendChunk({ direction: "rx", tsMs: 1000, bytes });
-    expect(s.lines.length).toBe(3000);
+    expect(s.lines.length).toBe(DEFAULT_VISIBLE_LOG_WINDOW_LINES);
   });
 
   it("each line owns an independent rawBytes copy", () => {
@@ -235,6 +261,48 @@ describe("useSerialDebugStore.appendChunk", () => {
     });
     expect(s.lines.length).toBe(2);
     expect(s.lines[0].rawBytes).not.toBe(s.lines[1].rawBytes);
+  });
+
+  // `lines` is a shallowRef, so every in-place write has to publish itself via
+  // triggerRef. This guards all three writers: append, append-into-a-saturated
+  // window (length does not change), and the trim when the limit is lowered.
+  it("publishes every in-place lines write to reactive readers", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2;
+    await nextTick();
+
+    const seen: string[] = [];
+    const stop = watchEffect(() => {
+      seen.push(s.lines.map((line) => line.text).join(","));
+    });
+    try {
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("a\n")],
+      });
+      await nextTick();
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 1001,
+        bytes: [...Buffer.from("b\n")],
+      });
+      await nextTick();
+      // Window is full: the head is dropped for every append, so the array
+      // length stops changing while the content keeps moving.
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 1002,
+        bytes: [...Buffer.from("c\n")],
+      });
+      await nextTick();
+      s.logWindowLines = 1;
+      await nextTick();
+
+      expect(seen).toEqual(["", "a", "a,b", "b,c", "c"]);
+    } finally {
+      stop();
+    }
   });
 
   it("reuses one TextDecoder while processing a chunk batch", () => {
@@ -265,6 +333,7 @@ describe("useSerialDebugStore.appendChunk", () => {
 
   it("drains auto-save lines in bounded lightweight batches", () => {
     const s = useSerialDebugStore();
+    s.sessionAutoSavePath = "/logs/COM1/serial-debug.txt";
     s.appendChunk({
       direction: "rx",
       tsMs: 1000,
@@ -284,6 +353,33 @@ describe("useSerialDebugStore.appendChunk", () => {
     const secondBatch = s.drainPendingAutoSaveLines(1);
     expect(secondBatch).toHaveLength(1);
     expect(secondBatch[0].text).toBe("second");
+  });
+
+  it("does not queue auto-save lines while no session file is active", () => {
+    const s = useSerialDebugStore();
+
+    for (let i = 0; i < 200; i += 1) {
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 1000 + i,
+        bytes: [...Buffer.from(`line-${i}\n`)],
+      });
+    }
+
+    // Nothing drains the backlog while auto-save is off, so it must stay empty
+    // instead of retaining every line for the whole session.
+    expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+
+    // Enabling auto-save starts capturing from that point on.
+    s.sessionAutoSavePath = "/logs/COM1/serial-debug.txt";
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("after-enable\n")],
+    });
+    expect(
+      s.drainPendingAutoSaveLines(Infinity).map((line) => line.text),
+    ).toEqual(["after-enable"]);
   });
 });
 
@@ -422,6 +518,61 @@ describe("useSerialDebugStore port-manager integration", () => {
     ]);
   });
 
+  // The live view is fed by the raw chunk stream and never reads the archive,
+  // so the notice the archive wrote into itself can only reach the user through
+  // this event. Without it the log keeps scrolling while archiving has silently
+  // stopped.
+  describe("archive cap notice", () => {
+    // Mirrors serial_debug_archive_cap_sentinel in
+    // crates/tyutool-core/src/serial_debug.rs.
+    const SOH = String.fromCharCode(1);
+
+    it("puts a translated sys line into the live view", async () => {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      s.baudRate = 115200;
+      await s.openPort();
+      const before = s.lines.length;
+
+      fake.emitArchiveCapped(256);
+
+      const added = s.lines.slice(before);
+      expect(added).toHaveLength(1);
+      expect(added[0].direction).toBe("sys");
+      expect(added[0].text).toContain("256 MiB");
+      // The sentinel is an internal marker — it must never reach the user.
+      expect(added[0].text).not.toContain(SOH);
+      expect(added[0].text).not.toContain("archive-capped");
+    });
+
+    it("does not write the notice back into the archive", async () => {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      s.baudRate = 115200;
+      await s.openPort();
+      fake.sysLineWrites.length = 0;
+
+      fake.emitArchiveCapped(256);
+
+      // The archive already holds the sentinel; a write-back would record the
+      // same event twice (and be dropped, the archive being capped).
+      expect(fake.sysLineWrites).toEqual([]);
+    });
+
+    it("stops listening once the session is torn down", async () => {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      s.baudRate = 115200;
+      await s.openPort();
+      await s.closePort();
+      const before = s.lines.length;
+
+      fake.emitArchiveCapped(256);
+
+      expect(s.lines.length).toBe(before);
+    });
+  });
+
   it("reuses one TextDecoder across queued chunks flushed in the same frame", async () => {
     const OriginalTextDecoder = globalThis.TextDecoder;
     let decoderConstructCount = 0;
@@ -507,6 +658,7 @@ describe("useSerialDebugStore port-manager integration", () => {
 
   it("clear() empties lines and pending buffer", async () => {
     const s = useSerialDebugStore();
+    s.sessionAutoSavePath = "/logs/COM1/serial-debug.txt";
     s.appendChunk({
       direction: "rx",
       tsMs: 1000,
@@ -764,7 +916,7 @@ describe("useSerialDebugStore watch chip management", () => {
 
     await s.setActiveChip(id);
 
-    const items = s.activeDisplayLines;
+    const items = s.activeDisplayLines();
     expect(items.map((line) => line.text)).toEqual([
       "ERR alpha",
       "ERR beta",
@@ -775,6 +927,35 @@ describe("useSerialDebugStore watch chip management", () => {
     // single filtered line shown repeatedly).
     expect(new Set(items.map((line) => line.id)).size).toBe(3);
     expect(items.every((line) => Number.isInteger(line.id))).toBe(true);
+  });
+
+  // A filter tab renders straight out of the archive, so it is the one live-view
+  // path that can meet the raw cap sentinel.
+  it("translates the archive cap sentinel in a filter page", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("tyutool", false);
+    const id = s.watchChips[0].id;
+    const SOH = String.fromCharCode(1);
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 1,
+      start: 0,
+      items: [
+        {
+          lineNo: 4,
+          tsMs: 1000,
+          direction: "sys",
+          text: `${SOH}tyutool:archive-capped:512${SOH}`,
+        },
+      ],
+    });
+
+    await s.setActiveChip(id);
+
+    const [line] = s.activeDisplayLines();
+    expect(line.text).toContain("512 MiB");
+    expect(line.text).not.toContain(SOH);
+    expect(line.text).not.toContain("archive-capped");
   });
 
   it("keeps display ids stable when the same filter page is reloaded", async () => {
@@ -792,9 +973,9 @@ describe("useSerialDebugStore watch chip management", () => {
     });
 
     await s.setActiveChip(id);
-    const firstIds = s.activeDisplayLines.map((line) => line.id);
+    const firstIds = s.activeDisplayLines().map((line) => line.id);
     await s.setActiveChip(id);
-    expect(s.activeDisplayLines.map((line) => line.id)).toEqual(firstIds);
+    expect(s.activeDisplayLines().map((line) => line.id)).toEqual(firstIds);
   });
 
   it("does not reuse display ids for archive line numbers of a new session", async () => {
@@ -808,7 +989,7 @@ describe("useSerialDebugStore watch chip management", () => {
       items: [{ lineNo: 1, tsMs: 1000, direction: "rx", text: "ERR old" }],
     });
     await s.setActiveChip(id);
-    const oldId = s.activeDisplayLines[0].id;
+    const oldId = s.activeDisplayLines()[0].id;
 
     await s.clear();
     fake.setFilterPage(id, {
@@ -819,8 +1000,8 @@ describe("useSerialDebugStore watch chip management", () => {
     });
     await s.setActiveChip(id);
 
-    expect(s.activeDisplayLines[0].text).toBe("ERR new");
-    expect(s.activeDisplayLines[0].id).not.toBe(oldId);
+    expect(s.activeDisplayLines()[0].text).toBe("ERR new");
+    expect(s.activeDisplayLines()[0].id).not.toBe(oldId);
   });
 
   it("throttles active filter tail reloads for repeated live updates", async () => {
@@ -1062,6 +1243,7 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
       async readSessionPage() {
         return { totalLines: 0, start: 0, items: [] };
       },
+      async setArchiveLimit() {},
       onChunk(cb) {
         chunkListeners.add(cb);
         return () => chunkListeners.delete(cb);
@@ -1077,6 +1259,9 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
       onFilterUpdated(cb) {
         filterListeners.add(cb);
         return () => filterListeners.delete(cb);
+      },
+      onArchiveCapped() {
+        return () => {};
       },
     };
     return {
@@ -1315,5 +1500,96 @@ describe("useSerialDebugStore baud-rate follows flash chip", () => {
     flash.selectedChipId = "esp32";
     await nextTick();
     expect(s.baudRate).toBe(9600);
+  });
+});
+
+describe("useSerialDebugStore visible log window", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  function appendLines(
+    s: ReturnType<typeof useSerialDebugStore>,
+    count: number,
+  ): void {
+    const text =
+      Array.from({ length: count }, (_, i) => `line${i}`).join("\n") + "\n";
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from(text)],
+    });
+  }
+
+  it("defaults the visible window to 5000 lines", () => {
+    const s = useSerialDebugStore();
+    expect(DEFAULT_VISIBLE_LOG_WINDOW_LINES).toBe(5000);
+    expect(s.logWindowLines).toBe(DEFAULT_VISIBLE_LOG_WINDOW_LINES);
+  });
+
+  it("trims already-buffered lines as soon as the limit is lowered", async () => {
+    const s = useSerialDebugStore();
+    appendLines(s, 20);
+    expect(s.lines.length).toBe(20);
+
+    s.logWindowLines = 5;
+    await nextTick();
+
+    expect(s.lines.length).toBe(5);
+    expect(s.lines[0].text).toBe("line15");
+    expect(s.lines[4].text).toBe("line19");
+  });
+
+  it("caps newly appended lines at the configured limit", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 3;
+    await nextTick();
+
+    appendLines(s, 10);
+
+    expect(s.lines.length).toBe(3);
+    expect(s.lines[0].text).toBe("line7");
+    expect(s.lines[2].text).toBe("line9");
+  });
+});
+
+describe("useSerialDebugStore session archive limit", () => {
+  let fake: ReturnType<typeof fakeTransport>;
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    fake = fakeTransport();
+    __setSerialDebugTransportForTest(fake);
+  });
+  afterEach(() => __setSerialDebugTransportForTest(null));
+
+  it("defaults to 256 MiB and pushes nothing until the value changes", () => {
+    const s = useSerialDebugStore();
+    expect(DEFAULT_ARCHIVE_LIMIT_MIB).toBe(256);
+    expect(s.archiveLimitMib).toBe(DEFAULT_ARCHIVE_LIMIT_MIB);
+    expect(fake.archiveLimitCalls).toEqual([]);
+  });
+
+  it("pushes the limit to Rust in bytes whenever it changes", async () => {
+    const s = useSerialDebugStore();
+    s.archiveLimitMib = 512;
+    await nextTick();
+    expect(fake.archiveLimitCalls).toEqual([512 * 1024 * 1024]);
+
+    s.archiveLimitMib = 64;
+    await nextTick();
+    expect(fake.archiveLimitCalls).toEqual([
+      512 * 1024 * 1024,
+      64 * 1024 * 1024,
+    ]);
+  });
+
+  it("swallows a transport failure — the Rust default cap still applies", async () => {
+    const s = useSerialDebugStore();
+    fake.setArchiveLimit = async () => {
+      throw new Error("archive not ready");
+    };
+    s.archiveLimitMib = 128;
+    await expect(nextTick()).resolves.toBeUndefined();
+    expect(s.archiveLimitMib).toBe(128);
   });
 });

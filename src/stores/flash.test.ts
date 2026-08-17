@@ -120,6 +120,7 @@ function makeSerialDebugTransportWithDeferredClose() {
     async readSessionPage() {
       return { totalLines: 0, start: 0, items: [] };
     },
+    async setArchiveLimit() {},
     onChunk() {
       return () => {};
     },
@@ -130,6 +131,9 @@ function makeSerialDebugTransportWithDeferredClose() {
       return () => {};
     },
     onFilterUpdated() {
+      return () => {};
+    },
+    onArchiveCapped() {
       return () => {};
     },
   };
