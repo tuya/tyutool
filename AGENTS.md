@@ -293,6 +293,6 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 ### Testing
 
 - Test files live next to their source, same name with `.test.ts` suffix; Rust uses inline `#[cfg(test)] mod tests`
-- **Before creating a test file:** run `ls` in the source file's directory to check whether a co-located `.test.ts` already exists. If it does, append to it — never create a parallel file with suffixes like `-extended`, `-v2`, etc.
+- **Before creating a test file:** run `ls` in the source file's directory to check whether a co-located `.test.ts` already exists. If it does, append to it — never create a parallel file with suffixes like `-extended`, `-v2`, etc. Sole exception: a second file is allowed when it needs a different `@vitest-environment` than the existing one (vitest environment directives are per-file), e.g. `settings.init.test.ts` (happy-dom) alongside `settings.test.ts` (node); name it `<stem>.<scope>.test.ts` and state the environment reason in a header comment.
 - Pure logic (utility functions, type conversions) must have unit tests; Vue components and stores as needed
 - Frontend tests run in the `node` environment — no DOM

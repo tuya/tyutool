@@ -6091,7 +6091,7 @@ dependencies = [
  "clap_complete",
  "console",
  "ctrlc",
- "dirs 5.0.1",
+ "dirs 6.0.0",
  "fern",
  "flate2",
  "hex",
@@ -6123,12 +6123,12 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "tyutool-serve"
-version = "0.1.0"
+version = "3.2.8"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
