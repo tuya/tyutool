@@ -114,6 +114,27 @@ describe("useFlashProgress reducer", () => {
     );
   });
 
+  it("maps the beken handshake failure into a localized message", () => {
+    const { p } = make();
+    p.runningOp.value = "flash";
+    p.handleFlashProgressPayload({
+      kind: "done",
+      result: {
+        err: {
+          message:
+            "plugin error: T5AI did not answer the download-mode handshake — the serial " +
+            "port opened and 10 reset attempts were sent, but the chip never replied, so " +
+            "nothing was written to it. Check that the selected port is the board's flash " +
+            "UART (a USB adapter often exposes two ports) and that the selected chip type " +
+            "matches the board, then power-cycle the board and start again",
+        },
+      },
+    } as never);
+    expect(p.flashMessage.value).toBe(
+      i18n.global.t("flash.err.handshakeNoResponse"),
+    );
+  });
+
   it("on done/cancelled sets error and still runs teardown", () => {
     const { p, onOperationSettled } = make();
     p.runningOp.value = "erase";

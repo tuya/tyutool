@@ -8,10 +8,19 @@ import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-t
 
 const t = i18n.global.t;
 
+/** Mirrors `HANDSHAKE_NO_RESPONSE_MARKER` in
+ *  `crates/tyutool-core/src/plugins/beken/frame.rs` — the stable fragment of the
+ *  handshake-failure error, matched here so the GUI can show localized text. */
+const HANDSHAKE_NO_RESPONSE_MARKER =
+  "did not answer the download-mode handshake";
+
 /** Maps a backend error message to a user-facing string. */
 function mapBackendUserMessage(raw: string | undefined): string {
   const msg = raw?.trim() ?? "";
   const lower = msg.toLowerCase();
+  if (lower.includes(HANDSHAKE_NO_RESPONSE_MARKER)) {
+    return t("flash.err.handshakeNoResponse");
+  }
   const serialAccessDenied =
     lower.includes("serial i/o") &&
     (lower.includes("access is denied") ||

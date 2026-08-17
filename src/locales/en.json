@@ -312,7 +312,8 @@
       "verifyFailed": "Verification failed: check connection, chip, and firmware match.",
       "checksumLog": "Error: checksum does not match device report.",
       "portAccessDenied": "Could not open the serial port: access was denied. Usually another program is using the port (including tyutool Serial Debug), or the current process lacks permission. Close the program using the port and try again.",
-      "portUnavailable": "Port unavailable. Check connection or release port."
+      "portUnavailable": "Port unavailable. Check connection or release port.",
+      "handshakeNoResponse": "The device did not enter download mode: the serial port opened, but the chip never replied, so nothing was written to it. Check that the selected port is the board's flash UART (a USB-serial adapter often exposes two ports) and that the selected chip type matches the board, then power-cycle the board and try again."
     },
     "segment": "Segment",
     "addSegment": "Add segment",
