@@ -8,6 +8,7 @@ import {
   defineComponent,
   h,
   nextTick,
+  ref,
   type ComponentPublicInstance,
 } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,9 +33,18 @@ import { __setSerialDebugTransportForTest } from "@/features/serial-debug/transp
 import type { SerialDebugTransport } from "@/features/serial-debug/transport";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { SerialDebugLogLineRenderer } from "@/features/serial-debug/log-line-renderer";
+import { formatHexDumpFromChunks } from "@/features/serial-debug/hex-format";
+import type {
+  DebugLogLine,
+  HexBytesPerRow,
+} from "@/features/serial-debug/types";
 import SerialDebugLogView from "./SerialDebugLogView.vue";
 
 const VIEWPORT_HEIGHT = 200;
+// Mirrors the component: overscan rows above/below the viewport, and the
+// vertical inset of the hex dump inside its pane.
+const OVERSCAN_ROWS = 10;
+const HEX_DUMP_INSET_Y = 12;
 
 function fakeTransport(): SerialDebugTransport {
   const noopUnsub = (): void => {};
@@ -70,10 +80,15 @@ async function flush(): Promise<void> {
 describe("SerialDebugLogView auto-scroll", () => {
   let app: ReturnType<typeof createApp> | null = null;
   let host: HTMLDivElement | null = null;
+  // Refs, not mount arguments: the hex tests change these after mounting.
+  const hexBytesPerRow = ref<HexBytesPerRow>(16);
+  const hexViewProp = ref(false);
 
   beforeEach(() => {
     setActivePinia(createPinia());
     __setSerialDebugTransportForTest(fakeTransport());
+    hexBytesPerRow.value = 16;
+    hexViewProp.value = false;
     host = document.createElement("div");
     document.body.appendChild(host);
   });
@@ -88,14 +103,15 @@ describe("SerialDebugLogView auto-scroll", () => {
   });
 
   function mountComponent(hexView = false): ComponentPublicInstance {
+    hexViewProp.value = hexView;
     app = createApp(
       defineComponent({
         setup() {
           return () =>
             h(SerialDebugLogView, {
               lines: [],
-              hexView,
-              hexBytesPerRow: 16,
+              hexView: hexViewProp.value,
+              hexBytesPerRow: hexBytesPerRow.value,
               ansiEnabled: false,
             });
         },
@@ -175,6 +191,47 @@ describe("SerialDebugLogView auto-scroll", () => {
 
   function renderedIds(): number[] {
     return renderedRows().map((el) => Number(el.dataset.lineId));
+  }
+
+  /** The hex dump text actually mounted (the probe row is not part of it). */
+  function mountedDump(): string {
+    const el = host!.querySelector<HTMLElement>(".virt-window pre");
+    if (!el) throw new Error("hex dump not rendered");
+    return el.textContent ?? "";
+  }
+
+  /**
+   * The dump the whole visible buffer would produce — the pre-virtualization
+   * output. Every mounted window must be a verbatim row-aligned slice of it,
+   * which is what keeps the hex view one continuous dump.
+   */
+  function fullDumpRows(
+    lines: readonly DebugLogLine[],
+    bytesPerRow: HexBytesPerRow = hexBytesPerRow.value,
+  ): string[] {
+    const chunks = lines.map((l) =>
+      Uint8Array.from([
+        ...(l.rawBytes ?? new TextEncoder().encode(l.text)),
+        0x0a,
+      ]),
+    );
+    const dump = formatHexDumpFromChunks(chunks, bytesPerRow);
+    return dump === "" ? [] : dump.split("\n");
+  }
+
+  /** Row index the mounted window starts at, verifying it is a verbatim slice. */
+  function mountedWindowStartRow(rows: string[]): number {
+    const dump = rows.join("\n");
+    const at = dump.indexOf(mountedDump());
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(at === 0 || dump[at - 1] === "\n").toBe(true);
+    return at === 0 ? 0 : dump.slice(0, at).split("\n").length - 1;
+  }
+
+  function hexRowHeight(rows: number): number {
+    // contentHeight = rows * rowHeight + 2 * inset (happy-dom has no layout, so
+    // the component falls back to its font-size estimate).
+    return (spacerHeight() - 2 * HEX_DUMP_INSET_Y) / rows;
   }
 
   /** Open the Ctrl+F bar and type a query. */
@@ -353,5 +410,219 @@ describe("SerialDebugLogView auto-scroll", () => {
 
     expect(s.lines.length).toBe(50);
     expect(renderer.cacheSize()).toBe(50);
+  });
+
+  // ── hex view virtualization ───────────────────────────────────────────
+  // The hex view is one continuous dump of the buffer's byte stream, so its rows
+  // are byte ranges, not log lines. What is asserted below is that the mounted
+  // window stays a verbatim, correctly positioned slice of that dump (visual
+  // output unchanged) while its size stays bounded.
+
+  it("mounts a bounded hex window no matter how large the buffer gets", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 20000;
+    for (let i = 0; i < 500; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+
+    const dumpAt500 = mountedDump();
+    const rowsAt500 = dumpAt500.split("\n").length;
+    expect(rowsAt500).toBeGreaterThan(0);
+    expect(rowsAt500).toBeLessThan(80);
+    // The whole buffer is far bigger than what is mounted.
+    expect(fullDumpRows(s.lines).length).toBeGreaterThan(3 * rowsAt500);
+
+    for (let i = 500; i < 5000; i++) appendLine(s, i);
+    await flush();
+
+    expect(s.lines.length).toBe(5000);
+    const rows = fullDumpRows(s.lines);
+    // 10x the buffer, same amount of DOM …
+    expect(mountedDump().split("\n").length).toBe(rowsAt500);
+    // … still following the tail, and still a verbatim slice of the full dump.
+    expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
+    expect(mountedWindowStartRow(rows)).toBe(rows.length - rowsAt500);
+  });
+
+  it("mounts the hex rows around the current scroll offset", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    for (let i = 0; i < 600; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+
+    const rows = fullDumpRows(s.lines);
+    const rowHeight = hexRowHeight(rows.length);
+    expect(rowHeight).toBeGreaterThan(0);
+
+    const targetRow = Math.floor(rows.length / 2);
+    await scrollTo(el, targetRow * rowHeight + HEX_DUMP_INSET_Y);
+
+    const startRow = mountedWindowStartRow(rows);
+    expect(startRow).toBe(targetRow - OVERSCAN_ROWS);
+    // Neither end of the buffer is mounted.
+    expect(mountedDump()).not.toContain(rows[0]);
+    expect(mountedDump()).not.toContain(rows[rows.length - 1]);
+  });
+
+  it("re-cuts the hex row model when bytesPerRow changes", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    for (let i = 0; i < 400; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+
+    const rowsAt16 = fullDumpRows(s.lines, 16).length;
+    expect(hexRowHeight(rowsAt16)).toBeGreaterThan(0);
+
+    hexBytesPerRow.value = 8;
+    await flush();
+
+    // Half as many bytes per row means twice as many rows to scroll through
+    // (minus one when the final 16-byte row was already a partial one).
+    const rows = fullDumpRows(s.lines, 8);
+    expect(rows.length).toBeGreaterThanOrEqual(2 * rowsAt16 - 1);
+    expect(rows.length).toBeLessThanOrEqual(2 * rowsAt16);
+    expect(hexRowHeight(rows.length)).toBeGreaterThan(0);
+    // The index survived the switch: the window is still a slice of the *new*
+    // dump, and auto-scroll still sits on the last row.
+    expect(mountedWindowStartRow(rows)).toBeGreaterThan(0);
+    expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
+  });
+
+  it("keeps following the tail in hex view and stops when scrolled up", async () => {
+    const s = useSerialDebugStore();
+    // Saturated window: every append drops one line off the head, so the byte
+    // stream re-bases under the viewport on every batch.
+    s.logWindowLines = 200;
+    for (let i = 0; i < 200; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    const el = pane();
+    const { writes } = stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+    writes.length = 0;
+
+    for (let i = 200; i < 210; i++) appendLine(s, i);
+    await flush();
+
+    expect(s.lines.length).toBe(200);
+
+    expect(writes.length).toBeGreaterThan(0);
+    const rows = fullDumpRows(s.lines);
+    expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
+
+    // User scrolls up: no more scrollTop writes, and the head of the buffer is
+    // what is mounted.
+    await scrollTo(el, 0);
+    writes.length = 0;
+    for (let i = 210; i < 220; i++) appendLine(s, i);
+    await flush();
+
+    expect(writes).toEqual([]);
+    expect(mountedWindowStartRow(fullDumpRows(s.lines))).toBe(0);
+  });
+
+  it("re-measures the hex row height when the font size changes", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    for (let i = 0; i < 300; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+
+    const rows = fullDumpRows(s.lines);
+    const before = hexRowHeight(rows.length);
+
+    s.logFontSize = 18;
+    await flush();
+
+    // Taller rows, same row count: the byte index does not depend on layout.
+    expect(hexRowHeight(rows.length)).toBeGreaterThan(before);
+    expect(fullDumpRows(s.lines).length).toBe(rows.length);
+    expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
+  });
+
+  it("renders an archive-backed filter tab in hex view", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    for (let i = 0; i < 100; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    stubGeometry(pane());
+    await scrollTo(pane(), Number.MAX_SAFE_INTEGER);
+
+    // Filter tabs are fed from the Rust session archive: text only, no
+    // rawBytes, so the byte index has to re-encode. The first line stands in
+    // for the localized archive-cap sentinel — non-ASCII text, several UTF-8
+    // bytes per character.
+    const items: DebugLogLine[] = Array.from({ length: 400 }, (_, i) => ({
+      id: 100_000 + i,
+      tsMs: i,
+      direction: i === 0 ? "sys" : "rx",
+      text: i === 0 ? "日志归档已达上限 256 MiB" : `match-${i}`,
+    }));
+    s.filterPagesById = {
+      chipA: { filterId: "chipA", totalMatches: 400, start: 0, items },
+    };
+    s.activeChipId = "chipA";
+    await flush();
+    stubGeometry(pane());
+    await scrollTo(pane(), Number.MAX_SAFE_INTEGER);
+
+    const rows = fullDumpRows(items);
+    expect(rows.length).toBeGreaterThan(100);
+    expect(mountedDump().split("\n").length).toBeLessThan(80);
+    expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
+
+    // The head of that tab, including the non-ASCII sys line.
+    await scrollTo(pane(), 0);
+    expect(mountedWindowStartRow(rows)).toBe(0);
+    expect(mountedDump().startsWith(rows[0])).toBe(true);
+  });
+
+  it("switches between the hex and line panes without losing the row model", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    for (let i = 0; i < 300; i++) appendLine(s, i);
+    mountComponent(true);
+    await flush();
+    stubGeometry(pane());
+    await scrollTo(pane(), Number.MAX_SAFE_INTEGER);
+    const hexSpacer = spacerHeight();
+    expect(hexSpacer).toBeGreaterThan(0);
+
+    // hexView is a prop; flip it on the wrapper. v-if/v-else swaps the pane
+    // element, so the geometry stub has to be re-applied.
+    hexViewProp.value = false;
+    await flush();
+    stubGeometry(pane());
+    await scrollTo(pane(), Number.MAX_SAFE_INTEGER);
+
+    expect(host!.querySelector(".virt-window pre")).toBeNull();
+    expect(renderedRows().length).toBeGreaterThan(0);
+    // The line row model is in charge now: 300 lines, bounded DOM, at the tail.
+    expect(renderedRows().length).toBeLessThan(80);
+    expect(renderedIds()).toContain(s.lines[299].id);
+
+    hexViewProp.value = true;
+    await flush();
+    stubGeometry(pane());
+    await scrollTo(pane(), Number.MAX_SAFE_INTEGER);
+
+    const rows = fullDumpRows(s.lines);
+    expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
+    expect(mountedDump().split("\n").length).toBeLessThan(80);
   });
 });
