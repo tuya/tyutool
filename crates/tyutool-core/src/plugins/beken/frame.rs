@@ -41,6 +41,15 @@ const RX_EXT_MIN: usize = 11;
 // Protocol error
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Stable fragment of the "the device never answered the handshake" error raised
+/// by [`shake`](super::ops::shake) when every reset attempt went unanswered.
+///
+/// Cross-layer contract: the GUI matches on this fragment to show a localized
+/// message (`mapBackendUserMessage` in
+/// `src/features/firmware-flash/useFlashProgress.ts`) instead of the raw prose.
+/// Changing it means changing that matcher with it.
+pub const HANDSHAKE_NO_RESPONSE_MARKER: &str = "did not answer the download-mode handshake";
+
 /// Low-level protocol error (internal to beken layer; converted to [`FlashError`] at plugin boundary).
 #[derive(Debug)]
 pub enum ProtocolError {
@@ -48,6 +57,9 @@ pub enum ProtocolError {
     Io(std::io::Error),
     /// Timeout waiting for device response.
     Timeout { attempts: u32 },
+    /// The device stayed silent through every reset + `LinkCheck` round of the
+    /// handshake — it never entered download mode.
+    HandshakeFailed { chip: &'static str, resets: u32 },
     /// Received frame has wrong magic bytes.
     BadMagic(u8),
     /// Device returned non-zero status byte.
@@ -67,6 +79,20 @@ impl fmt::Display for ProtocolError {
         match self {
             Self::Io(e) => write!(f, "serial I/O: {e}"),
             Self::Timeout { attempts } => write!(f, "timeout after {attempts} attempts"),
+            // Wording is load-bearing: this is what the CLI prints, what the GUI
+            // maps to its localized text, and — for most users — the only clue
+            // they get. It must name what was observed (the chip never replied),
+            // say what was *not* done (nothing reached the flash), and end on the
+            // things that can still change the outcome. The bare retry count it
+            // replaced ("timeout after 10 attempts") did none of that.
+            Self::HandshakeFailed { chip, resets } => write!(
+                f,
+                "{chip} {HANDSHAKE_NO_RESPONSE_MARKER} — the serial port opened and {resets} \
+                 reset attempts were sent, but the chip never replied, so nothing was written to \
+                 it. Check that the selected port is the board's flash UART (a USB adapter often \
+                 exposes two ports) and that the selected chip type matches the board, then \
+                 power-cycle the board and start again"
+            ),
             Self::BadMagic(b) => write!(f, "bad frame magic: {b:#04x}"),
             Self::DeviceError(s) => write!(f, "device returned error status: {s:#04x}"),
             Self::CrcMismatch { expected, got } => {
@@ -346,6 +372,23 @@ mod tests {
         assert_eq!(frame.cmd, 0x07);
         assert_eq!(frame.status, 0x00);
         assert_eq!(frame.data, vec![0x00, 0x00, 0x01, 0x00]);
+    }
+
+    #[test]
+    fn handshake_failed_message_is_actionable() {
+        let msg = ProtocolError::HandshakeFailed {
+            chip: "T5AI",
+            resets: 10,
+        }
+        .to_string();
+        // Names the chip and the marker the GUI matches on.
+        assert!(msg.starts_with("T5AI "));
+        assert!(msg.contains(HANDSHAKE_NO_RESPONSE_MARKER));
+        // States what was *not* done, and what the user can do next.
+        assert!(msg.contains("nothing was written"));
+        assert!(msg.contains("port"));
+        assert!(msg.contains("chip type"));
+        assert!(msg.contains("power-cycle"));
     }
 
     #[test]

@@ -64,8 +64,14 @@ pub fn shake<T: IoTransport>(
             }
         }
         if !connected {
-            return Err(ProtocolError::Timeout {
-                attempts: max_reset_retries,
+            log::warn!(
+                "Handshake failed: {} reset attempts, {} link-checks each, no reply",
+                max_reset_retries,
+                chip.handshake_retries()
+            );
+            return Err(ProtocolError::HandshakeFailed {
+                chip: chip.name(),
+                resets: max_reset_retries,
             });
         }
     } else {
@@ -161,8 +167,14 @@ pub fn shake<T: IoTransport>(
         }
 
         if !connected {
-            return Err(ProtocolError::Timeout {
-                attempts: outer * 100,
+            log::warn!(
+                "Handshake failed: {} reset attempts, ~{} link-checks total, no reply",
+                outer,
+                outer * 100
+            );
+            return Err(ProtocolError::HandshakeFailed {
+                chip: chip.name(),
+                resets: outer,
             });
         }
 
