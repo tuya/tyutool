@@ -50,16 +50,33 @@ const RX_EXT_MIN: usize = 11;
 /// Changing it means changing that matcher with it.
 pub const HANDSHAKE_NO_RESPONSE_MARKER: &str = "did not answer the download-mode handshake";
 
+/// Stable fragment of the "the chip went quiet at the target baud rate" error.
+/// Same cross-layer contract as [`HANDSHAKE_NO_RESPONSE_MARKER`].
+pub const BAUD_SWITCH_MARKER: &str = "stopped responding after the switch to";
+
+/// Stable fragment of the "what is on the flash is not what we sent" errors
+/// ([`ProtocolError::CrcMismatch`] and the per-sector variant in
+/// [`ops`](super::ops)). Same cross-layer contract as
+/// [`HANDSHAKE_NO_RESPONSE_MARKER`].
+pub const VERIFY_MISMATCH_MARKER: &str = "flash verification failed";
+
 /// Low-level protocol error (internal to beken layer; converted to [`FlashError`] at plugin boundary).
 #[derive(Debug)]
 pub enum ProtocolError {
     /// Serial / filesystem I/O.
     Io(std::io::Error),
-    /// Timeout waiting for device response.
-    Timeout { attempts: u32 },
+    /// No reply arrived within the window the caller allowed.
+    Timeout { waited_ms: u64 },
     /// The device stayed silent through every reset + `LinkCheck` round of the
     /// handshake — it never entered download mode.
     HandshakeFailed { chip: &'static str, resets: u32 },
+    /// The chip answered at the bootrom baud rate but went quiet once both sides
+    /// moved to the requested one.
+    BaudSwitchFailed {
+        chip: &'static str,
+        baud: u32,
+        bootrom_baud: u32,
+    },
     /// Received frame has wrong magic bytes.
     BadMagic(u8),
     /// Device returned non-zero status byte.
@@ -78,7 +95,17 @@ impl fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e) => write!(f, "serial I/O: {e}"),
-            Self::Timeout { attempts } => write!(f, "timeout after {attempts} attempts"),
+            // Reached mid-operation, after the chip has already been talking, so
+            // this one names the silence and its length instead of giving advice
+            // the caller is better placed to give. What it must not print is the
+            // old "timeout after 1 attempts": a retry counter that was hardcoded
+            // to 1 at the only site that produces it.
+            Self::Timeout { waited_ms } => {
+                write!(
+                    f,
+                    "the device stopped responding (no reply in {waited_ms} ms)"
+                )
+            }
             // Wording is load-bearing: this is what the CLI prints, what the GUI
             // maps to its localized text, and — for most users — the only clue
             // they get. It must name what was observed (the chip never replied),
@@ -93,14 +120,35 @@ impl fmt::Display for ProtocolError {
                  exposes two ports) and that the selected chip type matches the board, then \
                  power-cycle the board and start again"
             ),
+            // The chip is reachable and the link is up, so the target baud rate
+            // is the one thing that changed between the reply and the silence —
+            // and lowering it is something the user can actually do.
+            Self::BaudSwitchFailed {
+                chip,
+                baud,
+                bootrom_baud,
+            } => write!(
+                f,
+                "{chip} {BAUD_SWITCH_MARKER} {baud} baud — it answered at {bootrom_baud} baud, so \
+                 the board is connected and nothing was written to it, but the link does not hold \
+                 at {baud}. Lower the baud rate and try again (a long or unshielded USB-serial \
+                 cable will not carry the highest rates)"
+            ),
             Self::BadMagic(b) => write!(f, "bad frame magic: {b:#04x}"),
-            Self::DeviceError(s) => write!(f, "device returned error status: {s:#04x}"),
-            Self::CrcMismatch { expected, got } => {
-                write!(f, "CRC mismatch: expected={expected:#010x} got={got:#010x}")
-            }
+            Self::DeviceError(s) => write!(f, "the device rejected the command (status {s:#04x})"),
+            Self::CrcMismatch { expected, got } => write!(
+                f,
+                "{VERIFY_MISMATCH_MARKER}: the chip reports checksum {got:#010x} where the \
+                 firmware is {expected:#010x}, so what was written does not match the file. The \
+                 write itself reported success, which usually means an unreliable link: lower the \
+                 baud rate and flash again"
+            ),
             Self::UnknownFlashMid(mid) => write!(f, "flash MID {mid:#08x} not in table"),
             Self::Cancelled => write!(f, "operation cancelled"),
-            Self::Protocol(msg) => write!(f, "protocol: {msg}"),
+            // Bare, for the same reason `FlashError::Plugin` is: the payload is
+            // what the user reads, and "protocol:" in front of a sentence that
+            // already explains itself only adds a word they cannot act on.
+            Self::Protocol(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -389,6 +437,50 @@ mod tests {
         assert!(msg.contains("port"));
         assert!(msg.contains("chip type"));
         assert!(msg.contains("power-cycle"));
+    }
+
+    #[test]
+    fn baud_switch_failure_message_points_at_the_baud_rate() {
+        let msg = ProtocolError::BaudSwitchFailed {
+            chip: "T5AI",
+            baud: 2_000_000,
+            bootrom_baud: 115200,
+        }
+        .to_string();
+        assert!(msg.starts_with("T5AI "));
+        assert!(msg.contains(BAUD_SWITCH_MARKER));
+        // Distinguishes itself from HandshakeFailed: the board *did* answer.
+        assert!(msg.contains("115200"));
+        assert!(msg.contains("nothing was written"));
+        assert!(msg.contains("Lower the baud rate"));
+    }
+
+    #[test]
+    fn timeout_message_reports_the_silence_not_a_retry_count() {
+        let msg = ProtocolError::Timeout { waited_ms: 3000 }.to_string();
+        assert_eq!(msg, "the device stopped responding (no reply in 3000 ms)");
+    }
+
+    #[test]
+    fn crc_mismatch_message_explains_what_mismatched() {
+        let msg = ProtocolError::CrcMismatch {
+            expected: 0xDEAD_BEEF,
+            got: 0x1234_5678,
+        }
+        .to_string();
+        assert!(msg.contains(VERIFY_MISMATCH_MARKER));
+        assert!(msg.contains("0xdeadbeef"));
+        assert!(msg.contains("0x12345678"));
+        assert!(msg.contains("lower the baud rate"));
+    }
+
+    #[test]
+    fn protocol_errors_render_without_a_jargon_prefix() {
+        // The payload is the user-facing sentence; nothing is prepended to it.
+        assert_eq!(
+            ProtocolError::Protocol("missing address".into()).to_string(),
+            "missing address"
+        );
     }
 
     #[test]

@@ -309,10 +309,11 @@
       "authorizeOfficialOnly": "tyutool does not write authorization over the BootROM flash protocol. Follow the TuyaOpen guide: use auth / auth-read in tos.py monitor, or edit tuya_config.h and rebuild. See the “Device authorization” page on tuyaopen.ai.",
       "addrInvalid": "Start and end addresses must be valid hexadecimal (optional 0x prefix).",
       "startAfterEnd": "Start address cannot be greater than end address.",
-      "verifyFailed": "Verification failed: check connection, chip, and firmware match.",
+      "verifyFailed": "Flash verification failed: what was written to the chip does not match the firmware file. The write itself reported success, which usually means an unreliable link — lower the baud rate and flash again.",
       "checksumLog": "Error: checksum does not match device report.",
       "portAccessDenied": "Could not open the serial port: access was denied. Usually another program is using the port (including tyutool Serial Debug), or the current process lacks permission. Close the program using the port and try again.",
       "portUnavailable": "Port unavailable. Check connection or release port.",
+      "baudSwitchFailed": "The device stopped responding after switching to the selected baud rate. It did answer at the chip's bootrom rate, so the board is connected and nothing was written to it, but the link does not hold at that speed. Lower the baud rate and try again (a long or unshielded USB-serial cable will not carry the highest rates).",
       "handshakeNoResponse": "The device did not enter download mode: the serial port opened, but the chip never replied, so nothing was written to it. Check that the selected port is the board's flash UART (a USB-serial adapter often exposes two ports) and that the selected chip type matches the board, then power-cycle the board and try again."
     },
     "segment": "Segment",
