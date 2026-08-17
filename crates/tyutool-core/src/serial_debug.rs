@@ -112,7 +112,10 @@ pub struct SerialDebugLine {
 /// character: it never occurs in a translated UI string, which is the only other
 /// source of `Sys` lines.
 const ARCHIVE_CAP_SENTINEL_PREFIX: &str = "\u{1}tyutool:archive-capped:";
-const ARCHIVE_CAP_SENTINEL_SUFFIX: char = '\u{1}';
+/// Opening delimiter of the dropped-chunk sentinel — same family, same
+/// collision-safety rules, different payload (bytes lost, not the MiB cap).
+const CHUNK_DROP_SENTINEL_PREFIX: &str = "\u{1}tyutool:chunks-dropped:";
+const SENTINEL_SUFFIX: char = '\u{1}';
 
 /// Text written into the archive in place of the first line that would have
 /// broken the size cap, carrying the limit in MiB.
@@ -134,23 +137,125 @@ const ARCHIVE_CAP_SENTINEL_SUFFIX: char = '\u{1}';
 /// 3. the match is on the whole string (prefix + digits + suffix), not a
 ///    substring, so a longer line that merely embeds the marker is not a match.
 pub fn serial_debug_archive_cap_sentinel(limit_mib: u64) -> String {
-    format!("{ARCHIVE_CAP_SENTINEL_PREFIX}{limit_mib}{ARCHIVE_CAP_SENTINEL_SUFFIX}")
+    format!("{ARCHIVE_CAP_SENTINEL_PREFIX}{limit_mib}{SENTINEL_SUFFIX}")
 }
 
-/// The MiB limit carried by an archive-cap sentinel line, or `None` for any
-/// other line. Mirrored in `src/features/serial-debug/archive-line-text.ts`.
-pub fn serial_debug_archive_cap_limit_mib(line: &SerialDebugLine) -> Option<u64> {
+/// Text written into the archive at a gap in the chunk stream, carrying the
+/// number of bytes lost. Same reasoning and the same three collision-safety
+/// layers as [`serial_debug_archive_cap_sentinel`].
+pub fn serial_debug_chunk_drop_sentinel(dropped_bytes: u64) -> String {
+    format!("{CHUNK_DROP_SENTINEL_PREFIX}{dropped_bytes}{SENTINEL_SUFFIX}")
+}
+
+/// The numeric payload of a `Sys` sentinel line built from `prefix`, or `None`
+/// for any other line. The `Sys`-only / whole-string / digits-only rules live
+/// here so every sentinel family gets all three.
+fn sentinel_payload(line: &SerialDebugLine, prefix: &str) -> Option<u64> {
     if line.direction != LogDirection::Sys {
         return None;
     }
     let digits = line
         .text
-        .strip_prefix(ARCHIVE_CAP_SENTINEL_PREFIX)?
-        .strip_suffix(ARCHIVE_CAP_SENTINEL_SUFFIX)?;
+        .strip_prefix(prefix)?
+        .strip_suffix(SENTINEL_SUFFIX)?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     digits.parse().ok()
+}
+
+/// The MiB limit carried by an archive-cap sentinel line, or `None` for any
+/// other line. Mirrored in `src/features/serial-debug/archive-line-text.ts`.
+pub fn serial_debug_archive_cap_limit_mib(line: &SerialDebugLine) -> Option<u64> {
+    sentinel_payload(line, ARCHIVE_CAP_SENTINEL_PREFIX)
+}
+
+/// The byte count carried by a dropped-chunk sentinel line, or `None` for any
+/// other line. Mirrored in `src/features/serial-debug/archive-line-text.ts`.
+pub fn serial_debug_chunk_drop_bytes(line: &SerialDebugLine) -> Option<u64> {
+    sentinel_payload(line, CHUNK_DROP_SENTINEL_PREFIX)
+}
+
+fn log_direction(direction: Direction) -> LogDirection {
+    match direction {
+        Direction::Tx => LogDirection::Tx,
+        Direction::Rx => LogDirection::Rx,
+    }
+}
+
+/// One coalesced report of chunks the bridge had to drop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SerialDebugDropReport {
+    pub chunks: u64,
+    pub bytes: u64,
+}
+
+/// Quiet period after the last drop before a burst is reported. Without it a
+/// sustained overload would emit one notice per dropped chunk — thousands of
+/// them, which is noise, not information.
+pub const SERIAL_DEBUG_DROP_QUIET_MS: u64 = 250;
+/// Ceiling on how long a burst may keep absorbing drops before it is reported
+/// anyway. A device that never stops printing would otherwise never go quiet,
+/// and the user — the one person who can act on this by lowering the baud rate
+/// or muting device-side logging — would be told nothing at all.
+pub const SERIAL_DEBUG_DROP_BURST_MS: u64 = 2000;
+
+/// Accumulates dropped chunks so one burst of loss becomes one user-visible
+/// notice.
+///
+/// Written by the serial reader thread (which must never block) and read by the
+/// bridge thread. Both counters are swapped independently, so a drop recorded
+/// between the two swaps can have its chunk count and its byte count land in
+/// different reports; nothing is ever lost, and the user-visible figure (bytes)
+/// stays exact per report.
+#[derive(Debug, Default)]
+pub struct SerialDebugDropCounter {
+    chunks: AtomicU64,
+    bytes: AtomicU64,
+    first_drop_ms: AtomicU64,
+    last_drop_ms: AtomicU64,
+}
+
+impl SerialDebugDropCounter {
+    /// Record one dropped chunk. Cheap and non-blocking by construction: this
+    /// runs on the reader thread, the only thread draining the OS buffer.
+    pub fn record(&self, bytes: usize, now_ms: u64) {
+        self.chunks.fetch_add(1, Ordering::SeqCst);
+        self.bytes.fetch_add(bytes as u64, Ordering::SeqCst);
+        let _ = self
+            .first_drop_ms
+            .compare_exchange(0, now_ms, Ordering::SeqCst, Ordering::SeqCst);
+        self.last_drop_ms.store(now_ms, Ordering::SeqCst);
+    }
+
+    /// The pending burst, if it is ready to report: either the loss has stopped
+    /// ([`SERIAL_DEBUG_DROP_QUIET_MS`]) or it has been going on long enough that
+    /// waiting for it to stop would keep the user in the dark
+    /// ([`SERIAL_DEBUG_DROP_BURST_MS`]).
+    pub fn take_report(&self, now_ms: u64) -> Option<SerialDebugDropReport> {
+        if self.chunks.load(Ordering::SeqCst) == 0 && self.bytes.load(Ordering::SeqCst) == 0 {
+            return None;
+        }
+        let quiet_for = now_ms.saturating_sub(self.last_drop_ms.load(Ordering::SeqCst));
+        let burst_age = now_ms.saturating_sub(self.first_drop_ms.load(Ordering::SeqCst));
+        if quiet_for < SERIAL_DEBUG_DROP_QUIET_MS && burst_age < SERIAL_DEBUG_DROP_BURST_MS {
+            return None;
+        }
+        self.take_pending()
+    }
+
+    /// Drain whatever is pending regardless of timing — for teardown, so a burst
+    /// that was still aggregating when the session ended is still reported, and
+    /// for session clear, where the caller discards it.
+    pub fn take_pending(&self) -> Option<SerialDebugDropReport> {
+        let chunks = self.chunks.swap(0, Ordering::SeqCst);
+        let bytes = self.bytes.swap(0, Ordering::SeqCst);
+        self.first_drop_ms.store(0, Ordering::SeqCst);
+        if chunks == 0 && bytes == 0 {
+            return None;
+        }
+        Some(SerialDebugDropReport { chunks, bytes })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -517,10 +622,7 @@ impl SerialDebugArchive {
                 .map(|idx| idx + 1)
                 .unwrap_or(0);
             let text = String::from_utf8_lossy(&raw_bytes[..text_end]).into_owned();
-            let direction = match chunk.direction {
-                Direction::Tx => LogDirection::Tx,
-                Direction::Rx => LogDirection::Rx,
-            };
+            let direction = log_direction(chunk.direction);
             // `raw_bytes` is deliberately dropped here: `text` above is already
             // derived from it, and carrying it into the archive JSON costs
             // ~268 B of `number[]` per 407 B line. Consumers that need bytes
@@ -548,6 +650,59 @@ impl SerialDebugArchive {
         }
 
         Ok(completed)
+    }
+
+    /// Record a gap in the chunk stream for `direction`: whatever is buffered
+    /// there is closed off as its own line, then a dropped-chunk sentinel `Sys`
+    /// line is appended. Returns the lines written, newest last.
+    ///
+    /// Closing the buffer is the whole point. `append_chunk` only cuts a line at
+    /// `\n`, so if a chunk is dropped mid-line the bytes before the gap and the
+    /// bytes after it are concatenated into one line that looks perfectly
+    /// ordinary — a log line the device never printed. Cutting here turns the
+    /// loss into a visible line boundary with the sentinel right after it.
+    pub fn append_gap(
+        &mut self,
+        direction: Direction,
+        ts_ms: u64,
+        dropped_bytes: u64,
+    ) -> std::io::Result<Vec<SerialDebugLine>> {
+        let pending = match direction {
+            Direction::Tx => &mut self.pending_tx,
+            Direction::Rx => &mut self.pending_rx,
+        };
+        let partial = std::mem::take(pending);
+        let mut written = Vec::new();
+        if !partial.is_empty() {
+            let text_end = partial
+                .iter()
+                .rposition(|&b| b != b'\n' && b != b'\r')
+                .map(|idx| idx + 1)
+                .unwrap_or(0);
+            if let Some(line) = self.append_line(SerialDebugLine {
+                line_no: 0,
+                ts_ms,
+                direction: log_direction(direction),
+                text: String::from_utf8_lossy(&partial[..text_end]).into_owned(),
+                raw_bytes: None,
+            })? {
+                written.push(line);
+            }
+        }
+        if let Some(line) = self.append_line(SerialDebugLine {
+            line_no: 0,
+            ts_ms,
+            direction: LogDirection::Sys,
+            // A sentinel, not prose — see `serial_debug_chunk_drop_sentinel`.
+            text: serial_debug_chunk_drop_sentinel(dropped_bytes),
+            raw_bytes: None,
+        })? {
+            written.push(line);
+        }
+        if !written.is_empty() {
+            self.flush_writers()?;
+        }
+        Ok(written)
     }
 
     /// Returns `None` once the archive is capped (see [`Self::append_line`]).
@@ -1347,6 +1502,12 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// The clock the serial-debug engine timestamps with, for hosts that have to
+/// stamp drop reports and gap lines with the same reading.
+pub fn serial_debug_now_ms() -> u64 {
+    now_ms()
 }
 
 fn next_serial_debug_session_id(now_ms: u64, pid: u32) -> String {
@@ -2323,6 +2484,208 @@ mod tests {
                 "must not match: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn chunk_drop_sentinel_is_only_recognised_on_an_exact_sys_line() {
+        let line = |direction, text: &str| SerialDebugLine {
+            line_no: 1,
+            ts_ms: 0,
+            direction,
+            text: text.to_string(),
+            raw_bytes: None,
+        };
+
+        assert_eq!(
+            serial_debug_chunk_drop_bytes(&line(
+                LogDirection::Sys,
+                &serial_debug_chunk_drop_sentinel(8192)
+            )),
+            Some(8192)
+        );
+
+        // Device output is never a Sys line, so echoing the marker cannot forge
+        // a data-loss notice.
+        assert_eq!(
+            serial_debug_chunk_drop_bytes(&line(
+                LogDirection::Rx,
+                &serial_debug_chunk_drop_sentinel(8192)
+            )),
+            None
+        );
+
+        for text in [
+            &format!("boot: {}", serial_debug_chunk_drop_sentinel(8192)),
+            &format!("{} trailing", serial_debug_chunk_drop_sentinel(8192)),
+            "\u{1}tyutool:chunks-dropped:\u{1}",
+            "\u{1}tyutool:chunks-dropped:12x\u{1}",
+            "tyutool:chunks-dropped:8192",
+        ] {
+            assert_eq!(
+                serial_debug_chunk_drop_bytes(&line(LogDirection::Sys, text)),
+                None,
+                "must not match: {text:?}"
+            );
+        }
+
+        // The two sentinel families never answer for each other.
+        assert_eq!(
+            serial_debug_archive_cap_limit_mib(&line(
+                LogDirection::Sys,
+                &serial_debug_chunk_drop_sentinel(8192)
+            )),
+            None
+        );
+        assert_eq!(
+            serial_debug_chunk_drop_bytes(&line(
+                LogDirection::Sys,
+                &serial_debug_archive_cap_sentinel(256)
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn append_gap_closes_the_open_line_so_the_halves_never_merge() {
+        let dir = temp_serial_debug_dir("gap-line-boundary");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+
+        // A line that was still being received when the drop happened.
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"before-gap".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(archive.total_lines(), 0, "no newline yet");
+
+        let written = archive.append_gap(Direction::Rx, 2, 4096).unwrap();
+        assert_eq!(written.len(), 2);
+        assert_eq!(written[0].direction, LogDirection::Rx);
+        assert_eq!(written[0].text, "before-gap");
+        assert_eq!(written[1].direction, LogDirection::Sys);
+        assert_eq!(serial_debug_chunk_drop_bytes(&written[1]), Some(4096));
+
+        // Bytes that arrive after the gap start a line of their own. Without the
+        // cut above they would have been appended to "before-gap", producing one
+        // plausible-looking line the device never printed.
+        let after = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 3,
+                bytes: b"after-gap\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].text, "after-gap");
+
+        let all = archive.read_line_range(1, 10).unwrap();
+        let texts = all.iter().map(|l| l.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "before-gap",
+                serial_debug_chunk_drop_sentinel(4096).as_str(),
+                "after-gap",
+            ]
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("before-gapafter-gap")),
+            "the gap must be a line boundary, not a splice: {texts:?}"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn append_gap_only_cuts_its_own_direction_and_needs_no_pending_bytes() {
+        let dir = temp_serial_debug_dir("gap-direction");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Tx,
+                ts_ms: 1,
+                bytes: b"half-sent".to_vec(),
+            })
+            .unwrap();
+
+        // Nothing buffered on Rx: the gap is just the sentinel.
+        let written = archive.append_gap(Direction::Rx, 2, 512).unwrap();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].direction, LogDirection::Sys);
+
+        // The untouched Tx buffer still completes normally.
+        let completed = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Tx,
+                ts_ms: 3,
+                bytes: b"-rest\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].text, "half-sent-rest");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn drop_counter_coalesces_a_burst_into_one_report() {
+        let drops = SerialDebugDropCounter::default();
+
+        drops.record(4096, 1_000);
+        drops.record(2048, 1_010);
+        drops.record(1024, 1_020);
+
+        // Still losing bytes — reporting now would be one notice per chunk.
+        assert_eq!(drops.take_report(1_100), None);
+
+        let report = drops
+            .take_report(1_020 + SERIAL_DEBUG_DROP_QUIET_MS)
+            .unwrap();
+        assert_eq!(report.chunks, 3);
+        assert_eq!(report.bytes, 4096 + 2048 + 1024);
+
+        // One burst, one notice: the counters are empty afterwards.
+        assert_eq!(drops.take_report(9_999_999), None);
+        assert_eq!(drops.take_pending(), None);
+    }
+
+    #[test]
+    fn drop_counter_reports_a_burst_that_never_goes_quiet() {
+        let drops = SerialDebugDropCounter::default();
+
+        // A device that keeps flooding never leaves a quiet window, and the user
+        // is exactly the person who can act on this — so the burst ceiling has to
+        // force a report out.
+        let mut now = 1_000;
+        while now < 1_000 + SERIAL_DEBUG_DROP_BURST_MS {
+            drops.record(4096, now);
+            assert_eq!(drops.take_report(now), None);
+            now += 10;
+        }
+        drops.record(4096, now);
+        let report = drops.take_report(now).unwrap();
+        assert!(report.chunks > 1, "the burst must be coalesced");
+        assert_eq!(report.bytes, report.chunks * 4096);
+    }
+
+    #[test]
+    fn drop_counter_take_pending_drains_an_unfinished_burst() {
+        let drops = SerialDebugDropCounter::default();
+        assert_eq!(drops.take_pending(), None);
+
+        drops.record(64, 1_000);
+        // Teardown / session clear must not need the timing gate.
+        assert_eq!(
+            drops.take_pending(),
+            Some(SerialDebugDropReport {
+                chunks: 1,
+                bytes: 64
+            })
+        );
+        assert_eq!(drops.take_pending(), None);
     }
 
     #[test]

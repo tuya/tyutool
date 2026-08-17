@@ -31,10 +31,12 @@ pub use serial::{
 };
 pub use serial_debug::{
     serial_debug_archive_cap_limit_mib, serial_debug_archive_cap_sentinel,
+    serial_debug_chunk_drop_bytes, serial_debug_chunk_drop_sentinel,
     serial_debug_fail_backfill_if_current, serial_debug_finish_backfill_if_current,
-    serial_debug_scan_filter_matches, ChunkCallback, DataBits, DebugChunk, DebugConfig, Direction,
-    DisconnectCallback, LogDirection, Parity, SerialDebugArchive, SerialDebugArchiveMeta,
-    SerialDebugArchiveReader, SerialDebugChunkBatchBuffer, SerialDebugFilterBackfillSnapshot,
+    serial_debug_now_ms, serial_debug_scan_filter_matches, ChunkCallback, DataBits, DebugChunk,
+    DebugConfig, Direction, DisconnectCallback, LogDirection, Parity, SerialDebugArchive,
+    SerialDebugArchiveMeta, SerialDebugArchiveReader, SerialDebugChunkBatchBuffer,
+    SerialDebugDropCounter, SerialDebugDropReport, SerialDebugFilterBackfillSnapshot,
     SerialDebugFilterDefinition, SerialDebugFilterIndex, SerialDebugFilterPage,
     SerialDebugFilterStats, SerialDebugFilterStatus, SerialDebugGeneration, SerialDebugLine,
     SerialDebugSession, SerialDebugSessionPage, StopBits,

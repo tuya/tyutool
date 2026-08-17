@@ -37,6 +37,7 @@ function fakeTransport(): SerialDebugTransport & {
   emitDisconnect: (reason: string) => void;
   emitFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void;
   emitArchiveCapped: (limitMib: number) => void;
+  emitChunksDropped: (droppedBytes: number) => void;
   setFilterPage: (filterId: string, page: SerialDebugFilterPage) => void;
   readFilterMatchesCalls: Array<{
     filterId: string;
@@ -55,6 +56,9 @@ function fakeTransport(): SerialDebugTransport & {
     (p: SerialDebugFilterUpdatePayload) => void
   >();
   const archiveCappedListeners = new Set<(p: { limitMib: number }) => void>();
+  const chunksDroppedListeners = new Set<
+    (p: { droppedBytes: number }) => void
+  >();
   const sent: Uint8Array[] = [];
   const archiveLimitCalls: number[] = [];
   const sysLineWrites: string[] = [];
@@ -158,6 +162,10 @@ function fakeTransport(): SerialDebugTransport & {
       archiveCappedListeners.add(cb);
       return () => archiveCappedListeners.delete(cb);
     },
+    onChunksDropped(cb) {
+      chunksDroppedListeners.add(cb);
+      return () => chunksDroppedListeners.delete(cb);
+    },
     emitChunk(c) {
       chunkListeners.forEach((l) => l(c));
     },
@@ -172,6 +180,9 @@ function fakeTransport(): SerialDebugTransport & {
     },
     emitArchiveCapped(limitMib) {
       archiveCappedListeners.forEach((l) => l({ limitMib }));
+    },
+    emitChunksDropped(droppedBytes) {
+      chunksDroppedListeners.forEach((l) => l({ droppedBytes }));
     },
     setFilterPage(filterId, page) {
       const entry = filters.get(filterId);
@@ -573,6 +584,107 @@ describe("useSerialDebugStore port-manager integration", () => {
     });
   });
 
+  // Dropping a chunk is bad; splicing the bytes either side of the gap into one
+  // line is worse — it fabricates a log line the device never printed, and the
+  // user has no way to tell. The gap has to become a line boundary.
+  describe("dropped chunk notice", () => {
+    const SOH = String.fromCharCode(1);
+
+    async function openedStore() {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      s.baudRate = 115200;
+      await s.openPort();
+      return s;
+    }
+
+    it("closes the open line so the halves are never joined", async () => {
+      const s = await openedStore();
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("before-gap")],
+      });
+      await waitForChunkFrame();
+      const before = s.lines.length;
+
+      fake.emitChunksDropped(4096);
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1001,
+        bytes: [...Buffer.from("after-gap\n")],
+      });
+      await waitForChunkFrame();
+
+      const added = s.lines.slice(before);
+      expect(added.map((line) => line.direction)).toEqual(["rx", "sys", "rx"]);
+      expect(added[0].text).toBe("before-gap");
+      expect(added[2].text).toBe("after-gap");
+      expect(
+        added.every((line) => !line.text.includes("before-gapafter-gap")),
+      ).toBe(true);
+    });
+
+    it("emits queued pre-gap chunks before the notice, not after", async () => {
+      const s = await openedStore();
+      const before = s.lines.length;
+
+      // Still sitting in the 16 ms coalescing queue when the drop arrives.
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("queued\n")],
+      });
+      fake.emitChunksDropped(512);
+      await waitForChunkFrame();
+
+      const added = s.lines.slice(before);
+      expect(added).toHaveLength(2);
+      // Order is the point: the queued chunk arrived before the gap, so the
+      // notice must land after it, not on top of it.
+      expect(added[0].direction).toBe("rx");
+      expect(added[0].text).toBe("queued");
+      expect(added[1].direction).toBe("sys");
+      expect(added[1].text).toContain("512");
+    });
+
+    it("shows a translated notice and never the raw sentinel", async () => {
+      const s = await openedStore();
+      const before = s.lines.length;
+
+      fake.emitChunksDropped(12288);
+
+      const added = s.lines.slice(before);
+      expect(added).toHaveLength(1);
+      expect(added[0].direction).toBe("sys");
+      expect(added[0].text).toContain("12288");
+      expect(added[0].text).not.toContain(SOH);
+      expect(added[0].text).not.toContain("chunks-dropped");
+    });
+
+    it("does not write the notice back into the archive", async () => {
+      const s = await openedStore();
+      fake.sysLineWrites.length = 0;
+
+      fake.emitChunksDropped(4096);
+
+      // Rust already wrote the sentinel into the archive at the gap; a write-back
+      // would record the same loss twice, in the wrong place.
+      expect(fake.sysLineWrites).toEqual([]);
+      expect(s.lines.length).toBeGreaterThan(0);
+    });
+
+    it("stops listening once the session is torn down", async () => {
+      const s = await openedStore();
+      await s.closePort();
+      const before = s.lines.length;
+
+      fake.emitChunksDropped(4096);
+
+      expect(s.lines.length).toBe(before);
+    });
+  });
+
   it("reuses one TextDecoder across queued chunks flushed in the same frame", async () => {
     const OriginalTextDecoder = globalThis.TextDecoder;
     let decoderConstructCount = 0;
@@ -956,6 +1068,33 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(line.text).toContain("512 MiB");
     expect(line.text).not.toContain(SOH);
     expect(line.text).not.toContain("archive-capped");
+  });
+
+  it("translates the dropped-chunk sentinel in a filter page", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("tyutool", false);
+    const id = s.watchChips[0].id;
+    const SOH = String.fromCharCode(1);
+    fake.setFilterPage(id, {
+      filterId: id,
+      totalMatches: 1,
+      start: 0,
+      items: [
+        {
+          lineNo: 4,
+          tsMs: 1000,
+          direction: "sys",
+          text: `${SOH}tyutool:chunks-dropped:8192${SOH}`,
+        },
+      ],
+    });
+
+    await s.setActiveChip(id);
+
+    const [line] = s.activeDisplayLines();
+    expect(line.text).toContain("8192");
+    expect(line.text).not.toContain(SOH);
+    expect(line.text).not.toContain("chunks-dropped");
   });
 
   it("keeps display ids stable when the same filter page is reloaded", async () => {

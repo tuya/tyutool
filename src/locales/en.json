@@ -546,6 +546,7 @@
     },
     "log": {
       "archiveCapped": "[tyutool] The session archive reached its {mib} MiB limit. Lines from here on are shown live but not archived, so history, filters and export stop at this point.",
+      "chunksDropped": "[tyutool] {bytes} bytes of device output were lost here: tyutool could not keep up with the port. The lines before and after this notice are not continuous. Lower the baud rate or reduce device-side logging.",
       "waitingData": "Waiting for data…",
       "title": "Log",
       "pausedScroll": "Scroll to bottom",

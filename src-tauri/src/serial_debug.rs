@@ -6,7 +6,7 @@
 //! (`SERIAL_DEBUG_CHUNK_FLUSH_*`) so a chatty device cannot flood the IPC
 //! channel.
 
-use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -15,8 +15,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use tyutool_core::{
     serial_debug_fail_backfill_if_current, serial_debug_finish_backfill_if_current,
-    serial_debug_scan_filter_matches, DebugChunk, DebugConfig, SerialDebugArchive,
-    SerialDebugArchiveReader, SerialDebugChunkBatchBuffer, SerialDebugFilterBackfillSnapshot,
+    serial_debug_now_ms, serial_debug_scan_filter_matches, DebugChunk, DebugConfig, Direction,
+    SerialDebugArchive, SerialDebugArchiveReader, SerialDebugChunkBatchBuffer,
+    SerialDebugDropCounter, SerialDebugDropReport, SerialDebugFilterBackfillSnapshot,
     SerialDebugFilterDefinition, SerialDebugFilterIndex, SerialDebugFilterPage,
     SerialDebugFilterStats, SerialDebugGeneration, SerialDebugLine, SerialDebugSession,
     SerialDebugSessionPage,
@@ -41,6 +42,14 @@ struct DisconnectPayload {
 #[serde(rename_all = "camelCase")]
 struct ArchiveCappedPayload {
     limit_mib: u64,
+}
+
+/// Payload of `serial-debug-chunks-dropped`. Only the byte count crosses — the
+/// wording comes from `serialDebug.log.chunksDropped`.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChunksDroppedPayload {
+    dropped_bytes: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -221,18 +230,33 @@ pub(crate) struct SerialDebugChunkBridgeHandle {
     generation: Arc<SerialDebugGeneration>,
     send_lock: Arc<StdMutex<()>>,
     tx: SyncSender<SerialDebugChunkBridgeMessage>,
+    drops: Arc<SerialDebugDropCounter>,
 }
 
 impl SerialDebugChunkBridgeHandle {
-    fn send_chunk(
-        &self,
-        chunk: DebugChunk,
-    ) -> Result<(), std::sync::mpsc::SendError<SerialDebugChunkBridgeMessage>> {
+    /// Hand one chunk to the bridge, or account for it as lost.
+    ///
+    /// `try_send`, never `send`: this runs on the serial reader thread, which is
+    /// the only thread draining the OS/driver receive buffer, and the port runs
+    /// without flow control. Blocking here therefore applies no backpressure to
+    /// the *device* — it just stops the buffer being drained until the driver
+    /// overflows and discards bytes we never saw, with no count, no error and
+    /// nothing to show the user. Dropping the chunk here instead keeps the reader
+    /// draining and moves the loss to a boundary we own: we know how many bytes
+    /// went, we can close the archive line so the halves cannot be spliced, and
+    /// we can tell the user (who can lower the baud rate or quieten the device).
+    fn send_chunk(&self, chunk: DebugChunk) {
         let _guard = self.send_lock.lock().unwrap();
-        self.tx.send(SerialDebugChunkBridgeMessage::Chunk {
+        let bytes = chunk.bytes.len();
+        match self.tx.try_send(SerialDebugChunkBridgeMessage::Chunk {
             generation: self.generation.current(),
             chunk,
-        })
+        }) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => self.drops.record(bytes, serial_debug_now_ms()),
+            // The bridge thread is gone; the session is being torn down.
+            Err(TrySendError::Disconnected(_)) => {}
+        }
     }
 
     fn reset(&self) -> Result<u64, String> {
@@ -250,6 +274,47 @@ impl SerialDebugChunkBridgeHandle {
     }
 }
 
+/// Surface one coalesced burst of dropped chunks: a `log::warn!` for the
+/// developer, a gap in the archive and a `Sys` notice for the user.
+///
+/// Whatever is buffered is flushed first — those chunks arrived before the gap,
+/// and emitting them afterwards would put the notice in the wrong place in the
+/// live view.
+fn report_serial_debug_drops(
+    app: &AppHandle,
+    archive: &Arc<StdMutex<SerialDebugArchive>>,
+    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
+    pending: &mut SerialDebugChunkBatchBuffer,
+    report: SerialDebugDropReport,
+) {
+    flush_serial_debug_chunk(app, archive, filters, pending.take());
+    log::warn!(
+        "[serial-debug] chunk bridge queue full (capacity {}): dropped {} chunk(s) / {} byte(s) \
+         of device output",
+        SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY,
+        report.chunks,
+        report.bytes
+    );
+    // Only the reader thread's Rx chunks travel the bounded queue: the Tx path
+    // (`serial_debug_send`) writes straight to the archive.
+    let lines = {
+        let mut guard = match archive.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        guard
+            .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
+            .unwrap_or_default()
+    };
+    ingest_serial_debug_lines(app, archive, filters, &lines);
+    let _ = app.emit(
+        "serial-debug-chunks-dropped",
+        &ChunksDroppedPayload {
+            dropped_bytes: report.bytes,
+        },
+    );
+}
+
 fn spawn_serial_debug_chunk_bridge(
     app: AppHandle,
     archive: Arc<StdMutex<SerialDebugArchive>>,
@@ -260,15 +325,22 @@ fn spawn_serial_debug_chunk_bridge(
     // when archive/filter/UI consumption temporarily lags behind the serial reader.
     let (tx, rx) =
         mpsc::sync_channel::<SerialDebugChunkBridgeMessage>(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY);
+    let drops = Arc::new(SerialDebugDropCounter::default());
     let handle = SerialDebugChunkBridgeHandle {
         generation: Arc::clone(&generation),
         send_lock: Arc::new(StdMutex::new(())),
         tx: tx.clone(),
+        drops: Arc::clone(&drops),
     };
     std::thread::spawn(move || {
         let mut pending = SerialDebugChunkBatchBuffer::new();
         let mut active_generation = generation.current();
         loop {
+            // Before every receive, so `recv_timeout`'s own tick is the poll
+            // clock and no `continue` below can skip the check.
+            if let Some(report) = drops.take_report(serial_debug_now_ms()) {
+                report_serial_debug_drops(&app, &archive, &filters, &mut pending, report);
+            }
             match rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)) {
                 Ok(SerialDebugChunkBridgeMessage::Chunk { generation, chunk }) => {
                     if generation != active_generation {
@@ -285,6 +357,10 @@ fn spawn_serial_debug_chunk_bridge(
                 }
                 Ok(SerialDebugChunkBridgeMessage::Reset { generation, ack }) => {
                     let _ = pending.take();
+                    // Drops from the cleared session belong to the log the user
+                    // just discarded; reporting them into the new one would be a
+                    // notice about a gap that is no longer there.
+                    let _ = drops.take_pending();
                     active_generation = generation;
                     let _ = ack.send(());
                 }
@@ -297,6 +373,12 @@ fn spawn_serial_debug_chunk_bridge(
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
+                    // A burst still aggregating at teardown is reported anyway —
+                    // it is the last thing the user needs to know about the log
+                    // they are about to read.
+                    if let Some(report) = drops.take_pending() {
+                        report_serial_debug_drops(&app, &archive, &filters, &mut pending, report);
+                    }
                     return;
                 }
             }
@@ -342,7 +424,7 @@ pub(crate) async fn serial_debug_open(
         SerialDebugSession::open(
             cfg,
             Box::new(move |chunk: DebugChunk| {
-                let _ = chunk_tx_for_session.send_chunk(chunk);
+                chunk_tx_for_session.send_chunk(chunk);
             }),
             Box::new(move |reason: String| {
                 let _ =
@@ -756,5 +838,42 @@ mod tests {
     fn serial_debug_device_reset_session_requires_open_session() {
         let err = serial_debug_device_reset_session(None, "T5AI").unwrap_err();
         assert_eq!(err, "serial debug not open");
+    }
+
+    /// A full queue must cost us the chunk, not the reader thread.
+    ///
+    /// This test would hang rather than fail if `send_chunk` went back to a
+    /// blocking `send`: nothing drains `rx`, so the third call would park
+    /// forever — which is exactly what stalls the serial reader in production
+    /// and lets the OS receive buffer overflow behind our back.
+    #[test]
+    fn full_bridge_queue_drops_chunks_instead_of_blocking_the_reader() {
+        let (tx, rx) = mpsc::sync_channel::<SerialDebugChunkBridgeMessage>(1);
+        let handle = SerialDebugChunkBridgeHandle {
+            generation: Arc::new(SerialDebugGeneration::default()),
+            send_lock: Arc::new(StdMutex::new(())),
+            tx,
+            drops: Arc::new(SerialDebugDropCounter::default()),
+        };
+        let chunk = |bytes: usize| DebugChunk {
+            direction: Direction::Rx,
+            ts_ms: 1,
+            bytes: vec![b'x'; bytes],
+        };
+
+        handle.send_chunk(chunk(4)); // fits the capacity-1 queue
+        handle.send_chunk(chunk(8)); // dropped
+        handle.send_chunk(chunk(16)); // dropped
+
+        // One report for the whole burst, carrying the total loss.
+        let report = handle.drops.take_pending().unwrap();
+        assert_eq!(report.chunks, 2);
+        assert_eq!(report.bytes, 24);
+        assert!(handle.drops.take_pending().is_none());
+
+        drop(rx);
+        // A disconnected queue is a closing session, not a data loss.
+        handle.send_chunk(chunk(32));
+        assert!(handle.drops.take_pending().is_none());
     }
 }

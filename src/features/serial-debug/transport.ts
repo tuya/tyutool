@@ -2,6 +2,7 @@ import { isTauriRuntime } from "@/runtime";
 import { wsTransport } from "@/transport/ws-transport";
 import type {
   ArchiveCappedPayload,
+  ChunksDroppedPayload,
   DebugChunk,
   DebugConfig,
   DisconnectPayload,
@@ -15,6 +16,7 @@ type ChunkBatchListener = (chunks: DebugChunk[]) => void;
 type DisconnectListener = (p: DisconnectPayload) => void;
 type FilterListener = (payload: SerialDebugFilterUpdatePayload) => void;
 type ArchiveCappedListener = (p: ArchiveCappedPayload) => void;
+type ChunksDroppedListener = (p: ChunksDroppedPayload) => void;
 
 export interface SerialDebugTransport {
   open(cfg: DebugConfig): Promise<void>;
@@ -49,6 +51,15 @@ export interface SerialDebugTransport {
    * the archive wrote into itself would otherwise be invisible to the user.
    */
   onArchiveCapped(cb: ArchiveCappedListener): () => void;
+  /**
+   * Device output was dropped because the backend could not keep up. Its own
+   * event for the same reason as `onArchiveCapped` — plus a second one: the live
+   * view has to close its pending line buffer at the gap, or the bytes either
+   * side of it get spliced into one line the device never printed.
+   *
+   * Optional so an older backend (or a test fake) simply reports no drops.
+   */
+  onChunksDropped?(cb: ChunksDroppedListener): () => void;
 }
 
 /** Lazy Tauri transport — uses @tauri-apps/api. Loads dynamically so web builds stay lean. */
@@ -58,11 +69,13 @@ class TauriTransport implements SerialDebugTransport {
   private disconnectListeners = new Set<DisconnectListener>();
   private filterListeners = new Set<FilterListener>();
   private archiveCappedListeners = new Set<ArchiveCappedListener>();
+  private chunksDroppedListeners = new Set<ChunksDroppedListener>();
   private unlistenChunk?: () => void;
   private unlistenChunkBatch?: () => void;
   private unlistenDisconnect?: () => void;
   private unlistenFilterUpdated?: () => void;
   private unlistenArchiveCapped?: () => void;
+  private unlistenChunksDropped?: () => void;
   private listenersReady: Promise<void>;
 
   constructor() {
@@ -75,7 +88,8 @@ class TauriTransport implements SerialDebugTransport {
       this.unlistenChunkBatch &&
       this.unlistenDisconnect &&
       this.unlistenFilterUpdated &&
-      this.unlistenArchiveCapped
+      this.unlistenArchiveCapped &&
+      this.unlistenChunksDropped
     ) {
       return;
     }
@@ -114,6 +128,12 @@ class TauriTransport implements SerialDebugTransport {
       "serial-debug-archive-capped",
       (ev) => {
         this.archiveCappedListeners.forEach((l) => l(ev.payload));
+      },
+    );
+    this.unlistenChunksDropped = await listen<ChunksDroppedPayload>(
+      "serial-debug-chunks-dropped",
+      (ev) => {
+        this.chunksDroppedListeners.forEach((l) => l(ev.payload));
       },
     );
   }
@@ -220,6 +240,13 @@ class TauriTransport implements SerialDebugTransport {
       this.archiveCappedListeners.delete(cb);
     };
   }
+
+  onChunksDropped(cb: ChunksDroppedListener): () => void {
+    this.chunksDroppedListeners.add(cb);
+    return () => {
+      this.chunksDroppedListeners.delete(cb);
+    };
+  }
 }
 
 /** Web mode transport — talks to `tyutool-cli serve` over WebSocket via wsTransport. */
@@ -229,6 +256,7 @@ class WebTransport implements SerialDebugTransport {
   private disconnectListeners = new Set<DisconnectListener>();
   private filterListeners = new Set<FilterListener>();
   private archiveCappedListeners = new Set<ArchiveCappedListener>();
+  private chunksDroppedListeners = new Set<ChunksDroppedListener>();
   private isOpen = false;
 
   async open(cfg: DebugConfig): Promise<void> {
@@ -247,6 +275,7 @@ class WebTransport implements SerialDebugTransport {
       (reason) => this.disconnectListeners.forEach((l) => l({ reason })),
       (payload) => this.filterListeners.forEach((l) => l(payload)),
       (payload) => this.archiveCappedListeners.forEach((l) => l(payload)),
+      (payload) => this.chunksDroppedListeners.forEach((l) => l(payload)),
     );
     this.isOpen = true;
   }
@@ -336,6 +365,13 @@ class WebTransport implements SerialDebugTransport {
     this.archiveCappedListeners.add(cb);
     return () => {
       this.archiveCappedListeners.delete(cb);
+    };
+  }
+
+  onChunksDropped(cb: ChunksDroppedListener): () => void {
+    this.chunksDroppedListeners.add(cb);
+    return () => {
+      this.chunksDroppedListeners.delete(cb);
     };
   }
 }
