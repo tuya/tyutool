@@ -611,6 +611,7 @@ describe("serialDebugOpen / send / close", () => {
       (batch) => chunkBatches.push(batch),
       (r) => disconnects.push(r),
       () => {},
+      () => {},
     );
     await flush();
     const ws = latest();
@@ -640,6 +641,7 @@ describe("serialDebugOpen / send / close", () => {
       (batch) => chunkBatches.push(batch),
       () => {},
       () => {},
+      () => {},
     );
     await flush();
     const ws = latest();
@@ -665,10 +667,37 @@ describe("serialDebugOpen / send / close", () => {
     ]);
   });
 
+  it("routes serial_debug_archive_capped and maps limit_mib to limitMib", async () => {
+    const t = new WsTransport();
+    const capped: unknown[] = [];
+    const p = t.serialDebugOpen(
+      { port: "x" } as never,
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      (payload) => capped.push(payload),
+    );
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    ws.recv({ type: "serial_debug_opened" });
+    await p;
+
+    ws.recv({ type: "serial_debug_archive_capped", limit_mib: 256 });
+    expect(capped).toEqual([{ limitMib: 256 }]);
+
+    // A malformed frame must not synthesise a NaN notice.
+    ws.recv({ type: "serial_debug_archive_capped" });
+    expect(capped).toHaveLength(1);
+  });
+
   it("rejects serialDebugOpen on an error frame", async () => {
     const t = new WsTransport();
     const p = t.serialDebugOpen(
       { port: "x" } as never,
+      () => {},
       () => {},
       () => {},
       () => {},
@@ -701,6 +730,7 @@ describe("serialDebugOpen / send / close", () => {
     const p = t.serialDebugOpen(
       { port: "x" } as never,
       (c) => chunks.push(c),
+      () => {},
       () => {},
       () => {},
       () => {},

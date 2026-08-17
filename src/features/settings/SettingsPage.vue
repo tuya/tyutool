@@ -4,6 +4,10 @@ import { useI18n } from "vue-i18n";
 import { APP_VERSION } from "@/config/app";
 import { useSettingsStore, resolveLocale } from "@/stores/settings";
 import { useSerialDebugStore } from "@/stores/serial-debug";
+import {
+  ARCHIVE_LIMIT_PRESETS,
+  VISIBLE_LOG_WINDOW_PRESETS,
+} from "@/features/serial-debug/constants";
 import type {
   AutoUpdateIntervalId,
   LogLevelId,
@@ -49,6 +53,34 @@ const autoUpdateIntervalOptions = computed<TySelectOption[]>(() => [
   { value: "12h", label: t("settings.autoUpdate12h") },
   { value: "24h", label: t("settings.autoUpdate24h") },
 ]);
+
+const logWindowOptions = computed<TySelectOption[]>(() =>
+  VISIBLE_LOG_WINDOW_PRESETS.map((lines) => ({
+    value: String(lines),
+    label: t("serialDebug.logWindow.lines", { count: lines }),
+  })),
+);
+
+const logWindowValue = computed({
+  get: () => String(sd.logWindowLines),
+  set: (val: string) => {
+    sd.logWindowLines = Number(val);
+  },
+});
+
+const archiveLimitOptions = computed<TySelectOption[]>(() =>
+  ARCHIVE_LIMIT_PRESETS.map((mib) => ({
+    value: String(mib),
+    label: t("serialDebug.archiveLimit.size", { mib }),
+  })),
+);
+
+const archiveLimitValue = computed({
+  get: () => String(sd.archiveLimitMib),
+  set: (val: string) => {
+    sd.archiveLimitMib = Number(val);
+  },
+});
 
 const localeValue = computed({
   get: () => settings.locale,
@@ -506,6 +538,46 @@ function resetBatchAuthDisclaimer(): void {
           <TySwitch
             v-model="sd.autoSaveTimestamp"
             :aria-label="t('serialDebug.autoSave.timestamp')"
+          />
+        </div>
+        <div class="settings-row">
+          <div class="settings-row__copy">
+            <span class="settings-row__title">{{
+              t("serialDebug.logWindow.label")
+            }}</span>
+            <p class="settings-row__hint">
+              {{ t("serialDebug.logWindow.hint") }}
+            </p>
+          </div>
+          <TySelect
+            id="settings-serial-log-window"
+            v-model="logWindowValue"
+            :options="logWindowOptions"
+            :placeholder="
+              t('serialDebug.logWindow.lines', { count: sd.logWindowLines })
+            "
+            class="settings-row__control settings-row__control--select"
+            style="height: 2.5rem"
+          />
+        </div>
+        <div class="settings-row">
+          <div class="settings-row__copy">
+            <span class="settings-row__title">{{
+              t("serialDebug.archiveLimit.label")
+            }}</span>
+            <p class="settings-row__hint">
+              {{ t("serialDebug.archiveLimit.hint") }}
+            </p>
+          </div>
+          <TySelect
+            id="settings-serial-archive-limit"
+            v-model="archiveLimitValue"
+            :options="archiveLimitOptions"
+            :placeholder="
+              t('serialDebug.archiveLimit.size', { mib: sd.archiveLimitMib })
+            "
+            class="settings-row__control settings-row__control--select"
+            style="height: 2.5rem"
           />
         </div>
       </div>

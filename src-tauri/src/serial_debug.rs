@@ -35,6 +35,14 @@ struct DisconnectPayload {
     reason: String,
 }
 
+/// Payload of `serial-debug-archive-capped`. The frontend renders the notice
+/// itself from `serialDebug.log.archiveCapped`, so only the number crosses.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArchiveCappedPayload {
+    limit_mib: u64,
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct SerialDebugFilterUpdatePayload {
     def: SerialDebugFilterDefinition,
@@ -123,6 +131,24 @@ fn emit_filter_update(
     );
 }
 
+/// Every line the archive accepts passes through `ingest_serial_debug_lines`,
+/// which makes it the one place that can spot the archive-cap sentinel. The
+/// live view never sees archived lines — it re-splits the raw
+/// `serial-debug-chunk*` payloads itself — so without this event the cap notice
+/// would only ever exist in the archive file and the user would watch the log
+/// keep scrolling with no hint that recording had stopped.
+fn emit_archive_cap_notice(app: &AppHandle, lines: &[SerialDebugLine]) {
+    if let Some(limit_mib) = lines
+        .iter()
+        .find_map(tyutool_core::serial_debug_archive_cap_limit_mib)
+    {
+        let _ = app.emit(
+            "serial-debug-archive-capped",
+            &ArchiveCappedPayload { limit_mib },
+        );
+    }
+}
+
 fn ingest_serial_debug_lines(
     app: &AppHandle,
     archive: &Arc<StdMutex<SerialDebugArchive>>,
@@ -132,6 +158,7 @@ fn ingest_serial_debug_lines(
     if lines.is_empty() {
         return;
     }
+    emit_archive_cap_notice(app, lines);
     let updates = {
         let mut guard = match filters.lock() {
             Ok(guard) => guard,
@@ -480,7 +507,26 @@ pub(crate) fn serial_debug_append_sys_line(
             .append_sys_line(ts_ms, text)
             .map_err(|e| format!("append sys line failed: {e}"))?
     };
-    ingest_serial_debug_lines(&app, &state.archive, &state.filters, &[line]);
+    // `None` once the session archive hit its size cap.
+    if let Some(line) = line {
+        ingest_serial_debug_lines(&app, &state.archive, &state.filters, &[line]);
+    }
+    Ok(())
+}
+
+/// Push the user's archive-size limit (MiB in the UI, bytes on the wire) down to
+/// the archive. Mirrors the `set_log_level` shape: a setting the frontend owns
+/// and re-applies on load and on change.
+#[tauri::command]
+pub(crate) fn serial_debug_set_archive_limit(
+    state: State<'_, DebugState>,
+    max_bytes: u64,
+) -> Result<(), String> {
+    state
+        .archive
+        .lock()
+        .map_err(|_| "debug archive poisoned".to_string())?
+        .set_max_bytes(max_bytes);
     Ok(())
 }
 

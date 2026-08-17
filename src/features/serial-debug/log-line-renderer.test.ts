@@ -45,14 +45,29 @@ describe("SerialDebugLogLineRenderer", () => {
     expect(stripAnsiMock).toHaveBeenCalledTimes(2);
   });
 
-  it("drops cached entries for lines that are no longer visible", () => {
+  it("drops cached entries for lines that left the buffer", () => {
     const renderer = new SerialDebugLogLineRenderer();
 
     renderer.render([line(1, "one"), line(2, "two")], true, "");
     expect(renderer.cacheSize()).toBe(2);
 
+    // `render` sees only the visible slice, so rendering fewer lines must not
+    // evict anything — eviction is driven by `retain` with the full buffer.
     renderer.render([line(2, "two")], true, "");
+    expect(renderer.cacheSize()).toBe(2);
+
+    renderer.retain([line(2, "two")]);
     expect(renderer.cacheSize()).toBe(1);
+  });
+
+  it("matches over the whole buffer without building spans", () => {
+    const renderer = new SerialDebugLogLineRenderer();
+    parseAnsiMock.mockClear();
+    const lines = [line(1, "alpha"), line(2, "beta"), line(3, "alphabet")];
+
+    expect(renderer.matchingLineIds(lines, "  ALPHA  ")).toEqual([1, 3]);
+    expect(renderer.matchingLineIds(lines, "")).toEqual([]);
+    expect(parseAnsiMock).not.toHaveBeenCalled();
   });
 
   describe("level-prefix fallback colors (no ANSI fg)", () => {

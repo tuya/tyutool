@@ -96,6 +96,11 @@ pub enum ClientMessage {
         #[serde(default)]
         request_id: Option<String>,
     },
+    /// Per-session archive byte cap. Without this the `dev:web` archive would
+    /// stay unbounded and the setting would silently do nothing in web mode.
+    SerialDebugSetArchiveLimit {
+        max_bytes: u64,
+    },
     /// Frontend response to `flash_progress` `auth_conflict` milestone.
     AuthorizeConfirm {
         confirmed: bool,
@@ -159,6 +164,11 @@ pub enum ServerMessage {
         page: SerialDebugSessionPage,
         #[serde(skip_serializing_if = "Option::is_none")]
         request_id: Option<String>,
+    },
+    /// The session archive stopped recording. The frontend renders the wording
+    /// from `serialDebug.log.archiveCapped`, so only the number crosses.
+    SerialDebugArchiveCapped {
+        limit_mib: u64,
     },
 }
 
@@ -674,7 +684,13 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                         }
                     }
                 };
-                ingest_serial_debug_lines_ws(&sink_tx, &debug_filters, &[line]);
+                // `None` once the session archive hit its size cap.
+                if let Some(line) = line {
+                    ingest_serial_debug_lines_ws(&sink_tx, &debug_filters, &[line]);
+                }
+            }
+            ClientMessage::SerialDebugSetArchiveLimit { max_bytes } => {
+                debug_archive.lock().unwrap().set_max_bytes(max_bytes);
             }
             ClientMessage::SerialDebugFilterAdd {
                 keyword,
@@ -974,6 +990,24 @@ fn spawn_serial_debug_chunk_bridge_ws(
     handle
 }
 
+/// Every line the archive accepts passes through `ingest_serial_debug_lines_ws`,
+/// which makes it the one place that can spot the archive-cap sentinel. The live
+/// view never sees archived lines — it re-splits the raw `serial_debug_chunk*`
+/// payloads itself — so without this message the cap notice would only ever
+/// exist in the archive file and the user would watch the log keep scrolling
+/// with no hint that recording had stopped.
+fn emit_archive_cap_notice_ws(
+    sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    lines: &[SerialDebugLine],
+) {
+    if let Some(limit_mib) = lines
+        .iter()
+        .find_map(tyutool_core::serial_debug_archive_cap_limit_mib)
+    {
+        let _ = sink_tx.send(ServerMessage::SerialDebugArchiveCapped { limit_mib });
+    }
+}
+
 fn ingest_serial_debug_lines_ws(
     sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
     filters: &Arc<Mutex<SerialDebugFilterIndex>>,
@@ -982,6 +1016,7 @@ fn ingest_serial_debug_lines_ws(
     if lines.is_empty() {
         return;
     }
+    emit_archive_cap_notice_ws(sink_tx, lines);
     let updates = {
         let mut guard = match filters.lock() {
             Ok(guard) => guard,
@@ -1288,6 +1323,20 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_serial_debug_set_archive_limit() {
+        let msg: ClientMessage = serde_json::from_str(
+            r#"{"type":"serial_debug_set_archive_limit","max_bytes":268435456}"#,
+        )
+        .unwrap();
+        match msg {
+            ClientMessage::SerialDebugSetArchiveLimit { max_bytes } => {
+                assert_eq!(max_bytes, 268_435_456)
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
     fn deserialize_serial_debug_device_reset() {
         let msg: ClientMessage =
             serde_json::from_str(r#"{"type":"serial_debug_device_reset","chip_id":"T5AI"}"#)
@@ -1478,6 +1527,41 @@ mod tests {
         .unwrap();
         assert!(disc.contains(r#""type":"serial_debug_disconnected""#));
         assert!(disc.contains(r#""reason":"device removed""#));
+    }
+
+    #[test]
+    fn archive_cap_sentinel_becomes_an_archive_capped_message() {
+        let line = |direction, text: String| SerialDebugLine {
+            line_no: 7,
+            ts_ms: 1,
+            direction,
+            text,
+            raw_bytes: None,
+        };
+        let (sink_tx, mut sink_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        emit_archive_cap_notice_ws(
+            &sink_tx,
+            &[line(
+                tyutool_core::LogDirection::Sys,
+                tyutool_core::serial_debug_archive_cap_sentinel(64),
+            )],
+        );
+        let json = serde_json::to_string(&sink_rx.try_recv().unwrap()).unwrap();
+        assert!(json.contains(r#""type":"serial_debug_archive_capped""#));
+        // snake_case like every other ServerMessage field (cf. `request_id`);
+        // `ws-transport.ts` maps it to `limitMib` at the boundary.
+        assert!(json.contains(r#""limit_mib":64"#), "{json}");
+
+        // Ordinary device output never triggers it, even byte-for-byte.
+        emit_archive_cap_notice_ws(
+            &sink_tx,
+            &[line(
+                tyutool_core::LogDirection::Rx,
+                tyutool_core::serial_debug_archive_cap_sentinel(64),
+            )],
+        );
+        assert!(sink_rx.try_recv().is_err());
     }
 
     #[test]

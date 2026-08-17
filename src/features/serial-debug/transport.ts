@@ -1,6 +1,7 @@
 import { isTauriRuntime } from "@/runtime";
 import { wsTransport } from "@/transport/ws-transport";
 import type {
+  ArchiveCappedPayload,
   DebugChunk,
   DebugConfig,
   DisconnectPayload,
@@ -13,6 +14,7 @@ type ChunkListener = (chunk: DebugChunk) => void;
 type ChunkBatchListener = (chunks: DebugChunk[]) => void;
 type DisconnectListener = (p: DisconnectPayload) => void;
 type FilterListener = (payload: SerialDebugFilterUpdatePayload) => void;
+type ArchiveCappedListener = (p: ArchiveCappedPayload) => void;
 
 export interface SerialDebugTransport {
   open(cfg: DebugConfig): Promise<void>;
@@ -35,10 +37,18 @@ export interface SerialDebugTransport {
     start: number,
     limit: number,
   ): Promise<SerialDebugSessionPage>;
+  /** Push the session-archive byte cap down to Rust (0 = unlimited). */
+  setArchiveLimit(maxBytes: number): Promise<void>;
   onChunk(cb: ChunkListener): () => void; // returns unsubscribe
   onChunkBatch(cb: ChunkBatchListener): () => void;
   onDisconnect(cb: DisconnectListener): () => void;
   onFilterUpdated(cb: FilterListener): () => void;
+  /**
+   * The session archive stopped recording. Its own event because the live view
+   * is fed by the raw chunk stream and never sees archived lines — the notice
+   * the archive wrote into itself would otherwise be invisible to the user.
+   */
+  onArchiveCapped(cb: ArchiveCappedListener): () => void;
 }
 
 /** Lazy Tauri transport — uses @tauri-apps/api. Loads dynamically so web builds stay lean. */
@@ -47,10 +57,12 @@ class TauriTransport implements SerialDebugTransport {
   private chunkBatchListeners = new Set<ChunkBatchListener>();
   private disconnectListeners = new Set<DisconnectListener>();
   private filterListeners = new Set<FilterListener>();
+  private archiveCappedListeners = new Set<ArchiveCappedListener>();
   private unlistenChunk?: () => void;
   private unlistenChunkBatch?: () => void;
   private unlistenDisconnect?: () => void;
   private unlistenFilterUpdated?: () => void;
+  private unlistenArchiveCapped?: () => void;
   private listenersReady: Promise<void>;
 
   constructor() {
@@ -62,7 +74,8 @@ class TauriTransport implements SerialDebugTransport {
       this.unlistenChunk &&
       this.unlistenChunkBatch &&
       this.unlistenDisconnect &&
-      this.unlistenFilterUpdated
+      this.unlistenFilterUpdated &&
+      this.unlistenArchiveCapped
     ) {
       return;
     }
@@ -95,6 +108,12 @@ class TauriTransport implements SerialDebugTransport {
       "serial-debug-filter-updated",
       (ev) => {
         this.filterListeners.forEach((l) => l(ev.payload));
+      },
+    );
+    this.unlistenArchiveCapped = await listen<ArchiveCappedPayload>(
+      "serial-debug-archive-capped",
+      (ev) => {
+        this.archiveCappedListeners.forEach((l) => l(ev.payload));
       },
     );
   }
@@ -162,6 +181,11 @@ class TauriTransport implements SerialDebugTransport {
     return await invoke("serial_debug_session_read_page", { start, limit });
   }
 
+  async setArchiveLimit(maxBytes: number): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("serial_debug_set_archive_limit", { maxBytes });
+  }
+
   onChunk(cb: ChunkListener): () => void {
     this.chunkListeners.add(cb);
     return () => {
@@ -189,6 +213,13 @@ class TauriTransport implements SerialDebugTransport {
       this.filterListeners.delete(cb);
     };
   }
+
+  onArchiveCapped(cb: ArchiveCappedListener): () => void {
+    this.archiveCappedListeners.add(cb);
+    return () => {
+      this.archiveCappedListeners.delete(cb);
+    };
+  }
 }
 
 /** Web mode transport — talks to `tyutool-cli serve` over WebSocket via wsTransport. */
@@ -197,6 +228,7 @@ class WebTransport implements SerialDebugTransport {
   private chunkBatchListeners = new Set<ChunkBatchListener>();
   private disconnectListeners = new Set<DisconnectListener>();
   private filterListeners = new Set<FilterListener>();
+  private archiveCappedListeners = new Set<ArchiveCappedListener>();
   private isOpen = false;
 
   async open(cfg: DebugConfig): Promise<void> {
@@ -214,6 +246,7 @@ class WebTransport implements SerialDebugTransport {
       },
       (reason) => this.disconnectListeners.forEach((l) => l({ reason })),
       (payload) => this.filterListeners.forEach((l) => l(payload)),
+      (payload) => this.archiveCappedListeners.forEach((l) => l(payload)),
     );
     this.isOpen = true;
   }
@@ -267,6 +300,10 @@ class WebTransport implements SerialDebugTransport {
     return await wsTransport.serialDebugSessionReadPage(start, limit);
   }
 
+  async setArchiveLimit(maxBytes: number): Promise<void> {
+    await wsTransport.serialDebugSetArchiveLimit(maxBytes);
+  }
+
   onChunk(cb: ChunkListener): () => void {
     this.chunkListeners.add(cb);
     return () => {
@@ -292,6 +329,13 @@ class WebTransport implements SerialDebugTransport {
     this.filterListeners.add(cb);
     return () => {
       this.filterListeners.delete(cb);
+    };
+  }
+
+  onArchiveCapped(cb: ArchiveCappedListener): () => void {
+    this.archiveCappedListeners.add(cb);
+    return () => {
+      this.archiveCappedListeners.delete(cb);
     };
   }
 }

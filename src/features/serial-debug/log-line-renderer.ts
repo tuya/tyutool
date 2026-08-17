@@ -29,11 +29,15 @@ type CachedRenderedLine = {
   view: RenderedLogLine;
 };
 
+// `ansiSpans`/`plainSpans` are built lazily: the log view scans the whole
+// buffer for search matches (needs `lowerPlainText` only) but builds spans for
+// the visible slice alone, so parsing every line's ANSI eagerly would undo the
+// saving.
 type CachedLineBase = {
   plainText: string;
   lowerPlainText: string;
-  ansiSpans: AnsiSpan[];
-  plainSpans: AnsiSpan[];
+  ansiSpans?: AnsiSpan[];
+  plainSpans?: AnsiSpan[];
   lastRendered?: CachedRenderedLine;
 };
 
@@ -96,22 +100,51 @@ function splitByKeyword(
 export class SerialDebugLogLineRenderer {
   private baseByLineId = new Map<number, CachedLineBase>();
 
+  /**
+   * Build display spans. Callers pass the slice they are about to mount (the
+   * visible window), so this must NOT drive cache eviction — call `retain` with
+   * the full buffer for that.
+   */
   render(
     lines: readonly DebugLogLine[],
     ansiEnabled: boolean,
     searchQuery: string,
   ): RenderedLogLine[] {
     const normalizedQuery = searchQuery.trim().toLowerCase();
-    const visibleIds = new Set(lines.map((line) => line.id));
-    for (const existingId of this.baseByLineId.keys()) {
-      if (!visibleIds.has(existingId)) {
-        this.baseByLineId.delete(existingId);
-      }
-    }
-
     return lines.map((line) =>
       this.renderLine(line, ansiEnabled, normalizedQuery),
     );
+  }
+
+  /** Drop cached data for lines that have left the buffer. */
+  retain(lines: readonly DebugLogLine[]): void {
+    if (this.baseByLineId.size === 0) return;
+    const liveIds = new Set(lines.map((line) => line.id));
+    for (const existingId of this.baseByLineId.keys()) {
+      if (!liveIds.has(existingId)) {
+        this.baseByLineId.delete(existingId);
+      }
+    }
+  }
+
+  /**
+   * Ids of every line whose text contains `searchQuery`, over the whole buffer.
+   * Substring test only — no span building — so it stays affordable for lines
+   * that are never mounted.
+   */
+  matchingLineIds(
+    lines: readonly DebugLogLine[],
+    searchQuery: string,
+  ): number[] {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return [];
+    const ids: number[] = [];
+    for (const line of lines) {
+      if (this.getOrCreateBase(line).lowerPlainText.includes(normalizedQuery)) {
+        ids.push(line.id);
+      }
+    }
+    return ids;
   }
 
   cacheSize(): number {
@@ -133,13 +166,11 @@ export class SerialDebugLogLineRenderer {
       return cached.view;
     }
 
-    const spans = (ansiEnabled ? base.ansiSpans : base.plainSpans).map(
-      (span) => ({
-        text: span.text,
-        style: span.style,
-        segments: splitByKeyword(span.text, searchQuery),
-      }),
-    );
+    const spans = this.spansFor(line, base, ansiEnabled).map((span) => ({
+      text: span.text,
+      style: span.style,
+      segments: splitByKeyword(span.text, searchQuery),
+    }));
     const view: RenderedLogLine = {
       line,
       spans,
@@ -154,6 +185,23 @@ export class SerialDebugLogLineRenderer {
     return view;
   }
 
+  private spansFor(
+    line: DebugLogLine,
+    base: CachedLineBase,
+    ansiEnabled: boolean,
+  ): AnsiSpan[] {
+    if (ansiEnabled) {
+      base.ansiSpans ??= applyLevelFallback(
+        line,
+        base.plainText,
+        parseAnsi(line.text),
+      );
+      return base.ansiSpans;
+    }
+    base.plainSpans ??= [{ text: base.plainText, style: {} }];
+    return base.plainSpans;
+  }
+
   private getOrCreateBase(line: DebugLogLine): CachedLineBase {
     let existing = this.baseByLineId.get(line.id);
     if (existing) {
@@ -164,8 +212,6 @@ export class SerialDebugLogLineRenderer {
     existing = {
       plainText,
       lowerPlainText: plainText.toLowerCase(),
-      ansiSpans: applyLevelFallback(line, plainText, parseAnsi(line.text)),
-      plainSpans: [{ text: plainText, style: {} }],
     };
     this.baseByLineId.set(line.id, existing);
     return existing;

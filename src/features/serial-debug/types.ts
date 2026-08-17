@@ -31,6 +31,16 @@ export interface DisconnectPayload {
   reason: string;
 }
 
+/**
+ * Mirrors the `serial-debug-archive-capped` Tauri event and the
+ * `serial_debug_archive_capped` WS message (whose `limit_mib` is mapped to
+ * `limitMib` in `ws-transport.ts`). Only the number crosses — the wording comes
+ * from `serialDebug.log.archiveCapped`.
+ */
+export interface ArchiveCappedPayload {
+  limitMib: number;
+}
+
 export type DebugLineDirection = "tx" | "rx" | "sys";
 
 export interface DebugLogLine {

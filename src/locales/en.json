@@ -545,6 +545,7 @@
       "noMatch": "No matches"
     },
     "log": {
+      "archiveCapped": "[tyutool] The session archive reached its {mib} MiB limit. Lines from here on are shown live but not archived, so history, filters and export stop at this point.",
       "waitingData": "Waiting for data…",
       "title": "Log",
       "pausedScroll": "Scroll to bottom",
@@ -576,6 +577,16 @@
       "timestamp": "Include timestamp per line",
       "timestampFmtOn": "[12:00:00.000] [RX] [data]",
       "timestampFmtOff": "[RX] [data]"
+    },
+    "logWindow": {
+      "label": "Visible log line limit",
+      "hint": "Oldest lines are dropped past this limit; auto-saved files are unaffected",
+      "lines": "{count} lines"
+    },
+    "archiveLimit": {
+      "label": "Session archive size limit",
+      "hint": "Once the session archive reaches this size it stops recording; what was already captured is kept. History, filters and export stop there — auto-saved files are unaffected",
+      "size": "{mib} MiB"
     },
     "hexPopup": {
       "titleHex": "Hex view",

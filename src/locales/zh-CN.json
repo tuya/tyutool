@@ -545,6 +545,7 @@
       "noMatch": "无匹配"
     },
     "log": {
+      "archiveCapped": "[tyutool] 会话归档已达到 {mib} MiB 上限，之后的日志仅实时显示、不再归档，历史、筛选和导出到此为止。",
       "waitingData": "等待数据…",
       "title": "日志",
       "pausedScroll": "滚动到底部",
@@ -576,6 +577,16 @@
       "timestamp": "每行包含时间戳",
       "timestampFmtOn": "[12:00:00.000] [RX] [数据]",
       "timestampFmtOff": "[RX] [数据]"
+    },
+    "logWindow": {
+      "label": "日志显示行数上限",
+      "hint": "超出后会丢弃最旧的行；自动保存的文件不受影响",
+      "lines": "{count} 行"
+    },
+    "archiveLimit": {
+      "label": "会话归档大小上限",
+      "hint": "会话归档达到该大小后停止记录，已记录的内容保留；历史、筛选和导出到此为止，自动保存的文件不受影响",
+      "size": "{mib} MiB"
     },
     "hexPopup": {
       "titleHex": "十六进制视图",

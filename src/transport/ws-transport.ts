@@ -377,6 +377,9 @@ export class WsTransport {
     ) => void,
     onDisconnect: (reason: string) => void,
     onFilterUpdated: (payload: SerialDebugFilterUpdatePayload) => void,
+    onArchiveCapped: (
+      payload: import("@/features/serial-debug/types").ArchiveCappedPayload,
+    ) => void,
   ): Promise<void> {
     const ws = await this.connect();
     return new Promise((resolve, reject) => {
@@ -413,6 +416,8 @@ export class WsTransport {
             reason?: string;
             def?: SerialDebugFilterUpdatePayload["def"];
             stats?: SerialDebugFilterUpdatePayload["stats"];
+            // snake_case on the wire like every other ServerMessage field.
+            limit_mib?: number;
           };
           if (m.type === "serial_debug_chunk" && m.chunk) onChunk(m.chunk);
           else if (m.type === "serial_debug_chunk_batch" && m.chunks)
@@ -421,6 +426,11 @@ export class WsTransport {
             onDisconnect(m.reason ?? "");
           else if (m.type === "serial_debug_filter_updated" && m.def && m.stats)
             onFilterUpdated({ def: m.def, stats: m.stats });
+          else if (
+            m.type === "serial_debug_archive_capped" &&
+            typeof m.limit_mib === "number"
+          )
+            onArchiveCapped({ limitMib: m.limit_mib });
         } catch {
           /* ignore */
         }
@@ -454,6 +464,16 @@ export class WsTransport {
   async serialDebugSessionClear(): Promise<void> {
     const ws = await this.connect();
     ws.send(JSON.stringify({ type: "serial_debug_session_clear" }));
+  }
+
+  async serialDebugSetArchiveLimit(maxBytes: number): Promise<void> {
+    const ws = await this.connect();
+    ws.send(
+      JSON.stringify({
+        type: "serial_debug_set_archive_limit",
+        max_bytes: maxBytes,
+      }),
+    );
   }
 
   async serialDebugAppendSysLine(tsMs: number, text: string): Promise<void> {

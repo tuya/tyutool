@@ -4,27 +4,29 @@ import {
   nextTick,
   onActivated,
   onDeactivated,
+  onUnmounted,
   reactive,
   ref,
   watch,
+  watchEffect,
 } from "vue";
 import { useI18n } from "vue-i18n";
 import { faCircleNotch, faFloppyDisk } from "@fortawesome/free-solid-svg-icons";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { isTauriRuntime } from "@/runtime";
-import { stripAnsi, type AnsiStyle } from "@/features/serial-debug/ansi-parse";
+import type { AnsiStyle } from "@/features/serial-debug/ansi-parse";
 import {
   SerialDebugLogLineRenderer,
   type RenderedLogLine,
 } from "@/features/serial-debug/log-line-renderer";
 import { SerialDebugHexViewRenderer } from "@/features/serial-debug/hex-view-renderer";
 import { makeStamp, formatTs } from "@/features/serial-debug/utils";
+import { formatExportLine } from "@/features/serial-debug/archive-line-text";
 import { EXPORT_PAGE_SIZE } from "@/features/serial-debug/constants";
 import type {
   DebugLogLine,
   HexBytesPerRow,
-  SerialDebugLine,
 } from "@/features/serial-debug/types";
 import SerialDebugChipBar from "./SerialDebugChipBar.vue";
 
@@ -57,9 +59,107 @@ const activeChip = computed(() =>
     : null,
 );
 
-const displayLines = computed(() => s.activeDisplayLines);
+// A getter, not a computed: the store's live line buffer is a shallowRef whose
+// array identity stays the same across appends, and a computed that returns an
+// identity-stable value never notifies its subscribers. Calling through makes
+// every computed/watcher below depend on the store refs directly.
+const displayLines = (): DebugLogLine[] => s.activeDisplayLines();
 
 const scrollRef = ref<HTMLDivElement | null>(null);
+
+// ── viewport virtualization (ASCII line view only) ──────────────────────
+// Only the rows inside the viewport — plus OVERSCAN_ROWS above and below so a
+// fast scroll never shows a blank band — are turned into DOM. Rows are
+// fixed-height by construction (`.line` pins line-height and `.text` is
+// `white-space: pre`, so the pane scrolls horizontally instead of wrapping),
+// which makes a row's offset exactly `index * rowHeight` — no per-row
+// measurement, no reading `scrollHeight`.
+const OVERSCAN_ROWS = 10;
+
+const rowProbeRef = ref<HTMLDivElement | null>(null);
+const scrollTop = ref(0);
+const viewportHeight = ref(0);
+const measuredRowHeight = ref(0);
+
+// Used until the probe has been measured (first frame) and in environments
+// without a layout engine (happy-dom): mirrors the `.line` box — line-height
+// 1.5 plus 2 x 0.1875rem of vertical padding.
+function estimateRowHeight(fontSize: number): number {
+  return Math.round(fontSize * 1.5) + 6;
+}
+
+const rowHeight = computed(
+  () => measuredRowHeight.value || estimateRowHeight(s.logFontSize),
+);
+
+// Row height must never be hard-coded: the font size is user-adjustable
+// (10–18px). The probe is a real `.line` rendered inside the pane, so it picks
+// up every inherited style change.
+function measureLayout(): void {
+  const paneEl = scrollRef.value;
+  if (paneEl && paneEl.clientHeight > 0) {
+    viewportHeight.value = paneEl.clientHeight;
+  }
+  // getBoundingClientRect, not offsetHeight: a fractional row height (e.g.
+  // 19.5px at 13px font) rounded to an integer would drift the mounted rows out
+  // of their computed slots across the window.
+  const probeHeight = rowProbeRef.value?.getBoundingClientRect().height ?? 0;
+  if (probeHeight > 0) measuredRowHeight.value = probeHeight;
+}
+
+let resizeObserver: ResizeObserver | null = null;
+watch(
+  [scrollRef, rowProbeRef],
+  ([paneEl, probeEl]) => {
+    if (typeof ResizeObserver === "undefined") return;
+    resizeObserver ??= new ResizeObserver(() => measureLayout());
+    resizeObserver.disconnect();
+    if (paneEl) resizeObserver.observe(paneEl);
+    if (probeEl) resizeObserver.observe(probeEl);
+    measureLayout();
+  },
+  { flush: "post" },
+);
+onUnmounted(() => resizeObserver?.disconnect());
+
+// Font size changed: fall back to the estimate for one frame, then re-measure.
+watch(
+  () => s.logFontSize,
+  () => {
+    measuredRowHeight.value = 0;
+    void nextTick().then(measureLayout);
+  },
+);
+
+const contentHeight = computed(() => displayLines().length * rowHeight.value);
+const maxScrollTop = computed(() =>
+  Math.max(0, contentHeight.value - viewportHeight.value),
+);
+
+const visibleRange = computed<{ start: number; end: number }>(() => {
+  const total = displayLines().length;
+  const rh = rowHeight.value;
+  const top = Math.min(Math.max(scrollTop.value, 0), maxScrollTop.value);
+  return {
+    start: Math.max(0, Math.floor(top / rh) - OVERSCAN_ROWS),
+    end: Math.min(
+      total,
+      Math.ceil((top + viewportHeight.value) / rh) + OVERSCAN_ROWS,
+    ),
+  };
+});
+
+const windowOffsetY = computed(
+  () => visibleRange.value.start * rowHeight.value,
+);
+
+function applyScrollTop(el: HTMLElement, top: number): void {
+  // Keep the model in sync with the DOM: a programmatic scrollTop write fires
+  // its `scroll` event asynchronously (and never at all in tests), so the
+  // visible range would otherwise lag a frame behind.
+  scrollTop.value = top;
+  el.scrollTop = top;
+}
 
 // Per-tab scroll lock. Key: activeChipId (null = "All" tab).
 // Each tab maintains its own pause state independently.
@@ -76,11 +176,21 @@ async function scrollToBottom(): Promise<void> {
   await nextTick();
   const el = scrollRef.value;
   if (!el || lockAutoScroll.value) return;
-  el.scrollTop = el.scrollHeight;
+  // The hex pane is a single <pre> with no row model, so it still asks the DOM.
+  // The line pane derives the target from the row model instead: reading
+  // scrollHeight there would force a synchronous layout on every batch.
+  applyScrollTop(el, props.hexView ? el.scrollHeight : maxScrollTop.value);
 }
 
+// Track the newest line id, not the array length: once the visible window is
+// saturated (logWindowLines) the store drops one line off the head for
+// every line it appends, so the length stops changing while new lines keep
+// arriving — a length watcher goes permanently deaf at that point.
 watch(
-  () => displayLines.value.length,
+  () => {
+    const current = displayLines();
+    return current[current.length - 1]?.id ?? -1;
+  },
   () => {
     void scrollToBottom();
   },
@@ -126,7 +236,11 @@ watchLayoutChange(() => s.logFontSize);
 function onScroll(): void {
   const el = scrollRef.value;
   if (!el) return;
-  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  scrollTop.value = el.scrollTop;
+  if (el.clientHeight > 0) viewportHeight.value = el.clientHeight;
+  const atBottom = props.hexView
+    ? el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    : contentHeight.value - scrollTop.value - viewportHeight.value < 80;
   lockAutoScroll.value = !atBottom;
 }
 
@@ -137,7 +251,7 @@ async function resumeScroll(): Promise<void> {
 
 const hexRendered = computed(() => {
   if (!props.hexView) return null;
-  return hexViewRenderer.render(displayLines.value, props.hexBytesPerRow);
+  return hexViewRenderer.render(displayLines(), props.hexBytesPerRow);
 });
 
 function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
@@ -152,6 +266,11 @@ function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
 
 const ctxMenu = ref<{ x: number; y: number; selected: string } | null>(null);
 
+// Known limitation of the virtualized pane: the native selection can only cover
+// mounted rows, so a selection dragged past the viewport stops at the rows that
+// happen to be in the DOM. Selecting inside the viewport (the copy / to-hex /
+// to-ascii actions below) works as before. A selection model spanning unmounted
+// rows would need its own text layer and is deliberately out of scope.
 function onContextMenu(ev: MouseEvent): void {
   const sel = window.getSelection()?.toString() ?? "";
   if (!sel) {
@@ -190,10 +309,11 @@ onActivated(async () => {
   await nextTick();
   const el = scrollRef.value;
   if (!el) return;
+  measureLayout();
   if (lockAutoScroll.value && savedScrollTop !== null) {
-    el.scrollTop = savedScrollTop;
+    applyScrollTop(el, savedScrollTop);
   } else if (!lockAutoScroll.value) {
-    el.scrollTop = el.scrollHeight;
+    applyScrollTop(el, props.hexView ? el.scrollHeight : maxScrollTop.value);
   }
   savedScrollTop = null;
 });
@@ -206,17 +326,34 @@ const searchIndex = ref(0);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
 const searchQuery = computed(() => searchText.value.trim().toLowerCase());
-const displayLineViews = computed<RenderedLogLine[]>(() =>
-  lineRenderer.render(displayLines.value, props.ansiEnabled, searchQuery.value),
-);
 
-// Single pass: ordered list of matching IDs; Set derived from it for O(1) template lookup.
-const matchingLineIdList = computed<number[]>(() => {
-  if (!searchQuery.value) return [];
-  return displayLineViews.value
-    .filter((view) => view.hasMatch)
-    .map((view) => view.line.id);
+// Cache eviction must not hang off either template branch. Two paths fill the
+// renderer's per-line cache — the span building below (ASCII branch only) and
+// the whole-buffer match scan (runs in both branches, since the search bar sits
+// above the pane) — so tying eviction to the ASCII render would leak every line
+// that ages out of the buffer while the hex view is up with a search active.
+// This effect re-runs on every buffer publish regardless of what is mounted,
+// and it replaces (not adds to) the per-render prune the old code did: it no
+// longer re-scans on a pure scroll, when only the visible slice moves.
+watchEffect(() => lineRenderer.retain(displayLines()));
+
+// Spans are built for the mounted slice only.
+const visibleLineViews = computed<RenderedLogLine[]>(() => {
+  const all = displayLines();
+  const { start, end } = visibleRange.value;
+  return lineRenderer.render(
+    all.slice(start, end),
+    props.ansiEnabled,
+    searchQuery.value,
+  );
 });
+
+// Search stays whole-buffer: matching is a plain substring scan over every
+// line, decoupled from the span building above, so the count and the
+// prev/next order do not degrade to "whatever happens to be on screen".
+const matchingLineIdList = computed<number[]>(() =>
+  lineRenderer.matchingLineIds(displayLines(), searchQuery.value),
+);
 
 const matchingLineIds = computed<Set<number>>(
   () => new Set(matchingLineIdList.value),
@@ -265,12 +402,29 @@ async function navigateSearch(delta: number): Promise<void> {
   await scrollToMatch();
 }
 
+// Scroll by index, not by element lookup: a match outside the mounted window
+// has no DOM node to scroll into view.
 async function scrollToMatch(): Promise<void> {
   const id = currentMatchLineId.value;
   if (id === null) return;
   await nextTick();
-  const el = scrollRef.value?.querySelector(`[data-line-id="${id}"]`);
-  el?.scrollIntoView({ block: "nearest" });
+  const el = scrollRef.value;
+  if (!el) return;
+  const index = displayLines().findIndex((line) => line.id === id);
+  if (index < 0) return;
+  const rh = rowHeight.value;
+  const rowTop = index * rh;
+  const current = scrollTop.value;
+  // Equivalent of scrollIntoView({ block: "nearest" }): only move when the row
+  // sits outside the viewport.
+  let next = current;
+  if (rowTop < current) {
+    next = rowTop;
+  } else if (rowTop + rh > current + viewportHeight.value) {
+    next = rowTop + rh - viewportHeight.value;
+  }
+  if (next === current) return;
+  applyScrollTop(el, Math.min(Math.max(next, 0), maxScrollTop.value));
 }
 
 function onContainerKeydown(ev: KeyboardEvent): void {
@@ -304,12 +458,6 @@ async function writeFile(
   a.download = defaultName;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function formatExportLine(line: SerialDebugLine): string {
-  const dir =
-    line.direction === "tx" ? "TX " : line.direction === "rx" ? "RX " : "SYS";
-  return `[${formatTs(line.tsMs)}] [${dir}] ${stripAnsi(line.text)}`;
 }
 
 function linesAvailableForSession(): boolean {
@@ -634,53 +782,69 @@ async function saveLog(): Promise<void> {
       @scroll="onScroll"
       @contextmenu="onContextMenu"
     >
-      <div
-        v-for="lineView in displayLineViews"
-        :key="lineView.line.id"
-        :data-line-id="lineView.line.id"
-        class="line"
-        :data-dir="lineView.line.direction"
-        :class="{
-          'line-search-match':
-            matchingLineIds.has(lineView.line.id) &&
-            lineView.line.id !== currentMatchLineId,
-          'line-search-current': lineView.line.id === currentMatchLineId,
-        }"
-      >
-        <span v-if="s.showTimestamp || s.showDirBadge" class="prefix">
-          <span v-if="s.showTimestamp" class="ts">{{
-            formatTs(lineView.line.tsMs)
-          }}</span>
-          <span v-if="s.showDirBadge" class="dir-badge">{{
-            lineView.line.direction === "tx"
-              ? "TX"
-              : lineView.line.direction === "rx"
-                ? "RX"
-                : "SYS"
-          }}</span>
+      <!-- Row-height probe: an invisible real row, measured so the virtual
+           scroller tracks the current font size instead of a hard-coded value. -->
+      <div ref="rowProbeRef" class="line line-probe" aria-hidden="true">
+        <span class="prefix">
+          <span class="ts">00:00:00.000</span>
+          <span class="dir-badge">RX</span>
         </span>
-        <span class="text">
-          <span
-            v-for="(span, si) in lineView.spans"
-            :key="si"
-            :style="spanStyle(span.style)"
+        <span class="text">0</span>
+      </div>
+      <div class="virt-spacer" :style="{ height: contentHeight + 'px' }">
+        <div
+          class="virt-window"
+          :style="{ transform: `translateY(${windowOffsetY}px)` }"
+        >
+          <div
+            v-for="lineView in visibleLineViews"
+            :key="lineView.line.id"
+            :data-line-id="lineView.line.id"
+            class="line"
+            :data-dir="lineView.line.direction"
+            :class="{
+              'line-search-match':
+                matchingLineIds.has(lineView.line.id) &&
+                lineView.line.id !== currentMatchLineId,
+              'line-search-current': lineView.line.id === currentMatchLineId,
+            }"
           >
-            <template
-              v-if="searchQuery && matchingLineIds.has(lineView.line.id)"
-            >
-              <template v-for="(seg, sj) in span.segments" :key="sj">
-                <mark v-if="seg.isMatch" class="search-keyword-mark">{{
-                  seg.text
-                }}</mark
-                ><template v-else>{{ seg.text }}</template>
-              </template>
-            </template>
-            <template v-else>{{ span.text }}</template>
-          </span>
-        </span>
+            <span v-if="s.showTimestamp || s.showDirBadge" class="prefix">
+              <span v-if="s.showTimestamp" class="ts">{{
+                formatTs(lineView.line.tsMs)
+              }}</span>
+              <span v-if="s.showDirBadge" class="dir-badge">{{
+                lineView.line.direction === "tx"
+                  ? "TX"
+                  : lineView.line.direction === "rx"
+                    ? "RX"
+                    : "SYS"
+              }}</span>
+            </span>
+            <span class="text">
+              <span
+                v-for="(span, si) in lineView.spans"
+                :key="si"
+                :style="spanStyle(span.style)"
+              >
+                <template
+                  v-if="searchQuery && matchingLineIds.has(lineView.line.id)"
+                >
+                  <template v-for="(seg, sj) in span.segments" :key="sj">
+                    <mark v-if="seg.isMatch" class="search-keyword-mark">{{
+                      seg.text
+                    }}</mark
+                    ><template v-else>{{ seg.text }}</template>
+                  </template>
+                </template>
+                <template v-else>{{ span.text }}</template>
+              </span>
+            </span>
+          </div>
+        </div>
       </div>
       <div
-        v-if="displayLines.length === 0"
+        v-if="contentHeight === 0"
         class="px-3 py-2 text-[var(--ty-text-muted)]"
       >
         {{ t("serialDebug.log.waitingData") }}
@@ -854,6 +1018,25 @@ async function saveLog(): Promise<void> {
   white-space: nowrap;
   min-width: 5rem;
 }
+/* virtualized line window: the spacer carries the full scroll height, the
+   window holds the mounted slice and is offset to the slice's first row. */
+.virt-spacer {
+  position: relative;
+}
+.virt-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  min-width: 100%;
+}
+.line-probe {
+  position: absolute;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
 /* log lines */
 .line {
   display: flex;
@@ -861,6 +1044,9 @@ async function saveLog(): Promise<void> {
   gap: 0.625rem;
   padding: 0.1875rem 0.625rem;
   font-size: inherit;
+  /* Fixed row height is what makes index-based virtual scrolling correct;
+     keep this in sync with estimateRowHeight() in the script block. */
+  line-height: 1.5;
 }
 .line[data-dir="tx"] {
 }
@@ -914,10 +1100,9 @@ async function saveLog(): Promise<void> {
   color: var(--ty-text-muted);
 }
 .text {
-  flex: 1;
-  min-width: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* `pre`, not `pre-wrap`: soft wrapping would make row heights vary and break
+     the fixed-height row model. Long lines scroll horizontally instead. */
+  white-space: pre;
 }
 mark.search-keyword-mark {
   background: #fbbf24;

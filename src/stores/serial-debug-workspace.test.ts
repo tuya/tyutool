@@ -4,6 +4,14 @@ import {
   SD_WORKSPACE_VERSION,
   type SerialDebugWorkspaceSerialized,
 } from "./serial-debug-workspace";
+import {
+  DEFAULT_ARCHIVE_LIMIT_MIB,
+  DEFAULT_VISIBLE_LOG_WINDOW_LINES,
+  MAX_ARCHIVE_LIMIT_MIB,
+  MAX_VISIBLE_LOG_WINDOW_LINES,
+  MIN_ARCHIVE_LIMIT_MIB,
+  MIN_VISIBLE_LOG_WINDOW_LINES,
+} from "@/features/serial-debug/constants";
 
 /** A minimal valid record; callers spread a patch over it. */
 function base(): SerialDebugWorkspaceSerialized {
@@ -131,6 +139,64 @@ describe("parseSerialDebugWorkspace", () => {
     expect(w!.ansiEnabled).toBeUndefined();
     expect(w!.autoSave).toBeUndefined();
     expect(w!.autoSaveDir).toBeUndefined();
+  });
+
+  it("falls back to the default logWindowLines when absent or invalid", () => {
+    expect(parseSerialDebugWorkspace(base())!.logWindowLines).toBe(
+      DEFAULT_VISIBLE_LOG_WINDOW_LINES,
+    );
+    expect(
+      parseSerialDebugWorkspace({ ...base(), logWindowLines: "lots" })!
+        .logWindowLines,
+    ).toBe(DEFAULT_VISIBLE_LOG_WINDOW_LINES);
+    expect(
+      parseSerialDebugWorkspace({ ...base(), logWindowLines: Infinity })!
+        .logWindowLines,
+    ).toBe(DEFAULT_VISIBLE_LOG_WINDOW_LINES);
+  });
+
+  it("clamps an out-of-range logWindowLines into [MIN, MAX]", () => {
+    expect(
+      parseSerialDebugWorkspace({ ...base(), logWindowLines: 1 })!
+        .logWindowLines,
+    ).toBe(MIN_VISIBLE_LOG_WINDOW_LINES);
+    expect(
+      parseSerialDebugWorkspace({ ...base(), logWindowLines: 999999 })!
+        .logWindowLines,
+    ).toBe(MAX_VISIBLE_LOG_WINDOW_LINES);
+    expect(
+      parseSerialDebugWorkspace({ ...base(), logWindowLines: 3000 })!
+        .logWindowLines,
+    ).toBe(3000);
+  });
+
+  it("falls back to the default archiveLimitMib when absent or invalid", () => {
+    expect(parseSerialDebugWorkspace(base())!.archiveLimitMib).toBe(
+      DEFAULT_ARCHIVE_LIMIT_MIB,
+    );
+    expect(
+      parseSerialDebugWorkspace({ ...base(), archiveLimitMib: "big" })!
+        .archiveLimitMib,
+    ).toBe(DEFAULT_ARCHIVE_LIMIT_MIB);
+    expect(
+      parseSerialDebugWorkspace({ ...base(), archiveLimitMib: Infinity })!
+        .archiveLimitMib,
+    ).toBe(DEFAULT_ARCHIVE_LIMIT_MIB);
+  });
+
+  it("clamps an out-of-range archiveLimitMib into [MIN, MAX]", () => {
+    expect(
+      parseSerialDebugWorkspace({ ...base(), archiveLimitMib: 0 })!
+        .archiveLimitMib,
+    ).toBe(MIN_ARCHIVE_LIMIT_MIB);
+    expect(
+      parseSerialDebugWorkspace({ ...base(), archiveLimitMib: 999999 })!
+        .archiveLimitMib,
+    ).toBe(MAX_ARCHIVE_LIMIT_MIB);
+    expect(
+      parseSerialDebugWorkspace({ ...base(), archiveLimitMib: 512 })!
+        .archiveLimitMib,
+    ).toBe(512);
   });
 
   it("rejects a negative or non-finite customBaudRate", () => {
