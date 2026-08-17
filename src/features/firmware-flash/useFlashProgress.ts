@@ -8,18 +8,26 @@ import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-t
 
 const t = i18n.global.t;
 
-/** Mirrors `HANDSHAKE_NO_RESPONSE_MARKER` in
- *  `crates/tyutool-core/src/plugins/beken/frame.rs` — the stable fragment of the
- *  handshake-failure error, matched here so the GUI can show localized text. */
-const HANDSHAKE_NO_RESPONSE_MARKER =
-  "did not answer the download-mode handshake";
+/** Stable fragments of the beken connection/verify errors, mirroring the
+ *  `*_MARKER` constants in `crates/tyutool-core/src/plugins/beken/frame.rs`.
+ *  The backend prose is already actionable (it is what the CLI prints); these
+ *  let the GUI show the same advice in the user's language. */
+const BACKEND_MESSAGE_MARKERS: ReadonlyArray<[marker: string, key: string]> = [
+  [
+    "did not answer the download-mode handshake",
+    "flash.err.handshakeNoResponse",
+  ],
+  ["stopped responding after the switch to", "flash.err.baudSwitchFailed"],
+  ["flash verification failed", "flash.err.verifyFailed"],
+];
 
 /** Maps a backend error message to a user-facing string. */
 function mapBackendUserMessage(raw: string | undefined): string {
   const msg = raw?.trim() ?? "";
   const lower = msg.toLowerCase();
-  if (lower.includes(HANDSHAKE_NO_RESPONSE_MARKER)) {
-    return t("flash.err.handshakeNoResponse");
+  const marker = BACKEND_MESSAGE_MARKERS.find(([m]) => lower.includes(m));
+  if (marker) {
+    return t(marker[1]);
   }
   const serialAccessDenied =
     lower.includes("serial i/o") &&

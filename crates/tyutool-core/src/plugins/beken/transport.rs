@@ -251,7 +251,9 @@ impl<'a, T: IoTransport> Transport<'a, T> {
             }
 
             if Instant::now() >= deadline {
-                return Err(ProtocolError::Timeout { attempts: 1 });
+                return Err(ProtocolError::Timeout {
+                    waited_ms: timeout_ms,
+                });
             }
 
             // Read more data
@@ -393,8 +395,11 @@ impl<'a, T: IoTransport> Transport<'a, T> {
                 }
             }
 
+            // Callers turn this into their own error (`shake` knows whether it is
+            // a board that never woke up or a baud rate that does not hold), so
+            // it only has to report how long the spinning went on for.
             Err(ProtocolError::Timeout {
-                attempts: max_retries,
+                waited_ms: (max_retries as u64) * recv_timeout_ms,
             })
         })();
 

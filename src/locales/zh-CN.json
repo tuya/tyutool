@@ -309,10 +309,11 @@
       "authorizeOfficialOnly": "tyutool 不在 BootROM 烧录协议中写入授权。请按 TuyaOpen 文档使用 tos.py monitor 的 auth / auth-read，或修改 tuya_config.h 后重新编译烧录。详见 tuyaopen.ai 文档《设备授权》。",
       "addrInvalid": "起始地址与结束地址须为有效十六进制（可带 0x 前缀）。",
       "startAfterEnd": "起始地址不能大于结束地址。",
-      "verifyFailed": "校验失败：请检查连接、芯片型号与固件是否匹配。",
+      "verifyFailed": "烧录校验失败：写入芯片的数据与固件文件不一致。写入过程本身报告成功，这通常说明串口链路不稳定——请降低波特率后重新烧录。",
       "checksumLog": "错误：校验和与设备报告不一致。",
       "portAccessDenied": "无法打开串口：系统拒绝访问。通常是该串口已被其他程序占用（例如 tyutool 的串口调试）或当前权限不足。请关闭占用串口的程序后重试。",
       "portUnavailable": "串口不可用，请检查设备连接或释放串口。",
+      "baudSwitchFailed": "切换到所选波特率后设备失去响应。设备在芯片的 BootROM 波特率下是有应答的，说明连接正常、本次也未向设备写入任何数据，只是链路在该速率下撑不住。请降低波特率后重试（过长或无屏蔽的 USB 转串口线无法支持最高速率）。",
       "handshakeNoResponse": "设备未进入下载模式：串口已打开，但芯片始终没有响应，本次未向设备写入任何数据。请确认所选串口是开发板的烧录串口（USB 转串口芯片常虚拟出两个串口），以及所选芯片型号与开发板一致，然后给开发板重新上电后重试。"
     },
     "segment": "分段",

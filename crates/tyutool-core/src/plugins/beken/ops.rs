@@ -6,7 +6,7 @@
 use super::chip::ChipSpec;
 use super::command::{self, build, parse};
 use super::flash_table::{self, FlashParams};
-use super::frame::ProtocolError;
+use super::frame::{ProtocolError, VERIFY_MISMATCH_MARKER};
 use super::transport::{IoTransport, Transport};
 
 /// Sector size constant (4 KiB) — internal.
@@ -192,8 +192,20 @@ pub fn shake<T: IoTransport>(
         ));
         transport.switch_baud_rate(target_baud, chip.baud_switch_delay_ms())?;
 
-        // Verify link at new baud rate
-        transport.handshake(10, 50)?;
+        // Verify link at new baud rate. A failure here is a *different* fault
+        // from the handshake above — the chip is awake and answered at the
+        // bootrom rate — so it must not report itself as one.
+        if let Err(e) = transport.handshake(10, 50) {
+            if matches!(e, ProtocolError::Cancelled) {
+                return Err(e);
+            }
+            log::warn!("Link check failed at {target_baud} baud after switch: {e}");
+            return Err(ProtocolError::BaudSwitchFailed {
+                chip: chip.name(),
+                baud: target_baud,
+                bootrom_baud: chip.initial_baud(),
+            });
+        }
     }
 
     // 4. Chip-specific post-handshake
@@ -933,7 +945,11 @@ pub fn write<T: IoTransport>(
                 "write at {addr:#010x} failed after {MAX_SECTOR_RETRIES} attempts"
             ));
             return Err(ProtocolError::Protocol(format!(
-                "sector write+CRC failed at {addr:#010x} after {MAX_SECTOR_RETRIES} retries"
+                "{VERIFY_MISMATCH_MARKER}: the sector at {addr:#010x} still did not read back \
+                 correctly after {MAX_SECTOR_RETRIES} attempts, so flashing stopped there and the \
+                 firmware on the chip is incomplete. This is usually an unreliable link: lower \
+                 the baud rate and flash again. If it fails at the same address every time, that \
+                 part of the flash is likely worn out"
             )));
         }
 
@@ -990,6 +1006,21 @@ pub fn crc_check<T: IoTransport>(
 // ─────────────────────────────────────────────────────────────────────────
 // read — read flash contents to a buffer
 // ─────────────────────────────────────────────────────────────────────────
+
+/// The error every "this sector kept coming back wrong" path in [`read`]
+/// returns.
+///
+/// One wording in one place: the four sites that reach it differ only in *how*
+/// the sector failed (no reply, unparsable frame, short frame, CRC mismatch),
+/// which the log records per attempt and which the user cannot act on
+/// separately — all four mean the same thing to them, and have the same fix.
+fn read_gave_up(addr: u32, attempts: u32) -> ProtocolError {
+    ProtocolError::Protocol(format!(
+        "could not read the flash at {addr:#010x} — {attempts} attempts in a row came back \
+         missing or corrupted, so the saved file would be wrong. This is usually an unreliable \
+         link: lower the baud rate and read again"
+    ))
+}
 
 /// Read `length` bytes from flash starting at `start_addr`.
 ///
@@ -1122,9 +1153,7 @@ pub fn read<T: IoTransport>(
             }
 
             if !sector_ok {
-                return Err(ProtocolError::Protocol(format!(
-                    "read failed at {addr:#010x} after {MAX_SECTOR_RETRIES} attempts"
-                )));
+                return Err(read_gave_up(addr, MAX_SECTOR_RETRIES));
             }
         } else {
             // BK7231N: read without per-sector CRC, retry on failure
@@ -1153,9 +1182,7 @@ pub fn read<T: IoTransport>(
                             if let Some(warn) = warn_cb {
                                 warn("Read failed too many times. You can try a lower baud rate.");
                             }
-                            return Err(ProtocolError::Protocol(format!(
-                                "read failed at {addr:#010x} after {MAX_CONSECUTIVE_FAILURES} consecutive failures"
-                            )));
+                            return Err(read_gave_up(addr, MAX_CONSECUTIVE_FAILURES));
                         }
                         continue;
                     }
@@ -1169,9 +1196,7 @@ pub fn read<T: IoTransport>(
                             "read parse error at {addr:#010x} ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}): {e}"
                         ));
                         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                            return Err(ProtocolError::Protocol(format!(
-                                "read failed at {addr:#010x} after {MAX_CONSECUTIVE_FAILURES} consecutive failures"
-                            )));
+                            return Err(read_gave_up(addr, MAX_CONSECUTIVE_FAILURES));
                         }
                         continue;
                     }
@@ -1185,9 +1210,7 @@ pub fn read<T: IoTransport>(
                     ));
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                         transport.log("read failure too many times. You can try other baudrate.");
-                        return Err(ProtocolError::Protocol(format!(
-                            "read failed at {addr:#010x} after {MAX_CONSECUTIVE_FAILURES} consecutive failures"
-                        )));
+                        return Err(read_gave_up(addr, MAX_CONSECUTIVE_FAILURES));
                     }
                     continue;
                 }

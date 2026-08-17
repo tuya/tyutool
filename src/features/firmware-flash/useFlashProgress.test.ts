@@ -91,7 +91,7 @@ describe("useFlashProgress reducer", () => {
     p.runningOp.value = "flash";
     p.handleFlashProgressPayload({
       kind: "done",
-      result: { err: { message: "plugin error: serial I/O: 拒绝访问。" } },
+      result: { err: { message: "serial I/O: 拒绝访问。" } },
     } as never);
     const expected = i18n.global.t("flash.err.portAccessDenied");
     expect(p.flashMessage.value).toBe(expected);
@@ -106,7 +106,7 @@ describe("useFlashProgress reducer", () => {
     p.handleFlashProgressPayload({
       kind: "done",
       result: {
-        err: { message: "plugin error: serial I/O: Access is denied." },
+        err: { message: "serial I/O: Access is denied." },
       },
     } as never);
     expect(p.flashMessage.value).toBe(
@@ -114,26 +114,51 @@ describe("useFlashProgress reducer", () => {
     );
   });
 
-  it("maps the beken handshake failure into a localized message", () => {
-    const { p } = make();
-    p.runningOp.value = "flash";
-    p.handleFlashProgressPayload({
-      kind: "done",
-      result: {
-        err: {
-          message:
-            "plugin error: T5AI did not answer the download-mode handshake — the serial " +
-            "port opened and 10 reset attempts were sent, but the chip never replied, so " +
-            "nothing was written to it. Check that the selected port is the board's flash " +
-            "UART (a USB adapter often exposes two ports) and that the selected chip type " +
-            "matches the board, then power-cycle the board and start again",
-        },
-      },
-    } as never);
-    expect(p.flashMessage.value).toBe(
-      i18n.global.t("flash.err.handshakeNoResponse"),
-    );
-  });
+  // Each case is a real message from crates/tyutool-core/src/plugins/beken/,
+  // so the marker fragments stay pinned to the prose the backend emits.
+  const BACKEND_ERROR_CASES: ReadonlyArray<[string, string, string]> = [
+    [
+      "handshake never answered",
+      "T5AI did not answer the download-mode handshake — the serial port opened and 10 " +
+        "reset attempts were sent, but the chip never replied, so nothing was written to it. " +
+        "Check that the selected port is the board's flash UART (a USB adapter often exposes " +
+        "two ports) and that the selected chip type matches the board, then power-cycle the " +
+        "board and start again",
+      "flash.err.handshakeNoResponse",
+    ],
+    [
+      "link dies at the target baud rate",
+      "T5AI stopped responding after the switch to 2000000 baud — it answered at 115200 " +
+        "baud, so the board is connected and nothing was written to it, but the link does " +
+        "not hold at 2000000. Lower the baud rate and try again (a long or unshielded " +
+        "USB-serial cable will not carry the highest rates)",
+      "flash.err.baudSwitchFailed",
+    ],
+    [
+      "written data does not match the file",
+      "flash verification failed: the chip reports checksum 0x12345678 where the firmware " +
+        "is 0xdeadbeef, so what was written does not match the file. The write itself " +
+        "reported success, which usually means an unreliable link: lower the baud rate and " +
+        "flash again",
+      "flash.err.verifyFailed",
+    ],
+  ];
+
+  it.each(BACKEND_ERROR_CASES)(
+    "maps the backend error for %s into a localized message",
+    (_name, backendMessage, key) => {
+      // Guard: a missing key would make t() echo the key back, and the
+      // assertion below would still pass.
+      expect(i18n.global.te(key)).toBe(true);
+      const { p } = make();
+      p.runningOp.value = "flash";
+      p.handleFlashProgressPayload({
+        kind: "done",
+        result: { err: { message: backendMessage } },
+      } as never);
+      expect(p.flashMessage.value).toBe(i18n.global.t(key));
+    },
+  );
 
   it("on done/cancelled sets error and still runs teardown", () => {
     const { p, onOperationSettled } = make();
