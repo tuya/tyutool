@@ -67,25 +67,44 @@ const displayLines = (): DebugLogLine[] => s.activeDisplayLines();
 
 const scrollRef = ref<HTMLDivElement | null>(null);
 
-// ── viewport virtualization (ASCII line view only) ──────────────────────
+// ── viewport virtualization (both views) ────────────────────────────────
 // Only the rows inside the viewport — plus OVERSCAN_ROWS above and below so a
 // fast scroll never shows a blank band — are turned into DOM. Rows are
 // fixed-height by construction (`.line` pins line-height and `.text` is
 // `white-space: pre`, so the pane scrolls horizontally instead of wrapping),
 // which makes a row's offset exactly `index * rowHeight` — no per-row
 // measurement, no reading `scrollHeight`.
+//
+// Both views share this machinery; only what a "row" is differs. In the ASCII
+// view a row is a log line, so the row count is the buffer length. In the hex
+// view a row is 16 (or 8 / 32) bytes of the buffer's concatenated byte stream,
+// so the row count comes from the byte index in
+// `SerialDebugHexViewRenderer` — see its doc comment for why log-line indices
+// cannot address hex rows.
 const OVERSCAN_ROWS = 10;
 
-const rowProbeRef = ref<HTMLDivElement | null>(null);
+// Inset of the hex dump from the top and bottom of its pane. It used to be the
+// pane's own `p-3`; the vertical half now lives in the row model (added to the
+// spacer height and to the window's translateY) because padding on the scroll
+// box would not be part of `contentHeight` and would offset every row by a
+// constant the model has to know anyway. The horizontal half stays a plain
+// `px-3` on the pane.
+const HEX_DUMP_INSET_Y = 12;
+
+const rowProbeRef = ref<HTMLElement | null>(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(0);
 const measuredRowHeight = ref(0);
 
 // Used until the probe has been measured (first frame) and in environments
-// without a layout engine (happy-dom): mirrors the `.line` box — line-height
-// 1.5 plus 2 x 0.1875rem of vertical padding.
+// without a layout engine (happy-dom). ASCII mirrors the `.line` box —
+// line-height 1.5 plus 2 x 0.1875rem of vertical padding. A hex row is a bare
+// `<pre>` line: no padding, and the line-height it inherits from the pane's
+// `text-xs` (4/3, unitless in Tailwind v4, so it tracks the font size).
 function estimateRowHeight(fontSize: number): number {
-  return Math.round(fontSize * 1.5) + 6;
+  return props.hexView
+    ? Math.round((fontSize * 4) / 3)
+    : Math.round(fontSize * 1.5) + 6;
 }
 
 const rowHeight = computed(
@@ -93,8 +112,10 @@ const rowHeight = computed(
 );
 
 // Row height must never be hard-coded: the font size is user-adjustable
-// (10–18px). The probe is a real `.line` rendered inside the pane, so it picks
-// up every inherited style change.
+// (10–18px). The probe is a real row rendered inside the pane it measures (a
+// `.line` for the ASCII view, a one-line `<pre>` for the hex view — the two
+// have different boxes), so it picks up every inherited style change. Only one
+// of the two panes is ever mounted, so both probes can share the ref.
 function measureLayout(): void {
   const paneEl = scrollRef.value;
   if (paneEl && paneEl.clientHeight > 0) {
@@ -131,15 +152,38 @@ watch(
   },
 );
 
-const contentHeight = computed(() => displayLines().length * rowHeight.value);
+// Hex rows are addressed by byte offset, so the count comes from the renderer's
+// index rather than from the buffer length. Reading it also refreshes that index
+// for `hexRendered` below.
+const hexRowCount = computed(() =>
+  props.hexView
+    ? hexViewRenderer.rowCount(displayLines(), props.hexBytesPerRow)
+    : 0,
+);
+
+const totalRows = computed(() =>
+  props.hexView ? hexRowCount.value : displayLines().length,
+);
+const insetTop = computed(() => (props.hexView ? HEX_DUMP_INSET_Y : 0));
+const contentHeight = computed(() =>
+  totalRows.value === 0
+    ? 0
+    : totalRows.value * rowHeight.value + insetTop.value * 2,
+);
 const maxScrollTop = computed(() =>
   Math.max(0, contentHeight.value - viewportHeight.value),
 );
 
 const visibleRange = computed<{ start: number; end: number }>(() => {
-  const total = displayLines().length;
+  const total = totalRows.value;
   const rh = rowHeight.value;
-  const top = Math.min(Math.max(scrollTop.value, 0), maxScrollTop.value);
+  // Content space: row 0 starts `insetTop` below the top of the scroll box.
+  // Ignoring the inset would misplace the window by less than one row, which
+  // the overscan absorbs, but `maxScrollTop` above needs it to be exact.
+  const top = Math.min(
+    Math.max(scrollTop.value - insetTop.value, 0),
+    maxScrollTop.value,
+  );
   return {
     start: Math.max(0, Math.floor(top / rh) - OVERSCAN_ROWS),
     end: Math.min(
@@ -150,7 +194,7 @@ const visibleRange = computed<{ start: number; end: number }>(() => {
 });
 
 const windowOffsetY = computed(
-  () => visibleRange.value.start * rowHeight.value,
+  () => visibleRange.value.start * rowHeight.value + insetTop.value,
 );
 
 function applyScrollTop(el: HTMLElement, top: number): void {
@@ -176,10 +220,9 @@ async function scrollToBottom(): Promise<void> {
   await nextTick();
   const el = scrollRef.value;
   if (!el || lockAutoScroll.value) return;
-  // The hex pane is a single <pre> with no row model, so it still asks the DOM.
-  // The line pane derives the target from the row model instead: reading
-  // scrollHeight there would force a synchronous layout on every batch.
-  applyScrollTop(el, props.hexView ? el.scrollHeight : maxScrollTop.value);
+  // Both panes derive the target from the row model: reading scrollHeight would
+  // force a synchronous layout on every batch.
+  applyScrollTop(el, maxScrollTop.value);
 }
 
 // Track the newest line id, not the array length: once the visible window is
@@ -204,10 +247,14 @@ watch(
   },
 );
 
-// hexView toggle swaps the scrollRef DOM node (v-if/v-else); scroll into the new element.
+// hexView toggle swaps the scrollRef DOM node (v-if/v-else); scroll into the new
+// element. The row box differs between the two panes, so drop the measurement
+// and let the new pane's probe re-measure (the estimate covers the gap frame).
 watch(
   () => props.hexView,
   () => {
+    measuredRowHeight.value = 0;
+    void nextTick().then(measureLayout);
     void scrollToBottom();
   },
 );
@@ -232,16 +279,16 @@ function watchLayoutChange(source: () => unknown): void {
 }
 
 watchLayoutChange(() => s.logFontSize);
+// A different bytesPerRow re-cuts the byte stream into a different number of
+// rows, so the whole scroll extent changes under the viewport.
+watchLayoutChange(() => props.hexBytesPerRow);
 
 function onScroll(): void {
   const el = scrollRef.value;
   if (!el) return;
   scrollTop.value = el.scrollTop;
   if (el.clientHeight > 0) viewportHeight.value = el.clientHeight;
-  const atBottom = props.hexView
-    ? el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    : contentHeight.value - scrollTop.value - viewportHeight.value < 80;
-  lockAutoScroll.value = !atBottom;
+  lockAutoScroll.value = maxScrollTop.value - scrollTop.value >= 80;
 }
 
 async function resumeScroll(): Promise<void> {
@@ -249,9 +296,17 @@ async function resumeScroll(): Promise<void> {
   await scrollToBottom();
 }
 
+// Only the windowed rows are formatted, and the result is byte-identical to the
+// matching slice of the full-buffer dump — the view stays one continuous dump.
 const hexRendered = computed(() => {
   if (!props.hexView) return null;
-  return hexViewRenderer.render(displayLines(), props.hexBytesPerRow);
+  const { start, end } = visibleRange.value;
+  return hexViewRenderer.renderRows(
+    displayLines(),
+    props.hexBytesPerRow,
+    start,
+    end,
+  );
 });
 
 function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
@@ -313,7 +368,7 @@ onActivated(async () => {
   if (lockAutoScroll.value && savedScrollTop !== null) {
     applyScrollTop(el, savedScrollTop);
   } else if (!lockAutoScroll.value) {
-    applyScrollTop(el, props.hexView ? el.scrollHeight : maxScrollTop.value);
+    applyScrollTop(el, maxScrollTop.value);
   }
   savedScrollTop = null;
 });
@@ -337,8 +392,11 @@ const searchQuery = computed(() => searchText.value.trim().toLowerCase());
 // longer re-scans on a pure scroll, when only the visible slice moves.
 watchEffect(() => lineRenderer.retain(displayLines()));
 
-// Spans are built for the mounted slice only.
+// Spans are built for the mounted slice only. `visibleRange` counts hex rows
+// when the hex view is up, which would address the wrong lines — that branch
+// mounts no `.line` at all, so bail out rather than build spans nothing reads.
 const visibleLineViews = computed<RenderedLogLine[]>(() => {
+  if (props.hexView) return [];
   const all = displayLines();
   const { start, end } = visibleRange.value;
   return lineRenderer.render(
@@ -410,10 +468,16 @@ async function scrollToMatch(): Promise<void> {
   await nextTick();
   const el = scrollRef.value;
   if (!el) return;
-  const index = displayLines().findIndex((line) => line.id === id);
+  const lines = displayLines();
+  const index = lines.findIndex((line) => line.id === id);
   if (index < 0) return;
   const rh = rowHeight.value;
-  const rowTop = index * rh;
+  // In the hex view a scroll offset is a byte offset, not a line index: map the
+  // matched line to the hex row its first byte lands on.
+  const row = props.hexView
+    ? hexViewRenderer.rowOfLine(lines, props.hexBytesPerRow, index)
+    : index;
+  const rowTop = row * rh + insetTop.value;
   const current = scrollTop.value;
   // Equivalent of scrollIntoView({ block: "nearest" }): only move when the row
   // sits outside the viewport.
@@ -766,11 +830,21 @@ async function saveLog(): Promise<void> {
     <div
       v-if="hexView"
       ref="scrollRef"
-      class="pane flex-1 overflow-auto p-3 font-mono text-xs"
+      class="pane flex-1 overflow-auto px-3 font-mono text-xs"
       :style="{ fontSize: s.logFontSize + 'px' }"
       @scroll="onScroll"
     >
-      <pre class="whitespace-pre">{{ hexRendered }}</pre>
+      <!-- Row-height probe: one real dump row, measured so the virtual scroller
+           tracks the current font size instead of a hard-coded value. -->
+      <pre ref="rowProbeRef" class="hex-probe" aria-hidden="true">00</pre>
+      <div class="virt-spacer" :style="{ height: contentHeight + 'px' }">
+        <div
+          class="virt-window"
+          :style="{ transform: `translateY(${windowOffsetY}px)` }"
+        >
+          <pre class="whitespace-pre">{{ hexRendered }}</pre>
+        </div>
+      </div>
     </div>
 
     <!-- ASCII line view -->
@@ -1030,7 +1104,8 @@ async function saveLog(): Promise<void> {
   width: max-content;
   min-width: 100%;
 }
-.line-probe {
+.line-probe,
+.hex-probe {
   position: absolute;
   top: 0;
   visibility: hidden;
