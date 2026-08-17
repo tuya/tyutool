@@ -10,6 +10,7 @@ import type {
   DebugChunk,
   SerialDebugFilterPage,
   SerialDebugFilterUpdatePayload,
+  SerialDebugSessionPage,
 } from "@/features/serial-debug/types";
 import { useSerialDebugStore } from "./serial-debug";
 import { useFlashStore } from "./flash";
@@ -17,6 +18,9 @@ import { nextTick, watchEffect } from "vue";
 import {
   DEFAULT_ARCHIVE_LIMIT_MIB,
   DEFAULT_VISIBLE_LOG_WINDOW_LINES,
+  FILTER_PAGE_SIZE,
+  HISTORY_ENTRY_PAGES,
+  HISTORY_PAGE_SIZE,
   MAX_PENDING_LINE_BYTES,
 } from "@/features/serial-debug/constants";
 import { AUTH_ONLY_CHIP_ID } from "@/features/firmware-flash/constants";
@@ -39,6 +43,13 @@ function fakeTransport(): SerialDebugTransport & {
   emitArchiveCapped: (limitMib: number) => void;
   emitChunksDropped: (droppedBytes: number) => void;
   setFilterPage: (filterId: string, page: SerialDebugFilterPage) => void;
+  /** Pretend the Rust session archive holds `total` lines (`arch-1`…`arch-N`). */
+  setSessionArchive: (total: number) => void;
+  /** Take over `readSessionPage` entirely (gap / failure scenarios). */
+  setSessionPageResponder: (
+    fn: ((start: number, limit: number) => SerialDebugSessionPage) | null,
+  ) => void;
+  readSessionPageCalls: Array<{ start: number; limit: number }>;
   readFilterMatchesCalls: Array<{
     filterId: string;
     start?: number;
@@ -67,6 +78,11 @@ function fakeTransport(): SerialDebugTransport & {
     start?: number;
     limit?: number;
   }> = [];
+  const readSessionPageCalls: Array<{ start: number; limit: number }> = [];
+  let sessionArchiveTotal = 0;
+  let sessionPageResponder:
+    | ((start: number, limit: number) => SerialDebugSessionPage)
+    | null = null;
   let opened = false;
   let nextFilterId = 1;
   const filters = new Map<
@@ -132,11 +148,23 @@ function fakeTransport(): SerialDebugTransport & {
         }
       );
     },
-    async readSessionPage() {
+    async readSessionPage(start: number, limit: number) {
+      readSessionPageCalls.push({ start, limit });
+      if (sessionPageResponder) return sessionPageResponder(start, limit);
+      // Mirrors the Rust archive: dense 1-based `lineNo`, and an out-of-range
+      // `start` is silently clamped to `totalLines` (the clamped value is what
+      // comes back in `page.start`).
+      const clamped = Math.min(Math.max(start, 0), sessionArchiveTotal);
+      const end = Math.min(clamped + limit, sessionArchiveTotal);
       return {
-        totalLines: 0,
-        start: 0,
-        items: [],
+        totalLines: sessionArchiveTotal,
+        start: clamped,
+        items: Array.from({ length: Math.max(0, end - clamped) }, (_, i) => ({
+          lineNo: clamped + i + 1,
+          tsMs: 1_700_000_000_000 + clamped + i,
+          direction: "rx" as const,
+          text: `arch-${clamped + i + 1}`,
+        })),
       };
     },
     async setArchiveLimit(maxBytes: number) {
@@ -187,6 +215,13 @@ function fakeTransport(): SerialDebugTransport & {
     setFilterPage(filterId, page) {
       const entry = filters.get(filterId);
       if (entry) entry.page = page;
+    },
+    readSessionPageCalls,
+    setSessionArchive(total) {
+      sessionArchiveTotal = total;
+    },
+    setSessionPageResponder(fn) {
+      sessionPageResponder = fn;
     },
   };
 }
@@ -1730,5 +1765,286 @@ describe("useSerialDebugStore session archive limit", () => {
     s.archiveLimitMib = 128;
     await expect(nextTick()).resolves.toBeUndefined();
     expect(s.archiveLimitMib).toBe(128);
+  });
+});
+
+describe("useSerialDebugStore full-session history window", () => {
+  const ENTRY_LINES = HISTORY_PAGE_SIZE * HISTORY_ENTRY_PAGES;
+  let fake: ReturnType<typeof fakeTransport>;
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    fake = fakeTransport();
+    __setSerialDebugTransportForTest(fake);
+  });
+  afterEach(() => __setSerialDebugTransportForTest(null));
+
+  it("pages the archive tail into the window and shows it instead of the live buffer", async () => {
+    const s = useSerialDebugStore();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("live-a\nlive-b\n")],
+    });
+    fake.setSessionArchive(2000);
+
+    expect(await s.enterHistoryMode(s.lines.length)).toBe(true);
+
+    expect(s.historyMode).toBe(true);
+    expect(s.historyLines.length).toBe(ENTRY_LINES);
+    expect(s.historyStartLineNo).toBe(2000 - ENTRY_LINES + 1);
+    expect(s.historyEndLineNo).toBe(2000);
+    expect(s.historyTotalLines).toBe(2000);
+    expect(s.historyAtArchiveEnd).toBe(true);
+    expect(s.historyAtSessionStart).toBe(false);
+    expect(s.activeDisplayLines()).toBe(s.historyLines);
+    expect(s.activeDisplayLines()[0].text).toBe(
+      `arch-${2000 - ENTRY_LINES + 1}`,
+    );
+    // Never one big request: `readSessionPage` holds the Rust archive lock for
+    // the whole range, so a long read stalls the serial writer.
+    expect(
+      fake.readSessionPageCalls.every((c) => c.limit <= HISTORY_PAGE_SIZE),
+    ).toBe(true);
+    // Positioned so the viewport starts roughly where the live buffer did.
+    expect(s.historyEntryOffsetLines).toBe(ENTRY_LINES - s.lines.length);
+  });
+
+  it("keeps filling the live buffer while history mode is on, without displaying it", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(1000);
+    await s.enterHistoryMode(0);
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("still-live\n")],
+    });
+
+    expect(s.lines[s.lines.length - 1].text).toBe("still-live");
+    expect(s.activeDisplayLines()).toBe(s.historyLines);
+    expect(s.activeDisplayLines().some((l) => l.text === "still-live")).toBe(
+      false,
+    );
+  });
+
+  it("returns the number of lines it prepended and keeps the window within budget", async () => {
+    const s = useSerialDebugStore();
+    const budget = ENTRY_LINES + 2 * HISTORY_PAGE_SIZE;
+    s.logWindowLines = budget;
+    await nextTick();
+    fake.setSessionArchive(5000);
+    await s.enterHistoryMode(50);
+    expect(s.historyStartLineNo).toBe(5000 - ENTRY_LINES + 1);
+
+    // Steps that still fit inside the budget leave the window's tail alone.
+    for (let i = 1; i <= 2; i += 1) {
+      expect(await s.loadOlderHistory()).toEqual({
+        prepended: HISTORY_PAGE_SIZE,
+        reanchored: false,
+      });
+      expect(s.historyLines.length).toBe(ENTRY_LINES + i * HISTORY_PAGE_SIZE);
+      expect(s.historyAtArchiveEnd).toBe(true);
+    }
+
+    // The step that overflows trims the *tail*, which sits below the viewport,
+    // so nothing the user is looking at moves.
+    expect((await s.loadOlderHistory()).prepended).toBe(HISTORY_PAGE_SIZE);
+    expect(s.historyLines.length).toBe(budget);
+    expect(s.historyAtArchiveEnd).toBe(false);
+    expect(s.historyStartLineNo).toBe(
+      5000 - ENTRY_LINES + 1 - 3 * HISTORY_PAGE_SIZE,
+    );
+    expect(s.historyLines[0].text).toBe(`arch-${s.historyStartLineNo}`);
+
+    for (let i = 0; i < 10; i += 1) await s.loadOlderHistory();
+    expect(s.historyLines.length).toBe(budget);
+  });
+
+  it("stops at the session start, detected from lineNo 1 rather than page.start", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(ENTRY_LINES + 250);
+    await s.enterHistoryMode(10);
+    expect(s.historyAtSessionStart).toBe(false);
+
+    expect((await s.loadOlderHistory()).prepended).toBe(250);
+    expect(s.historyStartLineNo).toBe(1);
+    expect(s.historyAtSessionStart).toBe(true);
+
+    fake.readSessionPageCalls.length = 0;
+    expect(await s.loadOlderHistory()).toEqual({
+      prepended: 0,
+      reanchored: false,
+    });
+    expect(fake.readSessionPageCalls).toEqual([]);
+  });
+
+  it("re-anchors on the archive tail instead of splicing a non-contiguous page", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(2000);
+    await s.enterHistoryMode(50);
+    const firstLineNo = s.historyStartLineNo;
+
+    // A head-dropping archive policy would answer the "give me the 400 lines
+    // before firstLineNo" request with renumbered lines. Splicing them on would
+    // silently show the wrong content, so the self-check must refuse.
+    const badStart = firstLineNo - 1 - HISTORY_PAGE_SIZE;
+    fake.setSessionPageResponder((start, limit) => ({
+      totalLines: 2000,
+      start,
+      items: Array.from({ length: Math.min(limit, 2000 - start) }, (_, i) => ({
+        lineNo: start + i + 1 + (start === badStart ? 25 : 0),
+        tsMs: 0,
+        direction: "rx" as const,
+        text: `arch-${start + i + 1}`,
+      })),
+    }));
+
+    expect(await s.loadOlderHistory()).toEqual({
+      prepended: 0,
+      reanchored: true,
+    });
+    expect(s.historyMode).toBe(true);
+    expect(s.historyStartLineNo).toBe(firstLineNo);
+    expect(s.historyLines.length).toBe(ENTRY_LINES);
+  });
+
+  it("pages forward again and drops from the head to stay within budget", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 1500;
+    await nextTick();
+    fake.setSessionArchive(5000);
+    await s.enterHistoryMode(50);
+    expect(await s.jumpToSessionStart()).toBe(true);
+    expect(s.historyStartLineNo).toBe(1);
+    expect(s.historyAtSessionStart).toBe(true);
+    expect(s.historyAtArchiveEnd).toBe(false);
+
+    const dropped = await s.loadNewerHistory();
+
+    expect(dropped).toBe(ENTRY_LINES + HISTORY_PAGE_SIZE - 1500);
+    expect(s.historyLines.length).toBe(1500);
+    expect(s.historyStartLineNo).toBe(1 + dropped);
+    expect(s.historyAtSessionStart).toBe(false);
+    expect(s.historyAtArchiveEnd).toBe(false);
+  });
+
+  it("reports being at the archive end once a short page comes back", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 20000;
+    await nextTick();
+    fake.setSessionArchive(ENTRY_LINES + 100);
+    await s.enterHistoryMode(10);
+    await s.jumpToSessionStart();
+    expect(s.historyAtArchiveEnd).toBe(false);
+
+    expect(await s.loadNewerHistory()).toBe(0);
+
+    expect(s.historyAtArchiveEnd).toBe(true);
+    expect(s.historyEndLineNo).toBe(ENTRY_LINES + 100);
+  });
+
+  it("leaves history mode on clear — the new session renumbers from 1", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(2000);
+    await s.enterHistoryMode(10);
+    expect(s.historyMode).toBe(true);
+
+    await s.clear();
+
+    expect(s.historyMode).toBe(false);
+    expect(s.historyLines).toEqual([]);
+    expect(s.historyStartLineNo).toBe(0);
+    expect(s.activeDisplayLines()).toBe(s.lines);
+  });
+
+  it("does not let a read that resolves after a clear resurrect the window", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(2000);
+    await s.enterHistoryMode(10);
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const passthrough = fake.readSessionPage.bind(fake);
+    fake.readSessionPage = async (start: number, limit: number) => {
+      await gate;
+      return passthrough(start, limit);
+    };
+
+    const pending = s.loadOlderHistory();
+    await s.clear();
+    release!();
+    expect(await pending).toEqual({ prepended: 0, reanchored: false });
+
+    expect(s.historyMode).toBe(false);
+    expect(s.historyLines).toEqual([]);
+  });
+
+  it("falls back to the live view and says why when the archive read fails", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(2000);
+    await s.enterHistoryMode(10);
+    fake.setSessionPageResponder(() => {
+      throw new Error("archive gone");
+    });
+
+    expect((await s.loadOlderHistory()).prepended).toBe(0);
+
+    expect(s.historyMode).toBe(false);
+    expect(s.historyLines).toEqual([]);
+    expect(s.lines[s.lines.length - 1].text).toContain("archive gone");
+  });
+
+  it("does not enter history mode when the archive is empty", async () => {
+    const s = useSerialDebugStore();
+    fake.setSessionArchive(0);
+    expect(await s.enterHistoryMode(10)).toBe(false);
+    expect(s.historyMode).toBe(false);
+    expect(s.activeDisplayLines()).toBe(s.lines);
+  });
+
+  it("bounds how many filter matches the older-matches button accumulates", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 1000;
+    await nextTick();
+    fake.readFilterMatches = async (
+      filterId: string,
+      start: number,
+      limit: number,
+    ) => ({
+      filterId,
+      totalMatches: 10_000,
+      start,
+      items: Array.from({ length: limit }, (_, i) => ({
+        lineNo: start + i + 1,
+        tsMs: 0,
+        direction: "rx" as const,
+        text: `m-${start + i + 1}`,
+      })),
+    });
+    s.watchChips = [{ id: "f1", keyword: "m", useRegex: false, color: "#000" }];
+    s.filterStatsById = {
+      f1: {
+        filterId: "f1",
+        status: "complete",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: 0,
+        totalMatches: 10_000,
+        error: null,
+      },
+    };
+    await s.setActiveChip("f1");
+    expect(s.filterPagesById.f1.items.length).toBe(FILTER_PAGE_SIZE);
+
+    for (let i = 0; i < 5; i += 1) {
+      expect(await s.loadOlderActiveFilterMatches()).toBe(FILTER_PAGE_SIZE);
+    }
+
+    // Bounded, and trimmed from the tail so the scroll position is unaffected.
+    expect(s.filterPagesById.f1.items.length).toBe(1000);
+    expect(s.filterPagesById.f1.start).toBe(10_000 - 6 * FILTER_PAGE_SIZE);
+    expect(s.filterPagesById.f1.items[0].text).toBe(
+      `m-${10_000 - 6 * FILTER_PAGE_SIZE + 1}`,
+    );
   });
 });

@@ -34,6 +34,11 @@ import type { SerialDebugTransport } from "@/features/serial-debug/transport";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { SerialDebugLogLineRenderer } from "@/features/serial-debug/log-line-renderer";
 import { formatHexDumpFromChunks } from "@/features/serial-debug/hex-format";
+import {
+  FILTER_PAGE_SIZE,
+  HISTORY_ENTRY_PAGES,
+  HISTORY_PAGE_SIZE,
+} from "@/features/serial-debug/constants";
 import type {
   DebugLogLine,
   HexBytesPerRow,
@@ -45,6 +50,34 @@ const VIEWPORT_HEIGHT = 200;
 // vertical inset of the hex dump inside its pane.
 const OVERSCAN_ROWS = 10;
 const HEX_DUMP_INSET_Y = 12;
+
+// Synthetic Rust session archive / filter index for the paging tests. Both
+// default to 0, which reproduces the "nothing archived" transport the rest of
+// the suite was written against.
+let sessionArchiveTotal = 0;
+let filterMatchTotal = 0;
+
+/** Dense 1-based archive lines, like `SerialDebugArchive::read_page` returns. */
+function archivePage(
+  start: number,
+  limit: number,
+  total: number,
+  textPrefix: string,
+) {
+  // Mirrors Rust: an out-of-range `start` is silently clamped to `total`, and
+  // the clamped value — not the requested one — comes back in `page.start`.
+  const from = Math.min(Math.max(start, 0), total);
+  const to = Math.min(from + limit, total);
+  return {
+    start: from,
+    items: Array.from({ length: Math.max(0, to - from) }, (_, i) => ({
+      lineNo: from + i + 1,
+      tsMs: 1_700_000_000_000 + from + i,
+      direction: "rx" as const,
+      text: `${textPrefix}${from + i + 1}`,
+    })),
+  };
+}
 
 function fakeTransport(): SerialDebugTransport {
   const noopUnsub = (): void => {};
@@ -58,13 +91,19 @@ function fakeTransport(): SerialDebugTransport {
       throw new Error("not used");
     },
     removeFilter: async () => {},
-    readFilterMatches: async () => ({
-      filterId: "",
-      start: 0,
-      items: [],
-      totalMatches: 0,
+    readFilterMatches: async (
+      filterId: string,
+      start: number,
+      limit: number,
+    ) => ({
+      filterId,
+      totalMatches: filterMatchTotal,
+      ...archivePage(start, limit, filterMatchTotal, "m-"),
     }),
-    readSessionPage: async () => ({ start: 0, items: [], totalLines: 0 }),
+    readSessionPage: async (start: number, limit: number) => ({
+      totalLines: sessionArchiveTotal,
+      ...archivePage(start, limit, sessionArchiveTotal, "arch-"),
+    }),
     onChunk: () => noopUnsub,
     onChunkBatch: () => noopUnsub,
     onDisconnect: () => noopUnsub,
@@ -87,6 +126,8 @@ describe("SerialDebugLogView auto-scroll", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     __setSerialDebugTransportForTest(fakeTransport());
+    sessionArchiveTotal = 0;
+    filterMatchTotal = 0;
     hexBytesPerRow.value = 16;
     hexViewProp.value = false;
     host = document.createElement("div");
@@ -624,5 +665,204 @@ describe("SerialDebugLogView auto-scroll", () => {
     const rows = fullDumpRows(s.lines);
     expect(mountedDump().endsWith(rows[rows.length - 1])).toBe(true);
     expect(mountedDump().split("\n").length).toBeLessThan(80);
+  });
+
+  // ── full-session scrollback ("All" tab) ───────────────────────────────
+  // Scrolling past the top of the live ring buffer hands the pane a bounded
+  // window on the Rust session archive instead. The two buffers are never
+  // concatenated, so what is asserted below is (a) the switch happens and shows
+  // archive lines, (b) prepending older lines keeps the viewport on the line the
+  // user was reading, and (c) the switch does not wake the follow-tail watcher.
+
+  const ENTRY_LINES = HISTORY_PAGE_SIZE * HISTORY_ENTRY_PAGES;
+
+  /** Live buffer of `count` lines, an archive of `archived`, mounted and at the tail. */
+  async function mountWithArchive(
+    count: number,
+    archived: number,
+    hexView = false,
+  ): Promise<{
+    s: ReturnType<typeof useSerialDebugStore>;
+    el: HTMLElement;
+    writes: number[];
+  }> {
+    const s = useSerialDebugStore();
+    // Roomy on purpose: `logWindowLines` is also the history window's budget, so
+    // a tight value here would cap the window below one entry load.
+    s.logWindowLines = 20000;
+    for (let i = 0; i < count; i++) appendLine(s, i);
+    sessionArchiveTotal = archived;
+    mountComponent(hexView);
+    await flush();
+    const el = pane();
+    const { writes } = stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+    return { s, el, writes };
+  }
+
+  it("switches the All tab to the session archive when scrolled past the top of the live buffer", async () => {
+    const { s, el } = await mountWithArchive(200, 5000);
+
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(s.historyMode).toBe(true);
+    expect(s.historyLines.length).toBe(ENTRY_LINES);
+    expect(s.historyStartLineNo).toBe(5000 - ENTRY_LINES + 1);
+    expect(s.historyEndLineNo).toBe(5000);
+    // Positioned to skip the window's last `s.lines.length` lines, i.e. roughly
+    // where the live buffer began.
+    const rowHeight = spacerHeight() / ENTRY_LINES;
+    const entryRow = ENTRY_LINES - 200;
+    expect(el.scrollTop).toBe(entryRow * rowHeight);
+    expect(host!.textContent).toContain(
+      `arch-${s.historyStartLineNo + entryRow}`,
+    );
+    // The live buffer is untouched and still filling.
+    expect(s.lines.length).toBe(200);
+    expect(host!.textContent).not.toContain("L199");
+  });
+
+  it("keeps the viewport on the same line when older history is prepended", async () => {
+    const { s, el, writes } = await mountWithArchive(200, 5000);
+    await scrollTo(el, 0);
+    await flush();
+    writes.length = 0;
+
+    // Back to the top of the window: loads the next page older.
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(s.historyLines.length).toBe(ENTRY_LINES + HISTORY_PAGE_SIZE);
+    expect(s.historyStartLineNo).toBe(
+      5000 - ENTRY_LINES - HISTORY_PAGE_SIZE + 1,
+    );
+    const rowHeight = spacerHeight() / s.historyLines.length;
+    // Two writes only: the user's own scroll to 0, then the compensation that
+    // puts the previously-first line back where it was. No follow-tail write.
+    expect(writes).toEqual([0, HISTORY_PAGE_SIZE * rowHeight]);
+    expect(el.scrollTop).toBe(HISTORY_PAGE_SIZE * rowHeight);
+  });
+
+  it("locks auto-scroll on entering history mode so live output cannot pull the viewport away", async () => {
+    const { s, el, writes } = await mountWithArchive(200, 5000);
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(host!.querySelector(".paused-badge")).not.toBeNull();
+    const parked = el.scrollTop;
+    writes.length = 0;
+
+    // Live lines keep arriving: they change the id of the last line in the live
+    // buffer, but the displayed buffer is the history window, and the lock is
+    // set regardless.
+    for (let i = 200; i < 240; i++) appendLine(s, i);
+    await flush();
+
+    expect(s.lines.length).toBe(240);
+    expect(writes).toEqual([]);
+    expect(el.scrollTop).toBe(parked);
+  });
+
+  it("returns to the live tail from the scroll-to-bottom badge", async () => {
+    const { s, el } = await mountWithArchive(200, 5000);
+    await scrollTo(el, 0);
+    await flush();
+    expect(s.historyMode).toBe(true);
+
+    host!.querySelector<HTMLElement>(".paused-badge")!.click();
+    await flush();
+
+    expect(s.historyMode).toBe(false);
+    expect(s.historyLines).toEqual([]);
+    expect(el.scrollTop).toBe(el.scrollHeight - VIEWPORT_HEIGHT);
+    expect(renderedIds()).toContain(s.lines[199].id);
+    expect(host!.textContent).toContain("L199");
+  });
+
+  it("leaves history mode again when scrolled back to the end of the archive", async () => {
+    const { s, el } = await mountWithArchive(200, 5000);
+    await scrollTo(el, 0);
+    await flush();
+    expect(s.historyMode).toBe(true);
+    expect(s.historyAtArchiveEnd).toBe(true);
+
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+    await flush();
+
+    expect(s.historyMode).toBe(false);
+    expect(host!.textContent).toContain("L199");
+  });
+
+  it("renders the history window as one continuous hex dump", async () => {
+    const { s, el } = await mountWithArchive(200, 2000, true);
+
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(s.historyMode).toBe(true);
+    // Archive lines carry no rawBytes, so the byte index re-encodes their text —
+    // the same path a filter tab already uses.
+    expect(s.historyLines.every((l) => l.rawBytes === undefined)).toBe(true);
+    const rows = fullDumpRows(s.historyLines);
+    expect(rows.length).toBeGreaterThan(200);
+    expect(mountedDump().split("\n").length).toBeLessThan(80);
+    // A verbatim, correctly positioned slice of the dump of the whole window.
+    const startRow = mountedWindowStartRow(rows);
+    expect(startRow).toBeGreaterThan(0);
+    expect(mountedDump()).not.toContain(rows[0]);
+    expect(mountedDump()).not.toContain(rows[rows.length - 1]);
+  });
+
+  it("stays on the live buffer when there is nothing archived", async () => {
+    const { s, el, writes } = await mountWithArchive(200, 0);
+    writes.length = 0;
+
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(s.historyMode).toBe(false);
+    expect(writes).toEqual([0]);
+    expect(host!.querySelector(".history-bar")).toBeNull();
+  });
+
+  // Same scroll-anchor mechanism as history mode, on the pre-existing filter
+  // pagination: before virtualization the browser's own scroll anchoring
+  // absorbed the prepend, but the component owns scrollTop now.
+  it("keeps the viewport in place when older filter matches are prepended", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    filterMatchTotal = 5000;
+    mountComponent();
+    await flush();
+    s.watchChips = [{ id: "f1", keyword: "m", useRegex: false, color: "#000" }];
+    s.filterStatsById = {
+      f1: {
+        filterId: "f1",
+        status: "complete",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: 0,
+        totalMatches: filterMatchTotal,
+        error: null,
+      },
+    };
+    await s.setActiveChip("f1");
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+    await scrollTo(el, 0);
+
+    const button = [...host!.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("serialDebug.log.loadOlderMatches"),
+    );
+    expect(button).toBeDefined();
+    button!.click();
+    await flush();
+
+    expect(s.filterPagesById.f1.items.length).toBe(2 * FILTER_PAGE_SIZE);
+    const rowHeight = spacerHeight() / (2 * FILTER_PAGE_SIZE);
+    expect(el.scrollTop).toBe(FILTER_PAGE_SIZE * rowHeight);
+    expect(renderedRows().length).toBeLessThan(80);
   });
 });

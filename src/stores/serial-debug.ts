@@ -12,9 +12,11 @@ import {
   FILTER_PAGE_SIZE,
   MAX_PENDING_LINE_BYTES,
   MAX_SEND_HISTORY,
+  MAX_VISIBLE_LOG_WINDOW_LINES,
   DEFAULT_VISIBLE_LOG_WINDOW_LINES,
   DEFAULT_ARCHIVE_LIMIT_MIB,
 } from "@/features/serial-debug/constants";
+import { useSerialDebugHistory } from "@/features/serial-debug/useSerialDebugHistory";
 import {
   chipManifest,
   rustPluginIdForChip,
@@ -222,7 +224,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // ids of lines that are already on screen (the log renderers cache parsed
   // lines by id). Reset on session clear, because archive line numbers restart.
   let archiveLineIds = new Map<number, number>();
-  const MAX_ARCHIVE_LINE_IDS = 20000;
+  // Sized for the largest set of archive-backed lines that can be on screen at
+  // once, because dropping the memo costs every one of them a fresh id (renderer
+  // caches invalidated, and the follow-tail watcher sees "the last line changed"
+  // where nothing did). Two archive-backed buffers are each bounded by
+  // `logWindowLines` — the history window and the active filter tab's page — and
+  // the remaining filter tabs each keep their last loaded page.
+  const MAX_ARCHIVE_LINE_IDS =
+    2 * MAX_VISIBLE_LOG_WINDOW_LINES + 4 * FILTER_PAGE_SIZE;
   const pending = {
     tx: createPendingBuffer(),
     rx: createPendingBuffer(),
@@ -260,6 +269,34 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   let unsubscribeArchiveCapped: (() => void) | null = null;
   let unsubscribeChunksDropped: (() => void) | null = null;
   let resumeAfterFlashRelease = false;
+
+  // Full-session scrollback for the "All" tab. Owns its own buffer over the Rust
+  // session archive; see the composable's header for why it must never be
+  // spliced into `lines`. Destructured back into local bindings so the public
+  // API below stays one flat `return {}`.
+  const {
+    historyMode,
+    historyLines,
+    historyStartLineNo,
+    historyEndLineNo,
+    historyTotalLines,
+    historyLoading,
+    historyAtSessionStart,
+    historyAtArchiveEnd,
+    historyEntryOffsetLines,
+    enterHistoryMode,
+    loadOlderHistory,
+    loadNewerHistory,
+    jumpToSessionStart,
+    exitHistoryMode,
+  } = useSerialDebugHistory({
+    readSessionPage: (start, limit) => transport.readSessionPage(start, limit),
+    archiveLineId: (lineNo) => archiveLineId(lineNo),
+    historyBudget: () => logWindowLines.value,
+    reportError: (msg) => {
+      void appendSysLine(t("serialDebug.log.historyLoadFailed", { msg }));
+    },
+  });
 
   const resumePortManager = usePortManagerStore();
   watch(
@@ -525,6 +562,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
 
   async function clear(): Promise<void> {
     lines.value = [];
+    // A clear starts a new archive session whose line numbers restart at 1, so
+    // every anchor the history window holds points at the wrong lines.
+    exitHistoryMode();
     resetPendingBuffer(pending.tx);
     resetPendingBuffer(pending.rx);
     queuedChunks.length = 0;
@@ -588,11 +628,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // A plain getter, not a computed: on the "All" tab this returns `lines.value`
   // unchanged, and Vue only notifies a computed's subscribers when the
   // computed's *result* changes — an identity-stable array would swallow every
-  // triggerRef. As a getter, callers depend on `lines` / `filterPagesById`
-  // directly and are notified.
+  // triggerRef. As a getter, callers depend on `lines` / `filterPagesById` /
+  // `historyMode` / `historyLines` directly and are notified.
   function activeDisplayLines(): DebugLogLine[] {
-    if (activeChipId.value === null) return lines.value;
-    return filterPagesById.value[activeChipId.value]?.items ?? [];
+    if (activeChipId.value !== null) {
+      return filterPagesById.value[activeChipId.value]?.items ?? [];
+    }
+    // History mode swaps the buffer rather than concatenating: live lines keep
+    // flowing into `lines` (and into the auto-save queue) the whole time, they
+    // are just not what is on screen.
+    return historyMode.value ? historyLines.value : lines.value;
   }
 
   function flushQueuedChunks(): void {
@@ -1011,28 +1056,38 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
-  async function loadOlderActiveFilterMatches(): Promise<void> {
+  /** @returns how many matches were prepended, for the caller's scroll compensation. */
+  async function loadOlderActiveFilterMatches(): Promise<number> {
     const id = activeChipId.value;
-    if (!id) return;
+    if (!id) return 0;
     const existing = filterPagesById.value[id];
     if (!existing || existing.start === 0) {
       activeFilterFullyLoaded.value = true;
-      return;
+      return 0;
     }
     activeFilterLoading.value = true;
     try {
       const start = Math.max(0, existing.start - FILTER_PAGE_SIZE);
       const page = await loadFilterPage(id, start, existing.start - start);
+      const items = [...page.items, ...existing.items];
+      // Bounded like the live buffer and the history window: without this,
+      // holding the button down pulls every match of the whole session into
+      // memory. Trimmed from the tail, which sits below the viewport, so the
+      // scroll position is unaffected; `loadActiveFilterTail` (tab switch, live
+      // refresh) puts the newest matches back.
+      const max = Math.max(logWindowLines.value, FILTER_PAGE_SIZE);
+      if (items.length > max) items.length = max;
       filterPagesById.value = {
         ...filterPagesById.value,
         [id]: {
           ...existing,
           start: page.start,
           totalMatches: page.totalMatches,
-          items: [...page.items, ...existing.items],
+          items,
         },
       };
       activeFilterFullyLoaded.value = start === 0;
+      return page.items.length;
     } finally {
       activeFilterLoading.value = false;
     }
@@ -1227,6 +1282,15 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     filterPagesById,
     activeFilterLoading,
     activeFilterFullyLoaded,
+    historyMode,
+    historyLines,
+    historyStartLineNo,
+    historyEndLineNo,
+    historyTotalLines,
+    historyLoading,
+    historyAtSessionStart,
+    historyAtArchiveEnd,
+    historyEntryOffsetLines,
     sendMode,
     sendAppendCrlf,
     sendInput,
@@ -1258,6 +1322,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     setActiveChip,
     loadActiveFilterTail,
     loadOlderActiveFilterMatches,
+    enterHistoryMode,
+    loadOlderHistory,
+    loadNewerHistory,
+    jumpToSessionStart,
+    exitHistoryMode,
     increaseFontSize,
     decreaseFontSize,
     loadWorkspace,
