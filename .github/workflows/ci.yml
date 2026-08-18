@@ -50,24 +50,38 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      # This step normally takes 30-60s. On 2026-08-18 it hung for 43 minutes on
-      # an unresponsive apt mirror and had to be cancelled by hand, so it is now
-      # bounded twice: apt gives up on a stalled connection (Retries/Timeout), and
-      # the step itself dies rather than idling all the way into the job cap.
+      # This step normally takes 30-60s for ~60 MB of archives. Twice on
+      # 2026-08-18 the azure mirror crawled instead: once for 43 minutes (the
+      # job had to be cancelled by hand) and once at ~0.1 MB/s, stalling three
+      # minutes inside a single .deb. `Acquire::*::Timeout` does not catch that
+      # -- the connection is alive, just glacial -- so each attempt is bounded
+      # by `timeout` and retried. Retries resume: apt keeps the .debs it already
+      # fetched in /var/cache/apt/archives, so three bad windows still add up to
+      # a complete download rather than three fresh starts.
       # `build-essential curl wget file` are dropped from the Tauri-documented
-      # list -- the ubuntu runner image already ships them, and every extra
-      # package is one more mirror fetch that can stall.
+      # list -- the ubuntu runner image already ships them.
       - name: Install Linux system dependencies
-        timeout-minutes: 8
+        timeout-minutes: 14
         env:
           DEBIAN_FRONTEND: noninteractive
           APT_OPTS: -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
         run: |
           sudo apt-get update -qq $APT_OPTS
-          sudo apt-get install -y --no-install-recommends $APT_OPTS \
-            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
-            libxdo-dev libssl-dev libudev-dev \
-            libayatana-appindicator3-dev librsvg2-dev patchelf
+          for attempt in 1 2 3; do
+            if sudo timeout 240 apt-get install -y --no-install-recommends $APT_OPTS \
+                 libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+                 libxdo-dev libssl-dev libudev-dev \
+                 libayatana-appindicator3-dev librsvg2-dev patchelf; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt did not finish in 240s; retrying"
+            # If the kill landed mid-unpack, dpkg refuses to do anything else
+            # until it is told to finish the interrupted transaction.
+            sudo dpkg --configure -a || true
+            sleep 10
+          done
+          echo "::error::apt could not install the Tauri dependencies in 3 attempts"
+          exit 1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { key: "ci-tauri" }
