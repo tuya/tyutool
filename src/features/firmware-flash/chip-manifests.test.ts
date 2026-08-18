@@ -47,6 +47,24 @@ describe("CHIP_MANIFEST", () => {
     }
   });
 
+  it("erase presets stay inside the chip's own flash map", () => {
+    for (const id of CHIP_IDS) {
+      const m = CHIP_MANIFEST[id];
+      const size = Number(m.flashSize);
+      for (const preset of Object.values(m.erasePresets)) {
+        if (!preset) continue;
+        expect(Number(preset.start)).toBeLessThan(size);
+        expect(Number(preset.end)).toBeLessThanOrEqual(size);
+      }
+      const auth = m.erasePresets.authInfo;
+      if (!auth) continue;
+      // The KV / authorization partition always sits at the very top of flash
+      // (last 8 KiB reserved for RF + net params). A preset copied from a
+      // smaller chip's map would land mid-application and erase nothing useful.
+      expect(Number(auth.end)).toBeGreaterThanOrEqual(size - 0x2000 - 1);
+    }
+  });
+
   it("erase presets have valid hex addresses", () => {
     for (const id of CHIP_IDS) {
       const m = CHIP_MANIFEST[id];
