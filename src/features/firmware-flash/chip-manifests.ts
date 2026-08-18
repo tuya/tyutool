@@ -88,8 +88,13 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
     flashSize: "0x00800000", // 8 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
-      authInfo: { start: "0x001EE000", end: "0x001FFFFF" },
-      fullChipNoRf: { start: "0x00000000", end: "0x001EDFFF" },
+      // TuyaOpen platform/T5AI/tuyaos/tuyaos_adapter/src/driver/tkl_flash.c:
+      // the tuya_data partition 0x7CD000 (196 KiB) holds KV_PROTECTED / USER1 /
+      // KV / UF / KV_KEY — i.e. both the authorization data and the network
+      // provisioning data. sys_rf (0x7FE000) and sys_net (0x7FF000) are the
+      // last 8 KiB and are preserved by both presets.
+      authInfo: { start: "0x007CD000", end: "0x007FDFFF" },
+      fullChipNoRf: { start: "0x00000000", end: "0x007FDFFF" },
     },
   },
   t1: {
@@ -100,8 +105,8 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
     flashSize: "0x00800000", // 8 MiB — same layout as T5AI
     eraseRequires4KAlignment: true,
     erasePresets: {
-      authInfo: { start: "0x001EE000", end: "0x001FFFFF" },
-      fullChipNoRf: { start: "0x00000000", end: "0x001EDFFF" },
+      authInfo: { start: "0x007CD000", end: "0x007FDFFF" },
+      fullChipNoRf: { start: "0x00000000", end: "0x007FDFFF" },
     },
   },
   t3: {
@@ -112,7 +117,11 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
     flashSize: "0x00400000", // 4 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
-      authInfo: { start: "0x001EE000", end: "0x001FFFFF" },
+      // TuyaOpen platform/T3/tuyaos/tuyaos_adapter/src/driver/tkl_flash.c:
+      // the usr_config partition 0x3C9000 (212 KiB) holds KV_PROTECTED / RES1 /
+      // KV_KEY / KV / UF / RES2. The RF calibration (0x3FE000) and fast-connect
+      // (0x3FF000) blocks are the last 8 KiB and are preserved by both presets.
+      authInfo: { start: "0x003C9000", end: "0x003FDFFF" },
       fullChipNoRf: { start: "0x00000000", end: "0x003FDFFF" },
     },
   },

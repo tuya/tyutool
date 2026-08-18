@@ -501,8 +501,8 @@ describe("flash store", () => {
       const store = useFlashStore();
       store.selectedChipId = "t5ai"; // switch to a Beken chip that has authInfo
       store.applyErasePreset("authInfo");
-      expect(store.eraseStartAddr).toBe("0x001EE000");
-      expect(store.eraseEndAddr).toBe("0x001FFFFF");
+      expect(store.eraseStartAddr).toBe("0x007CD000");
+      expect(store.eraseEndAddr).toBe("0x007FDFFF");
     });
 
     it("sets erase address range from fullChipNoRf preset (Beken chip)", () => {
@@ -510,7 +510,7 @@ describe("flash store", () => {
       store.selectedChipId = "t5ai";
       store.applyErasePreset("fullChipNoRf");
       expect(store.eraseStartAddr).toBe("0x00000000");
-      expect(store.eraseEndAddr).toBe("0x001EDFFF");
+      expect(store.eraseEndAddr).toBe("0x007FDFFF");
     });
 
     it("sets erase address range from fullChip preset (ESP chip)", () => {
