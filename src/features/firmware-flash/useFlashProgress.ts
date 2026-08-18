@@ -190,6 +190,19 @@ export function useFlashProgress(deps: FlashProgressDeps) {
         })();
         return;
       }
+      if (typeof m === "object" && "flash_id_read" in m) {
+        const { mid } = m.flash_id_read;
+        // Same rendering as the CLI reporter's `{:#010x}` so a GUI log and a
+        // CLI log quote the same Flash ID string back in a bug report.
+        deps.appendLog(
+          mid === null
+            ? t("flash.log.milestone.flash_id_read")
+            : t("flash.log.milestone.flash_id_read_with_mid", {
+                mid: `0x${mid.toString(16).padStart(8, "0")}`,
+              }),
+        );
+        return;
+      }
       const milestoneKey = typeof m === "string" ? m : Object.keys(m)[0];
       const i18nKey = `flash.log.milestone.${milestoneKey}`;
       deps.appendLog(

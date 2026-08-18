@@ -90,6 +90,7 @@ describe("dynamic key families", () => {
     const milestones = [
       "handshake_complete",
       "flash_id_read",
+      "flash_id_read_with_mid",
       "erase_complete",
       "write_complete",
       "rebooted",

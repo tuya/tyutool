@@ -291,6 +291,30 @@ describe("useFlashProgress reducer", () => {
     );
   });
 
+  it("flash_id_read milestone logs the MID as 0x-padded hex", () => {
+    const { p, appendLog } = make();
+    p.handleFlashProgressPayload({
+      kind: "milestone",
+      milestone: { flash_id_read: { mid: 0xc86015 } },
+    } as never);
+    expect(appendLog).toHaveBeenCalledWith(
+      i18n.global.t("flash.log.milestone.flash_id_read_with_mid", {
+        mid: "0x00c86015",
+      }),
+    );
+  });
+
+  it("flash_id_read milestone without a MID falls back to the plain text", () => {
+    const { p, appendLog } = make();
+    p.handleFlashProgressPayload({
+      kind: "milestone",
+      milestone: { flash_id_read: { mid: null } },
+    } as never);
+    expect(appendLog).toHaveBeenCalledWith(
+      i18n.global.t("flash.log.milestone.flash_id_read"),
+    );
+  });
+
   it("object milestone (connected) logs its first-key fallback", () => {
     const { p, appendLog } = make();
     p.handleFlashProgressPayload({

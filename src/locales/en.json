@@ -475,6 +475,7 @@
       "milestone": {
         "handshake_complete": "Handshake complete.",
         "flash_id_read": "Flash ID read.",
+        "flash_id_read_with_mid": "Flash ID: {mid}",
         "erase_complete": "Erase complete.",
         "write_complete": "Write complete.",
         "rebooted": "Reboot command sent.",
