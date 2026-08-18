@@ -236,7 +236,19 @@ impl<'a, T: IoTransport> Transport<'a, T> {
 
     /// Receive and decode one RX frame, with timeout.
     pub fn recv_frame(&mut self, timeout_ms: u64) -> Result<RxFrame, ProtocolError> {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        // `MockIo` reports a timeout the instant it runs dry, so under `cargo
+        // test` this loop spins on the clock for the whole nominal timeout at
+        // 100 % CPU -- `read_bk7231n_consecutive_failures_error` (ten consecutive
+        // 5 s read timeouts) cost 50 s of the suite's 84 s on its own, and stole
+        // a core from every test running beside it. Wait a token amount instead.
+        // `waited_ms` below still reports the timeout the caller asked for, which
+        // is what the timeout assertions read; only the sleeping is skipped.
+        let wait_ms = if cfg!(test) {
+            timeout_ms.min(20)
+        } else {
+            timeout_ms
+        };
+        let deadline = Instant::now() + Duration::from_millis(wait_ms);
         loop {
             self.check_cancel()?;
 

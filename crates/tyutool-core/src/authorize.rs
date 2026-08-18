@@ -717,6 +717,21 @@ impl<T: AuthIo> AuthSession<T> {
         max_timeout: Duration,
         idle_timeout: Duration,
     ) -> (Vec<String>, usize) {
+        // Under `cargo test` every byte comes from `MockAuthIo`, which answers
+        // instantly or stays mute forever, so the production ceilings (3 s per
+        // command, 30 s for auth-read, 60 s for auth-write) are pure wall-clock
+        // burn against a mute mock: `auth_read_returns_none_for_empty_response`
+        // slept the full 30 s by itself. Cap the ceiling rather than the tests.
+        // 500 ms clears every window the tests legitimately need -- a probe in
+        // `detect_firmware` asks for `boot_probe_interval * 2` (≤ 100 ms), and a
+        // response that does arrive ends on the idle timeout (≤ 200 ms) or on a
+        // shell prompt. Tests that assert *timing* drive `timing` instead (see
+        // `fast_boot_timing` and `MockAuthIo::with_shell_ready_after`).
+        let max_timeout = if cfg!(test) {
+            max_timeout.min(Duration::from_millis(500))
+        } else {
+            max_timeout
+        };
         let fn_start = Instant::now();
         let mut total_bytes = 0usize;
         let mut raw_buf: Vec<u8> = Vec::new();
