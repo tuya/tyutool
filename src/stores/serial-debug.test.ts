@@ -113,6 +113,9 @@ function fakeTransport(): SerialDebugTransport & {
     async clearSession() {},
     async appendSysLine(_tsMs, text) {
       sysLineWrites.push(text);
+      // No archive position: the store must then treat the line as one the
+      // archive never took, i.e. never discard it during an auto-save handoff.
+      return null;
     },
     async addFilter(keyword, useRegex, color) {
       const id = `filter-${nextFilterId++}`;
@@ -427,6 +430,67 @@ describe("useSerialDebugStore.appendChunk", () => {
       s.drainPendingAutoSaveLines(Infinity).map((line) => line.text),
     ).toEqual(["after-enable"]);
   });
+
+  it("discards exactly the queued lines the backfill already covered", () => {
+    const s = useSerialDebugStore();
+    s.sessionAutoSavePath = "/logs/COM1/serial-debug.txt";
+
+    // Archived as line 3 → inside a backfill that stopped at line 3.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("backfilled\n")],
+      archivedBefore: 2,
+    });
+    // Archived as line 4 → after the backfill, the live half's job.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1001,
+      bytes: [...Buffer.from("live\n")],
+      archivedBefore: 3,
+    });
+    // No position at all → never in the archive, so never discarded.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1002,
+      bytes: [...Buffer.from("unarchived\n")],
+    });
+
+    s.dropBackfilledAutoSaveLines(3);
+
+    expect(
+      s.drainPendingAutoSaveLines(Infinity).map((line) => line.text),
+    ).toEqual(["live", "unarchived"]);
+
+    // The event for a line archived before the snapshot can still be delivered
+    // after the discard pass; the same predicate has to catch it at enqueue.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1003,
+      bytes: [...Buffer.from("late\n")],
+      archivedBefore: 1,
+    });
+    expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+  });
+
+  it("stops discarding once a session clear has renumbered the archive", async () => {
+    const s = useSerialDebugStore();
+    s.sessionAutoSavePath = "/logs/COM1/serial-debug.txt";
+    s.dropBackfilledAutoSaveLines(5);
+    await s.clear();
+
+    // The new session numbers from 1 again, so the old watermark would swallow
+    // every line of it.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("fresh\n")],
+      archivedBefore: 0,
+    });
+    expect(
+      s.drainPendingAutoSaveLines(Infinity).map((line) => line.text),
+    ).toEqual(["fresh"]);
+  });
 });
 
 describe("useSerialDebugStore.send", () => {
@@ -717,6 +781,74 @@ describe("useSerialDebugStore port-manager integration", () => {
       fake.emitChunksDropped(4096);
 
       expect(s.lines.length).toBe(before);
+    });
+  });
+
+  // Closing the port is the last moment the live view can catch up with what the
+  // device actually sent — nothing arrives after it, and nothing else ever cuts
+  // an unterminated line.
+  describe("closing the port", () => {
+    async function openedStore() {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      s.baudRate = 115200;
+      await s.openPort();
+      return s;
+    }
+
+    it("flushes the chunks still queued in the last coalescing frame", async () => {
+      const s = await openedStore();
+      const before = s.lines.length;
+
+      // Deliberately no waitForChunkFrame(): the close lands *inside* the 16 ms
+      // coalescing window. Rust archived these bytes the moment they arrived, so
+      // discarding the queue here would make the live view disagree with the
+      // export and the auto-save file.
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("last-gasp\n")],
+      });
+      await s.closePort();
+
+      const added = s.lines.slice(before).filter((l) => l.direction === "rx");
+      expect(added.map((l) => l.text)).toEqual(["last-gasp"]);
+    });
+
+    it("shows the tail the device never terminated with a newline", async () => {
+      const s = await openedStore();
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("boot ok\nlogin: ")],
+      });
+      await waitForChunkFrame();
+      const before = s.lines.length;
+      expect(s.lines[before - 1].text).toBe("boot ok");
+
+      await s.closePort();
+
+      // A prompt, a progress bar, a bootloader banner: no trailing newline, so
+      // only the close path can turn it into a line at all.
+      const added = s.lines.slice(before).filter((l) => l.direction === "rx");
+      expect(added.map((l) => l.text)).toEqual(["login: "]);
+    });
+
+    it("adds no empty line when nothing was left unterminated", async () => {
+      const s = await openedStore();
+      fake.emitChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("complete\n")],
+      });
+      await waitForChunkFrame();
+      const before = s.lines.length;
+
+      await s.closePort();
+
+      expect(s.lines.slice(before).filter((l) => l.direction === "rx")).toEqual(
+        [],
+      );
     });
   });
 
@@ -1396,7 +1528,9 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
         state.sent.push(b);
       },
       async clearSession() {},
-      async appendSysLine() {},
+      async appendSysLine() {
+        return null;
+      },
       async addFilter(keyword, useRegex, color) {
         return {
           def: { id: "filter-1", keyword, useRegex, color },

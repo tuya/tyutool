@@ -210,7 +210,17 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     "direction" | "tsMs" | "text"
   > & {
     estimatedChars: number;
+    /**
+     * Archive lines that existed before this line's own archive write; see
+     * `DebugChunk.archivedBefore`. `UNARCHIVED` means the line is not in the
+     * archive at all (or its position is unknown), so the backfill can never
+     * contain it and it must never be discarded.
+     */
+    archivedBefore: number;
   };
+  const UNARCHIVED = Number.POSITIVE_INFINITY;
+  /** A display line together with the archive position it was written at. */
+  type PreparedLine = { line: DebugLogLine; archivedBefore: number };
   // Only filled while an auto-save session file exists (sessionAutoSavePath).
   // Without that gate nothing ever drains it when auto-save is off, so it grows
   // for the whole session (~11 MiB/min at 921600). This queue is therefore only
@@ -218,6 +228,24 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // backfilled from the Rust-side session archive by
   // `useSerialAutoSave.backfillFromArchive`, which is the full record.
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
+  // Where the backfilled half of the current auto-save file ends: the archive
+  // snapshot the backfill was capped at, or null while it is not known yet.
+  // Everything at or after it is the live queue's job, everything before it has
+  // already been written — that split is what makes the handoff exact.
+  let autoSaveBackfilledUntil: number | null = null;
+  // Sys-line archive writes still in flight. The backfill awaits them before
+  // discarding, so no queued line can still be missing its position by then.
+  const pendingSysArchiveWrites = new Set<Promise<void>>();
+  // The watermark is a position in *one* session file's backfill; a new (or
+  // closed) file invalidates it. `flush: 'sync'` so this can never be queued
+  // behind — and then clobber — a snapshot the backfill has already published.
+  watch(
+    sessionAutoSavePath,
+    () => {
+      autoSaveBackfilledUntil = null;
+    },
+    { flush: "sync" },
+  );
 
   let nextLineId = 1;
   // Display id per archive line number, so reloading a filter page keeps the
@@ -427,12 +455,44 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     void applyArchiveLimit();
   });
 
+  /**
+   * Queue one line for the auto-save file, unless it is already in the
+   * backfilled half. Returns the queued entry so a caller that only learns the
+   * archive position later (`appendSysLine`) can fill it in.
+   */
+  function enqueueAutoSaveLine(
+    line: DebugLogLine,
+    archivedBefore: number,
+  ): PendingAutoSaveLine | null {
+    if (sessionAutoSavePath.value === null) return null;
+    // The backfill's own discard pass only sees what is queued when it runs; a
+    // line archived before the snapshot can still be delivered after it (the
+    // event and the snapshot read are separate round trips), so the same
+    // predicate has to guard the enqueue.
+    if (
+      autoSaveBackfilledUntil !== null &&
+      archivedBefore < autoSaveBackfilledUntil
+    ) {
+      return null;
+    }
+    const entry: PendingAutoSaveLine = {
+      direction: line.direction,
+      tsMs: line.tsMs,
+      text: line.text,
+      estimatedChars: line.text.length + 48,
+      archivedBefore,
+    };
+    pendingAutoSaveLines.push(entry);
+    return entry;
+  }
+
   function pushLine(
     direction: DebugLogLine["direction"],
     tsMs: number,
     text: string,
     rawBytes?: Uint8Array,
-  ): void {
+    archivedBefore: number = UNARCHIVED,
+  ): PendingAutoSaveLine | null {
     const line: DebugLogLine = {
       id: nextLineId++,
       direction,
@@ -441,30 +501,21 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       rawBytes,
     };
     lines.value.push(line);
-    if (sessionAutoSavePath.value !== null) {
-      pendingAutoSaveLines.push({
-        direction: line.direction,
-        tsMs: line.tsMs,
-        text: line.text,
-        estimatedChars: line.text.length + 48,
-      });
-    }
+    const entry = enqueueAutoSaveLine(line, archivedBefore);
     trimVisibleLines();
     triggerRef(lines);
+    return entry;
   }
 
-  function pushPreparedLines(batch: DebugLogLine[]): void {
+  function pushPreparedLines(batch: PreparedLine[]): void {
     if (batch.length === 0) return;
-    lines.value.push(...batch);
+    // One bulk push per frame — a per-line push would re-enter the reactive
+    // array once per line.
+    lines.value.push(...batch.map((prepared) => prepared.line));
     if (sessionAutoSavePath.value !== null) {
-      pendingAutoSaveLines.push(
-        ...batch.map((line) => ({
-          direction: line.direction,
-          tsMs: line.tsMs,
-          text: line.text,
-          estimatedChars: line.text.length + 48,
-        })),
-      );
+      for (const prepared of batch) {
+        enqueueAutoSaveLine(prepared.line, prepared.archivedBefore);
+      }
     }
     trimVisibleLines();
     triggerRef(lines);
@@ -472,13 +523,29 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
 
   async function appendSysLine(text: string): Promise<void> {
     const tsMs = Date.now();
-    pushLine("sys", tsMs, text);
+    // Pushed before it is archived, so its position is not known yet — the
+    // entry is patched in place below rather than queued late, which keeps the
+    // file in the same order as the live view.
+    const entry = pushLine("sys", tsMs, text);
+    const write = (async () => {
+      try {
+        const lineNo = await transport.appendSysLine(tsMs, text);
+        // `null` = not archived (capped archive, or web mode): leave it
+        // UNARCHIVED, because a line the archive never took cannot be
+        // backfilled and so must never be discarded.
+        if (entry !== null && lineNo !== null)
+          entry.archivedBefore = lineNo - 1;
+      } catch (e) {
+        rLog.warn(
+          `[SerialDebug] append sys line failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    })();
+    pendingSysArchiveWrites.add(write);
     try {
-      await transport.appendSysLine(tsMs, text);
-    } catch (e) {
-      rLog.warn(
-        `[SerialDebug] append sys line failed: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      await write;
+    } finally {
+      pendingSysArchiveWrites.delete(write);
     }
   }
 
@@ -488,9 +555,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
 
   function prepareLinesFromChunks(
     chunks: readonly DebugChunk[],
-  ): DebugLogLine[] {
-    const completedLines: DebugLogLine[] = [];
+  ): PreparedLine[] {
+    const completedLines: PreparedLine[] = [];
     for (const chunk of chunks) {
+      // The archive splits lines exactly as this loop does (same `\n` rule, same
+      // MAX_PENDING_LINE_BYTES), so a line completed by this chunk is a line the
+      // archive completed while appending this chunk — inside
+      // (archivedBefore, archivedBefore + appended].
+      const archivedBefore = chunk.archivedBefore ?? UNARCHIVED;
       const dir = chunk.direction as "tx" | "rx";
       const p = pending[dir];
       appendPendingBytes(p, chunk.bytes);
@@ -505,11 +577,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
         if (!lineBytes) break;
         const text = decodeLossy(trimTrailingLineEnding(lineBytes));
         completedLines.push({
-          id: nextLineId++,
-          direction: dir,
-          tsMs: chunk.tsMs,
-          text,
-          rawBytes: lineBytes,
+          line: {
+            id: nextLineId++,
+            direction: dir,
+            tsMs: chunk.tsMs,
+            text,
+            rawBytes: lineBytes,
+          },
+          archivedBefore,
         });
       }
     }
@@ -523,21 +598,26 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
 
   /**
    * Close the line currently being assembled for `dir` and show it as its own
-   * line. Used at a gap in the chunk stream: `prepareLinesFromChunks` only cuts
-   * on `\n`, so without this the bytes before the gap and the bytes after it
-   * would be joined into one line the device never printed.
+   * line. Used at a gap in the chunk stream and when the session closes:
+   * `prepareLinesFromChunks` only cuts on `\n`, so without this the bytes
+   * before the gap and the bytes after it would be joined into one line the
+   * device never printed, and whatever the device printed last without a
+   * newline would never be shown at all.
    */
-  function finalizePendingLine(dir: "tx" | "rx"): void {
+  function finalizePendingLine(dir: "tx" | "rx", archivedBefore: number): void {
     const p = pending[dir];
     if (p.totalBytes === 0) return;
     const lineBytes = takePendingBytes(p, p.totalBytes);
     pushPreparedLines([
       {
-        id: nextLineId++,
-        direction: dir,
-        tsMs: Date.now(),
-        text: decodeLossy(trimTrailingLineEnding(lineBytes)),
-        rawBytes: lineBytes,
+        line: {
+          id: nextLineId++,
+          direction: dir,
+          tsMs: Date.now(),
+          text: decodeLossy(trimTrailingLineEnding(lineBytes)),
+          rawBytes: lineBytes,
+        },
+        archivedBefore,
       },
     ]);
   }
@@ -551,13 +631,24 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
    * Only `rx` is finalized — the bounded backend queue only carries the serial
    * reader's Rx chunks, the Tx path writes straight through.
    */
-  function handleChunksDropped(droppedBytes: number): void {
+  function handleChunksDropped(
+    droppedBytes: number,
+    archivedBefore: number,
+  ): void {
     if (chunkFlushTimer !== null) {
       clearTimeout(chunkFlushTimer);
     }
     flushQueuedChunks();
-    finalizePendingLine("rx");
-    pushLine("sys", Date.now(), chunksDroppedNoticeText(droppedBytes));
+    // Both lines come from one `append_gap` call under one archive lock, so they
+    // share the position that call was made at.
+    finalizePendingLine("rx", archivedBefore);
+    pushLine(
+      "sys",
+      Date.now(),
+      chunksDroppedNoticeText(droppedBytes),
+      undefined,
+      archivedBefore,
+    );
   }
 
   async function clear(): Promise<void> {
@@ -573,6 +664,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       chunkFlushTimer = null;
     }
     pendingAutoSaveLines.length = 0;
+    // The archive restarts at line 1, so the backfill watermark now points at
+    // nothing; keeping it would discard every line of the new session.
+    autoSaveBackfilledUntil = null;
     cancelActiveFilterRefresh();
     filterStatsById.value = Object.fromEntries(
       Object.entries(filterStatsById.value).map(([id, stats]) => [
@@ -597,6 +691,43 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       const msg = e instanceof Error ? e.message : String(e);
       await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
     }
+  }
+
+  /**
+   * Settle every sys-line archive write that is already in flight, so the
+   * discard pass below cannot run while a queued line's position is still
+   * unknown. Writes started *after* this resolves need no wait: their archive
+   * append necessarily happens after the snapshot read that preceded the call,
+   * so they can only land after the backfilled half.
+   */
+  async function settleAutoSaveMarkers(): Promise<void> {
+    if (pendingSysArchiveWrites.size === 0) return;
+    await Promise.all([...pendingSysArchiveWrites]);
+  }
+
+  /**
+   * The backfill has written archive lines 1..`untilLineNo` to the auto-save
+   * file. Drop the queued live lines that are inside that range, and remember
+   * the watermark so later arrivals from before it are dropped at enqueue time.
+   *
+   * Exact in both directions. No duplicate: a queued line is discarded exactly
+   * when its archive counterpart is <= `untilLineNo`, because a snapshot can
+   * never land inside one archive write (`DebugChunk.archivedBefore`). No gap:
+   * everything at or after the snapshot is kept, and lines the archive never
+   * took are UNARCHIVED and therefore never discarded.
+   */
+  function dropBackfilledAutoSaveLines(untilLineNo: number): void {
+    autoSaveBackfilledUntil = untilLineNo;
+    // Compacted in place: the queue can hold a whole backfill's worth of live
+    // output, and a copy would be a second allocation of it.
+    let kept = 0;
+    for (const entry of pendingAutoSaveLines) {
+      if (entry.archivedBefore >= untilLineNo) {
+        pendingAutoSaveLines[kept] = entry;
+        kept += 1;
+      }
+    }
+    pendingAutoSaveLines.length = kept;
   }
 
   function drainPendingAutoSaveLines(
@@ -698,11 +829,19 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     unsubscribeFilterUpdated = null;
     unsubscribeArchiveCapped = null;
     unsubscribeChunksDropped = null;
-    queuedChunks.length = 0;
+    // Everything still in flight has to become a line before the port goes:
+    // the chunks queued in the last coalescing frame (dropping them would erase
+    // output the archive already has), and then the bytes the device left
+    // unterminated — a `login: ` prompt, a progress bar — which nothing else
+    // ever cuts. The two tail lines go in as UNARCHIVED: the store never learns
+    // the archive position of a line it closed itself, and a line whose position
+    // is unknown must never be discarded by the auto-save handoff.
     if (chunkFlushTimer !== null) {
       clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
     }
+    flushQueuedChunks();
+    finalizePendingLine("tx", UNARCHIVED);
+    finalizePendingLine("rx", UNARCHIVED);
     cancelActiveFilterRefresh();
     try {
       await transport.close();
@@ -795,14 +934,22 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     // holds the sentinel this line is the translation of, and writing it back
     // would record the same event twice (and be dropped anyway, the archive
     // being capped).
-    unsubscribeArchiveCapped = transport.onArchiveCapped(({ limitMib }) => {
-      pushLine("sys", Date.now(), archiveCapNoticeText(limitMib));
-    });
+    unsubscribeArchiveCapped = transport.onArchiveCapped(
+      ({ limitMib, archivedBefore }) => {
+        pushLine(
+          "sys",
+          Date.now(),
+          archiveCapNoticeText(limitMib),
+          undefined,
+          archivedBefore ?? UNARCHIVED,
+        );
+      },
+    );
     // Live view only, same as the cap notice: the archive already holds the
     // dropped-chunk sentinel this line is the translation of.
     unsubscribeChunksDropped =
-      transport.onChunksDropped?.(({ droppedBytes }) => {
-        handleChunksDropped(droppedBytes);
+      transport.onChunksDropped?.(({ droppedBytes, archivedBefore }) => {
+        handleChunksDropped(droppedBytes, archivedBefore ?? UNARCHIVED);
       }) ?? null;
     unsubscribeFilterUpdated = transport.onFilterUpdated((payload) => {
       filterStatsById.value = {
@@ -1314,6 +1461,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     clear,
     appendChunk,
     drainPendingAutoSaveLines,
+    settleAutoSaveMarkers,
+    dropBackfilledAutoSaveLines,
     showHexPopup,
     closeHexPopup,
     appendSysLine,

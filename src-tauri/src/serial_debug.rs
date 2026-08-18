@@ -42,6 +42,8 @@ struct DisconnectPayload {
 #[serde(rename_all = "camelCase")]
 struct ArchiveCappedPayload {
     limit_mib: u64,
+    /// `archived_before` of the cap sentinel itself — see [`ArchivedChunk`].
+    archived_before: u64,
 }
 
 /// Payload of `serial-debug-chunks-dropped`. Only the byte count crosses — the
@@ -50,6 +52,38 @@ struct ArchiveCappedPayload {
 #[serde(rename_all = "camelCase")]
 struct ChunksDroppedPayload {
     dropped_bytes: u64,
+    /// `archived_before` of the gap lines this notice belongs to — see
+    /// [`ArchivedChunk`].
+    archived_before: u64,
+}
+
+/// One chunk on its way to the webview, plus the number of lines the session
+/// archive held *before* this chunk was appended to it.
+///
+/// That number is what lets the frontend switch auto-save on mid-session without
+/// either duplicating or losing a line. Auto-save enables in two halves — the
+/// archive is paged into the file up to a snapshot `N`, the live queue continues
+/// after it — and the frontend cannot otherwise tell which half a live line
+/// belongs to: its own line counter and the archive's `line_no` diverge (the
+/// archive freezes its numbering once capped, and never holds an unterminated
+/// trailing line).
+///
+/// `archived_before` closes that gap exactly, because `append_chunk` archives a
+/// whole chunk under one lock: no snapshot can land *inside* a chunk, so every
+/// line the chunk produced is either wholly inside `N` or wholly after it.
+/// A live line is therefore already in the backfilled half iff
+/// `archived_before < N` — see `dropBackfilledAutoSaveLines` in
+/// `src/stores/serial-debug.ts`.
+///
+/// Read under the same lock guard as the `append_chunk` it precedes; reading it
+/// outside the guard would let another writer slip in between and make the
+/// number a lie.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArchivedChunk {
+    #[serde(flatten)]
+    chunk: DebugChunk,
+    archived_before: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -147,13 +181,17 @@ fn emit_filter_update(
 /// would only ever exist in the archive file and the user would watch the log
 /// keep scrolling with no hint that recording had stopped.
 fn emit_archive_cap_notice(app: &AppHandle, lines: &[SerialDebugLine]) {
-    if let Some(limit_mib) = lines
-        .iter()
-        .find_map(tyutool_core::serial_debug_archive_cap_limit_mib)
-    {
+    if let Some((limit_mib, line_no)) = lines.iter().find_map(|line| {
+        tyutool_core::serial_debug_archive_cap_limit_mib(line).map(|mib| (mib, line.line_no))
+    }) {
         let _ = app.emit(
             "serial-debug-archive-capped",
-            &ArchiveCappedPayload { limit_mib },
+            &ArchiveCappedPayload {
+                limit_mib,
+                // The sentinel is an archive line like any other, so its own
+                // position is exactly `line_no - 1`.
+                archived_before: line_no.saturating_sub(1),
+            },
         );
     }
 }
@@ -199,19 +237,29 @@ fn flush_serial_debug_chunk(
     if chunks.is_empty() {
         return;
     }
-    let completed = {
-        let mut archive = match archive.lock() {
+    let (completed, archived) = {
+        let mut guard = match archive.lock() {
             Ok(guard) => guard,
             Err(_) => return,
         };
         let mut completed = Vec::new();
-        for chunk in &chunks {
-            completed.extend(archive.append_chunk(chunk).unwrap_or_default());
+        let mut archived = Vec::with_capacity(chunks.len());
+        // One `archived_before` per chunk, not one per batch: per-chunk only
+        // needs `append_chunk` to be atomic, which the archive guarantees on its
+        // own, whereas a per-batch number would additionally rely on this loop
+        // holding the lock for the whole batch.
+        for chunk in chunks {
+            let archived_before = guard.total_lines();
+            completed.extend(guard.append_chunk(&chunk).unwrap_or_default());
+            archived.push(ArchivedChunk {
+                chunk,
+                archived_before,
+            });
         }
-        completed
+        (completed, archived)
     };
     ingest_serial_debug_lines(app, archive, filters, &completed);
-    let _ = app.emit("serial-debug-chunk-batch", &chunks);
+    let _ = app.emit("serial-debug-chunk-batch", &archived);
 }
 
 enum SerialDebugChunkBridgeMessage {
@@ -297,22 +345,49 @@ fn report_serial_debug_drops(
     );
     // Only the reader thread's Rx chunks travel the bounded queue: the Tx path
     // (`serial_debug_send`) writes straight to the archive.
-    let lines = {
+    let (lines, archived_before) = {
         let mut guard = match archive.lock() {
             Ok(guard) => guard,
             Err(_) => return,
         };
-        guard
-            .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
-            .unwrap_or_default()
+        // `append_gap` writes the cut-off partial line and the sentinel under one
+        // lock, so one number covers both frontend lines — see [`ArchivedChunk`].
+        let archived_before = guard.total_lines();
+        (
+            guard
+                .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
+                .unwrap_or_default(),
+            archived_before,
+        )
     };
     ingest_serial_debug_lines(app, archive, filters, &lines);
     let _ = app.emit(
         "serial-debug-chunks-dropped",
         &ChunksDroppedPayload {
             dropped_bytes: report.bytes,
+            archived_before,
         },
     );
+}
+
+/// Cut the tail the device never terminated into the archive, at the end of a
+/// session. Returns the lines written (empty when nothing was buffered) so the
+/// caller can ingest them like any other archive line.
+///
+/// Nothing else closes that buffer: `append_chunk` only cuts on a newline and
+/// `append_gap` only runs when a chunk is dropped, so a prompt or a progress bar
+/// — output the device deliberately leaves unterminated — would go down with the
+/// port and appear in neither the live view nor the archive.
+fn finalize_serial_debug_pending(
+    archive: &Arc<StdMutex<SerialDebugArchive>>,
+) -> Vec<SerialDebugLine> {
+    let mut guard = match archive.lock() {
+        Ok(guard) => guard,
+        Err(_) => return Vec::new(),
+    };
+    guard
+        .finalize_pending_lines(serial_debug_now_ms())
+        .unwrap_or_default()
 }
 
 fn spawn_serial_debug_chunk_bridge(
@@ -456,7 +531,10 @@ pub(crate) async fn serial_debug_open(
 }
 
 #[tauri::command]
-pub(crate) async fn serial_debug_close(state: State<'_, DebugState>) -> Result<(), String> {
+pub(crate) async fn serial_debug_close(
+    app: AppHandle,
+    state: State<'_, DebugState>,
+) -> Result<(), String> {
     let session = {
         let mut guard = state
             .session
@@ -476,6 +554,12 @@ pub(crate) async fn serial_debug_close(state: State<'_, DebugState>) -> Result<(
         .lock()
         .map_err(|_| "debug state poisoned".to_string())?
         .take();
+    // Cut after the bridge handle is dropped, which is what releases the bridge
+    // thread's final flush, so the chunks it was still holding land in the
+    // archive ahead of the tail. (`tyutool-serve`'s bridge acks its shutdown and
+    // is therefore exact about that ordering; this one has no ack.)
+    let lines = finalize_serial_debug_pending(&state.archive);
+    ingest_serial_debug_lines(&app, &state.archive, &state.filters, &lines);
     Ok(())
 }
 
@@ -506,17 +590,29 @@ pub(crate) fn serial_debug_send(
         ts_ms,
         bytes: bytes.clone(),
     };
-    let completed = {
+    // Tx chunks bypass the bounded bridge queue and are archived right here, so
+    // this is where their `archived_before` has to be read (same lock guard).
+    let (completed, archived_before) = {
         let mut archive = state
             .archive
             .lock()
             .map_err(|_| "debug archive poisoned".to_string())?;
-        archive
-            .append_chunk(&chunk)
-            .map_err(|e| format!("append serial debug tx chunk failed: {e}"))?
+        let archived_before = archive.total_lines();
+        (
+            archive
+                .append_chunk(&chunk)
+                .map_err(|e| format!("append serial debug tx chunk failed: {e}"))?,
+            archived_before,
+        )
     };
     ingest_serial_debug_lines(&app, &state.archive, &state.filters, &completed);
-    let _ = app.emit("serial-debug-chunk", &chunk);
+    let _ = app.emit(
+        "serial-debug-chunk",
+        &ArchivedChunk {
+            chunk,
+            archived_before,
+        },
+    );
     Ok(())
 }
 
@@ -573,13 +669,19 @@ pub(crate) fn serial_debug_session_clear(
     Ok(())
 }
 
+/// Returns the archive `line_no` the line was written as, or `None` when nothing
+/// was written (the archive is capped). The frontend needs the number for the
+/// same reason chunks carry `archived_before` (see [`ArchivedChunk`]): a sys line
+/// is pushed to the live view before it is archived, so its position in the
+/// archive is only known once this command answers. `None` means "not in the
+/// archive at all", which is what keeps such a line out of the discard pass.
 #[tauri::command]
 pub(crate) fn serial_debug_append_sys_line(
     app: AppHandle,
     state: State<'_, DebugState>,
     ts_ms: u64,
     text: String,
-) -> Result<(), String> {
+) -> Result<Option<u64>, String> {
     let line = {
         let mut archive = state
             .archive
@@ -590,10 +692,11 @@ pub(crate) fn serial_debug_append_sys_line(
             .map_err(|e| format!("append sys line failed: {e}"))?
     };
     // `None` once the session archive hit its size cap.
+    let line_no = line.as_ref().map(|line| line.line_no);
     if let Some(line) = line {
         ingest_serial_debug_lines(&app, &state.archive, &state.filters, &[line]);
     }
-    Ok(())
+    Ok(line_no)
 }
 
 /// Push the user's archive-size limit (MiB in the UI, bytes on the wire) down to
@@ -838,6 +941,49 @@ mod tests {
     fn serial_debug_device_reset_session_requires_open_session() {
         let err = serial_debug_device_reset_session(None, "T5AI").unwrap_err();
         assert_eq!(err, "serial debug not open");
+    }
+
+    /// Closing the port is the last moment the bytes the device printed without
+    /// a trailing newline can be saved — a `login: ` prompt, a progress bar.
+    /// Nothing else in the archive ever cuts them.
+    #[test]
+    fn closing_a_session_archives_the_unterminated_tail() {
+        let dir = std::env::temp_dir().join(format!(
+            "tyutool-gui-serial-debug-close-{}-{}",
+            std::process::id(),
+            serial_debug_now_ms()
+        ));
+        let archive = Arc::new(StdMutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        archive
+            .lock()
+            .unwrap()
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"login: ".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(archive.lock().unwrap().total_lines(), 0, "no newline yet");
+
+        let lines = finalize_serial_debug_pending(&archive);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "login: ");
+        assert_eq!(
+            archive
+                .lock()
+                .unwrap()
+                .read_line_range(1, 10)
+                .unwrap()
+                .iter()
+                .map(|l| l.text.clone())
+                .collect::<Vec<_>>(),
+            vec!["login: ".to_string()]
+        );
+        // Closing again has nothing left to cut: no empty line.
+        assert!(finalize_serial_debug_pending(&archive).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A full queue must cost us the chunk, not the reader thread.

@@ -420,8 +420,11 @@ export class WsTransport {
             def?: SerialDebugFilterUpdatePayload["def"];
             stats?: SerialDebugFilterUpdatePayload["stats"];
             // snake_case on the wire like every other ServerMessage field.
+            // (`archivedBefore` inside `chunk`/`chunks` is the exception: it is
+            // flattened into the chunk object, which is camelCase already.)
             limit_mib?: number;
             dropped_bytes?: number;
+            archived_before?: number;
           };
           if (m.type === "serial_debug_chunk" && m.chunk) onChunk(m.chunk);
           else if (m.type === "serial_debug_chunk_batch" && m.chunks)
@@ -434,12 +437,18 @@ export class WsTransport {
             m.type === "serial_debug_archive_capped" &&
             typeof m.limit_mib === "number"
           )
-            onArchiveCapped({ limitMib: m.limit_mib });
+            onArchiveCapped({
+              limitMib: m.limit_mib,
+              archivedBefore: m.archived_before,
+            });
           else if (
             m.type === "serial_debug_chunks_dropped" &&
             typeof m.dropped_bytes === "number"
           )
-            onChunksDropped?.({ droppedBytes: m.dropped_bytes });
+            onChunksDropped?.({
+              droppedBytes: m.dropped_bytes,
+              archivedBefore: m.archived_before,
+            });
         } catch {
           /* ignore */
         }
