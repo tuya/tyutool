@@ -15,7 +15,6 @@ useSerialAutoSave(s);
   <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2">
     <SerialDebugConnectionBar />
     <SerialDebugLogView
-      :lines="s.lines"
       :hexView="s.hexView"
       :hexBytesPerRow="s.hexBytesPerRow"
       :ansiEnabled="s.ansiEnabled"

@@ -7,6 +7,7 @@ import {
   createApp,
   defineComponent,
   h,
+  KeepAlive,
   nextTick,
   ref,
   type ComponentPublicInstance,
@@ -122,6 +123,8 @@ describe("SerialDebugLogView auto-scroll", () => {
   // Refs, not mount arguments: the hex tests change these after mounting.
   const hexBytesPerRow = ref<HexBytesPerRow>(16);
   const hexViewProp = ref(false);
+  // Drives the KeepAlive wrapper below: false = "the user navigated away".
+  const keptAliveShown = ref(true);
 
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -130,6 +133,7 @@ describe("SerialDebugLogView auto-scroll", () => {
     filterMatchTotal = 0;
     hexBytesPerRow.value = 16;
     hexViewProp.value = false;
+    keptAliveShown.value = true;
     host = document.createElement("div");
     document.body.appendChild(host);
   });
@@ -150,7 +154,6 @@ describe("SerialDebugLogView auto-scroll", () => {
         setup() {
           return () =>
             h(SerialDebugLogView, {
-              lines: [],
               hexView: hexViewProp.value,
               hexBytesPerRow: hexBytesPerRow.value,
               ansiEnabled: false,
@@ -167,6 +170,42 @@ describe("SerialDebugLogView auto-scroll", () => {
       }),
     );
     return app.mount(host!);
+  }
+
+  /**
+   * Same component behind a `<KeepAlive>`, which is how the router mounts it.
+   * `onActivated` / `onDeactivated` — where the leave/return scroll restore
+   * lives — only run for a cached instance. Toggling `keptAliveShown`
+   * deactivates and reactivates the *same* instance, so the DOM node (and the
+   * geometry stub installed on it) survives the round trip.
+   */
+  function mountKeptAlive(): void {
+    keptAliveShown.value = true;
+    app = createApp(
+      defineComponent({
+        setup() {
+          return () =>
+            h(KeepAlive, () =>
+              keptAliveShown.value
+                ? h(SerialDebugLogView, {
+                    hexView: hexViewProp.value,
+                    hexBytesPerRow: hexBytesPerRow.value,
+                    ansiEnabled: false,
+                  })
+                : null,
+            );
+        },
+      }),
+    );
+    app.component(
+      "FontAwesomeIcon",
+      defineComponent({
+        setup() {
+          return () => h("i");
+        },
+      }),
+    );
+    app.mount(host!);
   }
 
   /**
@@ -191,7 +230,9 @@ describe("SerialDebugLogView auto-scroll", () => {
     Object.defineProperty(el, "scrollTop", {
       get: () => scrollTop,
       set: (v: number) => {
-        scrollTop = Math.min(v, scrollHeight() - VIEWPORT_HEIGHT);
+        // Clamp both ends like a real scroll box: the component asks for a
+        // position and reads back what the DOM actually accepted.
+        scrollTop = Math.max(0, Math.min(v, scrollHeight() - VIEWPORT_HEIGHT));
         writes.push(scrollTop);
       },
       configurable: true,
@@ -451,6 +492,63 @@ describe("SerialDebugLogView auto-scroll", () => {
 
     expect(s.lines.length).toBe(50);
     expect(renderer.cacheSize()).toBe(50);
+  });
+
+  // The scroll restore in `onActivated` replays the offset captured on leave.
+  // It used to hand that offset straight to the model while the DOM clamped it
+  // to the (now shorter) content, so the two disagreed. The clamp inside
+  // `visibleRange` hides the disagreement for as long as the buffer stays
+  // short — but once live data grows the content back past the stale offset,
+  // the mounted window jumps there while the scrollbar stays put.
+  it("keeps the mounted window on the real scroll position when the buffer shrank while the page was away", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    for (let i = 0; i < 600; i++) appendLine(s, i);
+    mountKeptAlive();
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+
+    const rowHeight = spacerHeight() / 600;
+    expect(rowHeight).toBeGreaterThan(0);
+    // Park well above the tail: auto-scroll locks, so the return path below
+    // takes the "restore the saved offset" branch, not the follow-tail one.
+    await scrollTo(el, 300 * rowHeight);
+    expect(host!.querySelector(".paused-badge")).not.toBeNull();
+
+    // Leave the page. onDeactivated captures scrollTop.
+    keptAliveShown.value = false;
+    await flush();
+
+    // While away, the user lowers the visible-window cap. The store trims the
+    // buffer to a tenth of its length, so the saved offset now sits far past
+    // the end of the content it will be restored into.
+    s.logWindowLines = 60;
+    await flush();
+
+    // Come back: the DOM takes the offset it can, not the one it was given.
+    keptAliveShown.value = true;
+    await flush();
+    expect(pane()).toBe(el);
+    expect(el.scrollTop).toBe(60 * rowHeight - VIEWPORT_HEIGHT);
+
+    // Data keeps arriving and the content grows back past the stale offset,
+    // so `visibleRange` no longer clamps it away.
+    s.logWindowLines = 2000;
+    for (let i = 600; i < 1200; i++) appendLine(s, i);
+    await flush();
+
+    // Still locked, so the scrollbar has not moved …
+    expect(s.lines.length).toBe(660);
+    expect(el.scrollTop).toBe(60 * rowHeight - VIEWPORT_HEIGHT);
+    // … and the rows mounted are the rows that scrollbar is on.
+    const topRow = Math.floor(el.scrollTop / rowHeight);
+    const ids = renderedIds();
+    expect(ids).toContain(s.lines[topRow].id);
+    expect(s.lines.findIndex((line) => line.id === ids[0])).toBe(
+      topRow - OVERSCAN_ROWS,
+    );
   });
 
   // ── hex view virtualization ───────────────────────────────────────────

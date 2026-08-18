@@ -32,7 +32,6 @@ import SerialDebugChipBar from "./SerialDebugChipBar.vue";
 
 const props = withDefaults(
   defineProps<{
-    lines: DebugLogLine[];
     hexView: boolean;
     hexBytesPerRow: HexBytesPerRow;
     ansiEnabled: boolean;
@@ -201,8 +200,15 @@ function applyScrollTop(el: HTMLElement, top: number): void {
   // Keep the model in sync with the DOM: a programmatic scrollTop write fires
   // its `scroll` event asynchronously (and never at all in tests), so the
   // visible range would otherwise lag a frame behind.
-  scrollTop.value = top;
+  //
+  // Read the value back instead of storing the requested one: the DOM clamps a
+  // write to [0, scrollHeight - clientHeight], and a model holding the
+  // unclamped request would compute a window the scrollbar is not actually on.
+  // Callers may therefore ask for any number and let the DOM decide. The
+  // read-back is not an extra reflow — assigning scrollTop already has to
+  // resolve layout to clamp, so the value is there for the taking.
   el.scrollTop = top;
+  scrollTop.value = el.scrollTop;
 }
 
 // Per-tab scroll lock. Key: activeChipId (null = "All" tab).
@@ -331,15 +337,7 @@ function compensateScroll(
   beforeTop: number,
   rows: number,
 ): void {
-  // Clamp at the call site: applyScrollTop writes the *requested* value into the
-  // model, so asking for more than the DOM will accept desynchronizes the two.
-  applyScrollTop(
-    el,
-    Math.min(
-      Math.max(beforeTop + rows * rowHeight.value, 0),
-      maxScrollTop.value,
-    ),
-  );
+  applyScrollTop(el, beforeTop + rows * rowHeight.value);
 }
 
 async function enterHistory(): Promise<void> {
@@ -360,10 +358,7 @@ async function enterHistory(): Promise<void> {
   const row = props.hexView
     ? hexViewRenderer.rowOfLine(displayLines(), props.hexBytesPerRow, offset)
     : offset;
-  applyScrollTop(
-    el,
-    Math.min(row * rowHeight.value + insetTop.value, maxScrollTop.value),
-  );
+  applyScrollTop(el, row * rowHeight.value + insetTop.value);
 }
 
 async function loadOlderHistoryAtTop(): Promise<void> {
@@ -653,7 +648,7 @@ async function scrollToMatch(): Promise<void> {
     next = rowTop + rh - viewportHeight.value;
   }
   if (next === current) return;
-  applyScrollTop(el, Math.min(Math.max(next, 0), maxScrollTop.value));
+  applyScrollTop(el, next);
 }
 
 function onContainerKeydown(ev: KeyboardEvent): void {
