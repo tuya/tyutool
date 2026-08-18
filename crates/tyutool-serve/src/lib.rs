@@ -135,10 +135,10 @@ pub enum ServerMessage {
         request_id: Option<String>,
     },
     SerialDebugChunk {
-        chunk: DebugChunk,
+        chunk: ArchivedChunk,
     },
     SerialDebugChunkBatch {
-        chunks: Vec<DebugChunk>,
+        chunks: Vec<ArchivedChunk>,
     },
     SerialDebugOpened,
     SerialDebugClosed,
@@ -170,13 +170,36 @@ pub enum ServerMessage {
     /// from `serialDebug.log.archiveCapped`, so only the number crosses.
     SerialDebugArchiveCapped {
         limit_mib: u64,
+        /// `archived_before` of the cap sentinel itself — see [`ArchivedChunk`].
+        archived_before: u64,
     },
     /// Device output was dropped because the bridge queue was full. One message
     /// per coalesced burst; the wording comes from
     /// `serialDebug.log.chunksDropped`.
     SerialDebugChunksDropped {
         dropped_bytes: u64,
+        /// `archived_before` of the gap lines this notice belongs to — see
+        /// [`ArchivedChunk`].
+        archived_before: u64,
     },
+}
+
+/// One chunk on its way to the browser, plus the number of lines the session
+/// archive held *before* this chunk was appended to it. Twin of `ArchivedChunk`
+/// in `src-tauri/src/serial_debug.rs`, which carries the full rationale: it is
+/// what lets the frontend enable auto-save mid-session without duplicating or
+/// losing a line, and it is exact because `append_chunk` archives a whole chunk
+/// under one lock, so no snapshot can land inside a chunk.
+///
+/// Flattened into the `chunk` object, which already serialises camelCase
+/// (`tsMs`), so the field reaches the frontend as `archivedBefore` with no
+/// mapping in `ws-transport.ts`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedChunk {
+    #[serde(flatten)]
+    pub chunk: DebugChunk,
+    pub archived_before: u64,
 }
 
 enum SerialDebugChunkBridgeMessage {
@@ -595,6 +618,10 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 if let Some(bridge) = debug_chunk_bridge.lock().unwrap().take() {
                     let _ = bridge.shutdown();
                 }
+                // After the bridge's shutdown ack, so everything it was still
+                // holding is archived and the tail is cut behind all of it.
+                let lines = finalize_serial_debug_pending_ws(&debug_archive);
+                ingest_serial_debug_lines_ws(&sink_tx, &debug_filters, &lines);
                 let _ = sink_tx.send(ServerMessage::SerialDebugClosed);
             }
             ClientMessage::SerialDebugDeviceReset { chip_id } => {
@@ -637,12 +664,24 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                         ts_ms,
                         bytes,
                     };
-                    let completed = {
+                    // Tx chunks bypass the bounded bridge queue and are archived
+                    // right here, so this is where `archived_before` has to be
+                    // read (same lock guard).
+                    let (completed, archived_before) = {
                         let mut archive = debug_archive.lock().unwrap();
-                        archive.append_chunk(&chunk).unwrap_or_default()
+                        let archived_before = archive.total_lines();
+                        (
+                            archive.append_chunk(&chunk).unwrap_or_default(),
+                            archived_before,
+                        )
                     };
                     ingest_serial_debug_lines_ws(&sink_tx, &debug_filters, &completed);
-                    let _ = sink_tx.send(ServerMessage::SerialDebugChunk { chunk });
+                    let _ = sink_tx.send(ServerMessage::SerialDebugChunk {
+                        chunk: ArchivedChunk {
+                            chunk,
+                            archived_before,
+                        },
+                    });
                 } else {
                     let _ = sink_tx.send(ServerMessage::Error {
                         message: "serial debug not open".into(),
@@ -931,19 +970,27 @@ fn flush_serial_debug_chunk_ws(
     if chunks.is_empty() {
         return;
     }
-    let completed = {
-        let mut archive = match archive.lock() {
+    let (completed, archived) = {
+        let mut guard = match archive.lock() {
             Ok(guard) => guard,
             Err(_) => return,
         };
         let mut completed = Vec::new();
-        for chunk in &chunks {
-            completed.extend(archive.append_chunk(chunk).unwrap_or_default());
+        let mut archived = Vec::with_capacity(chunks.len());
+        // One `archived_before` per chunk, not one per batch — see the twin in
+        // `src-tauri/src/serial_debug.rs`.
+        for chunk in chunks {
+            let archived_before = guard.total_lines();
+            completed.extend(guard.append_chunk(&chunk).unwrap_or_default());
+            archived.push(ArchivedChunk {
+                chunk,
+                archived_before,
+            });
         }
-        completed
+        (completed, archived)
     };
     ingest_serial_debug_lines_ws(sink_tx, filters, &completed);
-    let _ = sink_tx.send(ServerMessage::SerialDebugChunkBatch { chunks });
+    let _ = sink_tx.send(ServerMessage::SerialDebugChunkBatch { chunks: archived });
 }
 
 /// Surface one coalesced burst of dropped chunks — `log::warn!` for the
@@ -968,19 +1015,45 @@ fn report_serial_debug_drops_ws(
     );
     // Only the reader thread's Rx chunks travel the bounded queue: the Tx path
     // (`SerialDebugSend`) writes straight to the archive.
-    let lines = {
+    let (lines, archived_before) = {
         let mut guard = match archive.lock() {
             Ok(guard) => guard,
             Err(_) => return,
         };
-        guard
-            .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
-            .unwrap_or_default()
+        // `append_gap` writes the cut-off partial line and the sentinel under one
+        // lock, so one number covers both frontend lines.
+        let archived_before = guard.total_lines();
+        (
+            guard
+                .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
+                .unwrap_or_default(),
+            archived_before,
+        )
     };
     ingest_serial_debug_lines_ws(sink_tx, filters, &lines);
     let _ = sink_tx.send(ServerMessage::SerialDebugChunksDropped {
         dropped_bytes: report.bytes,
+        archived_before,
     });
+}
+
+/// Cut the tail the device never terminated into the archive, at the end of a
+/// session. Twin of `finalize_serial_debug_pending` in `src-tauri`.
+///
+/// Nothing else closes that buffer: `append_chunk` only cuts on a newline and
+/// `append_gap` only runs when a chunk is dropped, so a prompt or a progress bar
+/// — output the device deliberately leaves unterminated — would go down with the
+/// port and appear in neither the live view nor the archive.
+fn finalize_serial_debug_pending_ws(
+    archive: &Arc<Mutex<SerialDebugArchive>>,
+) -> Vec<SerialDebugLine> {
+    let mut guard = match archive.lock() {
+        Ok(guard) => guard,
+        Err(_) => return Vec::new(),
+    };
+    guard
+        .finalize_pending_lines(serial_debug_now_ms())
+        .unwrap_or_default()
 }
 
 fn spawn_serial_debug_chunk_bridge_ws(
@@ -1082,11 +1155,15 @@ fn emit_archive_cap_notice_ws(
     sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
     lines: &[SerialDebugLine],
 ) {
-    if let Some(limit_mib) = lines
-        .iter()
-        .find_map(tyutool_core::serial_debug_archive_cap_limit_mib)
-    {
-        let _ = sink_tx.send(ServerMessage::SerialDebugArchiveCapped { limit_mib });
+    if let Some((limit_mib, line_no)) = lines.iter().find_map(|line| {
+        tyutool_core::serial_debug_archive_cap_limit_mib(line).map(|mib| (mib, line.line_no))
+    }) {
+        let _ = sink_tx.send(ServerMessage::SerialDebugArchiveCapped {
+            limit_mib,
+            // The sentinel is an archive line like any other, so its own
+            // position is exactly `line_no - 1`.
+            archived_before: line_no.saturating_sub(1),
+        });
     }
 }
 
@@ -1634,6 +1711,9 @@ mod tests {
         // snake_case like every other ServerMessage field (cf. `request_id`);
         // `ws-transport.ts` maps it to `limitMib` at the boundary.
         assert!(json.contains(r#""limit_mib":64"#), "{json}");
+        // The sentinel sits at line 7, so it is inside a backfill snapshot iff
+        // that snapshot is >= 7, i.e. iff `archived_before` (6) < snapshot.
+        assert!(json.contains(r#""archived_before":6"#), "{json}");
 
         // Ordinary device output never triggers it, even byte-for-byte.
         emit_archive_cap_notice_ws(
@@ -1644,6 +1724,52 @@ mod tests {
             )],
         );
         assert!(sink_rx.try_recv().is_err());
+    }
+
+    /// The web host must save the tail exactly like the Tauri host: closing the
+    /// port is the last moment output the device left unterminated — a `login: `
+    /// prompt, a progress bar — can reach the archive at all.
+    #[test]
+    fn finalize_serial_debug_pending_ws_archives_the_unterminated_tail() {
+        let dir = std::env::temp_dir().join(format!(
+            "tyutool-serve-close-tail-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        archive
+            .lock()
+            .unwrap()
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"login: ".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(archive.lock().unwrap().total_lines(), 0, "no newline yet");
+
+        let lines = finalize_serial_debug_pending_ws(&archive);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "login: ");
+        assert_eq!(
+            archive
+                .lock()
+                .unwrap()
+                .read_line_range(1, 10)
+                .unwrap()
+                .iter()
+                .map(|l| l.text.clone())
+                .collect::<Vec<_>>(),
+            vec!["login: ".to_string()]
+        );
+        // Closing again has nothing left to cut: no empty line.
+        assert!(finalize_serial_debug_pending_ws(&archive).is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The web host must report dropped device output exactly like the Tauri
@@ -1693,6 +1819,10 @@ mod tests {
         );
         // snake_case on the wire; `ws-transport.ts` maps it to `droppedBytes`.
         assert!(json.contains(r#""dropped_bytes":12288"#), "{json}");
+        // Nothing was archived before the gap ("before-gap" has no newline yet,
+        // so it is still buffered), and `append_gap` writes both of its lines
+        // under one lock — one number covers the cut line and the notice.
+        assert!(json.contains(r#""archived_before":0"#), "{json}");
 
         // Bytes arriving after the gap must start their own line.
         let after = archive
@@ -1765,33 +1895,91 @@ mod tests {
         assert!(err.contains(r#""message":"boom""#));
 
         let chunk = serde_json::to_string(&ServerMessage::SerialDebugChunk {
-            chunk: DebugChunk {
-                direction: tyutool_core::Direction::Tx,
-                ts_ms: 42,
-                bytes: vec![7, 8],
+            chunk: ArchivedChunk {
+                chunk: DebugChunk {
+                    direction: tyutool_core::Direction::Tx,
+                    ts_ms: 42,
+                    bytes: vec![7, 8],
+                },
+                archived_before: 9,
             },
         })
         .unwrap();
         assert!(chunk.contains(r#""type":"serial_debug_chunk""#));
         assert!(chunk.contains(r#""direction":"tx""#));
+        // Flattened into the chunk object and camelCase like `tsMs`, so
+        // `ws-transport.ts` needs no mapping for it.
+        assert!(chunk.contains(r#""archivedBefore":9"#), "{chunk}");
 
         let batch = serde_json::to_string(&ServerMessage::SerialDebugChunkBatch {
             chunks: vec![
-                DebugChunk {
-                    direction: tyutool_core::Direction::Rx,
-                    ts_ms: 1,
-                    bytes: vec![1],
+                ArchivedChunk {
+                    chunk: DebugChunk {
+                        direction: tyutool_core::Direction::Rx,
+                        ts_ms: 1,
+                        bytes: vec![1],
+                    },
+                    archived_before: 0,
                 },
-                DebugChunk {
-                    direction: tyutool_core::Direction::Rx,
-                    ts_ms: 2,
-                    bytes: vec![2, 3],
+                ArchivedChunk {
+                    chunk: DebugChunk {
+                        direction: tyutool_core::Direction::Rx,
+                        ts_ms: 2,
+                        bytes: vec![2, 3],
+                    },
+                    archived_before: 1,
                 },
             ],
         })
         .unwrap();
         assert!(batch.contains(r#""type":"serial_debug_chunk_batch""#));
         assert!(batch.contains(r#""tsMs":2"#));
+        assert!(batch.contains(r#""archivedBefore":1"#), "{batch}");
+    }
+
+    /// The frontend's mid-session auto-save handoff is exact only if every chunk
+    /// reports the archive line count that existed *before* it was appended —
+    /// per chunk, so a batch of several chunks carries several numbers.
+    #[test]
+    fn chunk_batch_reports_the_archive_position_of_each_chunk() {
+        let dir = std::env::temp_dir().join(format!(
+            "tyutool-serve-chunk-positions-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let (sink_tx, mut sink_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let chunk = |bytes: &[u8]| DebugChunk {
+            direction: Direction::Rx,
+            ts_ms: 1,
+            bytes: bytes.to_vec(),
+        };
+        flush_serial_debug_chunk_ws(
+            &sink_tx,
+            &archive,
+            &filters,
+            vec![
+                chunk(b"one\n"),       // archives line 1
+                chunk(b"partial"),     // archives nothing (no newline yet)
+                chunk(b"-end\ntwo\n"), // archives lines 2 and 3
+            ],
+        );
+
+        let positions = match sink_rx.try_recv().unwrap() {
+            ServerMessage::SerialDebugChunkBatch { chunks } => {
+                chunks.iter().map(|c| c.archived_before).collect::<Vec<_>>()
+            }
+            other => panic!("expected a chunk batch, got {other:?}"),
+        };
+        assert_eq!(positions, vec![0, 1, 1]);
+        assert_eq!(archive.lock().unwrap().total_lines(), 3);
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -23,7 +23,17 @@ export interface SerialDebugTransport {
   close(): Promise<void>;
   send(bytes: Uint8Array): Promise<void>;
   clearSession(): Promise<void>;
-  appendSysLine(tsMs: number, text: string): Promise<void>;
+  /**
+   * Archive one `sys` line.
+   *
+   * @returns the archive `lineNo` it was written as, or `null` when it was not
+   * archived at all (the archive is capped, or the web backend does not report a
+   * position). The store needs it because a sys line reaches the live view
+   * before it reaches the archive, so `DebugChunk.archivedBefore`'s trick — read
+   * the position while writing — is not available; `null` therefore means "not
+   * in the archive", which keeps the line out of the auto-save discard pass.
+   */
+  appendSysLine(tsMs: number, text: string): Promise<number | null>;
   addFilter(
     keyword: string,
     useRegex: boolean,
@@ -159,9 +169,14 @@ class TauriTransport implements SerialDebugTransport {
     await invoke("serial_debug_session_clear");
   }
 
-  async appendSysLine(tsMs: number, text: string): Promise<void> {
+  async appendSysLine(tsMs: number, text: string): Promise<number | null> {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("serial_debug_append_sys_line", { tsMs, text });
+    return (
+      (await invoke<number | null>("serial_debug_append_sys_line", {
+        tsMs,
+        text,
+      })) ?? null
+    );
   }
 
   async addFilter(
@@ -294,8 +309,12 @@ class WebTransport implements SerialDebugTransport {
     await wsTransport.serialDebugSessionClear();
   }
 
-  async appendSysLine(tsMs: number, text: string): Promise<void> {
+  async appendSysLine(tsMs: number, text: string): Promise<number | null> {
     await wsTransport.serialDebugAppendSysLine(tsMs, text);
+    // The WS message is fire-and-forget, so the archive position never comes
+    // back. Harmless: auto-save — the only consumer of the position — writes
+    // through `invoke("append_text_file")` and so never runs in web mode.
+    return null;
   }
 
   async addFilter(

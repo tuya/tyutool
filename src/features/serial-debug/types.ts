@@ -19,12 +19,17 @@ export interface DebugChunk {
   direction: "tx" | "rx";
   tsMs: number;
   bytes: number[]; // Tauri deserializes Vec<u8> as a number[]
-}
-
-export interface SerialDebugSessionMeta {
-  sessionId: string;
-  logPath: string;
-  totalLines: number;
+  /**
+   * How many lines the Rust session archive held *before* this chunk was
+   * appended to it (`ArchivedChunk` in `src-tauri/src/serial_debug.rs`). It is
+   * what makes the mid-session auto-save handoff exact: a live line is already
+   * inside a backfill snapshot `N` iff its chunk's `archivedBefore < N`.
+   *
+   * Optional only so an older backend or a test fake can leave it out; missing
+   * means "position unknown", and the store then never discards the line — the
+   * no-gap direction, i.e. at worst the old duplicate window.
+   */
+  archivedBefore?: number;
 }
 
 export interface DisconnectPayload {
@@ -39,6 +44,8 @@ export interface DisconnectPayload {
  */
 export interface ArchiveCappedPayload {
   limitMib: number;
+  /** `archivedBefore` of the cap sentinel itself; see `DebugChunk`. */
+  archivedBefore?: number;
 }
 
 /**
@@ -49,6 +56,12 @@ export interface ArchiveCappedPayload {
  */
 export interface ChunksDroppedPayload {
   droppedBytes: number;
+  /**
+   * `archivedBefore` of the two lines `append_gap` wrote for this notice (the
+   * cut-off partial line and the sentinel); see `DebugChunk`. Both were written
+   * under one archive lock, so one number covers both.
+   */
+  archivedBefore?: number;
 }
 
 export type DebugLineDirection = "tx" | "rx" | "sys";

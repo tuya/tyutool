@@ -42,6 +42,15 @@ const noArchive: SessionPageHandler = async () => {
 
 let sessionPageHandler: SessionPageHandler = noArchive;
 
+/**
+ * What the fake archive answers when the store archives a `sys` line: the
+ * `lineNo` it was written as, or null for "not archived". Set per test.
+ */
+let sysLineArchivePosition: number | null = null;
+
+/** Holds the sys-line archive write open, to model a slow round trip. */
+let sysLineGate: Promise<void> | null = null;
+
 /** Serve `lines` as an archive; `growBy` fakes a session that keeps growing. */
 function archivePages(
   lines: readonly SerialDebugLine[],
@@ -65,7 +74,10 @@ function fakeTransport(): SerialDebugTransport {
     async close() {},
     async send() {},
     async clearSession() {},
-    async appendSysLine() {},
+    async appendSysLine() {
+      if (sysLineGate) await sysLineGate;
+      return sysLineArchivePosition;
+    },
     async addFilter() {
       throw new Error("not implemented");
     },
@@ -138,6 +150,8 @@ describe("useSerialAutoSave", () => {
     vi.useFakeTimers();
     invokeSpy.mockReset();
     sessionPageHandler = noArchive;
+    sysLineArchivePosition = null;
+    sysLineGate = null;
     setActivePinia(createPinia());
     __setSerialDebugTransportForTest(fakeTransport());
   });
@@ -527,6 +541,269 @@ describe("useSerialAutoSave", () => {
     expect(writtenContents()).toEqual([
       `[${formatTs(1000)}] [RX ] old\n`,
       `[${formatTs(2000)}] [RX ] live\n`,
+    ]);
+  });
+
+  /**
+   * The handoff race, from the duplicate side: a line the archive already held
+   * when the snapshot was taken, but whose chunk event only reached the frontend
+   * after the session file existed. It is in the backfilled half *and* in the
+   * live queue, and only its `archivedBefore` says so.
+   */
+  it("writes a line archived before the snapshot but delivered after it exactly once", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+
+    s.port = "/dev/ttyUSB0";
+    s.open = true;
+    await nextTick();
+
+    let releasePage: ((page: SerialDebugSessionPage) => void) | null = null;
+    sessionPageHandler = () =>
+      new Promise<SerialDebugSessionPage>((resolve) => {
+        releasePage = resolve;
+      });
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    await nextTick();
+    await settle();
+
+    // Archived as line 3 (so the archive held 2 lines before its chunk), which
+    // is inside the snapshot below — the backfill will write it.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("straddler\n")],
+      archivedBefore: 2,
+    });
+
+    (releasePage as ((page: SerialDebugSessionPage) => void) | null)?.({
+      totalLines: 3,
+      start: 0,
+      items: [
+        { lineNo: 1, tsMs: 1000, direction: "rx", text: "a" },
+        { lineNo: 2, tsMs: 1001, direction: "rx", text: "b" },
+        { lineNo: 3, tsMs: 2000, direction: "rx", text: "straddler" },
+      ],
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    const file = writtenContents().join("");
+    expect(file.split("straddler")).toHaveLength(2); // i.e. exactly one hit
+    expect(file).toBe(
+      `[${formatTs(1000)}] [RX ] a\n` +
+        `[${formatTs(1001)}] [RX ] b\n` +
+        `[${formatTs(2000)}] [RX ] straddler\n`,
+    );
+  });
+
+  /**
+   * The same race from the gap side: a line archived *after* the snapshot is the
+   * live half's responsibility, and the discard pass must leave it alone even
+   * though it arrived while the backfill was still running.
+   */
+  it("keeps a line archived after the snapshot that arrived during the backfill", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+
+    s.port = "/dev/ttyUSB0";
+    s.open = true;
+    await nextTick();
+
+    let releasePage: ((page: SerialDebugSessionPage) => void) | null = null;
+    sessionPageHandler = () =>
+      new Promise<SerialDebugSessionPage>((resolve) => {
+        releasePage = resolve;
+      });
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    await nextTick();
+    await settle();
+
+    // The archive held 2 lines before this chunk, i.e. it became line 3 — one
+    // past the snapshot of 2 that the backfill is about to report.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("after-snapshot\n")],
+      archivedBefore: 2,
+    });
+
+    (releasePage as ((page: SerialDebugSessionPage) => void) | null)?.({
+      totalLines: 2,
+      start: 0,
+      items: [
+        { lineNo: 1, tsMs: 1000, direction: "rx", text: "a" },
+        { lineNo: 2, tsMs: 1001, direction: "rx", text: "b" },
+      ],
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    expect(writtenContents().join("")).toBe(
+      `[${formatTs(1000)}] [RX ] a\n` +
+        `[${formatTs(1001)}] [RX ] b\n` +
+        `[${formatTs(2000)}] [RX ] after-snapshot\n`,
+    );
+  });
+
+  /**
+   * A sys line reaches the live queue before it reaches the archive, so its
+   * position is only known once the backend answers. The discard has to wait for
+   * that answer — here it is still outstanding when the backfill finishes.
+   */
+  it("waits for an in-flight sys line's archive position before discarding", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+
+    s.port = "/dev/ttyUSB0";
+    s.open = true;
+    await nextTick();
+
+    let releasePage: ((page: SerialDebugSessionPage) => void) | null = null;
+    sessionPageHandler = () =>
+      new Promise<SerialDebugSessionPage>((resolve) => {
+        releasePage = resolve;
+      });
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    await nextTick();
+    await settle();
+
+    let releaseSysLine: (() => void) | null = null;
+    sysLineGate = new Promise<void>((resolve) => {
+      releaseSysLine = resolve;
+    });
+    sysLineArchivePosition = 2; // archived as line 2, inside the snapshot
+    void s.appendSysLine("connected");
+    await settle();
+
+    (releasePage as ((page: SerialDebugSessionPage) => void) | null)?.({
+      totalLines: 2,
+      start: 0,
+      items: [
+        { lineNo: 1, tsMs: 1000, direction: "rx", text: "a" },
+        { lineNo: 2, tsMs: 1001, direction: "sys", text: "connected" },
+      ],
+    });
+    await settle();
+
+    (releaseSysLine as (() => void) | null)?.();
+    await settle();
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    const file = writtenContents().join("");
+    expect(file.split("connected")).toHaveLength(2); // exactly one hit
+    expect(file).toBe(
+      `[${formatTs(1000)}] [RX ] a\n` + `[${formatTs(1001)}] [SYS] connected\n`,
+    );
+  });
+
+  /**
+   * A sys line the archive refused (it is capped) exists only in the live view,
+   * so the backfill can never hold a copy and it must survive the discard.
+   */
+  it("keeps a sys line the capped archive refused", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+
+    s.port = "/dev/ttyUSB0";
+    s.open = true;
+    await nextTick();
+
+    let releasePage: ((page: SerialDebugSessionPage) => void) | null = null;
+    sessionPageHandler = () =>
+      new Promise<SerialDebugSessionPage>((resolve) => {
+        releasePage = resolve;
+      });
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    await nextTick();
+    await settle();
+
+    sysLineArchivePosition = null; // archive capped: nothing was written
+    await s.appendSysLine("port closed");
+
+    (releasePage as ((page: SerialDebugSessionPage) => void) | null)?.({
+      totalLines: 1,
+      start: 0,
+      items: [{ lineNo: 1, tsMs: 1000, direction: "rx", text: "a" }],
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    expect(writtenContents().join("")).toContain("[SYS] port closed\n");
+  });
+
+  /**
+   * Once the archive is capped its line count freezes, so every later chunk
+   * reports the same `archivedBefore` — which is exactly the snapshot. The
+   * predicate is `<`, so those lines are kept and the file keeps growing where
+   * the archive stopped.
+   */
+  it("keeps recording live lines after the archive has stopped at its cap", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+
+    // Mirrors serial_debug_archive_cap_sentinel in
+    // crates/tyutool-core/src/serial_debug.rs.
+    const SOH = String.fromCharCode(1);
+    const sentinel = `${SOH}tyutool:archive-capped:16${SOH}`;
+
+    s.port = "/dev/ttyUSB0";
+    s.open = true;
+    await nextTick();
+
+    // A capped archive: 2 lines, frozen there for the rest of the session.
+    sessionPageHandler = archivePages([
+      { lineNo: 1, tsMs: 1000, direction: "rx", text: "a" },
+      { lineNo: 2, tsMs: 1001, direction: "sys", text: sentinel },
+    ]);
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    await nextTick();
+    await settle();
+
+    // Frozen counter: both chunks report the same position as the snapshot.
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("after-cap-1\n")],
+      archivedBefore: 2,
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2001,
+      bytes: [...Buffer.from("after-cap-2\n")],
+      archivedBefore: 2,
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    const written = writtenContents().join("").trimEnd().split("\n");
+    expect(written).toHaveLength(4);
+    expect(written[0]).toBe(`[${formatTs(1000)}] [RX ] a`);
+    // The cap notice is translated on the way out, never the raw sentinel.
+    expect(written[1]).toContain("16 MiB");
+    expect(written[1]).not.toContain(SOH);
+    expect(written.slice(2)).toEqual([
+      `[${formatTs(2000)}] [RX ] after-cap-1`,
+      `[${formatTs(2001)}] [RX ] after-cap-2`,
     ]);
   });
 

@@ -35,10 +35,9 @@ pub use serial_debug::{
     serial_debug_fail_backfill_if_current, serial_debug_finish_backfill_if_current,
     serial_debug_now_ms, serial_debug_scan_filter_matches, ChunkCallback, DataBits, DebugChunk,
     DebugConfig, Direction, DisconnectCallback, LogDirection, Parity, SerialDebugArchive,
-    SerialDebugArchiveMeta, SerialDebugArchiveReader, SerialDebugChunkBatchBuffer,
-    SerialDebugDropCounter, SerialDebugDropReport, SerialDebugFilterBackfillSnapshot,
-    SerialDebugFilterDefinition, SerialDebugFilterIndex, SerialDebugFilterPage,
-    SerialDebugFilterStats, SerialDebugFilterStatus, SerialDebugGeneration, SerialDebugLine,
-    SerialDebugSession, SerialDebugSessionPage, StopBits,
+    SerialDebugArchiveReader, SerialDebugChunkBatchBuffer, SerialDebugDropCounter,
+    SerialDebugDropReport, SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition,
+    SerialDebugFilterIndex, SerialDebugFilterPage, SerialDebugFilterStats, SerialDebugFilterStatus,
+    SerialDebugGeneration, SerialDebugLine, SerialDebugSession, SerialDebugSessionPage, StopBits,
 };
 pub use usb_port_survey::{usb_port_survey, UsbPortSurveyEntry, UsbPortSurveyUsb};

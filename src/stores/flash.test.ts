@@ -109,7 +109,9 @@ function makeSerialDebugTransportWithDeferredClose() {
     },
     async send() {},
     async clearSession() {},
-    async appendSysLine() {},
+    async appendSysLine() {
+      return null;
+    },
     async addFilter() {
       throw new Error("not implemented");
     },

@@ -83,38 +83,53 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
    * with nothing draining it). Paged and streamed: one page is read, formatted
    * and appended before the next is requested, so memory stays bounded.
    *
-   * Handoff with the live queue — deliberately "rather duplicate than gap":
-   * `sessionAutoSavePath` is set *before* this runs, so live queuing has
-   * already started when the snapshot (`totalLines` of the first page) is
-   * taken. The backend appends a line to the archive before it emits the chunk
-   * event, so every line the frontend has ever seen is already archived,
-   * therefore inside the snapshot → no gap is possible. The flip side is that
-   * lines archived just before the snapshot but only delivered to the frontend
-   * after the path was set land in both halves and appear twice. That window
-   * is one chunk-batch tick (16 ms in the store) plus one IPC round trip —
-   * a few KiB at 921600 baud, tens of lines at worst.
+   * Handoff with the live queue — neither duplicated nor gapped:
+   * `sessionAutoSavePath` is set *before* this runs, so live queuing has already
+   * started when the snapshot (`totalLines` of the first page) is taken, and the
+   * two halves therefore overlap in time. The overlap is resolved by position,
+   * not by timing: every live line carries the archive position it was written
+   * at (`DebugChunk.archivedBefore`), so the store can discard exactly the
+   * queued lines this backfill already covers — no more, no less. See
+   * `dropBackfilledAutoSaveLines`.
+   *
+   * The discard is handed the number of archive lines this backfill *actually
+   * wrote*, not the snapshot: a page that fails halfway (unreadable archive,
+   * rejected write) then still leaves whatever the live queue holds of the
+   * missing range in the file, instead of discarding it as "already written".
+   * Nothing live can reach the file before the backfill finishes (`flush` awaits
+   * `backfillPromise`), so waiting until then costs no ordering.
    */
   async function backfillFromArchive(path: string): Promise<void> {
     const { invoke } = await import("@tauri-apps/api/core");
     let start = 0;
     let total: number | null = null;
-    while (true) {
-      const limit =
-        total === null
-          ? AUTO_SAVE_BACKFILL_PAGE_SIZE
-          : Math.min(AUTO_SAVE_BACKFILL_PAGE_SIZE, total - start);
-      if (limit <= 0) break;
-      const page = await transport.readSessionPage(start, limit);
-      if (total === null) total = page.totalLines;
-      // Auto-save may have been switched off (or restarted) while the page was
-      // in flight; that file is no longer ours to append to.
-      if (s.sessionAutoSavePath !== path) return;
-      if (page.items.length === 0) break;
-      await invoke("append_text_file", {
-        path,
-        content: formatAutoSaveBlock(page.items),
-      });
-      start += page.items.length;
+    try {
+      while (true) {
+        const limit =
+          total === null
+            ? AUTO_SAVE_BACKFILL_PAGE_SIZE
+            : Math.min(AUTO_SAVE_BACKFILL_PAGE_SIZE, total - start);
+        if (limit <= 0) break;
+        const page = await transport.readSessionPage(start, limit);
+        if (total === null) total = page.totalLines;
+        // Auto-save may have been switched off (or restarted) while the page was
+        // in flight; that file is no longer ours to append to.
+        if (s.sessionAutoSavePath !== path) return;
+        if (page.items.length === 0) break;
+        await invoke("append_text_file", {
+          path,
+          content: formatAutoSaveBlock(page.items),
+        });
+        start += page.items.length;
+      }
+    } finally {
+      // A sys line reaches the live queue before it reaches the archive, so its
+      // position can still be in flight; wait for those answers, or the discard
+      // would have to guess.
+      await s.settleAutoSaveMarkers();
+      if (s.sessionAutoSavePath === path) {
+        s.dropBackfilledAutoSaveLines(start);
+      }
     }
   }
 

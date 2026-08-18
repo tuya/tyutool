@@ -70,6 +70,18 @@ const ARCHIVE_INDEX_ENTRY_BYTES: u64 = 16;
 const FILTER_MATCH_INDEX_ENTRY_BYTES: u64 = 8;
 const MAX_PENDING_SERIAL_DEBUG_LINE_BYTES: usize = 4096;
 const FILTER_BACKFILL_READ_BATCH_LINES: u64 = 512;
+/// How many `.idx` entries one archive read pulls in a single `read_exact`
+/// (16 KiB). A page is 400 lines, so a normal page costs exactly one index
+/// read; the cap only bounds the buffer when a caller asks for a huge `limit`.
+const ARCHIVE_READ_INDEX_BATCH_LINES: usize = 1024;
+/// Byte budget for one bulk read out of the `.ndjson`. Consecutive archived
+/// lines occupy a contiguous byte span (see [`read_line_run`]), so a page is
+/// normally fetched with one `read_exact`; this splits the span when a caller
+/// asks for more lines than the budget covers, so peak memory stays bounded
+/// regardless of `limit`. A line is at most
+/// `MAX_PENDING_SERIAL_DEBUG_LINE_BYTES` of payload, so any single line always
+/// fits and the split always makes progress.
+const ARCHIVE_READ_SPAN_BUDGET_BYTES: u64 = 4 * 1024 * 1024;
 static SERIAL_DEBUG_SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Compile-time cap for one session archive. The GUI/web setting overrides this
@@ -256,14 +268,6 @@ impl SerialDebugDropCounter {
         }
         Some(SerialDebugDropReport { chunks, bytes })
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SerialDebugArchiveMeta {
-    pub session_id: String,
-    pub log_path: String,
-    pub total_lines: u64,
 }
 
 pub struct SerialDebugArchive {
@@ -564,14 +568,6 @@ impl SerialDebugArchive {
         }
     }
 
-    pub fn meta(&self) -> SerialDebugArchiveMeta {
-        SerialDebugArchiveMeta {
-            session_id: self.session_id.clone(),
-            log_path: self.log_path.display().to_string(),
-            total_lines: self.total_lines(),
-        }
-    }
-
     pub fn total_lines(&self) -> u64 {
         self.next_line_no
     }
@@ -667,27 +663,9 @@ impl SerialDebugArchive {
         ts_ms: u64,
         dropped_bytes: u64,
     ) -> std::io::Result<Vec<SerialDebugLine>> {
-        let pending = match direction {
-            Direction::Tx => &mut self.pending_tx,
-            Direction::Rx => &mut self.pending_rx,
-        };
-        let partial = std::mem::take(pending);
         let mut written = Vec::new();
-        if !partial.is_empty() {
-            let text_end = partial
-                .iter()
-                .rposition(|&b| b != b'\n' && b != b'\r')
-                .map(|idx| idx + 1)
-                .unwrap_or(0);
-            if let Some(line) = self.append_line(SerialDebugLine {
-                line_no: 0,
-                ts_ms,
-                direction: log_direction(direction),
-                text: String::from_utf8_lossy(&partial[..text_end]).into_owned(),
-                raw_bytes: None,
-            })? {
-                written.push(line);
-            }
+        if let Some(line) = self.close_pending_line(direction, ts_ms)? {
+            written.push(line);
         }
         if let Some(line) = self.append_line(SerialDebugLine {
             line_no: 0,
@@ -703,6 +681,59 @@ impl SerialDebugArchive {
             self.flush_writers()?;
         }
         Ok(written)
+    }
+
+    /// Close whatever is still buffered in *both* directions, for the end of a
+    /// session. Returns the lines written, newest last.
+    ///
+    /// `append_chunk` only cuts a line at `\n`, so output the device never
+    /// terminated — a `login: ` prompt, a progress bar, a bootloader prompt —
+    /// stays in the pending buffer. Without this the port closes on top of it
+    /// and those bytes exist nowhere: not in the live view, not in the archive,
+    /// and therefore not in the export, the auto-save file, the filter tabs or
+    /// the history window either. Empty buffers write nothing, so closing a
+    /// quiet session adds no blank line.
+    pub fn finalize_pending_lines(&mut self, ts_ms: u64) -> std::io::Result<Vec<SerialDebugLine>> {
+        let mut written = Vec::new();
+        for direction in [Direction::Tx, Direction::Rx] {
+            if let Some(line) = self.close_pending_line(direction, ts_ms)? {
+                written.push(line);
+            }
+        }
+        if !written.is_empty() {
+            self.flush_writers()?;
+        }
+        Ok(written)
+    }
+
+    /// Cut whatever is buffered for `direction` into a line of its own. `None`
+    /// when nothing is buffered (or the archive is capped). Does not flush —
+    /// callers batch that with the rest of what they write.
+    fn close_pending_line(
+        &mut self,
+        direction: Direction,
+        ts_ms: u64,
+    ) -> std::io::Result<Option<SerialDebugLine>> {
+        let pending = match direction {
+            Direction::Tx => &mut self.pending_tx,
+            Direction::Rx => &mut self.pending_rx,
+        };
+        let partial = std::mem::take(pending);
+        if partial.is_empty() {
+            return Ok(None);
+        }
+        let text_end = partial
+            .iter()
+            .rposition(|&b| b != b'\n' && b != b'\r')
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        self.append_line(SerialDebugLine {
+            line_no: 0,
+            ts_ms,
+            direction: log_direction(direction),
+            text: String::from_utf8_lossy(&partial[..text_end]).into_owned(),
+            raw_bytes: None,
+        })
     }
 
     /// Returns `None` once the archive is capped (see [`Self::append_line`]).
@@ -735,15 +766,16 @@ impl SerialDebugArchive {
     }
 
     pub fn read_lines(&self, line_nos: &[u64]) -> std::io::Result<Vec<SerialDebugLine>> {
-        let mut idx_file = File::open(&self.idx_path)?;
-        let mut log_file = File::open(&self.log_path)?;
-        let mut items = Vec::with_capacity(line_nos.len());
-        for &line_no in line_nos {
-            if let Some(line) = self.read_line_with_files(line_no, &mut idx_file, &mut log_file)? {
-                items.push(line);
-            }
-        }
-        Ok(items)
+        // `total_lines()` is read once, before any I/O. The archive is
+        // append-only, so a run bounded by that snapshot is fully written and
+        // flushed for the whole read — nothing a later append does can move
+        // bytes the run already covers.
+        read_archive_lines(
+            &self.log_path,
+            &self.idx_path,
+            line_nos,
+            Some(self.total_lines()),
+        )
     }
 
     pub fn read_page(&self, start: u64, limit: u64) -> std::io::Result<SerialDebugSessionPage> {
@@ -871,22 +903,6 @@ impl SerialDebugArchive {
         self.read_index_entry_with_file(line_no, &mut idx_file)
     }
 
-    fn read_line_with_files(
-        &self,
-        line_no: u64,
-        idx_file: &mut File,
-        log_file: &mut File,
-    ) -> std::io::Result<Option<SerialDebugLine>> {
-        if line_no == 0 || line_no > self.total_lines() {
-            return Ok(None);
-        }
-        let (offset, len) = self.read_index_entry_with_file(line_no, idx_file)?;
-        log_file.seek(SeekFrom::Start(offset))?;
-        let mut buf = vec![0u8; len as usize];
-        log_file.read_exact(&mut buf)?;
-        Ok(Some(serde_json::from_slice::<SerialDebugLine>(&buf)?))
-    }
-
     fn read_index_entry_with_file(
         &self,
         line_no: u64,
@@ -926,26 +942,11 @@ impl SerialDebugArchive {
 
 impl SerialDebugArchiveReader {
     pub fn read_lines(&self, line_nos: &[u64]) -> std::io::Result<Vec<SerialDebugLine>> {
-        let mut idx_file = File::open(&self.idx_path)?;
-        let mut log_file = File::open(&self.log_path)?;
-        let mut items = Vec::with_capacity(line_nos.len());
-        for &line_no in line_nos {
-            if line_no == 0 {
-                continue;
-            }
-            idx_file.seek(SeekFrom::Start((line_no - 1) * ARCHIVE_INDEX_ENTRY_BYTES))?;
-            let mut offset_buf = [0u8; 8];
-            let mut len_buf = [0u8; 8];
-            idx_file.read_exact(&mut offset_buf)?;
-            idx_file.read_exact(&mut len_buf)?;
-            let offset = u64::from_le_bytes(offset_buf);
-            let len = u64::from_le_bytes(len_buf);
-            log_file.seek(SeekFrom::Start(offset))?;
-            let mut buf = vec![0u8; len as usize];
-            log_file.read_exact(&mut buf)?;
-            items.push(serde_json::from_slice::<SerialDebugLine>(&buf)?);
-        }
-        Ok(items)
+        // No `total_lines` bound here: the reader is a path snapshot with no
+        // view of the writer's counter, so a line number past the end still
+        // fails the `.idx` read as it always has. Callers bound the range with
+        // the total they snapshotted alongside the reader.
+        read_archive_lines(&self.log_path, &self.idx_path, line_nos, None)
     }
 
     pub fn read_line_range(
@@ -959,6 +960,119 @@ impl SerialDebugArchiveReader {
         let line_nos = (start_line_no..start_line_no.saturating_add(limit)).collect::<Vec<_>>();
         self.read_lines(&line_nos)
     }
+}
+
+/// Read the archived lines named by `line_nos`, in that order, skipping line 0
+/// and — when `max_line_no` is set — anything past the end of the archive.
+///
+/// Line numbers that ascend by exactly one are grouped into a *run* and fetched
+/// by [`read_line_run`] with a handful of syscalls instead of four per line;
+/// that is the whole point, since paging (`read_page` / `read_line_range`) asks
+/// for nothing but one long run. Sparse input — a filter's match list — simply
+/// degenerates to runs of length one, which cost what the per-line path always
+/// cost.
+fn read_archive_lines(
+    log_path: &std::path::Path,
+    idx_path: &std::path::Path,
+    line_nos: &[u64],
+    max_line_no: Option<u64>,
+) -> std::io::Result<Vec<SerialDebugLine>> {
+    let mut idx_file = File::open(idx_path)?;
+    let mut log_file = File::open(log_path)?;
+    let mut items = Vec::with_capacity(line_nos.len());
+    let in_range = |line_no: u64| line_no != 0 && max_line_no.is_none_or(|max| line_no <= max);
+
+    let mut i = 0;
+    while i < line_nos.len() {
+        let first = line_nos[i];
+        if !in_range(first) {
+            i += 1;
+            continue;
+        }
+        let mut run = 1;
+        while i + run < line_nos.len() {
+            let next = first.saturating_add(run as u64);
+            if line_nos[i + run] != next || !in_range(next) {
+                break;
+            }
+            run += 1;
+        }
+        read_line_run(&mut idx_file, &mut log_file, first, run, &mut items)?;
+        i += run;
+    }
+    Ok(items)
+}
+
+/// Append `count` consecutive archived lines starting at `first_line_no`
+/// (1-based) to `out`.
+///
+/// The `.idx` entries of consecutive lines are themselves consecutive
+/// (`(line_no - 1) * 16`), and the `.ndjson` is append-only — every line is
+/// written at `next_offset` and advances it by `len + 1` — so the payloads of
+/// consecutive lines form one contiguous byte span with a single `\n` between
+/// them. That holds for every append path (`append_chunk`, `append_gap`,
+/// `append_sys_line`, the cap notice), because they all funnel through
+/// `write_encoded_line`, and the `stopWriting` cap never rewrites or renumbers.
+/// So one seek+read fetches the whole index slice and one more fetches the whole
+/// payload span: 4 syscalls per batch instead of 4 per line.
+fn read_line_run(
+    idx_file: &mut File,
+    log_file: &mut File,
+    first_line_no: u64,
+    count: usize,
+    out: &mut Vec<SerialDebugLine>,
+) -> std::io::Result<()> {
+    let mut done = 0;
+    while done < count {
+        let batch = (count - done).min(ARCHIVE_READ_INDEX_BATCH_LINES);
+        let batch_first = first_line_no + done as u64;
+        idx_file.seek(SeekFrom::Start(
+            (batch_first - 1) * ARCHIVE_INDEX_ENTRY_BYTES,
+        ))?;
+        let mut idx_buf = vec![0u8; batch * ARCHIVE_INDEX_ENTRY_BYTES as usize];
+        idx_file.read_exact(&mut idx_buf)?;
+
+        let entries = idx_buf
+            .chunks_exact(ARCHIVE_INDEX_ENTRY_BYTES as usize)
+            .map(|entry| {
+                let mut offset = [0u8; 8];
+                let mut len = [0u8; 8];
+                offset.copy_from_slice(&entry[..8]);
+                len.copy_from_slice(&entry[8..]);
+                (u64::from_le_bytes(offset), u64::from_le_bytes(len))
+            })
+            .collect::<Vec<_>>();
+
+        let mut i = 0;
+        while i < entries.len() {
+            // Grow the span while it stays inside the byte budget; `last` never
+            // stays below `i`, so a single oversized line still makes progress.
+            let (span_start, first_len) = entries[i];
+            let mut last = i;
+            let mut span_end = span_start + first_len;
+            while last + 1 < entries.len() {
+                let (next_offset, next_len) = entries[last + 1];
+                let next_end = next_offset + next_len;
+                if next_end - span_start > ARCHIVE_READ_SPAN_BUDGET_BYTES {
+                    break;
+                }
+                last += 1;
+                span_end = next_end;
+            }
+            let mut span = vec![0u8; (span_end - span_start) as usize];
+            log_file.seek(SeekFrom::Start(span_start))?;
+            log_file.read_exact(&mut span)?;
+            for &(offset, len) in &entries[i..=last] {
+                let from = (offset - span_start) as usize;
+                out.push(serde_json::from_slice::<SerialDebugLine>(
+                    &span[from..from + len as usize],
+                )?);
+            }
+            i = last + 1;
+        }
+        done += batch;
+    }
+    Ok(())
 }
 
 impl SerialDebugFilterIndex {
@@ -2630,6 +2744,71 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Closing a port must not swallow what the device printed last. A prompt
+    /// (`login: `), a progress bar or a bootloader banner carries no trailing
+    /// newline, so nothing else in the archive ever cuts it.
+    #[test]
+    fn finalize_pending_lines_archives_the_unterminated_tail_of_both_directions() {
+        let dir = temp_serial_debug_dir("finalize-tail");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Tx,
+                ts_ms: 1,
+                bytes: b"who".to_vec(),
+            })
+            .unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 2,
+                bytes: b"login: ".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(archive.total_lines(), 0, "neither side ended in a newline");
+
+        let written = archive.finalize_pending_lines(3).unwrap();
+
+        assert_eq!(written.len(), 2);
+        assert_eq!(written[0].direction, LogDirection::Tx);
+        assert_eq!(written[0].text, "who");
+        assert_eq!(written[1].direction, LogDirection::Rx);
+        assert_eq!(written[1].text, "login: ");
+        // Readable from the archive file, not just returned: that is what the
+        // export, the auto-save backfill and the history window read.
+        let all = archive.read_line_range(1, 10).unwrap();
+        assert_eq!(
+            all.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            vec!["who", "login: "]
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn finalize_pending_lines_writes_nothing_when_nothing_is_buffered() {
+        let dir = temp_serial_debug_dir("finalize-empty");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"done\n".to_vec(),
+            })
+            .unwrap();
+
+        // Every byte already ended in a line; closing must not add a blank one.
+        assert!(archive.finalize_pending_lines(2).unwrap().is_empty());
+        assert_eq!(archive.total_lines(), 1);
+        // Idempotent: a second close still has nothing to cut.
+        assert!(archive.finalize_pending_lines(3).unwrap().is_empty());
+        assert_eq!(archive.total_lines(), 1);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn drop_counter_coalesces_a_burst_into_one_report() {
         let drops = SerialDebugDropCounter::default();
@@ -2873,6 +3052,234 @@ mod tests {
             .unwrap();
         assert_eq!(completed_tail.len(), 1);
         assert_eq!(completed_tail[0].text.len(), 8);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The pre-batching reader: seek+read the index entry, then seek+read the
+    /// payload, once per line. Kept here as the reference that the batched
+    /// `read_archive_lines` has to reproduce exactly.
+    fn read_lines_one_at_a_time(
+        log_path: &std::path::Path,
+        idx_path: &std::path::Path,
+        line_nos: &[u64],
+        max_line_no: Option<u64>,
+    ) -> Vec<SerialDebugLine> {
+        let mut idx_file = File::open(idx_path).unwrap();
+        let mut log_file = File::open(log_path).unwrap();
+        let mut items = Vec::new();
+        for &line_no in line_nos {
+            if line_no == 0 || max_line_no.is_some_and(|max| line_no > max) {
+                continue;
+            }
+            idx_file
+                .seek(SeekFrom::Start((line_no - 1) * ARCHIVE_INDEX_ENTRY_BYTES))
+                .unwrap();
+            let mut offset_buf = [0u8; 8];
+            let mut len_buf = [0u8; 8];
+            idx_file.read_exact(&mut offset_buf).unwrap();
+            idx_file.read_exact(&mut len_buf).unwrap();
+            let offset = u64::from_le_bytes(offset_buf);
+            let len = u64::from_le_bytes(len_buf);
+            log_file.seek(SeekFrom::Start(offset)).unwrap();
+            let mut buf = vec![0u8; len as usize];
+            log_file.read_exact(&mut buf).unwrap();
+            items.push(serde_json::from_slice::<SerialDebugLine>(&buf).unwrap());
+        }
+        items
+    }
+
+    /// `read_page(start, limit)` must return exactly what the one-line-at-a-time
+    /// reader returns for the same window, and must keep clamping `start`
+    /// silently — the frontend reads `items[0].lineNo`, but `page.start` is part
+    /// of the contract all the same.
+    fn assert_read_page_matches_reference(archive: &SerialDebugArchive, start: u64, limit: u64) {
+        let total = archive.total_lines();
+        let clamped_start = start.min(total);
+        let end = clamped_start.saturating_add(limit).min(total);
+        let expected = read_lines_one_at_a_time(
+            &archive.log_path,
+            &archive.idx_path,
+            &(clamped_start + 1..=end).collect::<Vec<_>>(),
+            Some(total),
+        );
+
+        let page = archive.read_page(start, limit).unwrap();
+        assert_eq!(page.total_lines, total, "start={start} limit={limit}");
+        assert_eq!(page.start, clamped_start, "start={start} limit={limit}");
+        assert_eq!(page.items, expected, "start={start} limit={limit}");
+    }
+
+    fn append_numbered_lines(archive: &mut SerialDebugArchive, count: u64) {
+        let mut bytes = Vec::new();
+        for i in 1..=count {
+            bytes.extend_from_slice(format!("line {i} payload\n").as_bytes());
+        }
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 7,
+                bytes,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn archive_read_page_matches_line_by_line_reads() {
+        let dir = temp_serial_debug_dir("read-page-equivalence");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+
+        // Empty archive: every window is empty and `start` clamps to 0.
+        assert_read_page_matches_reference(&archive, 0, 400);
+        assert_read_page_matches_reference(&archive, 9, 400);
+
+        // Single line.
+        append_numbered_lines(&mut archive, 1);
+        assert_read_page_matches_reference(&archive, 0, 400);
+        assert_read_page_matches_reference(&archive, 1, 400);
+        assert_read_page_matches_reference(&archive, 5, 400);
+
+        // 907 lines over a 400-line page size: two full pages, a short last
+        // page, and both page boundaries.
+        append_numbered_lines(&mut archive, 906);
+        assert_eq!(archive.total_lines(), 907);
+        for start in [0, 1, 399, 400, 401, 799, 800, 906, 907] {
+            assert_read_page_matches_reference(&archive, start, 400);
+        }
+        // `start` past the end is clamped silently, not rejected.
+        for start in [908, 5_000, u64::MAX] {
+            assert_read_page_matches_reference(&archive, start, 400);
+        }
+        assert!(archive.read_page(908, 400).unwrap().items.is_empty());
+        assert_eq!(archive.read_page(908, 400).unwrap().start, 907);
+        // Degenerate limits.
+        assert_read_page_matches_reference(&archive, 10, 0);
+        assert_read_page_matches_reference(&archive, 10, 1);
+        assert_read_page_matches_reference(&archive, 0, u64::MAX);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn archive_read_page_matches_line_by_line_reads_with_gap_and_cap_lines() {
+        let dir = temp_serial_debug_dir("read-page-equivalence-sentinels");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+
+        // A gap closes off the buffered partial line and appends a sentinel, so
+        // the archive holds an ordinary line, a partial line and a `Sys` line
+        // back to back — the contiguous-span assumption has to hold across all
+        // three.
+        append_numbered_lines(&mut archive, 3);
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 8,
+                bytes: b"truncated".to_vec(),
+            })
+            .unwrap();
+        archive.append_gap(Direction::Rx, 9, 128).unwrap();
+        append_numbered_lines(&mut archive, 3);
+        archive.append_sys_line(10, "note".into()).unwrap();
+        assert_eq!(archive.total_lines(), 9);
+        for start in 0..=10 {
+            assert_read_page_matches_reference(&archive, start, 4);
+        }
+
+        // Then fill to the cap: the last archived line is the cap sentinel and
+        // nothing is written after it, so the index stays hole-free.
+        archive.set_max_bytes(8192);
+        let capped_at = fill_until_capped(&mut archive);
+        assert!(capped_at > 9);
+        assert!(
+            serial_debug_archive_cap_limit_mib(
+                archive
+                    .read_page(capped_at - 1, 1)
+                    .unwrap()
+                    .items
+                    .first()
+                    .unwrap()
+            )
+            .is_some(),
+            "the last line must be the cap sentinel"
+        );
+        for start in [0, capped_at / 2, capped_at - 1, capped_at, capped_at + 5] {
+            assert_read_page_matches_reference(&archive, start, 400);
+        }
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn archive_read_page_matches_line_by_line_reads_across_read_batches() {
+        let dir = temp_serial_debug_dir("read-page-equivalence-batches");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        // 1200 near-maximal lines: more than ARCHIVE_READ_INDEX_BATCH_LINES
+        // (1024) and over 4 MiB of payload, so a single-window read has to split
+        // both its index reads and its payload spans.
+        let filler = "x".repeat(4000);
+        for batch in 0..12 {
+            let mut bytes = Vec::new();
+            for i in 0..100 {
+                bytes.extend_from_slice(format!("{}-{i} {filler}\n", batch).as_bytes());
+            }
+            archive
+                .append_chunk(&DebugChunk {
+                    direction: Direction::Rx,
+                    ts_ms: batch,
+                    bytes,
+                })
+                .unwrap();
+        }
+        assert_eq!(archive.total_lines(), 1200);
+        assert_read_page_matches_reference(&archive, 0, 1200);
+        assert_read_page_matches_reference(&archive, 1000, 400);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn archive_read_lines_matches_line_by_line_reads_for_arbitrary_line_numbers() {
+        let dir = temp_serial_debug_dir("read-lines-equivalence");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        append_numbered_lines(&mut archive, 20);
+
+        // Sparse (a filter match list), descending, duplicated, line 0 and past
+        // the end all have to behave as before: skip what is out of range, keep
+        // the caller's order everywhere else.
+        for line_nos in [
+            vec![],
+            vec![0],
+            vec![0, 1, 0, 2],
+            vec![3, 7, 8, 9, 15],
+            vec![20, 19, 18],
+            vec![5, 5, 5, 6],
+            vec![18, 19, 20, 21, 22],
+            (1..=20).collect::<Vec<_>>(),
+        ] {
+            let expected = read_lines_one_at_a_time(
+                &archive.log_path,
+                &archive.idx_path,
+                &line_nos,
+                Some(archive.total_lines()),
+            );
+            assert_eq!(
+                archive.read_lines(&line_nos).unwrap(),
+                expected,
+                "{line_nos:?}"
+            );
+
+            // The snapshot reader has no total to clamp against; within the
+            // archive it must agree line for line.
+            if line_nos.iter().all(|&n| n <= 20) {
+                let reader_expected =
+                    read_lines_one_at_a_time(&archive.log_path, &archive.idx_path, &line_nos, None);
+                assert_eq!(
+                    archive.snapshot_reader().read_lines(&line_nos).unwrap(),
+                    reader_expected,
+                    "{line_nos:?}"
+                );
+            }
+        }
 
         std::fs::remove_dir_all(dir).unwrap();
     }
