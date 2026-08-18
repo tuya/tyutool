@@ -22,6 +22,11 @@ jobs:
   rust:
     name: Rust (core + cli)
     runs-on: ubuntu-latest
+    # This pipeline finishes in ~2 minutes. GitHub's default job timeout is 6
+    # HOURS, so a hung step (see the apt note in `tauri`) burns the runner until
+    # a human notices and cancels. Cap every job well above its real cost and
+    # far below the default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -42,14 +47,25 @@ jobs:
   tauri:
     name: Rust (tauri backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      # This step normally takes 30-60s. On 2026-08-18 it hung for 43 minutes on
+      # an unresponsive apt mirror and had to be cancelled by hand, so it is now
+      # bounded twice: apt gives up on a stalled connection (Retries/Timeout), and
+      # the step itself dies rather than idling all the way into the job cap.
+      # `build-essential curl wget file` are dropped from the Tauri-documented
+      # list -- the ubuntu runner image already ships them, and every extra
+      # package is one more mirror fetch that can stall.
       - name: Install Linux system dependencies
+        timeout-minutes: 8
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          APT_OPTS: -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -qq $APT_OPTS
+          sudo apt-get install -y --no-install-recommends $APT_OPTS \
             libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
-            build-essential curl wget file \
             libxdo-dev libssl-dev libudev-dev \
             libayatana-appindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
@@ -64,6 +80,7 @@ jobs:
   frontend:
     name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v5
