@@ -106,7 +106,7 @@ tyutool/
 ├── crates/
 │   ├── tyutool-core/   # Rust library — all flash logic, chip plugins, serial utils, authorize, serial-debug engine
 │   ├── tyutool-cli/    # Standalone CLI binary; the `serve` subcommand lives in tyutool-serve
-│   ├── tyutool-serve/  # WS dev-serve backend for `tyutool-cli serve` (port 9527, dev only — no auth, localhost only)
+│   ├── tyutool-serve/  # WS dev-serve backend for `tyutool-cli serve` (port 9527, dev only — loopback bind + Host/Origin check, no auth)
 │   ├── tyutool-bridge/ # Resident tray + WS helper "Cobuilder Bridge" (port 18730; Origin allowlist + token grants) — see crates/tyutool-bridge/CLAUDE.md
 │   └── (see Cargo.toml [workspace].members — 5 crates total)
 ├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
@@ -135,11 +135,13 @@ tyutool/
 |-------|--------------|------|
 | `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine. **No binaries.** |
 | `tyutool-cli` | bin `tyutool_cli` | Interactive CLI. The `serve` subcommand delegates to `tyutool-serve`. |
-| `tyutool-serve` | lib (used by `tyutool-cli serve`) | WS dev-serve backend for `pnpm run dev:web` — **localhost:9527, dev-only, no auth, no Origin gate**. Not shipped to end users. |
+| `tyutool-serve` | lib (used by `tyutool-cli serve`) | WS dev-serve backend for `pnpm run dev:web` — **binds 127.0.0.1:9527, loopback `Host` + local-`Origin` handshake check (`validate_ws_origin`), no authentication, dev-only**. Not shipped to end users. |
 | `tyutool-bridge` | bin `tyutool-bridge` ("Cobuilder Bridge") | Resident tray + WS helper for cobuilder-web — **localhost:18730, Origin allowlist + per-connection token grants, single-execution lock, audit log**. Independent release line (`bridge-v*` tags). See `crates/tyutool-bridge/CLAUDE.md` and `PROTOCOL.md`. |
 | `src-tauri` | bin `tyutool_gui` | Tauri 2 desktop GUI backend; bridges the WebView to `tyutool-core`. |
 
-> **`tyutool-serve` vs `tyutool-bridge`** are easy to confuse: both expose `tyutool-core` over a localhost WebSocket, but they are different crates with different consumers, ports, and security models. `serve` is the in-repo dev shim (no humans are flashed in `dev:web`); `bridge` is a shipped, resident, security-hardened helper for a remote web client. They share no protocol — bridge frames are independent and documented in `crates/tyutool-bridge/PROTOCOL.md`.
+> **`tyutool-serve` vs `tyutool-bridge`** are easy to confuse: both expose `tyutool-core` over a localhost WebSocket, but they are different crates with different consumers, ports, and security models. `serve` is the in-repo dev shim; `bridge` is a shipped, resident, security-hardened helper for a remote web client. They share no protocol — bridge frames are independent and documented in `crates/tyutool-bridge/PROTOCOL.md`.
+>
+> Both refuse a cross-origin handshake, and the difference is *how much* they refuse: `serve` only checks that `Host` is loopback and `Origin` is absent or local (`validate_ws_origin`, ported verbatim from upstream — do not rewrite it), which stops a random web page from driving the user's hardware but trusts every local process. `bridge` adds an explicit Origin allowlist, per-connection token grants, a single-execution lock, and an audit log, because it is shipped to end users and left running.
 
 #### Chip plugin system (Rust)
 
