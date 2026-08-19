@@ -135,7 +135,7 @@ enum Commands {
         /// Uart baud rate (default: chip-specific monitor baud; 115200 without -d)
         #[arg(short = 'b', long = "baud")]
         baud: Option<u32>,
-        /// Chip type — selects the default monitor baud (t5ai: 460800, others: 115200)
+        /// Chip type — selects the default monitor baud (t5ai/t3: 460800, others: 115200)
         #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
         device: Option<String>,
         /// Append received data to this file
@@ -207,11 +207,14 @@ fn default_baud(device: &str) -> u32 {
     }
 }
 
-// Matches TuyaOpen `cli_monitor.py` `_CHIP_MONITOR_BAUDRATE`: T5/T5AI monitor
-// at 460800, every other chip (and no `-d`) at 115200.
+// Must stay in sync with `defaultLogBaudRate` in
+// src/features/firmware-flash/chip-manifests.ts: T5AI and T3 log at 460800,
+// every other chip (and no `-d`) at 115200. The GUI reads the same port at the
+// same rate, so a chip listed at 460800 there and 115200 here would show the
+// user solid garbage in one of the two.
 fn monitor_default_baud(device: Option<&str>) -> u32 {
     match device.map(|d| d.to_ascii_lowercase()).as_deref() {
-        Some("t5ai") => 460800,
+        Some("t5ai") | Some("t3") => 460800,
         _ => 115200,
     }
 }
@@ -877,9 +880,16 @@ mod tests {
 
     #[test]
     fn monitor_default_baud_per_chip() {
+        // 460800 chips — the ones whose `defaultLogBaudRate` is 460800 in
+        // chip-manifests.ts.
         assert_eq!(monitor_default_baud(Some("t5ai")), 460800);
         assert_eq!(monitor_default_baud(Some("T5AI")), 460800);
+        assert_eq!(monitor_default_baud(Some("t3")), 460800);
+        assert_eq!(monitor_default_baud(Some("T3")), 460800);
         assert_eq!(monitor_default_baud(Some("bk7231n")), 115200);
+        assert_eq!(monitor_default_baud(Some("t1")), 115200);
+        assert_eq!(monitor_default_baud(Some("t2")), 115200);
+        assert_eq!(monitor_default_baud(Some("ln882h")), 115200);
         assert_eq!(monitor_default_baud(Some("esp32")), 115200);
         assert_eq!(monitor_default_baud(None), 115200);
     }
