@@ -396,6 +396,15 @@ describe("SerialDebugLogView auto-scroll", () => {
     expect(writes).toEqual([]);
   });
 
+  it("offers auto-save as a toggle, disabled without a filesystem to write to", async () => {
+    mountComponent();
+    await flush();
+
+    const toggle = host!.querySelector<HTMLButtonElement>(".autosave-toggle");
+    expect(toggle).not.toBeNull();
+    expect(toggle!.disabled).toBe(true);
+  });
+
   it("mounts a bounded slice no matter how large the buffer gets", async () => {
     const s = useSerialDebugStore();
     s.logWindowLines = 20000;
@@ -912,6 +921,28 @@ describe("SerialDebugLogView auto-scroll", () => {
     expect(mountedDump()).not.toContain(rows[rows.length - 1]);
   });
 
+  // The badge is the only way out of history mode, so its label has to name
+  // which of the two things it does.
+  it("names the scroll badge after what it exits", async () => {
+    const { s, el } = await mountWithArchive(200, 0);
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(s.historyMode).toBe(false);
+    expect(host!.querySelector(".paused-badge")!.textContent).toContain(
+      "serialDebug.log.pausedScroll",
+    );
+
+    sessionArchiveTotal = 5000;
+    await scrollTo(el, 0);
+    await flush();
+
+    expect(s.historyMode).toBe(true);
+    expect(host!.querySelector(".paused-badge")!.textContent).toContain(
+      "serialDebug.log.backToLive",
+    );
+  });
+
   it("stays on the live buffer when there is nothing archived", async () => {
     const { s, el, writes } = await mountWithArchive(200, 0);
     writes.length = 0;
@@ -921,7 +952,6 @@ describe("SerialDebugLogView auto-scroll", () => {
 
     expect(s.historyMode).toBe(false);
     expect(writes).toEqual([0]);
-    expect(host!.querySelector(".history-bar")).toBeNull();
   });
 
   // Same scroll-anchor mechanism as history mode, on the pre-existing filter
@@ -949,18 +979,55 @@ describe("SerialDebugLogView auto-scroll", () => {
     const el = pane();
     stubGeometry(el);
     await scrollTo(el, Number.MAX_SAFE_INTEGER);
-    await scrollTo(el, 0);
 
-    const button = [...host!.querySelectorAll("button")].find((b) =>
-      b.textContent?.includes("serialDebug.log.loadOlderMatches"),
-    );
-    expect(button).toBeDefined();
-    button!.click();
+    // Reaching the top pages backwards on its own — same as the All tab.
+    await scrollTo(el, 0);
     await flush();
 
     expect(s.filterPagesById.f1.items.length).toBe(2 * FILTER_PAGE_SIZE);
     const rowHeight = spacerHeight() / (2 * FILTER_PAGE_SIZE);
     expect(el.scrollTop).toBe(FILTER_PAGE_SIZE * rowHeight);
     expect(renderedRows().length).toBeLessThan(80);
+  });
+
+  // The mirror of the All tab leaving history mode at the bottom edge: a filter
+  // tab that paged backwards is pinned against the live refresh, and coming back
+  // down is what releases it.
+  it("re-anchors a paged-back filter tab on the newest matches at the bottom", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 2000;
+    filterMatchTotal = 5000;
+    mountComponent();
+    await flush();
+    s.watchChips = [{ id: "f1", keyword: "m", useRegex: false, color: "#000" }];
+    s.filterStatsById = {
+      f1: {
+        filterId: "f1",
+        status: "complete",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: 0,
+        totalMatches: filterMatchTotal,
+        error: null,
+      },
+    };
+    await s.setActiveChip("f1");
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+    await scrollTo(el, 0);
+    await flush();
+    expect(s.activeFilterPinned).toBe(true);
+    expect(s.filterPagesById.f1.items.length).toBe(2 * FILTER_PAGE_SIZE);
+
+    await scrollTo(el, Number.MAX_SAFE_INTEGER);
+    await flush();
+
+    expect(s.activeFilterPinned).toBe(false);
+    expect(s.filterPagesById.f1.items.length).toBe(FILTER_PAGE_SIZE);
+    expect(s.filterPagesById.f1.start).toBe(
+      filterMatchTotal - FILTER_PAGE_SIZE,
+    );
+    expect(el.scrollTop).toBe(el.scrollHeight - VIEWPORT_HEIGHT);
   });
 });

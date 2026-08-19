@@ -298,10 +298,21 @@ function onScroll(): void {
   void onScrollEdge();
 }
 
+// The badge is the only exit from a paged-back pane now, so it has to say which
+// of the two things it does: unlock the live tail, or leave the older window the
+// tab is parked on (the archive window on "All", older matches on a filter tab).
+const scrollBadgeKey = computed(() =>
+  (activeChip.value ? s.activeFilterPinned : s.historyMode)
+    ? "serialDebug.log.backToLive"
+    : "serialDebug.log.pausedScroll",
+);
+
 async function resumeScroll(): Promise<void> {
-  // Without this the badge would scroll to the bottom of the *history window*
-  // instead of to the live tail — the buffer under the pane is a different one.
+  // Without these the badge would scroll to the bottom of the *paged-back*
+  // window instead of to the live tail — the buffer under the pane is a
+  // different one, and on a filter tab it is pinned against the live refresh.
   if (s.historyMode) s.exitHistoryMode();
+  if (s.activeFilterPinned) await s.loadActiveFilterTail();
   lockAutoScroll.value = false;
   await scrollToBottom();
 }
@@ -392,11 +403,20 @@ async function loadNewerHistoryAtBottom(): Promise<void> {
   compensateScroll(el, beforeTop, -rows);
 }
 
-async function jumpToSessionStart(): Promise<void> {
-  if (!(await s.jumpToSessionStart())) return;
+/**
+ * Back at the bottom of a paged-back filter tab: put the window on the newest
+ * matches and start following them again. The mirror of the All tab leaving
+ * history mode at the same edge.
+ *
+ * The scroll position is re-applied by hand because the window shrinks back to
+ * one page here — the follow-tail watcher only fires when the id of the *last*
+ * line changes, and re-anchoring on the tail usually leaves that line untouched.
+ */
+async function reanchorFilterTailAtBottom(): Promise<void> {
+  await s.loadActiveFilterTail();
   await nextTick();
   const el = scrollRef.value;
-  if (el) applyScrollTop(el, 0);
+  if (el) applyScrollTop(el, maxScrollTop.value);
 }
 
 async function loadOlderFilterMatchesAtTop(): Promise<void> {
@@ -409,16 +429,35 @@ async function loadOlderFilterMatchesAtTop(): Promise<void> {
 }
 
 /**
- * Infinite scroll for the "All" tab. Re-entry is blocked three ways: by
- * `historyLoading` while a read is in flight, by the compensation having moved
- * `scrollTop` away from the edge once it lands, and by the
- * `historyAtSessionStart` / `historyAtArchiveEnd` end stops.
+ * Infinite scroll. Re-entry is blocked three ways: by the in-flight read flag
+ * (`historyLoading` / `activeFilterLoading`), by the compensation having moved
+ * `scrollTop` away from the edge once it lands, and by the end stops
+ * (`historyAtSessionStart` / `historyAtArchiveEnd` / `activeFilterFullyLoaded`).
  */
 async function onScrollEdge(): Promise<void> {
-  if (s.activeChipId !== null || s.historyLoading) return;
+  if (s.historyLoading) return;
   // Not scrollable at all: there is no "the user scrolled up" to react to, and
   // entering history mode here would lock auto-scroll for no reason.
   if (maxScrollTop.value <= 0) return;
+  // Filter tabs page backwards through their own match list, not the archive
+  // window, so they stop here — there is no history mode to enter and no
+  // bottom-edge case (the tail is reloaded on tab switch and live refresh).
+  if (s.activeChipId !== null) {
+    if (scrollTop.value <= rowHeight.value) {
+      if (!s.activeFilterLoading && !s.activeFilterFullyLoaded) {
+        await loadOlderFilterMatchesAtTop();
+      }
+      return;
+    }
+    if (
+      maxScrollTop.value - scrollTop.value <= rowHeight.value &&
+      s.activeFilterPinned &&
+      !s.activeFilterLoading
+    ) {
+      await reanchorFilterTailAtBottom();
+    }
+    return;
+  }
   if (scrollTop.value <= rowHeight.value) {
     if (!s.historyMode) {
       await enterHistory();
@@ -792,21 +831,27 @@ async function saveLog(): Promise<void> {
         v-if="lockAutoScroll"
         type="button"
         class="paused-badge"
-        :aria-label="t('serialDebug.log.pausedScroll')"
+        :aria-label="t(scrollBadgeKey)"
         @click="resumeScroll"
       >
         <FontAwesomeIcon
           :icon="['fas', 'arrow-down']"
           class="size-3 shrink-0"
         />
-        {{ t("serialDebug.log.pausedScroll") }}
+        {{ t(scrollBadgeKey) }}
       </button>
 
       <div class="ml-auto flex items-center gap-1">
-        <!-- status: autosave -->
-        <span
-          class="autosave-indicator"
-          :class="{ 'autosave-indicator--active': s.sessionAutoSavePath }"
+        <!-- auto-save toggle. Green tracks the *setting*, the label tracks
+             whether a file is actually being written (needs an open port). -->
+        <button
+          type="button"
+          class="autosave-toggle"
+          :class="{ 'autosave-toggle--on': s.autoSave }"
+          :disabled="!isTauriRuntime()"
+          :aria-pressed="s.autoSave"
+          :aria-label="t('serialDebug.autoSave.label')"
+          @click="s.setAutoSaveEnabled(!s.autoSave)"
         >
           <FontAwesomeIcon
             :icon="s.sessionAutoSavePath ? faCircleNotch : faFloppyDisk"
@@ -818,7 +863,7 @@ async function saveLog(): Promise<void> {
               ? t("serialDebug.autoSave.active")
               : t("serialDebug.autoSave.off")
           }}
-        </span>
+        </button>
 
         <span class="toolbar-divider" />
 
@@ -904,79 +949,25 @@ async function saveLog(): Promise<void> {
     <!-- chip bar -->
     <SerialDebugChipBar />
 
+    <!-- Older matches load themselves when the pane reaches the top; this only
+         says so, and says when a read is in flight. Rendered on the same
+         condition as before (not only while loading) so it appears and
+         disappears once per tab, never on every page — a strip that came and
+         went mid-read would resize the pane under the scroll compensation. -->
     <div
       v-if="activeChip && !s.activeFilterFullyLoaded"
-      class="border-b border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-1"
-    >
-      <button
-        type="button"
-        class="btn-tool"
-        :disabled="s.activeFilterLoading"
-        @click="loadOlderFilterMatchesAtTop"
-      >
-        <FontAwesomeIcon :icon="['fas', 'arrow-up']" class="size-3 shrink-0" />
-        {{
-          s.activeFilterLoading
-            ? t("serialDebug.log.loadingOlderMatches")
-            : t("serialDebug.log.loadOlderMatches")
-        }}
-      </button>
-    </div>
-
-    <!-- history mode banner: the scrollbar only spans the loaded window, so the
-         position readout is what tells the user where in the session they are -->
-    <div
-      v-if="!activeChip && s.historyMode"
-      class="history-bar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1"
+      class="load-hint flex items-center gap-1 border-b border-[var(--ty-border)] px-3 py-1"
     >
       <FontAwesomeIcon
-        :icon="['fas', 'clock-rotate-left']"
+        :icon="s.activeFilterLoading ? faCircleNotch : ['fas', 'arrow-up']"
         class="size-3 shrink-0"
+        :class="{ 'fa-spin': s.activeFilterLoading }"
       />
-      <span class="history-title">{{
-        t("serialDebug.log.historyBanner")
-      }}</span>
-      <span class="history-position">{{
-        t("serialDebug.log.historyPosition", {
-          from: s.historyStartLineNo,
-          to: s.historyEndLineNo,
-          total: s.historyTotalLines,
-        })
-      }}</span>
-      <button
-        v-if="!s.historyAtSessionStart"
-        type="button"
-        class="btn-tool"
-        :disabled="s.historyLoading"
-        @click="loadOlderHistoryAtTop"
-      >
-        <FontAwesomeIcon :icon="['fas', 'arrow-up']" class="size-3 shrink-0" />
-        {{
-          s.historyLoading
-            ? t("serialDebug.log.loadingOlderLines")
-            : t("serialDebug.log.loadOlderLines")
-        }}
-      </button>
-      <span v-else class="history-position">{{
-        t("serialDebug.log.atSessionStart")
-      }}</span>
-      <div class="ml-auto flex items-center gap-1">
-        <button
-          type="button"
-          class="btn-tool"
-          :disabled="s.historyLoading || s.historyAtSessionStart"
-          @click="jumpToSessionStart"
-        >
-          {{ t("serialDebug.log.jumpToSessionStart") }}
-        </button>
-        <button type="button" class="btn-tool" @click="resumeScroll">
-          <FontAwesomeIcon
-            :icon="['fas', 'arrow-down']"
-            class="size-3 shrink-0"
-          />
-          {{ t("serialDebug.log.backToLive") }}
-        </button>
-      </div>
+      {{
+        s.activeFilterLoading
+          ? t("serialDebug.log.loadingOlderMatches")
+          : t("serialDebug.log.scrollForOlderMatches")
+      }}
     </div>
 
     <!-- Ctrl+F search bar -->
@@ -1284,20 +1275,35 @@ async function saveLog(): Promise<void> {
 .paused-badge:hover {
   background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent);
 }
-.autosave-indicator {
+.autosave-toggle {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
+  border: 1px solid transparent;
   border-radius: 0.375rem;
+  background: transparent;
+  cursor: pointer;
   font-size: 0.8125rem;
   white-space: nowrap;
   color: var(--ty-text-muted);
   opacity: 0.55;
-  user-select: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
 }
-.autosave-indicator--active {
+.autosave-toggle:hover:not(:disabled) {
+  background: var(--ty-surface-muted);
+  opacity: 1;
+}
+.autosave-toggle:disabled {
+  cursor: not-allowed;
+}
+.autosave-toggle--on {
   color: var(--ty-success);
+  border-color: var(--ty-success);
   opacity: 1;
 }
 /* search bar */
@@ -1328,21 +1334,13 @@ async function saveLog(): Promise<void> {
   color: var(--ty-text-muted);
   white-space: nowrap;
 }
-/* history mode banner */
-.history-bar {
+/* "scroll up for more" / "loading" strip above the pane */
+.load-hint {
   background: var(--ty-surface);
-}
-.history-title {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--ty-text);
-  white-space: nowrap;
-}
-.history-position {
   font-size: 0.75rem;
   color: var(--ty-text-muted);
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 /* virtualized line window: the spacer carries the full scroll height, the
    window holds the mounted slice and is offset to the slice's first row. */

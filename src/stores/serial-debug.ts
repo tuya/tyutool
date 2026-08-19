@@ -199,6 +199,13 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const filterPagesById = ref<Record<string, SerialDebugFilterLinePage>>({});
   const activeFilterLoading = ref(false);
   const activeFilterFullyLoaded = ref(false);
+  /**
+   * The user paged the active filter window backwards, so it no longer sits on
+   * the newest matches. While that holds, the live refresh must not re-anchor it
+   * on the tail — that would swap the content out from under someone reading it.
+   * Cleared by every path that re-anchors, i.e. by `loadActiveFilterTail`.
+   */
+  const activeFilterPinned = ref(false);
 
   // ── auto-save ─────────────────────────────────────────────────────────
   const autoSave = ref(false);
@@ -685,6 +692,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     archiveLineIds = new Map();
     activeFilterLoading.value = false;
     activeFilterFullyLoaded.value = true;
+    activeFilterPinned.value = false;
     try {
       await transport.clearSession();
     } catch (e) {
@@ -810,6 +818,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
         scheduleActiveFilterRefresh();
         return;
       }
+      // Paged back: drop the refresh rather than defer it. Returning to the
+      // bottom re-anchors on the tail, which *is* this refresh, so nothing is
+      // owed here. The match counts on the chips are updated by the caller and
+      // stay live either way.
+      if (activeFilterPinned.value) return;
       void loadActiveFilterTail().finally(() => {
         if (activeFilterRefreshPending) {
           scheduleActiveFilterRefresh();
@@ -1192,6 +1205,10 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     if (!id) return;
     const stats = filterStatsById.value[id];
     if (!stats) return;
+    // This is the one operation that puts the window back on the newest
+    // matches, so it is where the pin comes off — every caller (tab switch,
+    // chip add/remove, live refresh, scrolled back to the bottom) means it.
+    activeFilterPinned.value = false;
     activeFilterLoading.value = true;
     try {
       const start = Math.max(0, stats.totalMatches - FILTER_PAGE_SIZE);
@@ -1234,6 +1251,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
         },
       };
       activeFilterFullyLoaded.value = start === 0;
+      activeFilterPinned.value = true;
       return page.items.length;
     } finally {
       activeFilterLoading.value = false;
@@ -1402,6 +1420,21 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
+  /**
+   * Toggle auto-save from any surface (settings switch, log toolbar). Enabling
+   * without a directory would leave the switch on but inert — the watcher in
+   * `useSerialAutoSave` needs both — so ask for one instead.
+   */
+  async function setAutoSaveEnabled(next: boolean): Promise<void> {
+    if (next === autoSave.value) return;
+    if (next && !autoSaveDir.value) {
+      autoSave.value = true;
+      await pickAutoSaveDir();
+      return;
+    }
+    autoSave.value = next;
+  }
+
   return {
     // state
     open,
@@ -1429,6 +1462,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     filterPagesById,
     activeFilterLoading,
     activeFilterFullyLoaded,
+    activeFilterPinned,
     historyMode,
     historyLines,
     historyStartLineNo,
@@ -1481,6 +1515,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     loadWorkspace,
     startWorkspacePersistence,
     pickAutoSaveDir,
+    setAutoSaveEnabled,
     // constants for UI
     commonBaudRates: COMMON_BAUD_RATES,
   };
