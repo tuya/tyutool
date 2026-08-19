@@ -1352,6 +1352,56 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(fake.readFilterMatchesCalls[0]?.filterId).toBe(filterId);
   });
 
+  // The live refresh re-anchors the active filter window on the newest matches.
+  // Someone who paged backwards is reading older ones, so it has to hold off
+  // until they come back — otherwise the content is swapped out under them.
+  it("does not re-anchor a paged-back filter window on a live update", async () => {
+    vi.useFakeTimers();
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.addChip("LOG", false);
+    const filterId = s.watchChips[0].id;
+    fake.setFilterPage(filterId, {
+      filterId,
+      totalMatches: 900,
+      start: 400,
+      items: [{ lineNo: 401, tsMs: 1000, direction: "rx", text: "LOG mid" }],
+    });
+    await s.openPort();
+    await s.setActiveChip(filterId);
+    expect(s.activeFilterPinned).toBe(false);
+
+    await s.loadOlderActiveFilterMatches();
+    expect(s.activeFilterPinned).toBe(true);
+    fake.readFilterMatchesCalls.length = 0;
+
+    fake.emitFilterUpdated({
+      def: s.watchChips[0],
+      stats: {
+        filterId,
+        status: "complete",
+        scannedUntilLineNo: 20,
+        totalLinesSnapshot: 20,
+        totalMatches: 901,
+        error: null,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(fake.readFilterMatchesCalls).toEqual([]);
+    // The chip's own count still tracks the session — only the window is held.
+    expect(s.filterStatsById[filterId].totalMatches).toBe(901);
+
+    // Back at the tail: the window is re-anchored and the pin comes off, so the
+    // next live update is free to refresh again.
+    await s.loadActiveFilterTail();
+
+    expect(s.activeFilterPinned).toBe(false);
+    expect(fake.readFilterMatchesCalls).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
   it("chips cycle colors from CHIP_COLORS when added", async () => {
     const { CHIP_COLORS } = await import("@/features/serial-debug/constants");
     const s = useSerialDebugStore();
@@ -1899,6 +1949,45 @@ describe("useSerialDebugStore session archive limit", () => {
     s.archiveLimitMib = 128;
     await expect(nextTick()).resolves.toBeUndefined();
     expect(s.archiveLimitMib).toBe(128);
+  });
+});
+
+describe("useSerialDebugStore.setAutoSaveEnabled", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("flips the setting when a directory is already chosen", async () => {
+    const s = useSerialDebugStore();
+    s.autoSaveDir = "/tmp/logs";
+
+    await s.setAutoSaveEnabled(true);
+    expect(s.autoSave).toBe(true);
+    expect(s.autoSaveDir).toBe("/tmp/logs");
+
+    await s.setAutoSaveEnabled(false);
+    expect(s.autoSave).toBe(false);
+    expect(s.autoSaveDir).toBe("/tmp/logs");
+  });
+
+  it("does nothing when the value is already what was asked for", async () => {
+    const s = useSerialDebugStore();
+    s.autoSaveDir = "/tmp/logs";
+    s.autoSave = true;
+
+    await s.setAutoSaveEnabled(true);
+
+    expect(s.autoSave).toBe(true);
+  });
+
+  // No directory means the auto-save watcher would never start, so enabling
+  // asks for one. Outside Tauri the picker is unavailable and the flag is left
+  // on but inert — the same state the settings switch has always produced.
+  it("asks for a directory when enabling without one", async () => {
+    const s = useSerialDebugStore();
+
+    await s.setAutoSaveEnabled(true);
+
+    expect(s.autoSave).toBe(true);
+    expect(s.autoSaveDir).toBe("");
   });
 });
 

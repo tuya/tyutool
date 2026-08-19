@@ -314,6 +314,13 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     }
   }
 
+  /**
+   * Anchor the window on the head of the archive. No UI entry point today (the
+   * session-history bar it lived in was removed); kept because it is the only
+   * cheap way to reach line 1 — `loadOlderHistory` needs one call per page —
+   * which is both what a re-added jump affordance would need and what the
+   * `loadNewerHistory` tests use to set up.
+   */
   async function jumpToSessionStart(): Promise<boolean> {
     if (!historyMode.value || historyLoading.value) return false;
     const gen = generation;

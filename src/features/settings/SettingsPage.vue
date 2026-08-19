@@ -117,16 +117,6 @@ function openLogsFolder(): Promise<void> {
   return openLogsFolderAction(t);
 }
 
-async function setAutoSaveEnabled(nextValue: boolean): Promise<void> {
-  if (nextValue === sd.autoSave) return;
-  if (nextValue && !sd.autoSaveDir) {
-    sd.autoSave = true;
-    await sd.pickAutoSaveDir();
-  } else {
-    sd.autoSave = nextValue;
-  }
-}
-
 async function openOpensourceLicenses(): Promise<void> {
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
@@ -500,7 +490,7 @@ function resetBatchAuthDisclaimer(): void {
           <TySwitch
             :model-value="sd.autoSave"
             :aria-label="t('serialDebug.autoSave.label')"
-            @update:model-value="setAutoSaveEnabled"
+            @update:model-value="sd.setAutoSaveEnabled"
           />
         </div>
         <div class="settings-row settings-row--path">
