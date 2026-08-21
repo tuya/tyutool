@@ -594,13 +594,6 @@ function resetBatchAuthDisclaimer(): void {
           {{ t("settings.opensource") }}
         </button>
         <button
-          type="button"
-          class="ty-btn-secondary settings-inline-action w-full justify-center sm:w-auto"
-          @click="openDocumentation"
-        >
-          {{ t("settings.docs") }}
-        </button>
-        <button
           v-if="isTauriRuntime()"
           type="button"
           class="ty-btn-secondary settings-inline-action w-full justify-center sm:w-auto"
@@ -615,6 +608,22 @@ function resetBatchAuthDisclaimer(): void {
         >
           {{ t("settings.resetDisclaimerDone") }}
         </span>
+        <button
+          type="button"
+          class="docs-cta w-full sm:w-auto"
+          @click="openDocumentation"
+        >
+          <span class="docs-cta__shine" aria-hidden="true"></span>
+          <span class="docs-cta__icon" aria-hidden="true">
+            <FontAwesomeIcon :icon="['fas', 'book-open']" class="size-3.5" />
+          </span>
+          <span class="docs-cta__label">{{ t("settings.docs") }}</span>
+          <FontAwesomeIcon
+            :icon="['fas', 'arrow-up-right-from-square']"
+            class="docs-cta__arrow size-3"
+            aria-hidden="true"
+          />
+        </button>
       </div>
     </section>
 
@@ -1050,6 +1059,110 @@ function resetBatchAuthDisclaimer(): void {
   padding-top: 1rem;
 }
 
+/* Documentation call-to-action: the one accented button in the about row. */
+.docs-cta {
+  position: relative;
+  display: inline-flex;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ty-primary) 55%, transparent);
+  background: linear-gradient(
+    135deg,
+    var(--ty-primary) 0%,
+    var(--ty-primary-hover) 58%,
+    color-mix(in srgb, var(--ty-primary-hover) 84%, black 16%) 100%
+  );
+  padding-inline: 1rem;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.12),
+    0 8px 20px color-mix(in srgb, var(--ty-primary) 30%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.docs-cta:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ty-primary) 72%, transparent);
+  box-shadow:
+    0 2px 4px rgba(15, 23, 42, 0.14),
+    0 14px 28px color-mix(in srgb, var(--ty-primary) 38%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.docs-cta:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.docs-cta:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ty-primary) 26%, transparent),
+    0 10px 24px color-mix(in srgb, var(--ty-primary) 32%, transparent);
+}
+
+/* Light sweep across the face on hover/focus. */
+.docs-cta__shine {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.32) 50%,
+    transparent 62%
+  );
+  transform: translateX(-120%);
+  transition: transform 0.55s ease;
+}
+
+.docs-cta:hover .docs-cta__shine,
+.docs-cta:focus-visible .docs-cta__shine {
+  transform: translateX(120%);
+}
+
+.docs-cta__icon {
+  position: relative;
+  display: flex;
+  height: 1.55rem;
+  width: 1.55rem;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.docs-cta__label {
+  position: relative;
+}
+
+.docs-cta__arrow {
+  position: relative;
+  opacity: 0.85;
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.docs-cta:hover .docs-cta__arrow {
+  transform: translate(2px, -2px);
+  opacity: 1;
+}
+
 .disclaimer-reset-feedback {
   color: color-mix(in srgb, var(--ty-primary) 85%, var(--ty-text-muted));
   font-size: 0.75rem;
@@ -1111,8 +1224,14 @@ function resetBatchAuthDisclaimer(): void {
 
 @media (prefers-reduced-motion: reduce) {
   .update-entry-card,
-  .diagnostics-action-card {
+  .diagnostics-action-card,
+  .docs-cta,
+  .docs-cta__arrow {
     transition-duration: 0.01ms !important;
+  }
+
+  .docs-cta__shine {
+    display: none;
   }
 }
 </style>
