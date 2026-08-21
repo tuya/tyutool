@@ -314,7 +314,7 @@
       "portAccessDenied": "Could not open the serial port: access was denied. Usually another program is using the port (including tyutool Serial Debug), or the current process lacks permission. Close the program using the port and try again.",
       "portUnavailable": "Port unavailable. Check connection or release port.",
       "baudSwitchFailed": "The device stopped responding after switching to the selected baud rate. It did answer at the chip's bootrom rate, so the board is connected and nothing was written to it, but the link does not hold at that speed. Lower the baud rate and try again (a long or unshielded USB-serial cable will not carry the highest rates).",
-      "handshakeNoResponse": "The device did not enter download mode: the serial port opened, but the chip never replied, so nothing was written to it. Check that the selected port is the board's flash UART (a USB-serial adapter often exposes two ports) and that the selected chip type matches the board, then power-cycle the board and try again."
+      "handshakeNoResponse": "The device did not enter download mode: the chip never replied, nothing was written. Check the port (a USB-serial adapter often exposes two) and the chip type, then power-cycle the board and retry."
     },
     "segment": "Segment",
     "addSegment": "Add segment",
