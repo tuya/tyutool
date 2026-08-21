@@ -1,26 +1,24 @@
-//! Serial-debug session: open/close, send, the chunk bridge that batches device
-//! output for the UI, filters, and device reset.
+//! Serial-debug session: open/close, send, filters, and device reset — the Tauri
+//! host's half of the serial-debug feature.
 //!
-//! The chunk bridge is why this is more than a thin command wrapper: device
-//! output arrives line-by-line but reaches the webview in coalesced chunks
-//! (`SERIAL_DEBUG_CHUNK_FLUSH_*`) so a chatty device cannot flood the IPC
-//! channel.
+//! The chunk bridge that batches device output, bounds its queue and reports what
+//! it had to drop lives in `tyutool_core::serial_debug_bridge`, shared with
+//! `tyutool-serve`. All this file contributes to it is [`TauriSink`]: the four
+//! Tauri events those batches and notices become.
 
-use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use tyutool_core::{
-    serial_debug_fail_backfill_if_current, serial_debug_finish_backfill_if_current,
-    serial_debug_now_ms, serial_debug_scan_filter_matches, DebugChunk, DebugConfig, Direction,
-    SerialDebugArchive, SerialDebugArchiveReader, SerialDebugChunkBatchBuffer,
-    SerialDebugDropCounter, SerialDebugDropReport, SerialDebugFilterBackfillSnapshot,
-    SerialDebugFilterDefinition, SerialDebugFilterIndex, SerialDebugFilterPage,
-    SerialDebugFilterStats, SerialDebugGeneration, SerialDebugLine, SerialDebugSession,
-    SerialDebugSessionPage,
+    serial_debug_fail_backfill_if_current, serial_debug_finalize_pending,
+    serial_debug_finish_backfill_if_current, serial_debug_ingest_lines,
+    serial_debug_scan_filter_matches, serial_debug_spawn_chunk_bridge, ArchivedChunk, DebugChunk,
+    DebugConfig, SerialDebugArchive, SerialDebugArchiveReader, SerialDebugChunkBridgeHandle,
+    SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition, SerialDebugFilterIndex,
+    SerialDebugFilterPage, SerialDebugFilterStats, SerialDebugGeneration, SerialDebugSession,
+    SerialDebugSessionPage, SerialDebugSink,
 };
 
 pub(crate) struct DebugState {
@@ -46,6 +44,46 @@ struct ArchiveCappedPayload {
     archived_before: u64,
 }
 
+/// Turns everything the shared chunk bridge produces into Tauri events.
+///
+/// Emits are fire-and-forget by contract ([`SerialDebugSink`]): once the webview
+/// is gone there is nobody left to tell, and the bridge thread must not stall on
+/// finding that out.
+#[derive(Clone)]
+struct TauriSink {
+    app: AppHandle,
+}
+
+impl SerialDebugSink for TauriSink {
+    fn chunk_batch(&self, chunks: Vec<ArchivedChunk>) {
+        let _ = self.app.emit("serial-debug-chunk-batch", &chunks);
+    }
+
+    fn chunks_dropped(&self, dropped_bytes: u64, archived_before: u64) {
+        let _ = self.app.emit(
+            "serial-debug-chunks-dropped",
+            &ChunksDroppedPayload {
+                dropped_bytes,
+                archived_before,
+            },
+        );
+    }
+
+    fn archive_capped(&self, limit_mib: u64, archived_before: u64) {
+        let _ = self.app.emit(
+            "serial-debug-archive-capped",
+            &ArchiveCappedPayload {
+                limit_mib,
+                archived_before,
+            },
+        );
+    }
+
+    fn filter_updated(&self, def: SerialDebugFilterDefinition, stats: SerialDebugFilterStats) {
+        emit_filter_update(&self.app, &def, &stats);
+    }
+}
+
 /// Payload of `serial-debug-chunks-dropped`. Only the byte count crosses — the
 /// wording comes from `serialDebug.log.chunksDropped`.
 #[derive(Clone, Serialize)]
@@ -54,35 +92,6 @@ struct ChunksDroppedPayload {
     dropped_bytes: u64,
     /// `archived_before` of the gap lines this notice belongs to — see
     /// [`ArchivedChunk`].
-    archived_before: u64,
-}
-
-/// One chunk on its way to the webview, plus the number of lines the session
-/// archive held *before* this chunk was appended to it.
-///
-/// That number is what lets the frontend switch auto-save on mid-session without
-/// either duplicating or losing a line. Auto-save enables in two halves — the
-/// archive is paged into the file up to a snapshot `N`, the live queue continues
-/// after it — and the frontend cannot otherwise tell which half a live line
-/// belongs to: its own line counter and the archive's `line_no` diverge (the
-/// archive freezes its numbering once capped, and never holds an unterminated
-/// trailing line).
-///
-/// `archived_before` closes that gap exactly, because `append_chunk` archives a
-/// whole chunk under one lock: no snapshot can land *inside* a chunk, so every
-/// line the chunk produced is either wholly inside `N` or wholly after it.
-/// A live line is therefore already in the backfilled half iff
-/// `archived_before < N` — see `dropBackfilledAutoSaveLines` in
-/// `src/stores/serial-debug.ts`.
-///
-/// Read under the same lock guard as the `append_chunk` it precedes; reading it
-/// outside the guard would let another writer slip in between and make the
-/// number a lie.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ArchivedChunk {
-    #[serde(flatten)]
-    chunk: DebugChunk,
     archived_before: u64,
 }
 
@@ -99,10 +108,6 @@ pub(crate) struct SerialDebugFilterAddArgs {
     use_regex: bool,
     color: String,
 }
-
-const SERIAL_DEBUG_CHUNK_FLUSH_MS: u64 = 12;
-const SERIAL_DEBUG_CHUNK_FLUSH_BYTES: usize = 32 * 1024;
-const SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY: usize = 256;
 
 fn serial_debug_archive_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("tyutool").join("serial-debug")
@@ -174,294 +179,6 @@ fn emit_filter_update(
     );
 }
 
-/// Every line the archive accepts passes through `ingest_serial_debug_lines`,
-/// which makes it the one place that can spot the archive-cap sentinel. The
-/// live view never sees archived lines — it re-splits the raw
-/// `serial-debug-chunk*` payloads itself — so without this event the cap notice
-/// would only ever exist in the archive file and the user would watch the log
-/// keep scrolling with no hint that recording had stopped.
-fn emit_archive_cap_notice(app: &AppHandle, lines: &[SerialDebugLine]) {
-    if let Some((limit_mib, line_no)) = lines.iter().find_map(|line| {
-        tyutool_core::serial_debug_archive_cap_limit_mib(line).map(|mib| (mib, line.line_no))
-    }) {
-        let _ = app.emit(
-            "serial-debug-archive-capped",
-            &ArchiveCappedPayload {
-                limit_mib,
-                // The sentinel is an archive line like any other, so its own
-                // position is exactly `line_no - 1`.
-                archived_before: line_no.saturating_sub(1),
-            },
-        );
-    }
-}
-
-fn ingest_serial_debug_lines(
-    app: &AppHandle,
-    archive: &Arc<StdMutex<SerialDebugArchive>>,
-    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
-    lines: &[SerialDebugLine],
-) {
-    if lines.is_empty() {
-        return;
-    }
-    emit_archive_cap_notice(app, lines);
-    let updates = {
-        let mut guard = match filters.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
-        guard.ingest_completed_lines(lines).unwrap_or_default()
-    };
-    if updates.is_empty() {
-        return;
-    }
-    let guard = match filters.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    for stats in updates {
-        if let Some(def) = guard.definition(&stats.filter_id) {
-            emit_filter_update(app, &def, &stats);
-        }
-    }
-    let _ = archive; // keeps the signature symmetric with other bridge helpers
-}
-
-fn flush_serial_debug_chunk(
-    app: &AppHandle,
-    archive: &Arc<StdMutex<SerialDebugArchive>>,
-    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
-    chunks: Vec<DebugChunk>,
-) {
-    if chunks.is_empty() {
-        return;
-    }
-    let (completed, archived) = {
-        let mut guard = match archive.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
-        let mut completed = Vec::new();
-        let mut archived = Vec::with_capacity(chunks.len());
-        // One `archived_before` per chunk, not one per batch: per-chunk only
-        // needs `append_chunk` to be atomic, which the archive guarantees on its
-        // own, whereas a per-batch number would additionally rely on this loop
-        // holding the lock for the whole batch.
-        for chunk in chunks {
-            let archived_before = guard.total_lines();
-            completed.extend(guard.append_chunk(&chunk).unwrap_or_default());
-            archived.push(ArchivedChunk {
-                chunk,
-                archived_before,
-            });
-        }
-        (completed, archived)
-    };
-    ingest_serial_debug_lines(app, archive, filters, &completed);
-    let _ = app.emit("serial-debug-chunk-batch", &archived);
-}
-
-enum SerialDebugChunkBridgeMessage {
-    Chunk {
-        generation: u64,
-        chunk: DebugChunk,
-    },
-    Reset {
-        generation: u64,
-        ack: SyncSender<()>,
-    },
-}
-
-#[derive(Clone)]
-pub(crate) struct SerialDebugChunkBridgeHandle {
-    generation: Arc<SerialDebugGeneration>,
-    send_lock: Arc<StdMutex<()>>,
-    tx: SyncSender<SerialDebugChunkBridgeMessage>,
-    drops: Arc<SerialDebugDropCounter>,
-}
-
-impl SerialDebugChunkBridgeHandle {
-    /// Hand one chunk to the bridge, or account for it as lost.
-    ///
-    /// `try_send`, never `send`: this runs on the serial reader thread, which is
-    /// the only thread draining the OS/driver receive buffer, and the port runs
-    /// without flow control. Blocking here therefore applies no backpressure to
-    /// the *device* — it just stops the buffer being drained until the driver
-    /// overflows and discards bytes we never saw, with no count, no error and
-    /// nothing to show the user. Dropping the chunk here instead keeps the reader
-    /// draining and moves the loss to a boundary we own: we know how many bytes
-    /// went, we can close the archive line so the halves cannot be spliced, and
-    /// we can tell the user (who can lower the baud rate or quieten the device).
-    fn send_chunk(&self, chunk: DebugChunk) {
-        let _guard = self.send_lock.lock().unwrap();
-        let bytes = chunk.bytes.len();
-        match self.tx.try_send(SerialDebugChunkBridgeMessage::Chunk {
-            generation: self.generation.current(),
-            chunk,
-        }) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => self.drops.record(bytes, serial_debug_now_ms()),
-            // The bridge thread is gone; the session is being torn down.
-            Err(TrySendError::Disconnected(_)) => {}
-        }
-    }
-
-    fn reset(&self) -> Result<u64, String> {
-        let _guard = self.send_lock.lock().unwrap();
-        let generation = self.generation.advance();
-        let (ack_tx, ack_rx) = std::sync::mpsc::sync_channel(0);
-        self.tx
-            .send(SerialDebugChunkBridgeMessage::Reset {
-                generation,
-                ack: ack_tx,
-            })
-            .map_err(|e| e.to_string())?;
-        ack_rx.recv().map_err(|e| e.to_string())?;
-        Ok(generation)
-    }
-}
-
-/// Surface one coalesced burst of dropped chunks: a `log::warn!` for the
-/// developer, a gap in the archive and a `Sys` notice for the user.
-///
-/// Whatever is buffered is flushed first — those chunks arrived before the gap,
-/// and emitting them afterwards would put the notice in the wrong place in the
-/// live view.
-fn report_serial_debug_drops(
-    app: &AppHandle,
-    archive: &Arc<StdMutex<SerialDebugArchive>>,
-    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
-    pending: &mut SerialDebugChunkBatchBuffer,
-    report: SerialDebugDropReport,
-) {
-    flush_serial_debug_chunk(app, archive, filters, pending.take());
-    log::warn!(
-        "[serial-debug] chunk bridge queue full (capacity {}): dropped {} chunk(s) / {} byte(s) \
-         of device output",
-        SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY,
-        report.chunks,
-        report.bytes
-    );
-    // Only the reader thread's Rx chunks travel the bounded queue: the Tx path
-    // (`serial_debug_send`) writes straight to the archive.
-    let (lines, archived_before) = {
-        let mut guard = match archive.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
-        // `append_gap` writes the cut-off partial line and the sentinel under one
-        // lock, so one number covers both frontend lines — see [`ArchivedChunk`].
-        let archived_before = guard.total_lines();
-        (
-            guard
-                .append_gap(Direction::Rx, serial_debug_now_ms(), report.bytes)
-                .unwrap_or_default(),
-            archived_before,
-        )
-    };
-    ingest_serial_debug_lines(app, archive, filters, &lines);
-    let _ = app.emit(
-        "serial-debug-chunks-dropped",
-        &ChunksDroppedPayload {
-            dropped_bytes: report.bytes,
-            archived_before,
-        },
-    );
-}
-
-/// Cut the tail the device never terminated into the archive, at the end of a
-/// session. Returns the lines written (empty when nothing was buffered) so the
-/// caller can ingest them like any other archive line.
-///
-/// Nothing else closes that buffer: `append_chunk` only cuts on a newline and
-/// `append_gap` only runs when a chunk is dropped, so a prompt or a progress bar
-/// — output the device deliberately leaves unterminated — would go down with the
-/// port and appear in neither the live view nor the archive.
-fn finalize_serial_debug_pending(
-    archive: &Arc<StdMutex<SerialDebugArchive>>,
-) -> Vec<SerialDebugLine> {
-    let mut guard = match archive.lock() {
-        Ok(guard) => guard,
-        Err(_) => return Vec::new(),
-    };
-    guard
-        .finalize_pending_lines(serial_debug_now_ms())
-        .unwrap_or_default()
-}
-
-fn spawn_serial_debug_chunk_bridge(
-    app: AppHandle,
-    archive: Arc<StdMutex<SerialDebugArchive>>,
-    filters: Arc<StdMutex<SerialDebugFilterIndex>>,
-    generation: Arc<SerialDebugGeneration>,
-) -> SerialDebugChunkBridgeHandle {
-    // Bound the bridge queue so sustained ingress can't grow process memory without limit
-    // when archive/filter/UI consumption temporarily lags behind the serial reader.
-    let (tx, rx) =
-        mpsc::sync_channel::<SerialDebugChunkBridgeMessage>(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY);
-    let drops = Arc::new(SerialDebugDropCounter::default());
-    let handle = SerialDebugChunkBridgeHandle {
-        generation: Arc::clone(&generation),
-        send_lock: Arc::new(StdMutex::new(())),
-        tx: tx.clone(),
-        drops: Arc::clone(&drops),
-    };
-    std::thread::spawn(move || {
-        let mut pending = SerialDebugChunkBatchBuffer::new();
-        let mut active_generation = generation.current();
-        loop {
-            // Before every receive, so `recv_timeout`'s own tick is the poll
-            // clock and no `continue` below can skip the check.
-            if let Some(report) = drops.take_report(serial_debug_now_ms()) {
-                report_serial_debug_drops(&app, &archive, &filters, &mut pending, report);
-            }
-            match rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)) {
-                Ok(SerialDebugChunkBridgeMessage::Chunk { generation, chunk }) => {
-                    if generation != active_generation {
-                        if generation < active_generation {
-                            continue;
-                        }
-                        let _ = pending.take();
-                        active_generation = generation;
-                    }
-                    pending.push(chunk);
-                    if pending.should_flush_bytes(SERIAL_DEBUG_CHUNK_FLUSH_BYTES) {
-                        flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
-                    }
-                }
-                Ok(SerialDebugChunkBridgeMessage::Reset { generation, ack }) => {
-                    let _ = pending.take();
-                    // Drops from the cleared session belong to the log the user
-                    // just discarded; reporting them into the new one would be a
-                    // notice about a gap that is no longer there.
-                    let _ = drops.take_pending();
-                    active_generation = generation;
-                    let _ = ack.send(());
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    if pending
-                        .should_flush_elapsed(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS))
-                    {
-                        flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    flush_serial_debug_chunk(&app, &archive, &filters, pending.take());
-                    // A burst still aggregating at teardown is reported anyway —
-                    // it is the last thing the user needs to know about the log
-                    // they are about to read.
-                    if let Some(report) = drops.take_pending() {
-                        report_serial_debug_drops(&app, &archive, &filters, &mut pending, report);
-                    }
-                    return;
-                }
-            }
-        }
-    });
-    handle
-}
-
 #[tauri::command]
 pub(crate) async fn serial_debug_open(
     app: AppHandle,
@@ -483,14 +200,11 @@ pub(crate) async fn serial_debug_open(
             return Err("already open".into());
         }
     }
-    let archive_for_chunk = Arc::clone(&state.archive);
-    let filters_for_chunk = Arc::clone(&state.filters);
-    let app_for_chunk = app.clone();
     let app_for_disc = app.clone();
-    let chunk_tx = spawn_serial_debug_chunk_bridge(
-        app_for_chunk.clone(),
-        Arc::clone(&archive_for_chunk),
-        Arc::clone(&filters_for_chunk),
+    let chunk_tx = serial_debug_spawn_chunk_bridge(
+        TauriSink { app: app.clone() },
+        Arc::clone(&state.archive),
+        Arc::clone(&state.filters),
         Arc::clone(&state.generation),
     );
     let chunk_tx_for_session = chunk_tx.clone();
@@ -556,10 +270,12 @@ pub(crate) async fn serial_debug_close(
         .take();
     // Cut after the bridge handle is dropped, which is what releases the bridge
     // thread's final flush, so the chunks it was still holding land in the
-    // archive ahead of the tail. (`tyutool-serve`'s bridge acks its shutdown and
-    // is therefore exact about that ordering; this one has no ack.)
-    let lines = finalize_serial_debug_pending(&state.archive);
-    ingest_serial_debug_lines(&app, &state.archive, &state.filters, &lines);
+    // archive ahead of the tail. The shared bridge also offers an acked
+    // `shutdown()` — which is what makes `tyutool-serve` exact about that
+    // ordering — but nothing here waits for it, so this remains a race the drop
+    // usually wins.
+    let lines = serial_debug_finalize_pending(&state.archive);
+    serial_debug_ingest_lines(&TauriSink { app: app.clone() }, &state.filters, &lines);
     Ok(())
 }
 
@@ -605,7 +321,7 @@ pub(crate) fn serial_debug_send(
             archived_before,
         )
     };
-    ingest_serial_debug_lines(&app, &state.archive, &state.filters, &completed);
+    serial_debug_ingest_lines(&TauriSink { app: app.clone() }, &state.filters, &completed);
     let _ = app.emit(
         "serial-debug-chunk",
         &ArchivedChunk {
@@ -694,7 +410,7 @@ pub(crate) fn serial_debug_append_sys_line(
     // `None` once the session archive hit its size cap.
     let line_no = line.as_ref().map(|line| line.line_no);
     if let Some(line) = line {
-        ingest_serial_debug_lines(&app, &state.archive, &state.filters, &[line]);
+        serial_debug_ingest_lines(&TauriSink { app: app.clone() }, &state.filters, &[line]);
     }
     Ok(line_no)
 }
@@ -941,85 +657,5 @@ mod tests {
     fn serial_debug_device_reset_session_requires_open_session() {
         let err = serial_debug_device_reset_session(None, "T5AI").unwrap_err();
         assert_eq!(err, "serial debug not open");
-    }
-
-    /// Closing the port is the last moment the bytes the device printed without
-    /// a trailing newline can be saved — a `login: ` prompt, a progress bar.
-    /// Nothing else in the archive ever cuts them.
-    #[test]
-    fn closing_a_session_archives_the_unterminated_tail() {
-        let dir = std::env::temp_dir().join(format!(
-            "tyutool-gui-serial-debug-close-{}-{}",
-            std::process::id(),
-            serial_debug_now_ms()
-        ));
-        let archive = Arc::new(StdMutex::new(SerialDebugArchive::create(&dir).unwrap()));
-        archive
-            .lock()
-            .unwrap()
-            .append_chunk(&DebugChunk {
-                direction: Direction::Rx,
-                ts_ms: 1,
-                bytes: b"login: ".to_vec(),
-            })
-            .unwrap();
-        assert_eq!(archive.lock().unwrap().total_lines(), 0, "no newline yet");
-
-        let lines = finalize_serial_debug_pending(&archive);
-
-        assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].text, "login: ");
-        assert_eq!(
-            archive
-                .lock()
-                .unwrap()
-                .read_line_range(1, 10)
-                .unwrap()
-                .iter()
-                .map(|l| l.text.clone())
-                .collect::<Vec<_>>(),
-            vec!["login: ".to_string()]
-        );
-        // Closing again has nothing left to cut: no empty line.
-        assert!(finalize_serial_debug_pending(&archive).is_empty());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A full queue must cost us the chunk, not the reader thread.
-    ///
-    /// This test would hang rather than fail if `send_chunk` went back to a
-    /// blocking `send`: nothing drains `rx`, so the third call would park
-    /// forever — which is exactly what stalls the serial reader in production
-    /// and lets the OS receive buffer overflow behind our back.
-    #[test]
-    fn full_bridge_queue_drops_chunks_instead_of_blocking_the_reader() {
-        let (tx, rx) = mpsc::sync_channel::<SerialDebugChunkBridgeMessage>(1);
-        let handle = SerialDebugChunkBridgeHandle {
-            generation: Arc::new(SerialDebugGeneration::default()),
-            send_lock: Arc::new(StdMutex::new(())),
-            tx,
-            drops: Arc::new(SerialDebugDropCounter::default()),
-        };
-        let chunk = |bytes: usize| DebugChunk {
-            direction: Direction::Rx,
-            ts_ms: 1,
-            bytes: vec![b'x'; bytes],
-        };
-
-        handle.send_chunk(chunk(4)); // fits the capacity-1 queue
-        handle.send_chunk(chunk(8)); // dropped
-        handle.send_chunk(chunk(16)); // dropped
-
-        // One report for the whole burst, carrying the total loss.
-        let report = handle.drops.take_pending().unwrap();
-        assert_eq!(report.chunks, 2);
-        assert_eq!(report.bytes, 24);
-        assert!(handle.drops.take_pending().is_none());
-
-        drop(rx);
-        // A disconnected queue is a closing session, not a data loss.
-        handle.send_chunk(chunk(32));
-        assert!(handle.drops.take_pending().is_none());
     }
 }
