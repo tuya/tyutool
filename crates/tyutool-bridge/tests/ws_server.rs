@@ -44,10 +44,13 @@ async fn start_server() -> SocketAddr {
     addr
 }
 
+// The error is boxed because the bare tungstenite::Error is large enough to trip
+// clippy::result_large_err; no caller inspects it, only is_ok/is_err/expect.
 async fn connect_with_origin(
     addr: &SocketAddr,
     origin: &str,
-) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Error> {
+) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<tokio_tungstenite::tungstenite::Error>>
+{
     let mut request = format!("ws://{addr}/")
         .into_client_request()
         .expect("build client request");
@@ -58,6 +61,7 @@ async fn connect_with_origin(
     tokio_tungstenite::connect_async(request)
         .await
         .map(|(ws, _resp)| ws)
+        .map_err(Box::new)
 }
 
 #[tokio::test]
