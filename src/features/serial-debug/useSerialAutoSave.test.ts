@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { createPinia, setActivePinia } from "pinia";
-import { createApp, defineComponent, nextTick } from "vue";
+import { createApp, defineComponent, h, KeepAlive, nextTick, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SerialDebugTransport } from "./transport";
 import { __setSerialDebugTransportForTest } from "./transport";
@@ -179,8 +179,61 @@ describe("useSerialAutoSave", () => {
     app.mount(host);
   }
 
+  /**
+   * Same composable, but inside a `<KeepAlive>` so that navigating away from and
+   * back to the page runs the real `onDeactivated` / `onActivated` hooks.
+   */
+  function mountKeptAlive(s: ReturnType<typeof useSerialDebugStore>): {
+    deactivate: () => Promise<void>;
+    activate: () => Promise<void>;
+  } {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const shown = ref(true);
+    const Page = defineComponent({
+      setup() {
+        useSerialAutoSave(s);
+        return () => null;
+      },
+    });
+    app = createApp(
+      defineComponent({
+        setup() {
+          return () => h(KeepAlive, null, [shown.value ? h(Page) : h("div")]);
+        },
+      }),
+    );
+    app.mount(host);
+    return {
+      async deactivate() {
+        shown.value = false;
+        await nextTick();
+      },
+      async activate() {
+        shown.value = true;
+        await nextTick();
+      },
+    };
+  }
+
+  /**
+   * The file-writing invokes only — starting a session also invokes
+   * `register_dialog_path` to renew the write authorization.
+   */
+  function appendCalls(): unknown[][] {
+    return invokeSpy.mock.calls.filter(
+      (call) => call[0] === "append_text_file",
+    );
+  }
+
+  function registerCalls(): unknown[][] {
+    return invokeSpy.mock.calls.filter(
+      (call) => call[0] === "register_dialog_path",
+    );
+  }
+
   function writtenContents(): string[] {
-    return invokeSpy.mock.calls.map(
+    return appendCalls().map(
       (call) => (call[1] as { content: string }).content,
     );
   }
@@ -204,6 +257,9 @@ describe("useSerialAutoSave", () => {
     s.autoSaveDir = "/logs";
     s.open = true;
     await nextTick();
+    // Let the session-start authorization renewal land before the per-call
+    // mocks below, so they apply to the file writes.
+    await settle();
     expect(s.sessionAutoSavePath).not.toBeNull();
 
     s.appendChunk({
@@ -223,7 +279,7 @@ describe("useSerialAutoSave", () => {
       .mockResolvedValueOnce(undefined);
 
     await vi.advanceTimersByTimeAsync(5000);
-    expect(invokeSpy).toHaveBeenCalledTimes(1);
+    expect(appendCalls()).toHaveLength(1);
 
     s.appendChunk({
       direction: "rx",
@@ -238,7 +294,7 @@ describe("useSerialAutoSave", () => {
     (releaseFirstWrite as (() => void) | null)?.();
     await flushMicrotasks();
 
-    expect(invokeSpy).toHaveBeenCalledTimes(2);
+    expect(appendCalls()).toHaveLength(2);
     expect(s.sessionAutoSavePath).toBeNull();
   });
 
@@ -278,9 +334,9 @@ describe("useSerialAutoSave", () => {
     // than a couple of microtask rounds.
     await settle();
 
-    expect(invokeSpy.mock.calls.length).toBeGreaterThan(1);
+    expect(appendCalls().length).toBeGreaterThan(1);
     expect(s.sessionAutoSavePath).toBeNull();
-    for (const call of invokeSpy.mock.calls) {
+    for (const call of appendCalls()) {
       expect((call[1] as { content: string }).content.length).toBeLessThan(
         AUTO_SAVE_FLUSH_MAX_CHARS * 2,
       );
@@ -314,7 +370,7 @@ describe("useSerialAutoSave", () => {
     await flushMicrotasks();
 
     // A single append per tick would leave most of this behind forever.
-    expect(invokeSpy.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(appendCalls().length).toBeGreaterThanOrEqual(5);
     expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
   });
 
@@ -345,13 +401,13 @@ describe("useSerialAutoSave", () => {
     await flushMicrotasks();
 
     // 20 batches of backlog, capped at 16 appends for this tick.
-    const firstTickAppends = invokeSpy.mock.calls.length;
+    const firstTickAppends = appendCalls().length;
     expect(firstTickAppends).toBe(16);
 
     await vi.advanceTimersByTimeAsync(5000);
     await flushMicrotasks();
 
-    expect(invokeSpy.mock.calls.length).toBeGreaterThan(firstTickAppends);
+    expect(appendCalls().length).toBeGreaterThan(firstTickAppends);
     expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
   });
 
@@ -386,7 +442,7 @@ describe("useSerialAutoSave", () => {
     await settle();
 
     expect(s.sessionAutoSavePath).not.toBeNull();
-    expect(invokeSpy).toHaveBeenCalledTimes(1);
+    expect(appendCalls()).toHaveLength(1);
     expect(invokeSpy).toHaveBeenCalledWith("append_text_file", {
       path: s.sessionAutoSavePath,
       content:
@@ -529,7 +585,7 @@ describe("useSerialAutoSave", () => {
     await settle();
 
     // The periodic flush fired but must not overtake the pending backfill.
-    expect(invokeSpy).not.toHaveBeenCalled();
+    expect(appendCalls()).toHaveLength(0);
 
     (releasePage as ((page: SerialDebugSessionPage) => void) | null)?.({
       totalLines: 1,
@@ -820,7 +876,7 @@ describe("useSerialAutoSave", () => {
     await settle();
 
     expect(s.sessionAutoSavePath).not.toBeNull();
-    expect(invokeSpy).not.toHaveBeenCalled();
+    expect(appendCalls()).toHaveLength(0);
     expect(
       s.lines.some((line) =>
         line.text.startsWith("serialDebug.autoSave.errWrite"),
@@ -837,5 +893,129 @@ describe("useSerialAutoSave", () => {
     await settle();
 
     expect(writtenContents()).toEqual([`[${formatTs(1000)}] [RX ] live\n`]);
+  });
+
+  /**
+   * The Rust-side dialog-path grant expires 10 min after the last authorized
+   * write, and is otherwise only handed out when the user picks the directory.
+   * A session starting after a long idle gap must renew it, or every append is
+   * refused and auto-save shuts itself down mid-session.
+   */
+  it("renews the write authorization for the auto-save dir on session start", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    expect(invokeSpy).toHaveBeenCalledWith("register_dialog_path", {
+      path: "/logs",
+    });
+    expect(registerCalls()).toHaveLength(1);
+
+    // Closed and reopened later — by then the previous grant may be long gone.
+    s.open = false;
+    await nextTick();
+    await settle();
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    expect(registerCalls()).toHaveLength(2);
+  });
+
+  it("keeps recording when the authorization renewal fails", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "register_dialog_path") throw new Error("nope");
+    });
+
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("live\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    expect(writtenContents()).toEqual([`[${formatTs(1000)}] [RX ] live\n`]);
+    expect(
+      s.lines.some((line) =>
+        line.text.startsWith("serialDebug.autoSave.errWrite"),
+      ),
+    ).toBe(false);
+  });
+
+  /**
+   * Navigating away keeps the session file (the port is still open) but stops
+   * the flush interval, so nothing renews the grant while the user is gone —
+   * ten minutes on another page is enough for it to lapse. Coming back resumes
+   * the interval on the same path, so the renewal has to land before the first
+   * append or every later write is refused.
+   */
+  it("renews the write authorization when the page is reactivated with the port open", async () => {
+    const s = useSerialDebugStore();
+    const page = mountKeptAlive(s);
+    invokeSpy.mockResolvedValue(undefined);
+
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    expect(registerCalls()).toHaveLength(1);
+    const sessionPath = s.sessionAutoSavePath;
+    expect(sessionPath).not.toBeNull();
+
+    await page.deactivate();
+    await settle();
+    // The port is still open, so the session file survives the navigation.
+    expect(s.sessionAutoSavePath).toBe(sessionPath);
+
+    // Hold the renewal open, to prove nothing is appended before it lands.
+    let releaseRenewal: (() => void) | null = null;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "register_dialog_path") {
+        await new Promise<void>((resolve) => {
+          releaseRenewal = resolve;
+        });
+      }
+    });
+
+    await page.activate();
+    await settle();
+
+    expect(registerCalls()).toHaveLength(2);
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 3000,
+      bytes: [...Buffer.from("back\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    // The resumed interval ticked while the renewal was still pending.
+    expect(appendCalls()).toHaveLength(0);
+
+    (releaseRenewal as (() => void) | null)?.();
+    await settle();
+
+    expect(writtenContents()).toEqual([`[${formatTs(3000)}] [RX ] back\n`]);
   });
 });

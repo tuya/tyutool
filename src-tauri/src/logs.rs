@@ -30,13 +30,15 @@ use crate::{detect_install_type, SESSION_ID};
 /// dialog-chosen path here; the write commands then refuse any path that is not
 /// the registered path itself or a descendant of a registered directory.
 ///
-/// Entries are TTL-bounded (a write is allowed within `TTL` of registration) so
-/// a leaked/old entry cannot be reused later. The map is capped to bound memory.
+/// Entries are TTL-bounded (a write is allowed within `TTL` of the last
+/// authorized write to that entry) so a leaked/idle entry cannot be reused
+/// later. The map is capped to bound memory.
 pub(crate) struct DialogPathRegistry {
     entries: StdMutex<Vec<(std::path::PathBuf, std::time::Instant)>>,
 }
 
-/// How long a registered path stays authorized for writes.
+/// How long a registered path stays authorized for writes, counted from the
+/// last authorized write to it (not from registration) — see `is_authorized`.
 const DIALOG_PATH_TTL: Duration = Duration::from_secs(600); // 10 min
 
 /// Maximum number of registered paths kept at once (LRU eviction on insert).
@@ -77,6 +79,13 @@ impl DialogPathRegistry {
     /// Returns true if `path` may be written: it equals a registered path, or it
     /// lives beneath a registered directory, within the TTL. Expired entries are
     /// pruned as a side effect.
+    ///
+    /// The TTL slides: an authorized write refreshes the entry it matched, so a
+    /// grant that is actively being written to cannot expire mid-session
+    /// (serial-debug auto-save appends every 5 s for as long as the port stays
+    /// open). A leaked/idle entry still expires 10 min after its last write, and
+    /// the path was user-chosen via a dialog either way, so the refresh does not
+    /// widen what the renderer may reach.
     fn is_authorized(&self, path: &std::path::Path) -> bool {
         let now = std::time::Instant::now();
         let mut entries = match self.entries.lock() {
@@ -84,14 +93,21 @@ impl DialogPathRegistry {
             Err(p) => p.into_inner(),
         };
         Self::prune_locked(&mut entries, now);
-        entries.iter().any(|(registered, ts)| {
+        let hit = entries.iter().position(|(registered, ts)| {
             if now.duration_since(*ts) > DIALOG_PATH_TTL {
                 return false;
             }
             // Authorized if the write target is the registered path itself, or a
             // descendant of a registered directory.
             path == registered || path.starts_with(registered)
-        })
+        });
+        match hit {
+            Some(idx) => {
+                entries[idx].1 = now;
+                true
+            }
+            None => false,
+        }
     }
 
     fn prune_locked(
@@ -1375,6 +1391,7 @@ mod log_tools_tests {
 mod dialog_path_registry_tests {
     use super::DialogPathRegistry;
     use std::path::Path;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn rejects_unregistered_path() {
@@ -1411,6 +1428,53 @@ mod dialog_path_registry_tests {
         assert!(reg.is_authorized(Path::new("/tmp/export.txt")));
     }
 
+    /// A grant that keeps being written to must not expire mid-session. The age
+    /// is injected through the (same-module) private `entries` vec instead of
+    /// sleeping out the 10 minute TTL.
+    #[test]
+    fn authorized_write_slides_the_ttl_forward() {
+        let reg = DialogPathRegistry::new();
+        reg.register(Path::new("/tmp/serial-debug"));
+        let target = Path::new("/tmp/serial-debug/ttyUSB0/log.txt");
+
+        // Age the entry to just inside the TTL, as a 9½-minute-old session would be.
+        let almost_expired = super::DIALOG_PATH_TTL - Duration::from_secs(30);
+        age_entry(&reg, almost_expired);
+        let before = entry_ts(&reg);
+
+        assert!(reg.is_authorized(target));
+        assert!(
+            entry_ts(&reg) > before,
+            "an authorized write must refresh its own grant"
+        );
+
+        // The refreshed grant survives another almost-TTL gap; a registration-only
+        // TTL would have expired by now.
+        age_entry(&reg, almost_expired);
+        assert!(reg.is_authorized(target));
+    }
+
+    /// The other half of the sliding TTL: an entry nothing writes to still dies.
+    #[test]
+    fn idle_entry_still_expires() {
+        let reg = DialogPathRegistry::new();
+        reg.register(Path::new("/tmp/serial-debug"));
+        age_entry(&reg, super::DIALOG_PATH_TTL + Duration::from_secs(1));
+        assert!(!reg.is_authorized(Path::new("/tmp/serial-debug/ttyUSB0/log.txt")));
+    }
+
+    /// Backdate the single registered entry by `age`.
+    fn age_entry(reg: &DialogPathRegistry, age: Duration) {
+        let mut entries = reg.entries.lock().expect("poisoned");
+        entries[0].1 = Instant::now()
+            .checked_sub(age)
+            .expect("test clock too close to boot");
+    }
+
+    fn entry_ts(reg: &DialogPathRegistry) -> Instant {
+        reg.entries.lock().expect("poisoned")[0].1
+    }
+
     #[test]
     fn evicts_oldest_when_at_capacity() {
         let reg = DialogPathRegistry::new();
@@ -1418,7 +1482,8 @@ mod dialog_path_registry_tests {
         for i in 0..super::DIALOG_PATH_MAX_ENTRIES {
             reg.register(Path::new(&format!("/tmp/file-{i}.txt")));
         }
-        assert!(reg.is_authorized(Path::new("/tmp/file-0.txt")));
+        // No probing file-0 first: an authorized write slides its timestamp
+        // forward, which would make it the newest entry rather than the oldest.
         // Adding one more evicts the oldest (file-0 was registered first).
         reg.register(Path::new("/tmp/extra.txt"));
         assert!(reg.is_authorized(Path::new("/tmp/extra.txt")));
