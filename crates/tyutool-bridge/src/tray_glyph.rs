@@ -119,7 +119,9 @@ mod tests {
     fn visible_pixels(glyph: &Glyph) -> Vec<[u8; 4]> {
         glyph
             .rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|px| px[3] > 0)
             .map(|px| [px[0], px[1], px[2], px[3]])
             .collect()

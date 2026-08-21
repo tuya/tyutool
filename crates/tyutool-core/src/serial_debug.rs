@@ -1033,7 +1033,9 @@ fn read_line_run(
         idx_file.read_exact(&mut idx_buf)?;
 
         let entries = idx_buf
-            .chunks_exact(ARCHIVE_INDEX_ENTRY_BYTES as usize)
+            .as_chunks::<{ ARCHIVE_INDEX_ENTRY_BYTES as usize }>()
+            .0
+            .iter()
             .map(|entry| {
                 let mut offset = [0u8; 8];
                 let mut len = [0u8; 8];
