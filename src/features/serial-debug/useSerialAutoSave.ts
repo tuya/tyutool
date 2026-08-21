@@ -200,6 +200,28 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     await currentFlushPromise;
   }
 
+  /**
+   * Renew the write authorization for the auto-save directory.
+   *
+   * The Rust-side `DialogPathRegistry` only authorizes writes for 10 min after
+   * the last write to a registered path, and the dir is otherwise registered
+   * only when the user picks it (or when the workspace is restored). Never
+   * rejects: a failed renewal is not itself actionable, and the first append
+   * will surface the refusal through `serialDebug.autoSave.errWrite`.
+   */
+  async function registerAutoSaveDir(dir: string): Promise<void> {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("register_dialog_path", { path: dir });
+    } catch (e) {
+      rLog.warn(
+        `[SerialDebug] auto-save dir re-register failed: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }
+
   function startAutoSave(): void {
     if (!s.autoSave || !s.autoSaveDir) return;
     // Idempotent: when autoSave, autoSaveDir and open all flip in one tick both
@@ -208,12 +230,19 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     // backfill whose bookkeeping races the first one's.
     if (s.sessionAutoSavePath !== null) return;
     stopInterval();
+    const dir = s.autoSaveDir;
     const portDir = sanitizePortName(s.port);
     const filename = `serial-debug-${makeStamp()}.txt`;
     // path separator: Tauri on all platforms accepts forward slash
-    const path = `${s.autoSaveDir}/${portDir}/${filename}`;
+    const path = `${dir}/${portDir}/${filename}`;
     s.sessionAutoSavePath = path;
-    backfillPromise = backfillFromArchive(path)
+    // The dialog-path grant that authorizes writes under the auto-save dir
+    // expires 10 min after the last authorized write, so a session started
+    // after a long idle gap (port closed, reopened much later) needs a fresh
+    // grant before the first append. Everything that writes goes through
+    // backfillPromise first, so chaining here is enough to order it.
+    backfillPromise = registerAutoSaveDir(dir)
+      .then(() => backfillFromArchive(path))
       .catch((e) => {
         // No archive yet (port never opened) or an unreadable one must not stop
         // auto-save: the live half still records from here on. Developer-only
@@ -243,6 +272,21 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
   onActivated(() => {
     if (s.open && s.sessionAutoSavePath) {
       stopInterval();
+      // Leaving the page stops the flush interval but keeps the session file
+      // while the port stays open, so nothing writes while the user is away and
+      // the dialog-path grant can expire before they come back. Renew it before
+      // the resumed interval appends anything: `flush` awaits `backfillPromise`
+      // first, so parking the renewal there reuses the ordering channel that
+      // already exists. When a start-time backfill is still in flight we skip
+      // the renewal instead of chaining onto it — that chain renewed the grant
+      // itself and is still writing, so the grant cannot have expired, and
+      // replacing the promise would drop the backfill's own ordering guarantee.
+      const dir = s.autoSaveDir;
+      if (dir && !backfillPromise) {
+        backfillPromise = registerAutoSaveDir(dir).finally(() => {
+          backfillPromise = null;
+        });
+      }
       autoSaveInterval = setInterval(() => {
         void flush();
       }, 5000);
