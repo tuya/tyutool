@@ -1130,12 +1130,8 @@ async function openManualReleaseDownload(
 }
 
 .ud-meta-pill--warning {
-  border-color: color-mix(
-    in srgb,
-    var(--ty-warning, #f59e0b) 40%,
-    var(--ty-border)
-  );
-  color: color-mix(in srgb, var(--ty-warning, #f59e0b) 88%, black 12%);
+  border-color: color-mix(in srgb, var(--ty-warning) 40%, var(--ty-border));
+  color: var(--ty-warning);
 }
 
 .ud-progress-wrap {
@@ -1174,11 +1170,10 @@ async function openManualReleaseDownload(
   gap: 0.65rem;
   align-items: flex-start;
   border-radius: 0.85rem;
-  border: 1px solid
-    color-mix(in srgb, var(--ty-warning, #f59e0b) 36%, var(--ty-border));
+  border: 1px solid color-mix(in srgb, var(--ty-warning) 36%, var(--ty-border));
   background-color: color-mix(
     in srgb,
-    var(--ty-warning, #f59e0b) 6%,
+    var(--ty-warning) 6%,
     var(--ty-surface-muted)
   );
   padding: 0.8rem 0.9rem;
@@ -1186,7 +1181,7 @@ async function openManualReleaseDownload(
 
 .ud-portable-icon {
   flex-shrink: 0;
-  color: var(--ty-warning, #f59e0b);
+  color: var(--ty-warning);
 }
 
 .ud-portable-text {

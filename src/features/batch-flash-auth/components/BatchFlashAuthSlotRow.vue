@@ -83,7 +83,7 @@ const STATUS_COLORS: Record<string, string> = {
   done: "var(--ty-success)",
   failed: "var(--ty-danger)",
   skipped: "var(--ty-text-muted)",
-  no_code: "var(--ty-warning, #f59e0b)",
+  no_code: "var(--ty-warning)",
 };
 const statusColor = computed(() => STATUS_COLORS[props.portSlot.status]);
 
@@ -96,7 +96,7 @@ const BORDER_COLORS: Record<string, string> = {
   done: "var(--ty-success)",
   failed: "var(--ty-danger)",
   skipped: "var(--ty-text-muted)",
-  no_code: "var(--ty-warning, #f59e0b)",
+  no_code: "var(--ty-warning)",
 };
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
@@ -110,7 +110,7 @@ const rowBg = computed(() => {
   if (props.portSlot.status === "failed")
     return `color-mix(in srgb, var(--ty-danger) 8%, ${base})`;
   if (props.portSlot.status === "no_code")
-    return `color-mix(in srgb, var(--ty-warning, #f59e0b) 10%, ${base})`;
+    return `color-mix(in srgb, var(--ty-warning) 10%, ${base})`;
   return base;
 });
 
@@ -260,10 +260,7 @@ function showExcelError(): void {
       v-else-if="portSlot.status === 'no_code'"
       class="flex min-w-0 flex-1 items-center gap-2"
     >
-      <span
-        class="truncate text-xs"
-        :style="{ color: 'var(--ty-warning, #f59e0b)' }"
-      >
+      <span class="truncate text-xs" :style="{ color: 'var(--ty-warning)' }">
         {{ t("batchFlashAuth.slot.noCode") }}
       </span>
       <span
@@ -348,7 +345,7 @@ function showExcelError(): void {
       <span
         v-if="portSlot.readError"
         class="min-w-0 truncate text-xs"
-        :style="{ color: 'var(--ty-warning, #f59e0b)' }"
+        :style="{ color: 'var(--ty-warning)' }"
         >{{ t("batchFlashAuth.slot.readError") }}</span
       >
     </div>

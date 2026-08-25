@@ -382,9 +382,9 @@ const { message: readAddrError } = useAddrRangeError(
             role="tabpanel"
           >
             <div
-              class="space-y-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface-subtle)] px-3 py-2.5 text-xs leading-snug text-[var(--ty-text)]"
+              class="space-y-2 rounded-xl border border-[color-mix(in_srgb,var(--ty-warning)_38%,var(--ty-border))] bg-[color-mix(in_srgb,var(--ty-warning)_10%,transparent)] px-3 py-2.5 text-xs leading-snug text-[var(--ty-text)]"
             >
-              <p class="font-medium text-amber-800 dark:text-amber-400/95">
+              <p class="font-medium text-[var(--ty-warning)]">
                 <i18n-t keypath="flash.authTuyaOpenOnly" tag="span">
                   <template #link>
                     <a
