@@ -133,7 +133,7 @@ async function browseExcel() {
             class="text-[var(--ty-text-muted)]"
           >
             {{ t("batchFlashAuth.config.excelInProgress") }}
-            <strong :style="{ color: 'var(--ty-warning, #f59e0b)' }">{{
+            <strong :style="{ color: 'var(--ty-warning)' }">{{
               store.excelStats.inProgress
             }}</strong>
           </span>
@@ -261,8 +261,8 @@ async function browseExcel() {
         <!-- OTP irreversibility warning -->
         <div
           v-if="store.isOtpCapable && store.authConfig.authStorage === 'otp'"
-          class="flex items-start gap-1.5 rounded-lg border border-[var(--ty-warning,#f59e0b)] bg-[color-mix(in_srgb,var(--ty-warning,#f59e0b)_10%,transparent)] px-2.5 py-2 text-xs"
-          :style="{ color: 'var(--ty-warning, #f59e0b)' }"
+          class="flex items-start gap-1.5 rounded-lg border border-[var(--ty-warning)] bg-[color-mix(in_srgb,var(--ty-warning)_10%,transparent)] px-2.5 py-2 text-xs"
+          :style="{ color: 'var(--ty-warning)' }"
         >
           <FontAwesomeIcon
             :icon="['fas', 'triangle-exclamation']"
