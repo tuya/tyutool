@@ -7,11 +7,10 @@ import type {
   AutoUpdateIntervalId,
   LocalePreference,
   LogLevelId,
-  ThemePreference /*, ThemeStyle*/,
+  ThemePreference,
 } from "./settings";
 
 const THEME_KEY = "tyutool-theme";
-// const THEME_STYLE_KEY = 'tyutool-theme-style';
 const LOCALE_KEY = "tyutool-locale";
 const LEGACY_THEME_KEY = "tyutools-theme";
 const LEGACY_LOCALE_KEY = "tyutools-locale";
@@ -24,7 +23,6 @@ const AUTO_UPDATE_LAST_CHECK_AT_KEY = "tyutool-auto-update-last-check-at";
 
 export {
   THEME_KEY,
-  // THEME_STYLE_KEY,
   LOCALE_KEY,
   LEGACY_THEME_KEY,
   LEGACY_LOCALE_KEY,
@@ -52,12 +50,6 @@ export function loadStoredTheme(): ThemePreference {
   }
   return "system";
 }
-
-// export function loadStoredThemeStyle(): ThemeStyle {
-//   const s = localStorage.getItem(THEME_STYLE_KEY);
-//   if (s === 'tuyaopen-ide') return 'tuyaopen-ide';
-//   return 'default';
-// }
 
 export function loadStoredLocale(): LocalePreference {
   let s = localStorage.getItem(LOCALE_KEY);
@@ -126,9 +118,7 @@ export function loadStoredAutoUpdateLastCheckAt(): number | null {
   );
 }
 
-export function applyThemeToDom(
-  pref: ThemePreference /*, style: ThemeStyle = 'default'*/,
-): void {
+export function applyThemeToDom(pref: ThemePreference): void {
   const root = document.documentElement;
   let mode: "light" | "dark" = "dark";
   if (pref === "system") {
@@ -139,5 +129,4 @@ export function applyThemeToDom(
     mode = pref;
   }
   root.classList.toggle("dark", mode === "dark");
-  // root.classList.toggle('tuyaopen-ide', style === 'tuyaopen-ide');
 }

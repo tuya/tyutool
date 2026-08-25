@@ -21,7 +21,6 @@ import {
   AUTO_UPDATE_INTERVAL_KEY,
   AUTO_UPDATE_LAST_CHECK_AT_KEY,
   THEME_KEY,
-  // THEME_STYLE_KEY,
   LOCALE_KEY,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
@@ -67,25 +66,6 @@ describe("useSettingsStore init() + web persistence", () => {
     expect(localStorage.getItem(THEME_KEY)).toBe("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
-
-  // it("changing themeStyle persists and toggles the tuyaopen-ide class", async () => {
-  //   const s = useSettingsStore();
-  //   s.init();
-  //
-  //   s.setThemeStyle("tuyaopen-ide");
-  //   await nextTick();
-  //   expect(localStorage.getItem(THEME_STYLE_KEY)).toBe("tuyaopen-ide");
-  //   expect(document.documentElement.classList.contains("tuyaopen-ide")).toBe(
-  //     true,
-  //   );
-  //
-  //   s.setThemeStyle("default");
-  //   await nextTick();
-  //   expect(localStorage.getItem(THEME_STYLE_KEY)).toBe("default");
-  //   expect(document.documentElement.classList.contains("tuyaopen-ide")).toBe(
-  //     false,
-  //   );
-  // });
 
   it("changing locale persists and updates document lang", async () => {
     const s = useSettingsStore();

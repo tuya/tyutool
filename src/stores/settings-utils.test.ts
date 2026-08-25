@@ -13,13 +13,11 @@ import {
   loadStoredLogLevel,
   loadStoredSerialPortIndicatorsEnabled,
   loadStoredTheme,
-  // loadStoredThemeStyle,
   LOCALE_KEY,
   LOG_ENABLED_KEY,
   LOG_LEVEL_KEY,
   SERIAL_PORT_INDICATORS_ENABLED_KEY,
   THEME_KEY,
-  // THEME_STYLE_KEY,
 } from "./settings-utils";
 
 beforeEach(() => {
@@ -226,49 +224,3 @@ describe("applyThemeToDom", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 });
-
-// describe('loadStoredThemeStyle', () => {
-//   it('returns "default" when no stored value', () => {
-//     expect(loadStoredThemeStyle()).toBe('default');
-//   });
-//
-//   it('returns "tuyaopen-ide" when stored', () => {
-//     localStorage.setItem(THEME_STYLE_KEY, 'tuyaopen-ide');
-//     expect(loadStoredThemeStyle()).toBe('tuyaopen-ide');
-//   });
-//
-//   it('returns "default" for invalid stored value', () => {
-//     localStorage.setItem(THEME_STYLE_KEY, 'unknown');
-//     expect(loadStoredThemeStyle()).toBe('default');
-//   });
-// });
-//
-// describe('applyThemeToDom with style', () => {
-//   afterEach(() => {
-//     document.documentElement.classList.remove('dark', 'tuyaopen-ide');
-//     vi.restoreAllMocks();
-//   });
-//
-//   it('adds tuyaopen-ide class when style is "tuyaopen-ide"', () => {
-//     applyThemeToDom('light', 'tuyaopen-ide');
-//     expect(document.documentElement.classList.contains('tuyaopen-ide')).toBe(true);
-//   });
-//
-//   it('removes tuyaopen-ide class when style is "default"', () => {
-//     document.documentElement.classList.add('tuyaopen-ide');
-//     applyThemeToDom('light', 'default');
-//     expect(document.documentElement.classList.contains('tuyaopen-ide')).toBe(false);
-//   });
-//
-//   it('can have both dark and tuyaopen-ide classes simultaneously', () => {
-//     applyThemeToDom('dark', 'tuyaopen-ide');
-//     expect(document.documentElement.classList.contains('dark')).toBe(true);
-//     expect(document.documentElement.classList.contains('tuyaopen-ide')).toBe(true);
-//   });
-//
-//   it('defaults to "default" style when second arg omitted', () => {
-//     document.documentElement.classList.add('tuyaopen-ide');
-//     applyThemeToDom('dark');
-//     expect(document.documentElement.classList.contains('tuyaopen-ide')).toBe(false);
-//   });
-// });
