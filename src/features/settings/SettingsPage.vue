@@ -12,7 +12,6 @@ import type {
   AutoUpdateIntervalId,
   LogLevelId,
   LocalePreference,
-  // ThemeStyle,
 } from "@/stores/settings";
 import { isTauriRuntime } from "@/runtime";
 import { DISCLAIMER_KEY } from "@/features/batch-flash-auth/disclaimer";
@@ -95,15 +94,6 @@ const autoUpdateIntervalValue = computed({
   set: (val: string) =>
     settings.setAutoUpdateInterval(val as AutoUpdateIntervalId),
 });
-
-// const themeStyleOptions = computed<TySelectOption[]>(() => [
-//   { value: "default", label: t("settings.themeStyleDefault") },
-// ]);
-//
-// const themeStyleValue = computed({
-//   get: () => settings.themeStyle,
-//   set: (val: string) => settings.setThemeStyle(val as ThemeStyle),
-// });
 
 // Sync vue-i18n locale when settings locale changes (e.g. from Tauri store load)
 watch(
@@ -294,8 +284,6 @@ function resetBatchAuthDisclaimer(): void {
             {{ t("settings.appearanceHint") }}
           </p>
         </div>
-        <!-- Theme style: temporarily hidden -->
-        <!-- <fieldset class="mt-4 space-y-2"> ... </fieldset> -->
         <!-- Theme mode: segmented icons -->
         <fieldset class="mt-4 space-y-2">
           <legend class="text-sm font-medium text-[var(--ty-text)]">
