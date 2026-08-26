@@ -2,6 +2,84 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.9] - 2026-08-26
+
+### 新功能
+
+- `serial-debug`：All 标签页可回看整个会话——向上滚过顶部进入历史模式，从会话归档按 400 行分页读取，支持跳到会话开头、向前/向后翻页与一键回到实时；过滤标签页同样支持向上翻页，且翻页期间视图被锁定，不再被新到达的匹配顶走
+- `serial-debug`：日志可见行数上限改为可配置（默认 5000，可设 1000–20000）并随工作区保存；自动保存改为工具栏开关，未选目录时会先请你选择目录
+- `batch-auth`：批量烧录授权接入串口占用协调——批次启动前先检查端口归属，被其它功能占用的端口会集中提示并跳过（绝不抢占），槽位到达任一终态时自动释放端口
+- `gui`：设置页「关于」区新增在线文档入口
+
+### 问题修复
+
+- `firmware-flash`：修正 T5AI / T1 / T3 的擦除预设地址。此前三者沿用了 BK7231N/T2 的 2 MiB 地址，「擦除授权数据」落进了 primary_ap_app，「全片擦除」也够不到真正存放授权与配网数据的 KV 区（T5AI `tuya_data` 0x7CD000、T3 `usr_config` 0x3C9000），导致擦除后重新烧录 QIO.bin，配网数据依旧残留。T2 与 BK7231N 地址经核对无误，未改动；批量烧录不受影响
+- `core`：Beken 系（T5AI/T1/T2/T3/BK7231N）连接与读写失败的报错改成能照着做的说明。不再输出「plugin error: timeout after 10 attempts」这类内部重试计数，而是说明设备始终没有应答、未写入任何数据，并给出下一步：双串口适配器可能选错了口、芯片型号可能选错、断电重上电；波特率切换后掉链现在单独报错并指出波特率；CRC 校验、逐扇区写入校验与擦除状态字也会说明是什么对不上
+- `core`：授权流程遇到整个启动窗口一个字节都收不到的设备时，不再当作「老固件」继续用老协议对话、最后报一句「Failed to read MAC address」，而是直接给出真实原因（设备始终没有应答，建议断电重上电）；T5AI 烧录后的首次冷启动等待窗口相应放宽
+- `serial-debug`：串口高速刷屏时不再静默丢字节。读取线程改为非阻塞入队并统计丢弃量，发生丢弃时先断开该方向的当前行再提示（静默 250 ms 后或每 2 s 汇总一次），避免缺口两侧被拼成一行设备从未打印过的内容
+- `serial-debug`：修复自动保存在会话进行 10 分钟后失效的问题——写入授权到期被拒后，异常处理会把自动保存整场关掉，重新打开开关也无效
+- `serial-debug`：修复归档交接不精确导致的重复行；修复端口关闭时最后一行未换行的输出（`login: `、`>`、进度条）在实时视图、归档、导出、自动保存和过滤页中全部消失的问题
+- `serial-debug`：归档目录不可写时不再启动即崩溃；工作区字段加载时做合法性校验
+- `cli`：`monitor -d t3` 默认波特率修正为 460800。此前只对 t5ai 特判，t3 会用 115200 打开 460800 的日志口，输出乱码
+- `cli`：`reset -d` 会校验芯片型号是否受支持
+- `cli`：`--verbose` 的 debug/trace 级日志现在能真正写进日志文件
+- `firmware-flash`：授权凭证改为显式勾选后才持久化；GUI 日志里补上 Flash ID 的 MID
+- `gui`：修复深色模式下缺失的警告色与小号按钮样式；深色配色整体重做为层次一致的色阶
+
+### 安全加固
+
+- `gui`：启用内容安全策略（CSP），生产环境不再允许 `unsafe-eval`（多语言文案改为构建期预编译）
+- `gui`：`fetch_url` / `download_auth_firmware` 增加 https + 域名白名单校验、超时上限、重定向次数与响应体大小限制；任意路径写入改为必须先经真实文件对话框选择并登记才放行
+- `cli`：`serve` 的开发用 WebSocket 增加 Origin/Host 校验与消息大小上限
+- `batch-auth` / `logging`：批量授权的明文交互数据隔离到独立的 `batch-auth-*.trace` 文件，不再进入 `tyutool-*.log`；日志导出时对凭证脱敏，本地归档保留明文供排障
+
+### 工程改进
+
+- `perf`：serial-debug 的日志视图与 Hex 视图改为虚拟化渲染，端口跑满时不再随窗口大小卡顿
+- `bridge`：新增常驻托盘助手 crate `tyutool-bridge`（Cobuilder Bridge），走独立的 `bridge-v*` 发布线，不包含在本次 tyutool 安装包中
+- `gui`：Tauri 后端按职责拆分为 `batch.rs` / `serial_debug.rs` / `logs.rs` / `updater.rs` / `window.rs`
+- `ci`：src-tauri 纳入 CI 门禁并设置覆盖率下限；所有 job 加上时间上限，apt 改为重试而非直接失败
+- `deps`：thiserror 升到 2、dirs 升到 6
+
+---
+
+### Features
+
+- `serial-debug`: The All tab scrolls back through the whole session — scrolling past the top enters history mode, reading the session archive 400 lines at a time, with jump-to-start, load-older/load-newer and a one-click way back to live. Filter tabs page the same way and pin their window while paged back, so newly matched lines no longer swap the content out from under you
+- `serial-debug`: The visible-line cap is configurable (default 5000, 1000–20000) and persisted with the rest of the workspace; auto-save became a toolbar toggle that asks for a directory when none is set
+- `batch-auth`: Batch flash-and-authorize now goes through the serial-port coordinator — ports held by another feature are reported in one summary and skipped (never preempted), and each slot releases its port on any terminal state
+- `gui`: The Settings About section gains a documentation link
+
+### Bug Fixes
+
+- `firmware-flash`: Fix the T5AI / T1 / T3 erase presets, which carried BK7231N/T2's 2 MiB addresses. "Erase authorization data" landed inside primary_ap_app and "full chip erase" never reached the KV region that actually holds the authorization and provisioning data (T5AI `tuya_data` 0x7CD000, T3 `usr_config` 0x3C9000), so provisioning data survived an erase followed by a QIO.bin re-flash. T2 and BK7231N were verified correct and left alone; batch flashing is unaffected
+- `core`: Beken-family (T5AI/T1/T2/T3/BK7231N) connect and transfer errors now say what to do. Instead of "plugin error: timeout after 10 attempts" — an internal retry counter — they name what was observed (the chip never replied), what was not done (nothing was written) and what can change the outcome: wrong port on a dual-port USB adapter, wrong chip type, power cycle. A link that dies after the baud-rate switch reports itself separately and names the baud rate, and CRC / per-sector verify / erase status failures say what mismatched
+- `core`: When a device stays completely silent for the whole boot window, authorization no longer assumes old firmware, speaks the old protocol to it and fails with "Failed to read MAC address" — it reports the real cause (the device never answered; power-cycle the board). The post-flash cold-boot wait for T5AI is widened to match
+- `serial-debug`: Stop losing serial bytes silently under a saturated port. The reader thread queues non-blocking and accounts for what it could not queue; on a drop it closes the open line for that direction before announcing the gap (coalesced: once the drops go quiet for 250 ms, or every 2 s while they do not), so the bytes either side of a gap are never spliced into a line the device never printed
+- `serial-debug`: Fix auto-save dying ten minutes into a session — its write grant expired, the write was refused, and the error path shut auto-save down for the rest of the session with no way to bring it back
+- `serial-debug`: Fix duplicated lines from an inexact archive handoff, and the unterminated last line at port close (`login: `, `>`, a progress bar) vanishing from the live view, the archive, exports, auto-save files and filter tabs alike
+- `serial-debug`: No longer panics at startup when the archive directory is unwritable; workspace fields are validated on load
+- `cli`: `monitor -d t3` defaults to 460800. Only t5ai was special-cased, so t3 opened its 460800 log port at 115200 and printed garbage
+- `cli`: `reset -d` validates the chip against the supported list
+- `cli`: debug/trace records from `--verbose` actually reach the log file now
+- `firmware-flash`: Authorization credentials are persisted only when you opt in; the GUI log shows the Flash ID MID
+- `gui`: Fix the missing warning color and small-button styles in dark mode; the dark palette is reworked into a cohesive elevation scale
+
+### Security
+
+- `gui`: Content Security Policy is enabled, and production no longer allows `unsafe-eval` (locale messages are precompiled at build time)
+- `gui`: `fetch_url` / `download_auth_firmware` require https plus an allowlisted host, and cap timeout, redirects and response size; arbitrary-path writes are refused unless the path was registered from a real file dialog
+- `cli`: The `serve` dev WebSocket checks Origin/Host and caps message size
+- `batch-auth` / `logging`: Batch-auth plaintext interaction data is isolated into its own `batch-auth-*.trace` files and never enters `tyutool-*.log`; log exports redact credentials while the local archive keeps plaintext for diagnosis
+
+### Engineering
+
+- `perf`: The serial-debug log and hex views are virtualized, so a saturated port no longer makes cost scale with the window size
+- `bridge`: New resident tray helper crate `tyutool-bridge` (Cobuilder Bridge), released on its own `bridge-v*` line and not part of this tyutool installer
+- `gui`: The Tauri backend is split by responsibility into `batch.rs` / `serial_debug.rs` / `logs.rs` / `updater.rs` / `window.rs`
+- `ci`: src-tauri is gated in CI with coverage thresholds; every job is time-capped and apt retries instead of failing
+- `deps`: thiserror to 2, dirs to 6
+
 ## [3.2.8] - 2026-07-28
 
 ### 问题修复

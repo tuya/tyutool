@@ -20,4 +20,4 @@ members = [
 # consumes, so it inherits like everyone else. Upstream's "three Cargo.toml
 # files" above meant its own three members; more members, same semantics.
 [workspace.package]
-version = "3.2.8"
+version = "3.2.9"
