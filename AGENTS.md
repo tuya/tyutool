@@ -129,6 +129,33 @@ tyutool/
 
 **`tyutool-core` is the single source of truth for flash logic** — it is shared by the CLI, the GUI Tauri backend, and `tyutool-bridge`. Flash logic must never be duplicated into the frontend or into the other crates' binaries.
 
+**Crate boundary rule — applies to *all* logic, not just flash.** When adding code, decide its home mechanically, by what it depends on:
+
+| Depends on | Home |
+|---|---|
+| `AppHandle` / `Window` / `emit` | `src-tauri` |
+| clap, or terminal rendering (`indicatif`, `console`) | `tyutool-cli` |
+| a WS connection or per-connection session state | `tyutool-serve` / `tyutool-bridge` |
+| nothing platform-specific (pure `std` / `serde` / fs / serial) | **`tyutool-core`** |
+
+The question is what the type signature depends on, not whether the code "feels like business
+logic". One exception: pure-`std` code that only ever serves a single frontend (e.g. the
+log-file editor detection in `src-tauri/src/logs.rs`) stays with that frontend — the test is
+whether a *second* frontend could plausibly use it, not whether it *could* compile in core.
+
+**Never re-implement a helper that already exists in another crate.** If two binaries need the
+same behaviour, it belongs in `tyutool-core`. `tyutool_core::diagnostics::log_session_banner`
+is the model: one helper, three callers, and an explicit "never re-inline" rule below.
+A shared helper that pulls a heavy dependency (e.g. Excel parsing) goes behind a Cargo
+feature so the other binaries don't link it — `libudev` is the existing precedent.
+
+**Known outstanding violations — do not add to them.** `prune_log_files` is implemented three
+times (`tyutool-cli/src/main.rs`, `tyutool-bridge/src/main.rs`, `src-tauri/src/logs.rs`); the
+log tail/list/redact/zip helpers and the batch-flash / batch-auth orchestration live only in
+`src-tauri`, so the CLI cannot do them at all. The consolidation plan is
+`docs/specs/2026-08-26-core-consolidation-design.md` — read it before moving anything between
+crates.
+
 **Crate responsibilities (5 workspace members):**
 
 | Crate | Binary / lib | Role |
@@ -232,7 +259,9 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
 - **Bounded growth:** each session log is size-capped at 10 MB and rolls over when exceeded
   (CLI: `SessionLogWriter` → `tyutool-<ts>-N.log`; GUI: `tauri-plugin-log` `max_file_size` +
   `RotationStrategy::KeepAll`). Across sessions, `prune_log_files` trims old files at startup
-  (≤100 files / ≤100 MB total). New log sinks must stay bounded too.
+  (≤100 files / ≤100 MB total). New log sinks must stay bounded too. ⚠ `prune_log_files`
+  currently exists as **three** copies (CLI / bridge / GUI) that must be kept in agreement —
+  change all three, and do not add a fourth; see the crate boundary rule above.
 - **Bounded growth — serial-debug session archive:** the serial-debug archive
   (`{temp_dir}/tyutool/serial-debug/serial-debug-session-<ts>-<pid>-<seq>.ndjson`
   plus its `.idx` sidecar) is a *third* file family with its own bounds, because
@@ -322,7 +351,7 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 
 - Command names: snake_case; add `_cmd` suffix when a Tauri entry point shares a name with an internal function (`list_serial_ports_cmd`)
 - Event names: kebab-case, `feature-noun` format (`serial-debug-chunk`, `flash-progress`)
-- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`)
+- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`). This is the current rule and still applies — `docs/specs/2026-08-26-core-consolidation-design.md` plans to replace it with `ts-rs`-generated bindings, and this line is to be deleted only once that lands
 - Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
 - All Tauri-only code must be gated behind `isTauriRuntime()` from `src/runtime.ts`; never invoke Tauri commands in web mode
 
