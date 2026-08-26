@@ -379,7 +379,18 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 - Feature directories: kebab-case (`firmware-flash/`, `serial-debug/`)
 - Test files: same stem as the source plus `.test.ts`/`.test.rs` (a `.test.ts` matching a PascalCase `.vue` source is expected, not a violation of the `.ts` rule)
 - Rust modules stay **flat** (`crates/tyutool-core/src/authorize.rs`) until a module genuinely needs several files; only then does it become a directory with `mod.rs` (`plugins/`, `plugins/beken/`). Never create a directory for a single file.
-- A feature under `src/features/` follows the existing shape — `<Name>Page.vue`, a `components/` subdirectory, `types.ts` / `constants.ts` / `utils.ts`, `use*.ts` composables, and a `.test.ts` beside each `.ts` (see `serial-debug/`). Match that shape rather than inventing a layout.
+- `src/features/` holds **two kinds** of directory, and only the first has a required shape:
+  - **Page features** are mounted on a route and own a `<Name>Page.vue` — `firmware-flash`,
+    `serial-debug`, `settings`, `toolbox`, `batch-flash-auth`. Follow the shape those already
+    share: `<Name>Page.vue`, a `components/` subdirectory, `types.ts` / `constants.ts` /
+    `utils.ts`, and `use*.ts` composables (see `serial-debug/`). Match it rather than inventing
+    a layout.
+  - **Shared-logic features** have no page and no route; they exist so several page features can
+    share one model — `serial-port-indicators` is `model.ts` + `useFeaturePortIndicators.ts` and
+    nothing else. Keep them to the files they actually need; do not add an empty `components/`
+    or a placeholder `types.ts` for symmetry. Cross-feature *components* still belong in
+    `src/components/`, not here.
+  - Either kind: a `.test.ts` sits beside each `.ts`.
 
 ### Agent guidance layout
 
