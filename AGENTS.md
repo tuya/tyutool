@@ -346,6 +346,28 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 - `.vue` files: PascalCase (`SerialDebugPage.vue`)
 - Feature directories: kebab-case (`firmware-flash/`, `serial-debug/`)
 - Test files: same stem as the source plus `.test.ts`/`.test.rs` (a `.test.ts` matching a PascalCase `.vue` source is expected, not a violation of the `.ts` rule)
+- Rust modules stay **flat** (`crates/tyutool-core/src/authorize.rs`) until a module genuinely needs several files; only then does it become a directory with `mod.rs` (`plugins/`, `plugins/beken/`). Never create a directory for a single file.
+- A feature under `src/features/` follows the existing shape — `<Name>Page.vue`, a `components/` subdirectory, `types.ts` / `constants.ts` / `utils.ts`, `use*.ts` composables, and a `.test.ts` beside each `.ts` (see `serial-debug/`). Match that shape rather than inventing a layout.
+
+### Documentation layout
+
+| Path | Contents |
+|---|---|
+| `docs/cli.md` | Authoritative CLI reference — see the CLI documentation rule above |
+| `docs/specs/<date>-<name>-design.md` | Design docs: the problem, the decision, and what was deliberately rejected |
+| `docs/plans/<date>-<name>.md` | Implementation plan for a spec — checkbox (`- [ ]`) tasks, opening with Goal / Architecture / Tech Stack and a File Map table |
+| `docs/audits/<date>-<name>.md` | One-off audits; not archived |
+| `docs/usage-guide/{en,zh}/` | Published bilingual user guide; `docs/cli.md` stays its source of truth |
+| `docs/release.md` | Release process |
+
+- Specs and plans are paired: a plan names its spec with a `**Spec:**` line, and a spec names its
+  plan. Dates are the creation date (`YYYY-MM-DD`); the filename never changes afterwards.
+- **A document directly under `docs/specs/` or `docs/plans/` is in flight.** When the work ships,
+  move the spec and its plan into the sibling `completed/` directory in one commit — see
+  `597f05e chore(docs): archive completed plan/spec docs to completed/`.
+- Design docs may be written in Chinese (`docs/release.md`, the specs) or English (`docs/cli.md`,
+  `docs/serial-debug-stress.md`). User-facing references are English; internal design and process
+  docs follow whichever the surrounding documents use.
 
 ### Tauri IPC contract
 
