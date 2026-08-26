@@ -108,7 +108,7 @@ describe("i18n key coverage", () => {
   const enKeys = new Set(flatten(en as Record<string, unknown>));
   const zhKeys = new Set(flatten(zhCN as Record<string, unknown>));
 
-  // Enforces the CLAUDE.md rule "new keys must be added to both locales".
+  // Enforces the src/AGENTS.md rule "new keys must be added to both locales".
   it("en and zh-CN have identical key sets", () => {
     const onlyEn = [...enKeys].filter((k) => !zhKeys.has(k));
     const onlyZh = [...zhKeys].filter((k) => !enKeys.has(k));
