@@ -1,6 +1,7 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file is this repository's agent guidance. `CLAUDE.md` imports it with `@AGENTS.md` — keep
+content here, never there; see "Agent guidance layout" under Conventions.
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
@@ -70,7 +71,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Project: tyutool
 
-Firmware flash tool for Tuya-class IoT devices. Supports a desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary. **Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+. Use pnpm only (`pnpm-lock.yaml`); do not `npm install`. On Windows: Rust + VS Build Tools (MSVC) for Tauri. Postinstall allowlist: `pnpm-workspace.yaml` (`esbuild`, `lefthook`).
+Firmware flash tool for Tuya-class IoT devices. Supports a desktop GUI (Tauri 2 + Vue 3) and a standalone CLI binary. **Prerequisites:** Rust (stable), Node.js 22+, pnpm 10+ — nothing enforces those versions (`package.json` has no `engines` or `packageManager` field); CI pins `node-version: "22"`. Use pnpm only (`pnpm-lock.yaml`); do not `npm install`. On Windows: Rust + VS Build Tools (MSVC) for Tauri. Postinstall allowlist: `pnpm-workspace.yaml` (`esbuild`, `lefthook`).
 
 ### Commands
 
@@ -80,24 +81,51 @@ pnpm install           # install JS deps
 pnpm run dev           # Vite only (no Tauri, no CLI serve)
 pnpm run dev:web       # tyutool-cli serve + Vite (cross-platform Node script)
 pnpm run tauri:dev     # full GUI dev server with hot-reload
-pnpm run build         # type-check + vite build
-pnpm run test          # run frontend tests (vitest)
-pnpm run test:coverage # run with coverage
-pnpm run lint          # ESLint on src/
-pnpm run lint:fix      # ESLint with auto-fix
-pnpm run format        # Prettier format src/
+pnpm run build              # type-check src/ + vite build (does NOT cover scripts/)
+pnpm run test               # run frontend tests (vitest)
+pnpm run test:coverage      # what CI runs — see the gates below
+pnpm run typecheck:scripts  # type-check scripts/ — `build` does not
+pnpm run lint               # ESLint on src/
+pnpm run lint:fix           # ESLint with auto-fix
+pnpm run format             # Prettier format src/
 
 # Run a single frontend test file
 pnpm exec vitest run src/features/firmware-flash/hex.test.ts
 
-# Rust (CLI only)
+# Rust
 cargo build -p tyutool-cli --release
-cargo test -p tyutool-core
-cargo test -p tyutool-cli
+cargo test -p tyutool-core -p tyutool-cli   # ci.yml
+cargo test -p tyutool_gui                   # ci.yml (src-tauri)
+cargo test -p tyutool-bridge                # bridge.yml
+cargo test -p tyutool-serve                 # has tests; no CI job runs them yet
 
 # Full GUI build
 pnpm run tauri:build
 ```
+
+**CI gates (`.github/workflows/ci.yml`, `bridge.yml`) — work is not done until these pass:**
+
+```bash
+cargo fmt --all --check
+cargo clippy -p tyutool-core -p tyutool-cli --all-targets -- -D warnings   # ci.yml:38
+cargo clippy -p tyutool_gui --all-targets -- -D warnings                   # ci.yml:89
+cargo clippy -p tyutool-bridge --all-targets -- -D warnings                # bridge.yml:135
+pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
+```
+
+`tyutool-serve` is the one crate with **no CI job at all** — no clippy, no test, despite 28
+`#[test]` functions. Run `cargo test -p tyutool-serve` by hand when you touch it.
+
+- **clippy runs with `-D warnings`** — any lint fails the build. Fix the code; only reach for
+  `#[allow]` with a comment saying why. New stable lints land regularly and have broken this
+  repo before (`627414e`, `977f4e1`).
+- **`cargo fmt --all --check`** — lefthook formats staged `.rs` on commit, but if lefthook is not
+  installed the hook silently does nothing (`Can't find lefthook in PATH`). Run `cargo fmt --all`
+  yourself rather than trusting the hook.
+- **`typecheck:scripts`, not just `build`** — `build` type-checks `src/` only, and `scripts/`
+  drives releases.
+- **`test:coverage`, not `test`** — coverage forces every file named in `vitest.config.ts` to be
+  loaded; plain `test` leaves some unchecked.
 
 ### Architecture
 
@@ -107,7 +135,7 @@ tyutool/
 │   ├── tyutool-core/   # Rust library — all flash logic, chip plugins, serial utils, authorize, serial-debug engine
 │   ├── tyutool-cli/    # Standalone CLI binary; the `serve` subcommand lives in tyutool-serve
 │   ├── tyutool-serve/  # WS dev-serve backend for `tyutool-cli serve` (port 9527, dev only — loopback bind + Host/Origin check, no auth)
-│   ├── tyutool-bridge/ # Resident tray + WS helper "Cobuilder Bridge" (port 18730; Origin allowlist + token grants) — see crates/tyutool-bridge/CLAUDE.md
+│   ├── tyutool-bridge/ # Resident tray + WS helper "Cobuilder Bridge" (port 18730; Origin allowlist + token grants) — see crates/tyutool-bridge/AGENTS.md
 │   └── (see Cargo.toml [workspace].members — 5 crates total)
 ├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
 │   └── src/lib.rs      # Tauri commands bridging the WebView to tyutool-core
@@ -117,7 +145,7 @@ tyutool/
 │   ├── app-init.ts     # Post-mount bootstrap (workspace restore, device refresh)
 │   ├── runtime.ts      # isTauriRuntime(), getRuntime()
 │   ├── transport/      # WebSocket client (dev:web / browser mode)
-│   ├── features/       # firmware-flash, serial-debug, settings, toolbox (hub) + batch-flash-auth
+│   ├── features/       # firmware-flash, serial-debug, settings, toolbox (hub), batch-flash-auth, serial-port-indicators
 │   ├── stores/         # Pinia stores + *-workspace.ts persistence
 │   ├── components/     # Cross-feature Ty* components + AppShell.vue
 │   ├── config/         # Static app constants (version, Tauri path hints)
@@ -129,14 +157,49 @@ tyutool/
 
 **`tyutool-core` is the single source of truth for flash logic** — it is shared by the CLI, the GUI Tauri backend, and `tyutool-bridge`. Flash logic must never be duplicated into the frontend or into the other crates' binaries.
 
+**Crate boundary rule — applies to *all* logic, not just flash.** When adding code, decide its home mechanically, by what it depends on:
+
+| Depends on | Home |
+|---|---|
+| `AppHandle` / `Window` / `emit` | `src-tauri` |
+| clap, or terminal rendering (`indicatif`, `console`) | `tyutool-cli` |
+| a WS connection or per-connection session state | `tyutool-serve` / `tyutool-bridge` |
+| nothing platform-specific (pure `std` / `serde` / fs / serial) | **`tyutool-core`** |
+
+The question is what the type signature depends on, not whether the code "feels like business
+logic". One exception: pure-`std` code that only ever serves a single frontend (e.g. the
+log-file editor detection in `src-tauri/src/logs.rs`) stays with that frontend — the test is
+whether a *second* frontend could plausibly use it, not whether it *could* compile in core.
+
+**Never re-implement a helper that already exists in another crate.** If two binaries need the
+same behaviour, it belongs in `tyutool-core`. `tyutool_core::diagnostics::log_session_banner`
+is the model: one helper, three callers, and an explicit "never re-inline" rule below.
+A shared helper that pulls a heavy dependency (e.g. Excel parsing) goes behind a Cargo
+feature so the other binaries don't link it — `libudev` is the existing precedent.
+
+**Cargo features.** Name a feature after the dependency or capability it gates, lower-case,
+matching the upstream crate's own name where there is one (`libudev`, `excel`). `tyutool-core`
+declares **no `default` feature** — every optional cost is opted into explicitly by the consumer
+(`tyutool-core = { path = "...", features = ["libudev"] }`), never inherited. Comment each
+feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
+musl builds and CI must leave it off).
+
+**Known outstanding violations — do not add to them.** `prune_log_files` is implemented three
+times (`tyutool-cli/src/main.rs`, `tyutool-bridge/src/main.rs`, `src-tauri/src/logs.rs`); the
+log tail/list/redact/zip helpers and the batch-flash / batch-auth orchestration live only in
+`src-tauri`, so the CLI cannot do them at all. The consolidation plan is
+`docs/specs/2026-08-26-core-consolidation-design.md` — read it before moving anything between
+crates. Delete each item from this list as its stage in that spec lands; a fixed item left
+listed here is worse than no list.
+
 **Crate responsibilities (5 workspace members):**
 
 | Crate | Binary / lib | Role |
 |-------|--------------|------|
-| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine. **No binaries.** |
+| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine, and the serial-debug chunk bridge shared by `tyutool-serve` and `src-tauri` (`serial_debug_bridge.rs`). **No binaries.** |
 | `tyutool-cli` | bin `tyutool_cli` | Interactive CLI. The `serve` subcommand delegates to `tyutool-serve`. |
 | `tyutool-serve` | lib (used by `tyutool-cli serve`) | WS dev-serve backend for `pnpm run dev:web` — **binds 127.0.0.1:9527, loopback `Host` + local-`Origin` handshake check (`validate_ws_origin`), no authentication, dev-only**. Not shipped to end users. |
-| `tyutool-bridge` | bin `tyutool-bridge` ("Cobuilder Bridge") | Resident tray + WS helper for cobuilder-web — **localhost:18730, Origin allowlist + per-connection token grants, single-execution lock, audit log**. Independent release line (`bridge-v*` tags). See `crates/tyutool-bridge/CLAUDE.md` and `PROTOCOL.md`. |
+| `tyutool-bridge` | bin `tyutool-bridge` ("Cobuilder Bridge") | Resident tray + WS helper for cobuilder-web — **localhost:18730, Origin allowlist + per-connection token grants, single-execution lock, audit log**. Independent release line (`bridge-v*` tags). See `crates/tyutool-bridge/AGENTS.md` and `PROTOCOL.md`. |
 | `src-tauri` | bin `tyutool_gui` | Tauri 2 desktop GUI backend; bridges the WebView to `tyutool-core`. |
 
 > **`tyutool-serve` vs `tyutool-bridge`** are easy to confuse: both expose `tyutool-core` over a localhost WebSocket, but they are different crates with different consumers, ports, and security models. `serve` is the in-repo dev shim; `bridge` is a shipped, resident, security-hardened helper for a remote web client. They share no protocol — bridge frames are independent and documented in `crates/tyutool-bridge/PROTOCOL.md`.
@@ -232,7 +295,9 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
 - **Bounded growth:** each session log is size-capped at 10 MB and rolls over when exceeded
   (CLI: `SessionLogWriter` → `tyutool-<ts>-N.log`; GUI: `tauri-plugin-log` `max_file_size` +
   `RotationStrategy::KeepAll`). Across sessions, `prune_log_files` trims old files at startup
-  (≤100 files / ≤100 MB total). New log sinks must stay bounded too.
+  (≤100 files / ≤100 MB total). New log sinks must stay bounded too. ⚠ `prune_log_files`
+  currently exists as **three** copies (CLI / bridge / GUI) that must be kept in agreement —
+  change all three, and do not add a fourth; see the crate boundary rule above.
 - **Bounded growth — serial-debug session archive:** the serial-debug archive
   (`{temp_dir}/tyutool/serial-debug/serial-debug-session-<ts>-<pid>-<seq>.ndjson`
   plus its `.idx` sidecar) is a *third* file family with its own bounds, because
@@ -317,12 +382,57 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 - `.vue` files: PascalCase (`SerialDebugPage.vue`)
 - Feature directories: kebab-case (`firmware-flash/`, `serial-debug/`)
 - Test files: same stem as the source plus `.test.ts`/`.test.rs` (a `.test.ts` matching a PascalCase `.vue` source is expected, not a violation of the `.ts` rule)
+- Rust modules stay **flat** (`crates/tyutool-core/src/authorize.rs`) until a module genuinely needs several files; only then does it become a directory with `mod.rs` (`plugins/`, `plugins/beken/`). Never create a directory for a single file.
+- `src/features/` holds **two kinds** of directory, and only the first has a required shape:
+  - **Page features** are mounted on a route and own a `<Name>Page.vue` — `firmware-flash`,
+    `serial-debug`, `settings`, `toolbox`, `batch-flash-auth`. Follow the shape those already
+    share: `<Name>Page.vue`, a `components/` subdirectory, `types.ts` / `constants.ts` /
+    `utils.ts`, and `use*.ts` composables (see `serial-debug/`). Match it rather than inventing
+    a layout.
+  - **Shared-logic features** have no page and no route; they exist so several page features can
+    share one model — `serial-port-indicators` is `model.ts` + `useFeaturePortIndicators.ts` and
+    nothing else. Keep them to the files they actually need; do not add an empty `components/`
+    or a placeholder `types.ts` for symmetry. Cross-feature *components* still belong in
+    `src/components/`, not here.
+  - Either kind: a `.test.ts` sits beside each `.ts`.
+
+### Agent guidance layout
+
+- **Content lives in `AGENTS.md`; `CLAUDE.md` only imports it.** Every `CLAUDE.md` in this repo is
+  exactly one line — `@AGENTS.md`. Never put guidance text in a `CLAUDE.md`, and never let a pair
+  drift apart.
+- Scoped guidance sits beside the code it governs: `src/AGENTS.md`, `src-tauri/AGENTS.md`,
+  `crates/AGENTS.md`, `crates/tyutool-bridge/AGENTS.md`. Each has a `CLAUDE.md` next to it holding
+  only the `@AGENTS.md` line.
+- Add a scoped file only when a directory carries conventions that would be noise at the root — a
+  crate existing is not by itself a reason. A rule that applies repo-wide belongs in the root
+  `AGENTS.md`, once; do not restate it in a scoped file.
+
+### Documentation layout
+
+| Path | Contents |
+|---|---|
+| `docs/cli.md` | Authoritative CLI reference — see the CLI documentation rule above |
+| `docs/specs/<date>-<name>-design.md` | Design docs: the problem, the decision, and what was deliberately rejected |
+| `docs/plans/<date>-<name>.md` | Implementation plan for a spec — checkbox (`- [ ]`) tasks, opening with Goal / Architecture / Tech Stack and a File Map table |
+| `docs/audits/<date>-<name>.md` | One-off audits; not archived |
+| `docs/usage-guide/{en,zh}/` | Published bilingual user guide; `docs/cli.md` stays its source of truth |
+| `docs/release.md` | Release process |
+
+- Specs and plans are paired: a plan names its spec with a `**Spec:**` line, and a spec names its
+  plan. Dates are the creation date (`YYYY-MM-DD`); the filename never changes afterwards.
+- **A document directly under `docs/specs/` or `docs/plans/` is in flight.** When the work ships,
+  move the spec and its plan into the sibling `completed/` directory in one commit — see
+  `597f05e chore(docs): archive completed plan/spec docs to completed/`.
+- Design docs may be written in Chinese (`docs/release.md`, the specs) or English (`docs/cli.md`,
+  `docs/serial-debug-stress.md`). User-facing references are English; internal design and process
+  docs follow whichever the surrounding documents use.
 
 ### Tauri IPC contract
 
 - Command names: snake_case; add `_cmd` suffix when a Tauri entry point shares a name with an internal function (`list_serial_ports_cmd`)
 - Event names: kebab-case, `feature-noun` format (`serial-debug-chunk`, `flash-progress`)
-- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`)
+- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`). This is the current rule and still applies — `docs/specs/2026-08-26-core-consolidation-design.md` plans to replace it with `ts-rs`-generated bindings, and this line is to be deleted only once that lands
 - Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
 - All Tauri-only code must be gated behind `isTauriRuntime()` from `src/runtime.ts`; never invoke Tauri commands in web mode
 
