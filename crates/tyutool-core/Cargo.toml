@@ -14,6 +14,13 @@ libudev = ["serialport/libudev"]
 # leave it disabled so they don't link the zip crate for a capability they
 # don't use.
 zip = ["dep:zip"]
+# Enables ts-rs-derived TypeScript bindings for the FlashJob family
+# (`FlashJob` / `FlashMode` / `FlashSegment` / `AuthStorage`), written to
+# `src/bindings/` by `cargo test -p tyutool-core --features ts-rs`. Only
+# needed to (re)generate those files — tyutool-cli / tyutool-serve /
+# tyutool-bridge never derive `TS` and must leave this disabled so they don't
+# link the ts-rs macro crate for a capability they don't use.
+ts-rs = ["dep:ts-rs"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -30,3 +37,4 @@ log = "0.4"
 espflash = { version = "4.3", default-features = false, features = ["serialport"] }
 md-5 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+ts-rs = { version = "12", optional = true }

@@ -1246,6 +1246,8 @@ pub enum ConflictPolicy {
 /// `None` / `Kv` is the default and preserves existing behavior.
 /// OTP writes are irreversible — the UI must warn the user before selecting it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(export, export_to = "../../../src/bindings/"))]
 #[serde(rename_all = "lowercase")]
 pub enum AuthStorage {
     #[default]
