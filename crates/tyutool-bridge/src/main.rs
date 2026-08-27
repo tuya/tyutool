@@ -63,13 +63,16 @@ const AUTOSTART_APP_NAME: &str = "tyutool-bridge";
 /// asserts "has a cobuilder path" rather than the literal string.
 const COBUILDER_URL: &str = "https://platform.tuya.com/cobuilder";
 
-/// Session log retention for this binary, mirroring `prune_log_files` in
-/// tyutool-cli (same "delete oldest until inside the limits" rule, smaller
+/// Session log retention for this binary, mirroring `tyutool_core::prune_log_files`'s
+/// use in tyutool-cli (same "delete oldest until inside the limits" rule, smaller
 /// budget: the bridge is a resident process, not an interactive tool).
-const MAX_LOG_FILES: usize = 20;
-const MAX_LOG_BYTES_TOTAL: u64 = 50 * 1024 * 1024; // 50 MB
-/// Log file prefix; `prune_log_files` only ever touches files matching it.
-const LOG_FILE_PREFIX: &str = "tyutool-bridge-";
+const LOG_RETENTION: tyutool_core::LogRetention = tyutool_core::LogRetention {
+    prefix: "tyutool-bridge-",
+    max_files: 20,
+    max_bytes_total: 50 * 1024 * 1024, // 50 MB
+};
+/// Log file prefix; `tyutool_core::prune_log_files` only ever touches files matching it.
+const LOG_FILE_PREFIX: &str = LOG_RETENTION.prefix;
 
 /// The opt-in that lets `--headless` write devices with no human in the loop.
 ///
@@ -317,7 +320,7 @@ fn open_session_log() -> anyhow::Result<(std::path::PathBuf, std::fs::File)> {
         .ok_or_else(|| anyhow::anyhow!("no platform data directory"))?
         .join("tyutool-bridge");
     std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("create {}: {e}", dir.display()))?;
-    prune_log_files(&dir);
+    tyutool_core::prune_log_files(&dir, &LOG_RETENTION);
 
     let path = dir.join(format!(
         "{LOG_FILE_PREFIX}{}.log",
@@ -329,47 +332,6 @@ fn open_session_log() -> anyhow::Result<(std::path::PathBuf, std::fs::File)> {
         .open(&path)
         .map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
     Ok((path, file))
-}
-
-/// Delete the oldest session logs until the directory is within both limits.
-/// Always keeps at least one file; only touches `LOG_FILE_PREFIX` files.
-fn prune_log_files(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut files: Vec<(std::path::PathBuf, u64)> = entries
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.extension().is_some_and(|ext| ext == "log")
-                && path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .is_some_and(|stem| stem.starts_with(LOG_FILE_PREFIX))
-        })
-        .map(|path| {
-            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            (path, size)
-        })
-        .collect();
-
-    // The timestamped names sort chronologically, so name order is age order.
-    files.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
-
-    let mut count = files.len();
-    let mut total: u64 = files.iter().map(|(_, size)| size).sum();
-    for (path, size) in &files {
-        if count <= 1 || (count <= MAX_LOG_FILES && total <= MAX_LOG_BYTES_TOTAL) {
-            break;
-        }
-        if std::fs::remove_file(path).is_ok() {
-            count -= 1;
-            total = total.saturating_sub(*size);
-        } else {
-            // Locked by another instance: leave it and keep going.
-            count -= 1;
-        }
-    }
 }
 
 // ── Security wiring ──────────────────────────────────────────────────────────
