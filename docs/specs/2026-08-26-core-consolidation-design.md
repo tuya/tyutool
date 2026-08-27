@@ -414,8 +414,8 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 | **P1a** | 日志保留与读取下沉（~250 行） | 3–4 天 | 代码层面对 CLI 可用（接入另议，见 P6） | ✅ 已完成 |
 | **P1b** | 报告头 / 脱敏 / zip 导出下沉（~120 行）+ `zip` feature | 合并计入 P1a | `mask` 安全契约变成单点实现 | ✅ 已完成 |
 | **P2-1** | `FlashJob::new` + 四处字面量收敛 + `to_cli_command()` + 往返测试 | 3–5 天 | 契约收敛；**命令回显上线**（唯一用户可见变化） | ✅ 已完成 |
-| **P2-2** | `ts-rs` 生成 TS 类型（**仅 `FlashJob` 家族**） | 2–3 天 | 前端手工镜像部分退役 | 待做 |
-| **P3** | updater 纯逻辑下沉 → `core/updater.rs` | 1 天 | 仅 `sha256_hex` 单点化（见降级说明） | 待做，收益小 |
+| **P2-2** | `ts-rs` 生成 TS 类型（**仅 `FlashJob` 家族**） | 2–3 天 | 前端手工镜像部分退役；CI 校验无 drift | ✅ 已完成 |
+| ~~**P3**~~ | ~~updater 纯逻辑下沉~~ | — | — | ❌ **已取消**，见下 |
 | **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | 代码层面对 CLI 可用 | 待评估 |
 | **P5** | `src-tauri/src/serial_debug.rs`（661）对照 `tyutool-serve` 审计 | 低 | 共享部分已由 `e01d7f4` 抽走 | 待做 |
 | **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 待定 | **真正兑现「CLI 能用」** | 待定，见下 |
@@ -438,9 +438,11 @@ P1a + P1b 完成后的实际状态是：那些函数**住在 `tyutool-core` 里�
 AGENTS.md 的「已知违规」里那条「the CLI cannot do them at all」，
 **只有 P6 落地才能划掉**。
 
-### updater 从 P1 降到 P3 的理由
+### updater 阶段被取消的完整经过
 
-初稿把 updater 下沉排在 P1，理由写的是「两套版本比较规则合一」。**实测后不成立：**
+这一项被降级了两次，最后取消。记录全程，因为它是本设计里**唯一一个因为没查代码就写进计划的阶段**。
+
+**第一次降级（P1 → P3）** —— 初稿理由写的是「两套版本比较规则合一」，实测后不成立：
 
 ```
 $ grep -n "is_newer\|platform_key\|extract_binary" src-tauri/src/updater.rs
@@ -450,9 +452,50 @@ src-tauri/src/lib.rs:327:pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 ```
 
 `src-tauri/src/updater.rs` 只做 `update_check` / `update_download` / `update_install`，
-**不含版本比较、不含平台键、不含归档解包**。唯一真实重复的是 SHA-256，
-而它在 `lib.rs:327` 而非 `updater.rs`。初稿是看到 `updater.rs` 有 524 行就推断的，
-没有查内容——收益被高估了一个量级，故降至 P3。
+**不含版本比较、不含平台键、不含归档解包**。初稿是看到 `updater.rs` 有 524 行
+就推断的，没有查内容。
+
+**第二次，也就是取消** —— 派活前逐函数核实 `crates/tyutool-cli/src/update.rs`：
+
+```
+$ grep -rn "is_newer\|platform_key\|GzDecoder\|tar::Archive" --include=*.rs src-tauri/src
+（一处都没有）
+$ grep -c sha2 crates/tyutool-core/Cargo.toml
+0
+```
+
+| 函数 | 归属 |
+|---|---|
+| `platform_key` / `is_newer` / `is_windows` | **CLI 独有** —— GUI 走 `tauri-plugin-updater`，不自己比较版本 |
+| `extract_binary_from_tar_gz` / `_zip` | **CLI 独有**，且需 `flate2` + `tar` |
+| `replace_self` | **CLI 独有**（`self-replace`） |
+| `fetch_latest_json` / `download_bytes` | CLI 独有 |
+| `verify_sha256` | 与 `lib.rs:327` 的 `sha256_hex` **部分**重叠 |
+
+而那两个甚至不是同一个函数：
+
+```rust
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String            // 算摘要
+fn verify_sha256(data: &[u8], expected_hex: &str) -> bool   // 算 + 比
+```
+
+**唯一真正共享的是「算 SHA-256 并转小写十六进制」这 5 行。**
+
+#### 取消理由
+
+1. 按本设计自己的 crate 边界规则（及 AGENTS.md 的例外条款）——
+   **只服务单一前端的纯 std 代码留在该前端**——`update.rs` 绝大部分本就该留在 CLI。
+2. 剩下那 5 行下沉，代价是给 core 加 `sha2` 依赖、波及 5 个 consumer；
+   或再造一个 feature，机械成本超过省下的 5 行。
+3. SHA-256 是固定标准，两份实现**不可能产生行为漂移**，只有写法差异。
+
+按 `docs/specs/2026-08-27-refactor-v3-normalization-design.md` 定的筛选判据
+（有实测证据 + 不做有具体代价），**这一项两条都不满足**。
+
+#### 重新打开的条件
+
+若将来出现**第三个** SHA-256 调用点，或 GUI 改成自行处理归档与版本比较
+（不再依赖 `tauri-plugin-updater`），则重新评估。
 
 ### P4（批量下沉）的风险须单列
 
