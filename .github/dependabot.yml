@@ -1,0 +1,61 @@
+# Dependency version updates.
+#
+# ⚠ Scope: this file configures *version* updates — routine "a newer release
+# exists" PRs. It is NOT what surfaces security advisories. Dependabot security
+# updates are a separate repository setting (Settings → Code security →
+# Dependabot alerts / security updates) and work with or without this file.
+# Adding this file does not by itself clear the existing alerts; it makes the
+# dependency set move forward so they stop accumulating.
+#
+# Cadence is monthly, not weekly, on purpose. The lockfiles carry ~716 cargo
+# packages and 62 direct npm deps, so weekly runs would bury real signal under
+# routine bumps. Minor and patch updates are grouped into one PR per ecosystem
+# for the same reason; majors stay ungrouped so each gets read on its own.
+#
+# ⚠ Never enable auto-merge here. This project links native, platform-specific
+# dependencies (serialport + libudev, Tauri, calamine) where a version bump can
+# break one target and not the others, and CI does not build every target on
+# every PR. Every Dependabot PR needs a human reading the changelog.
+
+version: 2
+
+updates:
+  # ── Rust workspace ─────────────────────────────────────────────────────────
+  # One entry covers all 5 members: Cargo workspaces resolve from the root
+  # manifest, so pointing at "/" picks up crates/* and src-tauri too.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  # pnpm workspace; `pnpm-lock.yaml` is the lockfile Dependabot reads. Keep
+  # using pnpm — see the "do not npm install" note in AGENTS.md.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
+  # Covers the pinned actions in ci.yml / bridge.yml / release.yml and friends.
+  # Note `dtolnay/rust-toolchain@stable` is a floating tag, not a version, so
+  # Dependabot cannot track it — the Rust toolchain stays unpinned by design.
+  # See "Rust 工具链不固定" in docs/specs/2026-08-27-refactor-v3-normalization-design.md
+  # for why that is a held decision rather than an oversight.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
