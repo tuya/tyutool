@@ -676,7 +676,7 @@ pub fn run() {
             );
             let _ = SESSION_ID.set(session_id);
             if let Ok(log_dir) = app.path().app_log_dir() {
-                logs::prune_log_files(&log_dir);
+                tyutool_core::prune_log_files(&log_dir, &logs::LOG_RETENTION);
             }
             Ok(())
         })
