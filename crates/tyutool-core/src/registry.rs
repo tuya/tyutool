@@ -101,6 +101,13 @@ where
         job.mode
     );
 
+    match job.to_cli_command() {
+        Some(cmd) => log::info!("run_job: equivalent CLI command: {}", cmd),
+        None => log::info!(
+            "run_job: no equivalent single CLI command (multi-segment job or a required field is unset)"
+        ),
+    }
+
     let result = if matches!(job.mode, FlashMode::Authorize) {
         log::info!("run_job: Authorize mode on port={}", job.port);
         crate::authorize::run_authorize(job, cancel, &progress)

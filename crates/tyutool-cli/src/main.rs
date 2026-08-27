@@ -223,6 +223,63 @@ fn default_start(_device: &str) -> String {
     "0x00000000".to_string()
 }
 
+// Builds a `FlashJob` from already-resolved fields (defaults applied, port chosen,
+// end/length computed) for one subcommand. Kept as free functions — rather than inlined at
+// each `FlashJob { .. }` call site — so `main()`'s match arms and the round-trip tests below
+// share one FlashJob-construction path per mode instead of drifting apart.
+fn write_job(
+    chip_id: String,
+    port: String,
+    baud: u32,
+    start: String,
+    end: String,
+    file: String,
+) -> FlashJob {
+    FlashJob {
+        flash_start_hex: Some(start),
+        flash_end_hex: Some(end),
+        firmware_path: Some(file),
+        ..FlashJob::new(FlashMode::Flash, chip_id, port, baud)
+    }
+}
+
+fn read_job(
+    chip_id: String,
+    port: String,
+    baud: u32,
+    start: String,
+    end: String,
+    file: String,
+) -> FlashJob {
+    FlashJob {
+        read_start_hex: Some(start),
+        read_end_hex: Some(end),
+        read_file_path: Some(file),
+        ..FlashJob::new(FlashMode::Read, chip_id, port, baud)
+    }
+}
+
+fn erase_job(chip_id: String, port: String, baud: u32, start: String, end: String) -> FlashJob {
+    FlashJob {
+        erase_start_hex: Some(start),
+        erase_end_hex: Some(end),
+        ..FlashJob::new(FlashMode::Erase, chip_id, port, baud)
+    }
+}
+
+fn authorize_job(
+    chip_id: String,
+    port: String,
+    uuid: Option<String>,
+    authkey: Option<String>,
+) -> FlashJob {
+    FlashJob {
+        authorize_uuid: uuid,
+        authorize_key: authkey,
+        ..FlashJob::new(FlashMode::Authorize, chip_id, port, 115_200)
+    }
+}
+
 fn choose_port() -> Result<String, Box<dyn std::error::Error>> {
     let ports = list_serial_ports()?;
     if ports.is_empty() {
@@ -551,25 +608,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 port,
                 mode
             );
-            let job = FlashJob {
-                mode: FlashMode::Authorize,
-                chip_id,
-                port,
-                baud_rate: 115_200,
-                segments: None,
-                flash_start_hex: None,
-                flash_end_hex: None,
-                erase_start_hex: None,
-                erase_end_hex: None,
-                read_start_hex: None,
-                read_end_hex: None,
-                read_file_path: None,
-                firmware_path: None,
-                authorize_uuid: uuid,
-                authorize_key: authkey,
-                authorize_storage: None,
-                confirm_overwrite: None,
-            };
+            let job = authorize_job(chip_id, port, uuid, authkey);
             let reporter = CliReporter::new(force_plain);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
@@ -610,25 +649,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let reporter = CliReporter::new(force_plain);
 
-            let job = FlashJob {
-                mode: FlashMode::Flash,
-                chip_id,
-                port,
-                baud_rate: baud,
-                segments: None,
-                flash_start_hex: Some(start),
-                flash_end_hex: Some(end),
-                erase_start_hex: None,
-                erase_end_hex: None,
-                read_start_hex: None,
-                read_end_hex: None,
-                read_file_path: None,
-                firmware_path: Some(file),
-                authorize_uuid: None,
-                authorize_key: None,
-                authorize_storage: None,
-                confirm_overwrite: None,
-            };
+            let job = write_job(chip_id, port, baud, start, end, file);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
@@ -662,25 +683,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let reporter = CliReporter::new(force_plain);
 
-            let job = FlashJob {
-                mode: FlashMode::Read,
-                chip_id,
-                port,
-                baud_rate: baud,
-                segments: None,
-                flash_start_hex: None,
-                flash_end_hex: None,
-                erase_start_hex: None,
-                erase_end_hex: None,
-                read_start_hex: Some(start),
-                read_end_hex: Some(end),
-                read_file_path: Some(file),
-                firmware_path: None,
-                authorize_uuid: None,
-                authorize_key: None,
-                authorize_storage: None,
-                confirm_overwrite: None,
-            };
+            let job = read_job(chip_id, port, baud, start, end, file);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
@@ -712,25 +715,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let reporter = CliReporter::new(force_plain);
 
-            let job = FlashJob {
-                mode: FlashMode::Erase,
-                chip_id,
-                port,
-                baud_rate: baud,
-                segments: None,
-                flash_start_hex: None,
-                flash_end_hex: None,
-                erase_start_hex: Some(start),
-                erase_end_hex: Some(end),
-                read_start_hex: None,
-                read_end_hex: None,
-                read_file_path: None,
-                firmware_path: None,
-                authorize_uuid: None,
-                authorize_key: None,
-                authorize_storage: None,
-                confirm_overwrite: None,
-            };
+            let job = erase_job(chip_id, port, baud, start, end);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
@@ -944,6 +929,369 @@ mod tests {
             Commands::Reset { device, .. } => assert_eq!(device, "bk7231n"),
             _ => panic!("expected Commands::Reset"),
         }
+    }
+
+    // --- FlashJob <-> CLI command round trip -------------------------------------------
+    //
+    // `write_job`/`read_job`/`erase_job`/`authorize_job` and `FlashJob::to_cli_command`
+    // (in tyutool-core) are two directions of the same argv<->FlashJob mapping. These tests
+    // drive clap on real argv, build the FlashJob the same way `main()` does, ask
+    // `to_cli_command()` to render it back to a command line, reparse that line with clap,
+    // and rebuild a second FlashJob -- then assert the two jobs match. This is the path that
+    // would catch the two directions of the mapping drifting apart.
+
+    /// Minimal quote-aware whitespace tokenizer for `to_cli_command()`'s output, matching
+    /// the escaping `quote_arg` (in tyutool-core's job.rs) produces: double-quoted spans with
+    /// backslash escapes for `\` and `"`. Not a general shell tokenizer -- it only needs to
+    /// invert this one producer for these tests.
+    fn tokenize_command(cmd: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut chars = cmd.chars().peekable();
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                chars.next();
+                continue;
+            }
+            let mut token = String::new();
+            if c == '"' {
+                chars.next();
+                while let Some(c) = chars.next() {
+                    if c == '"' {
+                        break;
+                    }
+                    if c == '\\' {
+                        match chars.peek() {
+                            Some('"') => {
+                                token.push('"');
+                                chars.next();
+                            }
+                            Some('\\') => {
+                                token.push('\\');
+                                chars.next();
+                            }
+                            _ => token.push('\\'),
+                        }
+                    } else {
+                        token.push(c);
+                    }
+                }
+            } else {
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() {
+                        break;
+                    }
+                    token.push(c);
+                    chars.next();
+                }
+            }
+            tokens.push(token);
+        }
+        tokens
+    }
+
+    #[test]
+    fn round_trip_write_job() {
+        let argv = [
+            "tyutool",
+            "write",
+            "-d",
+            "t5ai",
+            "-p",
+            "COM3",
+            "-b",
+            "921600",
+            "-s",
+            "0x00000000",
+            "--end",
+            "0x00100000",
+            "-f",
+            "firmware.bin",
+        ];
+        let cli = Cli::try_parse_from(argv).unwrap();
+        let job1 = match cli.command {
+            Commands::Write {
+                device,
+                port,
+                baud,
+                start,
+                end,
+                file,
+            } => write_job(
+                normalize_chip_id(&device),
+                port.unwrap(),
+                baud.unwrap(),
+                start.unwrap(),
+                end.unwrap(),
+                file,
+            ),
+            _ => panic!("expected Commands::Write"),
+        };
+
+        let cmd = job1
+            .to_cli_command()
+            .expect("write job should be representable");
+        let argv2 = tokenize_command(&cmd);
+        let cli2 = Cli::try_parse_from(&argv2)
+            .unwrap_or_else(|e| panic!("failed to reparse `{cmd}`: {e}"));
+        let job2 = match cli2.command {
+            Commands::Write {
+                device,
+                port,
+                baud,
+                start,
+                end,
+                file,
+            } => write_job(
+                normalize_chip_id(&device),
+                port.unwrap(),
+                baud.unwrap(),
+                start.unwrap(),
+                end.unwrap(),
+                file,
+            ),
+            _ => panic!("expected Commands::Write"),
+        };
+
+        assert_eq!(job1, job2, "round trip via `{cmd}` diverged");
+    }
+
+    #[test]
+    fn round_trip_read_job() {
+        let argv = [
+            "tyutool",
+            "read",
+            "-d",
+            "esp32",
+            "-p",
+            "COM4",
+            "-b",
+            "460800",
+            "-s",
+            "0x00000000",
+            "-l",
+            "0x00200000",
+            "-f",
+            "out.bin",
+        ];
+        let cli = Cli::try_parse_from(argv).unwrap();
+        let job1 = match cli.command {
+            Commands::Read {
+                device,
+                port,
+                baud,
+                start,
+                length,
+                file,
+            } => {
+                let start = start.unwrap();
+                let start_val = parse_hex_addr(&start).unwrap();
+                let length_val = parse_hex_addr(&length).unwrap();
+                let end = format!("0x{:08X}", start_val + length_val);
+                read_job(
+                    normalize_chip_id(&device),
+                    port.unwrap(),
+                    baud.unwrap(),
+                    start,
+                    end,
+                    file,
+                )
+            }
+            _ => panic!("expected Commands::Read"),
+        };
+
+        let cmd = job1
+            .to_cli_command()
+            .expect("read job should be representable");
+        let argv2 = tokenize_command(&cmd);
+        let cli2 = Cli::try_parse_from(&argv2)
+            .unwrap_or_else(|e| panic!("failed to reparse `{cmd}`: {e}"));
+        let job2 = match cli2.command {
+            Commands::Read {
+                device,
+                port,
+                baud,
+                start,
+                length,
+                file,
+            } => {
+                let start = start.unwrap();
+                let start_val = parse_hex_addr(&start).unwrap();
+                let length_val = parse_hex_addr(&length).unwrap();
+                let end = format!("0x{:08X}", start_val + length_val);
+                read_job(
+                    normalize_chip_id(&device),
+                    port.unwrap(),
+                    baud.unwrap(),
+                    start,
+                    end,
+                    file,
+                )
+            }
+            _ => panic!("expected Commands::Read"),
+        };
+
+        assert_eq!(job1, job2, "round trip via `{cmd}` diverged");
+    }
+
+    #[test]
+    fn round_trip_erase_job() {
+        let argv = [
+            "tyutool",
+            "erase",
+            "-d",
+            "bk7231n",
+            "-p",
+            "/dev/ttyUSB1",
+            "-b",
+            "921600",
+            "-s",
+            "0x00010000",
+            "-l",
+            "0x00010000",
+        ];
+        let cli = Cli::try_parse_from(argv).unwrap();
+        let job1 = match cli.command {
+            Commands::Erase {
+                device,
+                port,
+                baud,
+                start,
+                length,
+            } => {
+                let start = start.unwrap();
+                let start_val = parse_hex_addr(&start).unwrap();
+                let length_val = parse_hex_addr(&length).unwrap();
+                let end = format!("0x{:08X}", start_val + length_val);
+                erase_job(
+                    normalize_chip_id(&device),
+                    port.unwrap(),
+                    baud.unwrap(),
+                    start,
+                    end,
+                )
+            }
+            _ => panic!("expected Commands::Erase"),
+        };
+
+        let cmd = job1
+            .to_cli_command()
+            .expect("erase job should be representable");
+        let argv2 = tokenize_command(&cmd);
+        let cli2 = Cli::try_parse_from(&argv2)
+            .unwrap_or_else(|e| panic!("failed to reparse `{cmd}`: {e}"));
+        let job2 = match cli2.command {
+            Commands::Erase {
+                device,
+                port,
+                baud,
+                start,
+                length,
+            } => {
+                let start = start.unwrap();
+                let start_val = parse_hex_addr(&start).unwrap();
+                let length_val = parse_hex_addr(&length).unwrap();
+                let end = format!("0x{:08X}", start_val + length_val);
+                erase_job(
+                    normalize_chip_id(&device),
+                    port.unwrap(),
+                    baud.unwrap(),
+                    start,
+                    end,
+                )
+            }
+            _ => panic!("expected Commands::Erase"),
+        };
+
+        assert_eq!(job1, job2, "round trip via `{cmd}` diverged");
+    }
+
+    #[test]
+    fn round_trip_authorize_job_non_credential_fields_match_and_credentials_never_leak() {
+        // `FlashJob`'s manual PartialEq compares every field including credentials, so an
+        // authorize round trip can't use plain `assert_eq!(job1, job2)` like the other three
+        // modes: the credentials are deliberately redacted by `to_cli_command()` and are
+        // expected to differ after the round trip. Assert everything else matches, and
+        // separately assert the real credential values never appear in the rendered command.
+        let real_uuid = "uuid-super-secret-0123456789";
+        let real_key = "authkey-super-secret-abcdef";
+        let argv = [
+            "tyutool",
+            "authorize",
+            "-d",
+            "t5ai",
+            "-p",
+            "COM5",
+            "--uuid",
+            real_uuid,
+            "--authkey",
+            real_key,
+        ];
+        let cli = Cli::try_parse_from(argv).unwrap();
+        let job1 = match cli.command {
+            Commands::Authorize {
+                port,
+                device,
+                uuid,
+                authkey,
+            } => {
+                let chip_id = device.as_deref().map(normalize_chip_id).unwrap_or_default();
+                authorize_job(chip_id, port.unwrap(), uuid, authkey)
+            }
+            _ => panic!("expected Commands::Authorize"),
+        };
+
+        let cmd = job1
+            .to_cli_command()
+            .expect("authorize job should be representable");
+        assert!(!cmd.contains(real_uuid), "real uuid leaked into `{cmd}`");
+        assert!(!cmd.contains(real_key), "real authkey leaked into `{cmd}`");
+        assert!(cmd.contains("--uuid <REDACTED>"));
+        assert!(cmd.contains("--authkey <REDACTED>"));
+
+        let argv2 = tokenize_command(&cmd);
+        let cli2 = Cli::try_parse_from(&argv2)
+            .unwrap_or_else(|e| panic!("failed to reparse `{cmd}`: {e}"));
+        let job2 = match cli2.command {
+            Commands::Authorize {
+                port,
+                device,
+                uuid,
+                authkey,
+            } => {
+                let chip_id = device.as_deref().map(normalize_chip_id).unwrap_or_default();
+                authorize_job(chip_id, port.unwrap(), uuid, authkey)
+            }
+            _ => panic!("expected Commands::Authorize"),
+        };
+
+        assert_eq!(job1.mode, job2.mode);
+        assert_eq!(job1.chip_id, job2.chip_id);
+        assert_eq!(job1.port, job2.port);
+        assert_eq!(job1.baud_rate, job2.baud_rate);
+        assert_eq!(job1.segments, job2.segments);
+        assert_eq!(job1.flash_start_hex, job2.flash_start_hex);
+        assert_eq!(job1.flash_end_hex, job2.flash_end_hex);
+        assert_eq!(job1.erase_start_hex, job2.erase_start_hex);
+        assert_eq!(job1.erase_end_hex, job2.erase_end_hex);
+        assert_eq!(job1.read_start_hex, job2.read_start_hex);
+        assert_eq!(job1.read_end_hex, job2.read_end_hex);
+        assert_eq!(job1.read_file_path, job2.read_file_path);
+        assert_eq!(job1.firmware_path, job2.firmware_path);
+        assert_eq!(job1.authorize_storage, job2.authorize_storage);
+        // Expected divergence: the credentials were redacted on the way out.
+        assert_ne!(job1.authorize_uuid, job2.authorize_uuid);
+        assert_ne!(job1.authorize_key, job2.authorize_key);
+    }
+
+    #[test]
+    fn to_cli_command_none_for_multi_segment_job_is_never_reparsed() {
+        // Sanity check that the `segments` (GUI multi-flash) case really does return `None`
+        // from the CLI side of the mapping too, matching the FlashJob-side test in job.rs.
+        let job = FlashJob {
+            segments: Some(vec![]),
+            ..FlashJob::new(FlashMode::Flash, "T5AI", "COM3", 921_600)
+        };
+        assert!(job.to_cli_command().is_none());
     }
 }
 
