@@ -6,13 +6,14 @@
 //! `tyutool-serve`. All this file contributes to it is [`TauriSink`]: the four
 //! Tauri events those batches and notices become.
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use tyutool_core::{
-    serial_debug_archive_dir, serial_debug_fail_backfill_if_current, serial_debug_finalize_pending,
+    serial_debug_fail_backfill_if_current, serial_debug_finalize_pending,
     serial_debug_finish_backfill_if_current, serial_debug_ingest_lines,
     serial_debug_scan_filter_matches, serial_debug_spawn_chunk_bridge, ArchivedChunk, DebugChunk,
     DebugConfig, SerialDebugArchive, SerialDebugArchiveReader, SerialDebugChunkBridgeHandle,
@@ -27,6 +28,21 @@ pub(crate) struct DebugState {
     pub filters: Arc<StdMutex<SerialDebugFilterIndex>>,
     pub chunk_bridge: Arc<StdMutex<Option<SerialDebugChunkBridgeHandle>>>,
     pub generation: Arc<SerialDebugGeneration>,
+    /// The directory `create_serial_debug_state_resilient` actually used for
+    /// `archive`/`filters` — the preferred primary, or its per-process fallback
+    /// when primary was unwritable at startup. Anything that re-derives a path
+    /// alongside the archive (e.g. the backfill `.historical.idx`) must join
+    /// onto this field, never recompute `serial_debug_archive_dir()`, or it
+    /// will target the primary even when the archive actually lives in the
+    /// fallback.
+    pub archive_dir: PathBuf,
+}
+
+/// Path of a filter's backfill scratch index, alongside the archive it was
+/// built from. Pulled out so the "must be under the actual archive dir, not
+/// the primary" contract is unit-testable without a Tauri app.
+fn historical_idx_path(archive_dir: &Path, filter_id: &str) -> PathBuf {
+    archive_dir.join(format!("serial-debug-filter-{filter_id}.historical.idx"))
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -436,8 +452,7 @@ pub(crate) fn serial_debug_filter_add(
     let filters_for_backfill = Arc::clone(&state.filters);
     let generation_for_backfill = Arc::clone(&state.generation);
     let filter_id = def.id.clone();
-    let historical_idx_path =
-        serial_debug_archive_dir().join(format!("serial-debug-filter-{filter_id}.historical.idx"));
+    let historical_idx_path = historical_idx_path(&state.archive_dir, &filter_id);
     tauri::async_runtime::spawn_blocking(move || {
         let result = serial_debug_scan_filter_matches(
             &backfill_snapshot,
@@ -601,5 +616,31 @@ mod tests {
     fn serial_debug_device_reset_session_requires_open_session() {
         let err = serial_debug_device_reset_session(None, "T5AI").unwrap_err();
         assert_eq!(err, "serial debug not open");
+    }
+
+    /// Regression test for the bug where the backfill `.historical.idx` path
+    /// was derived from the global `serial_debug_archive_dir()` primary
+    /// instead of the directory `create_serial_debug_state_resilient`
+    /// actually used. When startup falls back to a pid-scoped subdirectory,
+    /// the derived path must land inside that fallback, not the primary —
+    /// otherwise the write targets a directory already known to be
+    /// unwritable, and even when it isn't, the index ends up split from the
+    /// archive it indexes.
+    #[test]
+    fn historical_idx_path_uses_the_actual_archive_dir_not_the_global_primary() {
+        let primary = tyutool_core::serial_debug_archive_dir();
+        let fallback = primary.join(format!("pid-{}", std::process::id()));
+
+        let path = historical_idx_path(&fallback, "abc123");
+
+        assert!(
+            path.starts_with(&fallback),
+            "historical idx path {path:?} must live under the actual (fallback) dir {fallback:?}"
+        );
+        assert_ne!(
+            path.parent().unwrap(),
+            primary,
+            "historical idx path must not fall back to the global primary dir"
+        );
     }
 }
