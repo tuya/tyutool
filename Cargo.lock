@@ -6125,6 +6125,7 @@ dependencies = [
  "serialport",
  "tempfile",
  "thiserror 2.0.18",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -6164,7 +6165,6 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tyutool-core",
- "zip 2.4.2",
 ]
 
 [[package]]
