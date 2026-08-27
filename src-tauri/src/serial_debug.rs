@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use tyutool_core::{
-    serial_debug_fail_backfill_if_current, serial_debug_finalize_pending,
+    serial_debug_archive_dir, serial_debug_fail_backfill_if_current, serial_debug_finalize_pending,
     serial_debug_finish_backfill_if_current, serial_debug_ingest_lines,
     serial_debug_scan_filter_matches, serial_debug_spawn_chunk_bridge, ArchivedChunk, DebugChunk,
     DebugConfig, SerialDebugArchive, SerialDebugArchiveReader, SerialDebugChunkBridgeHandle,
@@ -107,62 +107,6 @@ pub(crate) struct SerialDebugFilterAddArgs {
     keyword: String,
     use_regex: bool,
     color: String,
-}
-
-fn serial_debug_archive_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("tyutool").join("serial-debug")
-}
-
-/// Create the serial-debug archive + filter index without panicking the GUI on
-/// startup. The preferred directory is `serial_debug_archive_dir()`; if that is
-/// not writable (permissions, a stale lock, antivirus interference) we fall back
-/// to a per-process-unique subdirectory and log a warning. Only if every attempt
-/// fails do we propagate the error — at which point the app genuinely cannot
-/// function and a controlled panic with a clear message is preferable to a
-/// silent half-initialised state.
-pub(crate) fn create_serial_debug_archive_resilient() -> (SerialDebugArchive, SerialDebugFilterIndex)
-{
-    let primary = serial_debug_archive_dir();
-    match (
-        SerialDebugArchive::create(&primary),
-        SerialDebugFilterIndex::create(&primary),
-    ) {
-        (Ok(a), Ok(f)) => return (a, f),
-        (a_res, f_res) => {
-            log::warn!(
-                "[serial-debug] archive dir {:?} unavailable \
-                 (archive={:?}, filters={:?}); retrying in a per-process dir",
-                primary,
-                a_res.err().map(|e| e.to_string()),
-                f_res.err().map(|e| e.to_string()),
-            );
-        }
-    }
-    // Per-process fallback so a stale/locked primary dir doesn't block startup.
-    let fallback = serial_debug_archive_dir().join(format!("pid-{}", std::process::id()));
-    match (
-        SerialDebugArchive::create(&fallback),
-        SerialDebugFilterIndex::create(&fallback),
-    ) {
-        (Ok(a), Ok(f)) => {
-            log::warn!(
-                "[serial-debug] archive initialised in fallback dir {:?} \
-                 (serial-debug persistence may be split across dirs)",
-                fallback
-            );
-            (a, f)
-        }
-        (a_res, f_res) => {
-            panic!(
-                "serial-debug archive could not be created in {:?} or {:?}: \
-                 archive={:?}, filters={:?}",
-                primary,
-                fallback,
-                a_res.err().map(|e| e.to_string()),
-                f_res.err().map(|e| e.to_string()),
-            );
-        }
-    }
 }
 
 fn emit_filter_update(

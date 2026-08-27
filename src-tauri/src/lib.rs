@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
-use tyutool_core::SerialDebugGeneration;
+use tyutool_core::{
+    create_serial_debug_state_resilient, serial_debug_archive_dir, SerialDebugGeneration,
+};
 
 /// Set once at startup; included in exported issue-report metadata.
 static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -639,7 +641,11 @@ pub fn run() {
             thread: StdMutex::new(None),
         })
         .manage({
-            let (archive, filters) = serial_debug::create_serial_debug_archive_resilient();
+            // The returned directory (which may be a pid-scoped fallback) isn't
+            // needed here — unlike tyutool-serve, nothing else in this process
+            // re-derives paths from it.
+            let (_dir, archive, filters) =
+                create_serial_debug_state_resilient(&serial_debug_archive_dir());
             serial_debug::DebugState {
                 session: Arc::new(StdMutex::new(None)),
                 archive: Arc::new(StdMutex::new(archive)),
