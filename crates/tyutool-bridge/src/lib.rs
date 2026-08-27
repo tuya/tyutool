@@ -2087,19 +2087,6 @@ fn real_port_enumerator() -> PortEnumerator {
 /// device.
 fn authorize_job(spec: &AuthJobSpec) -> tyutool_core::FlashJob {
     tyutool_core::FlashJob {
-        mode: tyutool_core::FlashMode::Authorize,
-        chip_id: spec.chip_id.clone(),
-        port: spec.port.clone(),
-        baud_rate: spec.baud_rate,
-        segments: None,
-        flash_start_hex: None,
-        flash_end_hex: None,
-        erase_start_hex: None,
-        erase_end_hex: None,
-        read_start_hex: None,
-        read_end_hex: None,
-        read_file_path: None,
-        firmware_path: None,
         authorize_uuid: Some(spec.uuid.clone()),
         authorize_key: Some(spec.auth_key.clone()),
         // `run_authorize` forces KV for single-device writes and ignores this
@@ -2111,6 +2098,12 @@ fn authorize_job(spec: &AuthJobSpec) -> tyutool_core::FlashJob {
         // is overwritten rather than skipped (PRD 覆盖不可撤销) — the same
         // decision `ConflictPolicy::Overwrite` encoded on the batch path.
         confirm_overwrite: None,
+        ..tyutool_core::FlashJob::new(
+            tyutool_core::FlashMode::Authorize,
+            spec.chip_id.clone(),
+            spec.port.clone(),
+            spec.baud_rate,
+        )
     }
 }
 
@@ -2330,23 +2323,15 @@ impl FlashBackend for RealFlashBackend {
         };
 
         let job = tyutool_core::FlashJob {
-            mode: tyutool_core::FlashMode::Flash,
-            chip_id: spec.chip_id,
-            port: spec.port,
-            baud_rate: spec.baud_rate,
-            segments: None,
             flash_start_hex: Some(format!("0x{:08X}", spec.start_addr)),
             flash_end_hex: Some(format!("0x{end_addr:08X}")),
-            erase_start_hex: None,
-            erase_end_hex: None,
-            read_start_hex: None,
-            read_end_hex: None,
-            read_file_path: None,
             firmware_path: Some(firmware.path().to_string_lossy().to_string()),
-            authorize_uuid: None,
-            authorize_key: None,
-            authorize_storage: None,
-            confirm_overwrite: None,
+            ..tyutool_core::FlashJob::new(
+                tyutool_core::FlashMode::Flash,
+                spec.chip_id,
+                spec.port,
+                spec.baud_rate,
+            )
         };
 
         // FlashEvent is forwarded verbatim (same payload shape as serve's
