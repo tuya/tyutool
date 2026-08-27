@@ -27,12 +27,11 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-tyutool-core = { path = "../crates/tyutool-core", features = ["libudev"] }
+tyutool-core = { path = "../crates/tyutool-core", features = ["libudev", "zip"] }
 tauri-plugin-log = "2"
 log = "0.4"
 calamine = { version = "0.26", features = ["dates"] }
 rust_xlsxwriter = "0.79"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 chrono = "0.4"
 
