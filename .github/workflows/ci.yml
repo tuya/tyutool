@@ -15,12 +15,18 @@ env:
 
 jobs:
   # ── Rust core + CLI tests ───────────────────────────────────────────────────
-  # tyutool-core and tyutool-cli hold the flash logic and need no GTK/WebKit
-  # system dependency, so this job stays fast and gates every push. The Tauri
-  # backend needs those libraries and is gated separately in the `tauri` job.
-  # `cargo fmt --all` covers every crate including src-tauri.
+  # tyutool-core, tyutool-cli and tyutool-serve hold the flash logic and the dev
+  # WS shim, and need no GTK/WebKit system dependency, so this job stays fast and
+  # gates every push. The Tauri backend needs those libraries and is gated
+  # separately in the `tauri` job. `cargo fmt --all` covers every crate including
+  # src-tauri.
+  #
+  # tyutool-serve joined here rather than getting a job of its own: it has no extra
+  # system deps, and its suite guards `validate_ws_origin` — the cross-origin and
+  # DNS-rebinding rejections that stop a random web page from driving the user's
+  # hardware. Those 28 tests existed but ran in no CI job at all until 2026-08-27.
   rust:
-    name: Rust (core + cli)
+    name: Rust (core + cli + serve)
     runs-on: ubuntu-latest
     # This pipeline finishes in ~2 minutes. GitHub's default job timeout is 6
     # HOURS, so a hung step (see the apt note in `tauri`) burns the runner until
@@ -35,9 +41,9 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy -p tyutool-core -p tyutool-cli --all-targets -- -D warnings
+        run: cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D warnings
       - name: Test
-        run: cargo test -p tyutool-core -p tyutool-cli
+        run: cargo test -p tyutool-core -p tyutool-cli -p tyutool-serve
 
   # ── Tauri backend (src-tauri) ───────────────────────────────────────────────
   # Guards the GUI bridge: path-traversal rejection, credential redaction on the
