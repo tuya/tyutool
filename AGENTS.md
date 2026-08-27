@@ -119,9 +119,12 @@ DNS-rebinding rejections, had never run in CI before 2026-08-27.
 - **clippy runs with `-D warnings`** — any lint fails the build. Fix the code; only reach for
   `#[allow]` with a comment saying why. New stable lints land regularly and have broken this
   repo before (`627414e`, `977f4e1`).
-- **`cargo fmt --all --check`** — lefthook formats staged `.rs` on commit, but if lefthook is not
-  installed the hook silently does nothing (`Can't find lefthook in PATH`). Run `cargo fmt --all`
-  yourself rather than trusting the hook.
+- **`cargo fmt --all --check`** — lefthook formats staged `.rs` on commit, but the hook is
+  **fail-open**: whenever `lefthook` is not resolvable it prints `Can't find lefthook in PATH`
+  and lets the commit through. The usual cause is not a missing install but **invoking git from
+  outside the environment that owns `node_modules/.bin`** — on a WSL checkout, driving git from
+  Windows-side Git Bash over `\\wsl.localhost` reproduces it every time. Run git from inside
+  WSL, and run `cargo fmt --all` yourself rather than trusting the hook either way.
 - **`typecheck:scripts`, not just `build`** — `build` type-checks `src/` only, and `scripts/`
   drives releases.
 - **`test:coverage`, not `test`** — coverage forces every file named in `vitest.config.ts` to be

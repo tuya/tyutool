@@ -119,25 +119,37 @@ libudev、Tauri、calamine），一次升级可能只挂某一个 target，而 C
 > **还需人工确认一步**：到 Settings → Code security 确认
 > Dependabot alerts 与 security updates 已开启。这一步本会话无法代劳。
 
-### 1.3 lefthook 静默失效（fail-open）
+### 1.3 lefthook 静默失效（fail-open）—— **初稿诊断错了**
 
-本次会话中**六次提交全部**输出 `Can't find lefthook in PATH`，钩子一次都没跑。
+本文初稿写的是「lefthook 没装，做法是 `pnpm install` 装回来」。**实测后不成立：**
 
-```yaml
-# lefthook.yml
-pre-commit:
-  commands:
-    backend:
-      glob: '**/*.rs'
-      run: cargo fmt --all      # ← 钩子不在时，这条静默不执行
+```
+$ ls -l node_modules/.bin/lefthook
+-rwxr-xr-x 1 pico-wsl pico-wsl 1109 Aug 25 10:32     ← 一直装着
+$ ls .git/hooks/ | grep -v sample
+pre-commit                                          ← 钩子也一直在
 ```
 
-**代价**：CI 有 `cargo fmt --all --check`（`ci.yml:36`）。钩子失效 → 本地全绿 → CI 红。
-本次只改了 `.md` 所以没暴露，改 `.rs` 时必踩。
+**真正的原因：调用 git 的位置错了。** 本会话前六次提交都是从 Windows 侧 Git Bash
+跨 `\\wsl.localhost` 调的 git，而 `.git/hooks/pre-commit` 里的 `lefthook` 只能在 WSL
+环境里从 `node_modules/.bin` 解析到——于是每次都报 `Can't find lefthook in PATH`
+并**静默跳过**。改从 WSL 内调 git 后，钩子立即正常：
 
-**做法**：两条都做——
-1. `pnpm install` 把钩子装回来（`pnpm-workspace.yaml` 的 postinstall 允许 lefthook）
-2. AGENTS.md 已写明「不要信任钩子，自己跑 `cargo fmt --all`」（`713afd6` 已落地）
+```
+│  frontend (skip) no files for inspection
+│  backend  (skip) no matching staged files
+```
+
+**所以这不是一个仓库问题，是工具链使用问题**。仓库侧无需修改。
+
+**仍然成立的那一半**：钩子是 **fail-open** 的——无论何种原因找不到 `lefthook`，
+它都只打一行提示然后放行，而 CI 的 `cargo fmt --all --check` 会拦住你。
+所以 AGENTS.md 那条「不要信任钩子，自己跑 `cargo fmt --all`」依然正确，
+只是归因要改：不是「可能没装」，而是「可能从错误的环境调用」。
+
+**给 agent 的实操结论**：在这个仓库里，**git 必须从 WSL 内调用**
+（`wsl -d Ubuntu-26.04 -- bash -lc '...'`）。从 Windows 侧跨 UNC 路径操作除了绕过钩子，
+本会话还造成过：可执行位误判、两次 `index.lock` 残留、一次 `find` 遍历超时。
 
 ---
 
