@@ -73,8 +73,19 @@ $ grep -c "#\[test\]" crates/tyutool-serve/src/lib.rs
 
 **做法**：`ci.yml` 的两条命令各加 `-p tyutool-serve`。
 
-> ⚠ 加进去很可能立刻挂——从未跑过的 clippy 通常积压着 lint。这是发现问题，不是引入问题。
-> 若一次修不完，先加 `cargo test`，clippy 单独一个 PR。
+**已完成（2026-08-27）**。本文初稿曾预判「加进去很可能立刻挂——从未跑过的 clippy
+通常积压着 lint」，并建议拆成两个 PR。**实测后这条预判不成立：**
+
+```
+$ cargo clippy -p tyutool-serve --all-targets -- -D warnings
+    Finished `dev` profile ... in 4.40s          → exit 0，零 lint
+$ cargo test -p tyutool-serve
+    test result: ok. 28 passed; 0 failed          → exit 0
+```
+
+一次加入即可，无需拆 PR。且那 28 个测试里包含 `validate_ws_origin` 的安全用例
+（`ws_rejects_cross_origin_browser_page` / `ws_rejects_dns_rebinding_host`）——
+那正是阻止任意网页驱动用户硬件的那道防线，它们之前从未在 CI 跑过。
 
 ### 1.2 依赖安全无人认领
 
