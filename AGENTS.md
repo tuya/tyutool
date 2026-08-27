@@ -187,13 +187,15 @@ declares **no `default` feature** — every optional cost is opted into explicit
 feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
 musl builds and CI must leave it off).
 
-**Known outstanding violations — do not add to them.** `prune_log_files` is implemented three
-times (`tyutool-cli/src/main.rs`, `tyutool-bridge/src/main.rs`, `src-tauri/src/logs.rs`); the
-log tail/list/redact/zip helpers and the batch-flash / batch-auth orchestration live only in
-`src-tauri`, so the CLI cannot do them at all. The consolidation plan is
-`docs/specs/2026-08-26-core-consolidation-design.md` — read it before moving anything between
-crates. Delete each item from this list as its stage in that spec lands; a fixed item left
-listed here is worse than no list.
+**Known outstanding violations — do not add to them.** The log tail/list/redact/zip helpers and
+the batch-flash / batch-auth orchestration live only in `src-tauri`, so the CLI cannot do them
+at all. The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md` — read it
+before moving anything between crates. Delete each item from this list as its stage in that spec
+lands; a fixed item left listed here is worse than no list.
+
+> **Done:** `prune_log_files` was implemented three times; P0 merged it into
+> `tyutool_core::prune_log_files(dir, &LogRetention)`. The three budgets stay distinct — the
+> policy is a parameter, not a constant.
 
 **Crate responsibilities (5 workspace members):**
 
@@ -298,9 +300,10 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
 - **Bounded growth:** each session log is size-capped at 10 MB and rolls over when exceeded
   (CLI: `SessionLogWriter` → `tyutool-<ts>-N.log`; GUI: `tauri-plugin-log` `max_file_size` +
   `RotationStrategy::KeepAll`). Across sessions, `prune_log_files` trims old files at startup
-  (≤100 files / ≤100 MB total). New log sinks must stay bounded too. ⚠ `prune_log_files`
-  currently exists as **three** copies (CLI / bridge / GUI) that must be kept in agreement —
-  change all three, and do not add a fourth; see the crate boundary rule above.
+  (CLI/GUI ≤100 files / ≤100 MB total; **bridge deliberately tighter at ≤20 files / ≤50 MB**,
+  because it is a resident process). New log sinks must stay bounded too. The algorithm lives
+  once in `tyutool_core::prune_log_files`; each binary passes its own `LogRetention`. Change the
+  algorithm there, and the budgets at the call site — never fork the function again.
 - **Bounded growth — serial-debug session archive:** the serial-debug archive
   (`{temp_dir}/tyutool/serial-debug/serial-debug-session-<ts>-<pid>-<seq>.ndjson`
   plus its `.idx` sidecar) is a *third* file family with its own bounds, because
