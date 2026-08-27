@@ -940,6 +940,79 @@ impl SerialDebugArchive {
     }
 }
 
+// ── serial-debug 归档目录 + 弹性创建 ─────────────────────────────────────────
+//
+// 这两个 helper 曾在 src-tauri 和 tyutool-serve 里各有一份几乎逐字相同的拷贝
+// （目录算法相同、fallback 阶梯相同），上游一次 `4e16523 fix(serial-debug):
+// avoid startup panic when archive dir is unwritable` 的修复因此要手工移植两次
+// 才能落到两个宿主上。下沉到这里之后，下一次这样的修复只需要改一处。
+
+/// `{temp_dir}/tyutool/serial-debug` — the preferred archive root. Both the
+/// Tauri GUI and `tyutool-serve` computed this identically before it was
+/// consolidated here; see the "Archive isolation" contract in `AGENTS.md`.
+pub fn serial_debug_archive_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("tyutool").join("serial-debug")
+}
+
+/// Create the serial-debug archive + filter index without panicking the host
+/// process on startup. The preferred directory is `primary`; if that is not
+/// writable (permissions, a stale lock, antivirus interference) this falls
+/// back to a per-process-unique subdirectory and logs a warning. Only if every
+/// attempt fails does it propagate the failure as a panic — at which point the
+/// caller genuinely cannot function and a controlled panic with a clear
+/// message is preferable to a silent half-initialised state.
+///
+/// Returns the directory actually used (so historical lookups point at the
+/// right place) alongside the archive and filter index.
+pub fn create_serial_debug_state_resilient(
+    primary: &std::path::Path,
+) -> (
+    std::path::PathBuf,
+    SerialDebugArchive,
+    SerialDebugFilterIndex,
+) {
+    match (
+        SerialDebugArchive::create(primary),
+        SerialDebugFilterIndex::create(primary),
+    ) {
+        (Ok(a), Ok(f)) => return (primary.to_path_buf(), a, f),
+        (a_res, f_res) => {
+            log::warn!(
+                "[serial-debug] archive dir {:?} unavailable \
+                 (archive={:?}, filters={:?}); retrying in a per-process dir",
+                primary,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+    // Per-process fallback so a stale/locked primary dir doesn't block startup.
+    let fallback = primary.join(format!("pid-{}", std::process::id()));
+    match (
+        SerialDebugArchive::create(&fallback),
+        SerialDebugFilterIndex::create(&fallback),
+    ) {
+        (Ok(a), Ok(f)) => {
+            log::warn!(
+                "[serial-debug] archive initialised in fallback dir {:?} \
+                 (serial-debug persistence may be split across dirs)",
+                fallback
+            );
+            (fallback, a, f)
+        }
+        (a_res, f_res) => {
+            panic!(
+                "serial-debug archive could not be created in {:?} or {:?}: \
+                 archive={:?}, filters={:?}",
+                primary,
+                fallback,
+                a_res.err().map(|e| e.to_string()),
+                f_res.err().map(|e| e.to_string()),
+            );
+        }
+    }
+}
+
 impl SerialDebugArchiveReader {
     pub fn read_lines(&self, line_nos: &[u64]) -> std::io::Result<Vec<SerialDebugLine>> {
         // No `total_lines` bound here: the reader is a path snapshot with no
@@ -2145,6 +2218,103 @@ mod tests {
         dir.push(unique);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// `true` iff `dir` actually refuses new files once write is denied on it —
+    /// false when running as a user that ignores directory permission bits
+    /// (root in some CI containers), where the resilient-fallback tests below
+    /// can't be reproduced and must skip instead of asserting the wrong thing.
+    #[cfg(unix)]
+    fn directory_write_denial_is_enforced(dir: &std::path::Path) -> bool {
+        let probe = dir.join("write-probe");
+        let denied = std::fs::write(&probe, b"x").is_err();
+        let _ = std::fs::remove_file(&probe);
+        denied
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resilient_create_falls_back_to_a_pid_dir_when_primary_cannot_take_new_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let primary = temp_serial_debug_dir("resilient-fallback-ok");
+        // Pre-create the fallback dir while primary is still writable:
+        // `create_dir_all` is a no-op for a directory that already exists, so the
+        // fallback attempt below never needs write access to `primary` itself —
+        // matching how a real fallback succeeds even though it is nested inside
+        // an otherwise-unwritable primary.
+        let fallback = primary.join(format!("pid-{}", std::process::id()));
+        std::fs::create_dir_all(&fallback).unwrap();
+        // Deny write on primary so `create_session_files` can't open new files
+        // directly inside it, forcing the fallback path.
+        std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        if !directory_write_denial_is_enforced(&primary) {
+            std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::remove_dir_all(&primary).unwrap();
+            eprintln!(
+                "directory write permission is not enforced for this user (e.g. root); skipping"
+            );
+            return;
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            create_serial_debug_state_resilient(&primary)
+        }));
+
+        std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (used_dir, _archive, _filters) =
+            result.expect("primary being unwritable must not panic when the fallback works");
+        assert_eq!(
+            used_dir, fallback,
+            "must report the directory actually used, not the primary"
+        );
+
+        std::fs::remove_dir_all(&primary).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resilient_create_panics_when_primary_and_fallback_both_fail() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let primary = temp_serial_debug_dir("resilient-fallback-panic");
+        // No fallback dir pre-created this time, and primary denies write: `mkdir`
+        // for the fallback subdir needs write on primary too, so both attempts fail.
+        std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        if !directory_write_denial_is_enforced(&primary) {
+            std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::remove_dir_all(&primary).unwrap();
+            eprintln!(
+                "directory write permission is not enforced for this user (e.g. root); skipping"
+            );
+            return;
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            create_serial_debug_state_resilient(&primary)
+        }));
+
+        std::fs::set_permissions(&primary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let payload = match result {
+            Ok(_) => panic!(
+                "both primary and its per-process fallback are unwritable; this must panic \
+                 loudly rather than silently degrade"
+            ),
+            Err(payload) => payload,
+        };
+        let msg = payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        assert!(
+            msg.contains("serial-debug archive could not be created"),
+            "unexpected panic message: {msg}"
+        );
+
+        std::fs::remove_dir_all(&primary).unwrap();
     }
 
     #[test]
