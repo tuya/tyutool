@@ -1,0 +1,5 @@
+# ts-rs-generated bindings (see AGENTS.md's Tauri IPC contract section). CI regenerates these
+# with `cargo test -p tyutool-core --features ts-rs` and fails the build on any diff, so they
+# must stay byte-for-byte what ts-rs emits — Prettier reformatting them (via `pnpm run format`
+# or the lefthook pre-commit hook) would make every regeneration look like drift.
+src/bindings/
