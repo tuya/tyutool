@@ -6,25 +6,9 @@ import type { FlashSegment } from "./FlashSegment";
 /**
  * One flash/erase/read/authorize job; shared by CLI and Tauri `invoke`.
  */
-export type FlashJob = {
-  mode: FlashMode;
-  /**
-   * Registry key for [`crate::registry::FlashPluginRegistry`] (e.g. `ESP32`, `ESP32C3`).
-   * Ignored for plugin lookup when `mode` is [`FlashMode::Authorize`] (UART-level flow).
-   */
-  chipId: string;
-  port: string;
-  baudRate: number;
-  segments?: Array<FlashSegment> | null;
-  flashStartHex?: string | null;
-  flashEndHex?: string | null;
-  eraseStartHex?: string | null;
-  eraseEndHex?: string | null;
-  readStartHex?: string | null;
-  readEndHex?: string | null;
-  readFilePath?: string | null;
-  firmwarePath?: string | null;
-  authorizeUuid?: string | null;
-  authorizeKey?: string | null;
-  authorizeStorage?: AuthStorage | null;
-};
+export type FlashJob = { mode: FlashMode, 
+/**
+ * Registry key for [`crate::registry::FlashPluginRegistry`] (e.g. `ESP32`, `ESP32C3`).
+ * Ignored for plugin lookup when `mode` is [`FlashMode::Authorize`] (UART-level flow).
+ */
+chipId: string, port: string, baudRate: number, segments?: Array<FlashSegment> | null, flashStartHex?: string | null, flashEndHex?: string | null, eraseStartHex?: string | null, eraseEndHex?: string | null, readStartHex?: string | null, readEndHex?: string | null, readFilePath?: string | null, firmwarePath?: string | null, authorizeUuid?: string | null, authorizeKey?: string | null, authorizeStorage?: AuthStorage | null, };
