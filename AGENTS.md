@@ -187,15 +187,26 @@ declares **no `default` feature** — every optional cost is opted into explicit
 feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
 musl builds and CI must leave it off).
 
-**Known outstanding violations — do not add to them.** The log tail/list/redact/zip helpers and
-the batch-flash / batch-auth orchestration live only in `src-tauri`, so the CLI cannot do them
-at all. The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md` — read it
-before moving anything between crates. Delete each item from this list as its stage in that spec
-lands; a fixed item left listed here is worse than no list.
+**Known outstanding violations — do not add to them.** Two remain, and they are different
+kinds of problem:
+
+1. **Wrong crate.** The batch-flash / batch-auth orchestration lives only in `src-tauri`
+   (`batch.rs` + `batch_auth.rs`, ~2100 lines), so no other frontend can drive it.
+2. **Reachable but not exposed.** The log helpers now live in `tyutool-core` and the CLI links
+   them, but **the CLI still has no subcommand that calls them** — a user cannot list, tail or
+   export logs from the CLI. Moving code is not the same as shipping the capability; that step
+   is its own stage in the spec.
+
+The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md`, whose phase
+table is the authority on what is done — read it before moving anything between crates. Delete
+each item here as its stage lands; a fixed item left listed is worse than no list.
 
 > **Done:** `prune_log_files` was implemented three times; P0 merged it into
-> `tyutool_core::prune_log_files(dir, &LogRetention)`. The three budgets stay distinct — the
-> policy is a parameter, not a constant.
+> `tyutool_core::prune_log_files(dir, &LogRetention)`, with the three budgets kept distinct as
+> a parameter rather than a constant. P1a and P1b then moved log retention, reading, listing,
+> the report header, credential redaction and zip bundling into `tyutool_core::diagnostics`;
+> `src-tauri/src/logs.rs` went from 1467 to about 790 lines and dropped its own `zip`
+> dependency, which now sits behind core's `zip` feature so bridge and serve do not link it.
 
 **Crate responsibilities (5 workspace members):**
 

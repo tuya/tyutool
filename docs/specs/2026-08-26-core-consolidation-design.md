@@ -406,16 +406,39 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 
 ## 实现顺序
 
-| 优先级 | 动作 | 量级 | 收益 |
-|:---:|---|---|---|
-| **P0** | `prune_log_files` 三合一 → `core/diagnostics.rs`（**上限与前缀需参数化**，见症状一） | 半天 | 消掉已被承认的复制；验证下沉路径可行 |
-| **P1** | `logs.rs` 纯逻辑层（~370 行）下沉 | 3–4 天 | **CLI 白捡日志列举 / tail / 导出 zip / 脱敏**；`mask` 安全契约变成单点实现 |
-| **P2** | `FlashJob::Default` + `From<Args>` + `ts-rs` + `to_cli_command()` | 3–5 天 | 契约收敛；命令回显上线 |
-| **P3** | updater 纯逻辑下沉 → `core/updater.rs` | 1 天 | 仅 `sha256_hex` 单点化（详见下方降级说明） |
-| **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | CLI 获得批量烧录 / 授权能力 |
-| **P5** | `src-tauri/src/serial_debug.rs`（661）对照 `tyutool-serve` 审计 | 低 | 共享部分已由 `e01d7f4` 抽走，剩余量小 |
+阶段划分与状态以本表为准。每完成一个阶段，在这里标记，并同步检查 AGENTS.md 的「已知违规」清单。
 
-### P1（原 updater）被降级的理由
+| 阶段 | 动作 | 量级 | 收益 | 状态 |
+|:---:|---|---|---|---|
+| **P0** | `prune_log_files` 三合一 → `core/diagnostics.rs`（上限与前缀参数化） | 半天 | 消掉已被承认的复制；验证下沉路径可行 | ✅ 已完成 |
+| **P1a** | 日志保留与读取下沉（~250 行） | 3–4 天 | 代码层面对 CLI 可用（接入另议，见 P6） | ✅ 已完成 |
+| **P1b** | 报告头 / 脱敏 / zip 导出下沉（~120 行）+ `zip` feature | 合并计入 P1a | `mask` 安全契约变成单点实现 | ✅ 已完成 |
+| **P2-1** | `FlashJob::new` + 四处字面量收敛 + `to_cli_command()` + 往返测试 | 3–5 天 | 契约收敛；**命令回显上线**（唯一用户可见变化） | ✅ 已完成 |
+| **P2-2** | `ts-rs` 生成 TS 类型（**仅 `FlashJob` 家族**） | 2–3 天 | 前端手工镜像部分退役 | 待做 |
+| **P3** | updater 纯逻辑下沉 → `core/updater.rs` | 1 天 | 仅 `sha256_hex` 单点化（见降级说明） | 待做，收益小 |
+| **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | 代码层面对 CLI 可用 | 待评估 |
+| **P5** | `src-tauri/src/serial_debug.rs`（661）对照 `tyutool-serve` 审计 | 低 | 共享部分已由 `e01d7f4` 抽走 | 待做 |
+| **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 待定 | **真正兑现「CLI 能用」** | 待定，见下 |
+
+### 一个必须说清的区分：下沉 ≠ CLI 能用
+
+初稿把 P1 的收益写成「CLI 白捡日志列举 / tail / 导出 zip / 脱敏」。
+**这个表述会让人误以为能力已交付。**
+
+P1a + P1b 完成后的实际状态是：那些函数**住在 `tyutool-core` 里、CLI 可以链接到**，
+但 **CLI 没有任何子命令调用它们**。用户依然不能用 CLI 列举日志、导出脱敏包。
+
+接入不是机械动作，它需要：
+
+1. 设计子命令形态（`logs list` / `logs tail` / `logs export`？还是归到一个 `logs` 下？）
+2. 按 AGENTS.md 的硬规则，**同一个 commit / PR 必须同步 `docs/cli.md`**
+3. 决定 `export` 子命令要不要开 `zip` feature（开了 CLI 就会链接 zip）
+
+所以它是一个**独立阶段 P6**，而不是 P1 的附带结果。
+AGENTS.md 的「已知违规」里那条「the CLI cannot do them at all」，
+**只有 P6 落地才能划掉**。
+
+### updater 从 P1 降到 P3 的理由
 
 初稿把 updater 下沉排在 P1，理由写的是「两套版本比较规则合一」。**实测后不成立：**
 
