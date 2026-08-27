@@ -641,10 +641,12 @@ pub fn run() {
             thread: StdMutex::new(None),
         })
         .manage({
-            // The returned directory (which may be a pid-scoped fallback) isn't
-            // needed here — unlike tyutool-serve, nothing else in this process
-            // re-derives paths from it.
-            let (_dir, archive, filters) =
+            // The returned directory may be a pid-scoped fallback (primary was
+            // unwritable at startup). It must be kept: serial_debug.rs re-derives
+            // the backfill `.historical.idx` path alongside the archive, and
+            // recomputing the primary via `serial_debug_archive_dir()` there
+            // would target a directory the archive isn't actually in.
+            let (dir, archive, filters) =
                 create_serial_debug_state_resilient(&serial_debug_archive_dir());
             serial_debug::DebugState {
                 session: Arc::new(StdMutex::new(None)),
@@ -652,6 +654,7 @@ pub fn run() {
                 filters: Arc::new(StdMutex::new(filters)),
                 chunk_bridge: Arc::new(StdMutex::new(None)),
                 generation: Arc::new(SerialDebugGeneration::default()),
+                archive_dir: dir,
             }
         })
         .manage(batch::BatchFlashState {
