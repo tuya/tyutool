@@ -25,13 +25,14 @@ use tokio_tungstenite::{
     },
 };
 use tyutool_core::{
-    device_reset_dtr_rts, list_serial_ports, run_job, serial_debug_fail_backfill_if_current,
-    serial_debug_finalize_pending, serial_debug_finish_backfill_if_current,
-    serial_debug_ingest_lines, serial_debug_scan_filter_matches, serial_debug_spawn_chunk_bridge,
-    ArchivedChunk, DebugChunk, DebugConfig, FlashJob, SerialDebugArchive, SerialDebugArchiveReader,
-    SerialDebugChunkBridgeHandle, SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition,
-    SerialDebugFilterIndex, SerialDebugFilterPage, SerialDebugFilterStats, SerialDebugGeneration,
-    SerialDebugSession, SerialDebugSessionPage, SerialDebugSink, SerialPortEntry,
+    create_serial_debug_state_resilient, device_reset_dtr_rts, list_serial_ports, run_job,
+    serial_debug_fail_backfill_if_current, serial_debug_finalize_pending,
+    serial_debug_finish_backfill_if_current, serial_debug_ingest_lines,
+    serial_debug_scan_filter_matches, serial_debug_spawn_chunk_bridge, ArchivedChunk, DebugChunk,
+    DebugConfig, FlashJob, SerialDebugArchiveReader, SerialDebugChunkBridgeHandle,
+    SerialDebugFilterBackfillSnapshot, SerialDebugFilterDefinition, SerialDebugFilterPage,
+    SerialDebugFilterStats, SerialDebugGeneration, SerialDebugSession, SerialDebugSessionPage,
+    SerialDebugSink, SerialPortEntry,
 };
 
 // ── Client → Server ──────────────────────────────────────────────────────────
@@ -319,68 +320,6 @@ fn forbidden(reason: &str) -> tokio_tungstenite::tungstenite::http::Response<Opt
         .header(header::CONTENT_TYPE, "text/plain")
         .body(Some(reason.to_string()))
         .expect("building a static 403 response cannot fail")
-}
-
-// ── serial-debug 归档的可用性兜底（自上游 tyutool 4e16523 移植）─────────────
-//
-// ⚠ 同样是逐字取自上游。原先我方写的是 `.expect("create serial-debug archive")`——
-// 归档目录不可写（只读挂载、权限不足、同名文件占位、多实例抢同一目录）时
-// **直接 panic 掉整个 serve 进程**，而 serial-debug 只是个附属能力，
-// 不该有权力把主服务带走。上游那笔修的正是这个。
-//
-// 移植原因同上：这笔补丁打在 crates/tyutool-cli/src/serve.rs 上，而本 fork 已把实现
-// 搬到本 crate，自动合并落不进来。上游对应提交：
-//   4e16523 fix(serial-debug): avoid startup panic when archive dir is unwritable
-
-/// Create the serial-debug archive + filter index without panicking on a
-/// locked/unwritable preferred dir. Returns the directory actually used (so
-/// historical lookups point at the right place), falling back to a per-process
-/// subdirectory with a logged warning. Panics only if every attempt fails.
-fn create_serial_debug_state_resilient(
-    primary: &std::path::Path,
-) -> (
-    std::path::PathBuf,
-    SerialDebugArchive,
-    SerialDebugFilterIndex,
-) {
-    match (
-        SerialDebugArchive::create(primary),
-        SerialDebugFilterIndex::create(primary),
-    ) {
-        (Ok(a), Ok(f)) => return (primary.to_path_buf(), a, f),
-        (a_res, f_res) => {
-            log::warn!(
-                "[serve] serial-debug dir {:?} unavailable \
-                 (archive={:?}, filters={:?}); retrying in a per-process dir",
-                primary,
-                a_res.err().map(|e| e.to_string()),
-                f_res.err().map(|e| e.to_string()),
-            );
-        }
-    }
-    let fallback = primary.join(format!("pid-{}", std::process::id()));
-    match (
-        SerialDebugArchive::create(&fallback),
-        SerialDebugFilterIndex::create(&fallback),
-    ) {
-        (Ok(a), Ok(f)) => {
-            log::warn!(
-                "[serve] serial-debug archive initialised in fallback dir {:?}",
-                fallback
-            );
-            (fallback, a, f)
-        }
-        (a_res, f_res) => {
-            panic!(
-                "serial-debug archive could not be created in {:?} or {:?}: \
-                 archive={:?}, filters={:?}",
-                primary,
-                fallback,
-                a_res.err().map(|e| e.to_string()),
-                f_res.err().map(|e| e.to_string()),
-            );
-        }
-    }
 }
 
 // ── Per-connection handler ───────────────────────────────────────────────────
@@ -1111,8 +1050,8 @@ mod tests {
     // through `serial_debug_spawn_chunk_bridge`, so these stay out of the crate's
     // top-level imports.
     use tyutool_core::{
-        serial_debug_flush_chunks, serial_debug_report_drops, Direction,
-        SerialDebugChunkBatchBuffer, SerialDebugDropReport,
+        serial_debug_flush_chunks, serial_debug_report_drops, Direction, SerialDebugArchive,
+        SerialDebugChunkBatchBuffer, SerialDebugDropReport, SerialDebugFilterIndex,
     };
 
     // ── WS 来源校验用例（随实现一并自上游 a2fa599 移植）──────────────────────
