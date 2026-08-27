@@ -1,34 +1,16 @@
 /**
  * Types aligned with `tyutool_core::FlashJob` / `FlashEvent` (snake_case JSON tag "kind").
+ *
+ * The `FlashJob` family (`FlashJobMode`, `FlashSegmentPayload`, `FlashJobPayload`) is
+ * ts-rs-generated from `crates/tyutool-core/src/job.rs` / `authorize.rs` — see
+ * `src/bindings/` and the ts-rs binding note in AGENTS.md's Tauri IPC contract section.
+ * Re-exported under their pre-existing names here so consumers need no changes.
+ * `FlashEvent` below is still hand-mirrored; do not add it to this generated set.
  */
-
-export type FlashJobMode = "flash" | "erase" | "read" | "authorize";
-
-export interface FlashSegmentPayload {
-  firmwarePath: string;
-  startAddr: string;
-  endAddr: string;
-}
-
-export interface FlashJobPayload {
-  mode: FlashJobMode;
-  chipId: string;
-  port: string;
-  baudRate: number;
-  segments?: FlashSegmentPayload[] | null;
-  flashStartHex?: string | null;
-  flashEndHex?: string | null;
-  eraseStartHex?: string | null;
-  eraseEndHex?: string | null;
-  readStartHex?: string | null;
-  readEndHex?: string | null;
-  readFilePath?: string | null;
-  firmwarePath?: string | null;
-  authorizeUuid?: string | null;
-  authorizeKey?: string | null;
-  /** Storage destination for auth credentials (T5AI only). Not exposed in single-device auth UI yet; defaults to null → kv. */
-  authorizeStorage?: "kv" | "otp" | null;
-}
+export type { FlashJob as FlashJobPayload } from "@/bindings/FlashJob";
+export type { FlashMode as FlashJobMode } from "@/bindings/FlashMode";
+export type { FlashSegment as FlashSegmentPayload } from "@/bindings/FlashSegment";
+export type { AuthStorage } from "@/bindings/AuthStorage";
 
 // Types aligned with tyutool_core::FlashEvent (snake_case JSON tag "kind")
 

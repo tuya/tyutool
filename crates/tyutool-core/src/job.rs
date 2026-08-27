@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 /// Mirrors Python `FlashArgv.mode` (write / read); extended for GUI tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(export, export_to = "../../../src/bindings/"))]
 #[serde(rename_all = "lowercase")]
 pub enum FlashMode {
     Flash,
@@ -14,6 +16,8 @@ pub enum FlashMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-rs", ts(export, export_to = "../../../src/bindings/"))]
 #[serde(rename_all = "camelCase")]
 pub struct FlashSegment {
     pub firmware_path: String,
@@ -23,6 +27,18 @@ pub struct FlashSegment {
 
 /// One flash/erase/read/authorize job; shared by CLI and Tauri `invoke`.
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+// `optional_fields = nullable` renders every `Option<T>` field below as `field?: T | null`
+// (skipping non-Option fields), matching the hand-written `FlashJobPayload` shape it replaces —
+// see the ts-rs binding note in AGENTS.md's Tauri IPC contract section.
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(
+        export,
+        export_to = "../../../src/bindings/",
+        optional_fields = nullable
+    )
+)]
 #[serde(rename_all = "camelCase")]
 pub struct FlashJob {
     pub mode: FlashMode,
@@ -47,6 +63,7 @@ pub struct FlashJob {
     /// Returns `true` to proceed with overwrite, `false` to abort.
     /// `None` in CLI mode — conflict is always overwritten without prompting.
     #[serde(skip)]
+    #[cfg_attr(feature = "ts-rs", ts(skip))]
     pub confirm_overwrite: Option<Box<dyn Fn(String, String) -> bool + Send>>,
 }
 

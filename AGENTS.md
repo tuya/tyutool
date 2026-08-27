@@ -97,6 +97,7 @@ cargo build -p tyutool-cli --release
 cargo test -p tyutool-core -p tyutool-cli -p tyutool-serve   # ci.yml
 cargo test -p tyutool_gui                                    # ci.yml (src-tauri)
 cargo test -p tyutool-bridge                                 # bridge.yml
+cargo test -p tyutool-core --features ts-rs   # (re)generates src/bindings/*.ts; ci.yml checks for drift
 
 # Full GUI build
 pnpm run tauri:build
@@ -109,6 +110,7 @@ cargo fmt --all --check
 cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D warnings   # ci.yml
 cargo clippy -p tyutool_gui --all-targets -- -D warnings                                    # ci.yml
 cargo clippy -p tyutool-bridge --all-targets -- -D warnings                                 # bridge.yml
+cargo test -p tyutool-core --features ts-rs && git diff --exit-code -- src/bindings/         # ci.yml
 pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
 ```
 
@@ -449,7 +451,19 @@ refactor/v3    ← main development branch (default); feature PRs merge here
 
 - Command names: snake_case; add `_cmd` suffix when a Tauri entry point shares a name with an internal function (`list_serial_ports_cmd`)
 - Event names: kebab-case, `feature-noun` format (`serial-debug-chunk`, `flash-progress`)
-- Frontend types manually mirror the corresponding Rust types; annotate with a comment pointing to the Rust source (see `serial-debug/types.ts`). This is the current rule and still applies — `docs/specs/2026-08-26-core-consolidation-design.md` plans to replace it with `ts-rs`-generated bindings, and this line is to be deleted only once that lands
+- The `FlashJob` family (`FlashJob`, `FlashMode`, `FlashSegment`, `AuthStorage`) is
+  `ts-rs`-generated: `cargo test -p tyutool-core --features ts-rs` derives them from
+  `crates/tyutool-core/src/job.rs` / `authorize.rs` and writes `src/bindings/*.ts`, committed to
+  the repo and checked for drift by CI (see Commands and `.github/workflows/ci.yml`'s `rust`
+  job). `src/features/firmware-flash/flash-ipc-types.ts` re-exports them under their
+  pre-`ts-rs` names (`FlashJobPayload`, `FlashJobMode`, `FlashSegmentPayload`) so consumers are
+  unchanged. `ts-rs` is gated behind the `ts-rs` Cargo feature on `tyutool-core` — see that
+  feature's comment in `crates/tyutool-core/Cargo.toml`.
+- Every other frontend type mirroring a Rust type (`FlashEvent` and its payload family in
+  `flash-ipc-types.ts`, `serial-debug/types.ts`, etc.) is still hand-written; annotate with a
+  comment pointing to the Rust source. `docs/specs/2026-08-26-core-consolidation-design.md`
+  plans to extend `ts-rs` generation to cover them — update this pair of rules as each family
+  moves over, and delete the hand-mirroring rule only once none remain
 - Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
 - All Tauri-only code must be gated behind `isTauriRuntime()` from `src/runtime.ts`; never invoke Tauri commands in web mode
 

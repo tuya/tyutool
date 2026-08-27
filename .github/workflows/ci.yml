@@ -44,6 +44,10 @@ jobs:
         run: cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D warnings
       - name: Test
         run: cargo test -p tyutool-core -p tyutool-cli -p tyutool-serve
+      - name: Bindings are up to date
+        run: |
+          cargo test -p tyutool-core --features ts-rs
+          git diff --exit-code -- src/bindings/
 
   # ── Tauri backend (src-tauri) ───────────────────────────────────────────────
   # Guards the GUI bridge: path-traversal rejection, credential redaction on the
