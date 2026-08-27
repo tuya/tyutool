@@ -442,7 +442,7 @@ fn archive_batch_cmd(
         environment,
     )?;
     let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-    logs::gather_and_write_logs_zip(
+    tyutool_core::gather_and_write_logs_zip(
         &log_dir,
         &app.package_info().name,
         &app.package_info().version.to_string(),

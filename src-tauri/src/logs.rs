@@ -1,21 +1,23 @@
-//! Log files: redaction, export, and opening them in an editor.
+//! Log files: opening them in an editor, plus the GUI-only write primitives.
 //!
-//! Retention and reading of `.log` files (`prune_trace_files`,
-//! `collect_log_files`, `list_log_files_impl`, `read_log_tail_impl`,
-//! `read_named_log_impl`, `resolve_log_open_path`, `LogFileInfo`, ...) live in
-//! `tyutool_core::diagnostics`, per the crate boundary rule in AGENTS.md — pure
-//! `std`/`serde` logic with no `AppHandle` dependency. This file keeps only the
-//! GUI-specific pieces: editor detection/opening, redaction, and zip export.
+//! Retention, reading, the report-info header, credential redaction, and zip
+//! export (`prune_trace_files`, `collect_log_files`, `list_log_files_impl`,
+//! `read_log_tail_impl`, `read_named_log_impl`, `resolve_log_open_path`,
+//! `LogFileInfo`, `build_report_info`, `redact_log_content`,
+//! `gather_and_write_logs_zip`, ...) live in `tyutool_core::diagnostics`, per
+//! the crate boundary rule in AGENTS.md — pure `std`/`serde` logic with no
+//! `AppHandle` dependency. This file keeps only the GUI-specific pieces:
+//! editor detection/opening and the `export_logs_zip` Tauri command that calls
+//! into `tyutool_core::gather_and_write_logs_zip`.
 //!
-//! Two guarantees documented in AGENTS.md live here and are covered by the
-//! tests at the bottom of this file:
-//!
-//! * `batch-auth-*.trace` files hold plaintext credential interaction data and
-//!   must never reach an export or archive zip. `tyutool_core::collect_log_files`
-//!   and the `.trace`-reading gates in `tyutool_core::diagnostics` exclude them
-//!   by extension and prefix.
-//! * The export path redacts credentials (`write_logs_zip` `mask = true`); the
-//!   archive path keeps plaintext because it is the operator's local bundle.
+//! One guarantee documented in AGENTS.md is covered by tests at the bottom of
+//! this file: `batch-auth-*.trace` files hold plaintext credential
+//! interaction data and must never reach an export or archive zip.
+//! `tyutool_core::collect_log_files` and the `.trace`-reading gates in
+//! `tyutool_core::diagnostics` exclude them by extension and prefix. The
+//! redaction/zip-export contract tests (export path masks credentials, archive
+//! path keeps plaintext) now live alongside `write_logs_zip` in
+//! `tyutool_core::diagnostics`.
 //!
 //! `DialogPathRegistry` gates the renderer-reachable arbitrary-path write
 //! primitives; see its doc comment.
@@ -671,123 +673,10 @@ pub(crate) fn open_log_file_in_editor(
     open_log_path_with_opener(&path, opener)
 }
 
-fn build_report_info(name: &str, version: &str, install: &str, session_id: &str) -> String {
-    format!(
-        "tyutool report-info\nname: {name}\nversion: {version}\nos: {}\narch: {}\nfamily: {}\ninstall: {install}\nsession: {session_id}\n",
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        std::env::consts::FAMILY,
-    )
-}
-
-/// Credential-bearing field prefixes that tyutool itself emits into log lines
-/// (see `authorize.rs` format strings). Redaction matches these prefixes and
-/// masks the value that follows, without assuming any UUID/AuthKey shape —
-/// device identifiers vary in length (12/16/20 chars and others).
-const REDACT_PREFIXES: &[&str] = &["uuid=", "authkey=", "existing_uuid=", "otp_uuid="];
-
-/// Mask a credential value that starts at `value_start` in `s`. The value runs
-/// until the next whitespace, comma, or closing paren — the delimiters tyutool's
-/// own format strings use. Returns the index just past the consumed value.
-fn mask_value_range(s: &str, value_start: usize) -> (usize, &'static str) {
-    let bytes = s.as_bytes();
-    let mut end = value_start;
-    while end < bytes.len() {
-        let b = bytes[end];
-        if b == b' ' || b == b',' || b == b')' || b == b'\n' || b == b'\r' || b == b'\t' {
-            break;
-        }
-        end += 1;
-    }
-    (end, "****")
-}
-
-/// Redact known-prefix credential values in a log file's text content. Used
-/// only on the export-for-report path (`mask = true`); the archive path keeps
-/// plaintext for local diagnosis. Pure & string-based — no regex dependency.
-fn redact_log_content(content: &str) -> String {
-    let mut out = String::with_capacity(content.len());
-    let bytes = content.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        // Try to match a redaction prefix at the current position.
-        let matched = REDACT_PREFIXES.iter().find_map(|pfx| {
-            if content[i..].starts_with(pfx) {
-                Some(*pfx)
-            } else {
-                None
-            }
-        });
-        if let Some(pfx) = matched {
-            out.push_str(pfx);
-            let value_start = i + pfx.len();
-            let (end, mask) = mask_value_range(content, value_start);
-            out.push_str(mask);
-            i = end;
-        } else {
-            // Push the next byte (UTF-8 safe: boundaries respected by pushing
-            // one char at a time when the byte starts a non-ASCII sequence).
-            let ch = content[i..].chars().next().expect("non-empty tail");
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-    out
-}
-
-fn write_logs_zip(
-    log_files: &[std::path::PathBuf],
-    report_info: &str,
-    dest: &std::path::Path,
-    mask: bool,
-) -> Result<(), String> {
-    use std::io::Write;
-    use zip::write::SimpleFileOptions;
-    let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-    let mut zw = zip::ZipWriter::new(file);
-    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    zw.start_file("report-info.txt", opts)
-        .map_err(|e| e.to_string())?;
-    zw.write_all(report_info.as_bytes())
-        .map_err(|e| e.to_string())?;
-    for p in log_files {
-        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-            let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
-            let bytes = if mask {
-                redact_log_content(&String::from_utf8_lossy(&bytes)).into_bytes()
-            } else {
-                bytes
-            };
-            zw.start_file(name, opts).map_err(|e| e.to_string())?;
-            zw.write_all(&bytes).map_err(|e| e.to_string())?;
-        }
-    }
-    zw.finish().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Gather `*.log` files from `dir`, build the report header, and write the zip
-/// to `dest`. `mask = true` redacts credential values (export-for-report);
-/// `mask = false` keeps plaintext (archive — local troubleshooting bundle).
-/// Pure (no AppHandle): collect + build + write folded into one unit.
-pub(crate) fn gather_and_write_logs_zip(
-    dir: &std::path::Path,
-    name: &str,
-    version: &str,
-    install: &str,
-    session_id: &str,
-    dest: &std::path::Path,
-    mask: bool,
-) -> Result<(), String> {
-    let files = tyutool_core::collect_log_files(dir);
-    let info = build_report_info(name, version, install, session_id);
-    write_logs_zip(&files, &info, dest, mask)
-}
-
 #[tauri::command]
 pub(crate) fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-    gather_and_write_logs_zip(
+    tyutool_core::gather_and_write_logs_zip(
         &dir,
         &app.package_info().name,
         &app.package_info().version.to_string(),
@@ -805,109 +694,6 @@ mod log_tools_tests {
     use super::*;
 
     #[test]
-    fn build_report_info_contains_expected_fields() {
-        let info = build_report_info("tyutool", "3.0.11", "AppImage", "abc-123");
-
-        assert!(info.contains("name: tyutool"));
-        assert!(info.contains("version: 3.0.11"));
-        assert!(info.contains("install: AppImage"));
-        assert!(info.contains("session: abc-123"));
-        assert!(info.contains(&format!("os: {}", std::env::consts::OS)));
-        assert!(info.contains(&format!("arch: {}", std::env::consts::ARCH)));
-        assert!(info.contains(&format!("family: {}", std::env::consts::FAMILY)));
-    }
-
-    #[test]
-    fn write_logs_zip_includes_logs_and_report() {
-        let dir = tempfile::tempdir().unwrap();
-        let log_a = dir.path().join("tyutool.log");
-        std::fs::write(&log_a, b"hello log").unwrap();
-        let dest = dir.path().join("out.zip");
-
-        write_logs_zip(&[log_a], "report-body", &dest, false).unwrap();
-
-        let f = std::fs::File::open(&dest).unwrap();
-        let mut zip = zip::ZipArchive::new(f).unwrap();
-        let names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
-            .collect();
-        assert!(names.contains(&"report-info.txt".to_string()));
-        assert!(names.contains(&"tyutool.log".to_string()));
-    }
-
-    /// Helper: write `content` to a single `tyutool.log` in a temp dir, zip it
-    /// via `write_logs_zip(mask)`, then return the zipped log's text content.
-    fn write_and_read_zipped_log(content: &str, mask: bool) -> String {
-        let dir = tempfile::tempdir().unwrap();
-        let log_a = dir.path().join("tyutool.log");
-        std::fs::write(&log_a, content.as_bytes()).unwrap();
-        let dest = dir.path().join("out.zip");
-        write_logs_zip(&[log_a], "report-body", &dest, mask).unwrap();
-        let f = std::fs::File::open(&dest).unwrap();
-        let mut zip = zip::ZipArchive::new(f).unwrap();
-        let mut entry = zip.by_name("tyutool.log").unwrap();
-        let mut out = String::new();
-        use std::io::Read;
-        entry.read_to_string(&mut out).unwrap();
-        out
-    }
-
-    /// Archive path (mask=false): credential-bearing log lines survive verbatim.
-    /// The archive is the operator's local troubleshooting bundle and must keep
-    /// real UUID/AuthKey values for diagnosis.
-    #[test]
-    fn write_logs_zip_mask_false_preserves_plaintext_credentials() {
-        let content = "[batch-auth] allocated  port=COM3 mac=AA uuid=plaintext-uuid-value\n";
-        let zipped = write_and_read_zipped_log(content, false);
-        assert!(zipped.contains("uuid=plaintext-uuid-value"));
-    }
-
-    /// Export-for-report path (mask=true): known-prefix credential values are
-    /// redacted. UUID form is NOT assumed — any length after `uuid=` is masked.
-    #[test]
-    fn write_logs_zip_mask_true_redacts_uuid_and_authkey_by_known_prefix() {
-        let content =
-            "[batch-auth] allocated  port=COM3 uuid=plaintext-uuid-value\n\
-              [batch-auth] verify-fail  reason=wrote (uuid=plaintext-uuid-value, authkey=secretkey)\n\
-              [batch-auth] skipped  port=COM3 existing_uuid=another-uuid\n\
-              [batch-auth] auth-write failed  otp_uuid=otp-uuid-here\n";
-        let zipped = write_and_read_zipped_log(content, true);
-        assert!(!zipped.contains("plaintext-uuid-value"));
-        assert!(!zipped.contains("secretkey"));
-        assert!(!zipped.contains("another-uuid"));
-        assert!(!zipped.contains("otp-uuid-here"));
-        // Prefixes themselves remain (the line is still legible as a log line).
-        assert!(zipped.contains("uuid="));
-        assert!(zipped.contains("authkey="));
-    }
-
-    /// UUID length is not fixed (firmware accepts 16 or 20; real devices may
-    /// return other lengths). Redaction must be by prefix, not by assuming a
-    /// specific UUID length.
-    #[test]
-    fn write_logs_zip_mask_redacts_uuid_regardless_of_length() {
-        for uuid_val in ["abcdef123456", "abcdef1234567890", "abcdef1234567890abcd"] {
-            let content = format!("[batch-auth] allocated  uuid={uuid_val}\n");
-            let zipped = write_and_read_zipped_log(&content, true);
-            assert!(
-                !zipped.contains(uuid_val),
-                "uuid `{uuid_val}` leaked into masked export"
-            );
-        }
-    }
-
-    /// Non-credential log content is untouched by masking.
-    #[test]
-    fn write_logs_zip_mask_preserves_non_credential_lines() {
-        let content =
-            "[info] tyutool v3.2.8 starting\n[serial] port=COM3 opened\n[batch-auth] done  port=COM3 mac=AA:BB\n";
-        let zipped = write_and_read_zipped_log(content, true);
-        assert!(zipped.contains("tyutool v3.2.8 starting"));
-        assert!(zipped.contains("port=COM3 opened"));
-        assert!(zipped.contains("mac=AA:BB"));
-    }
-
-    #[test]
     fn batch_auth_trace_writer_creates_dot_trace_file_with_plaintext() {
         let dir = tempfile::tempdir().unwrap();
         let mut w = BatchAuthTraceWriter::open(dir.path(), "20260804-120000").unwrap();
@@ -917,34 +703,6 @@ mod log_tools_tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("uuid=real-uuid"));
         assert!(content.contains("authkey=real-secret-key"));
-    }
-
-    #[test]
-    fn gather_and_write_logs_zip_collects_logs_and_report() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("tyutool.log"), b"hello").unwrap();
-        std::fs::write(dir.path().join("notes.txt"), b"skip").unwrap();
-        let dest = dir.path().join("out.zip");
-
-        gather_and_write_logs_zip(
-            dir.path(),
-            "tyutool",
-            "3.0.11",
-            "AppImage",
-            "sid",
-            &dest,
-            false,
-        )
-        .unwrap();
-
-        let f = std::fs::File::open(&dest).unwrap();
-        let mut zip = zip::ZipArchive::new(f).unwrap();
-        let names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
-            .collect();
-        assert!(names.contains(&"report-info.txt".to_string()));
-        assert!(names.contains(&"tyutool.log".to_string()));
-        assert!(!names.contains(&"notes.txt".to_string()));
     }
 
     #[test]
