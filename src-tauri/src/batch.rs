@@ -671,7 +671,7 @@ pub(crate) fn batch_auth_start(
         .as_ref()
         .and_then(|_| app.path().app_log_dir().ok())
     {
-        logs::prune_trace_files(&log_dir);
+        tyutool_core::prune_trace_files(&log_dir);
     }
     for port in ports {
         // Set up cancel + spawn thread

@@ -20,7 +20,10 @@ pub use authorize::{
     BatchAuthSlotResult, BatchAuthStep, ConflictPolicy, ReadAuthProbeResult,
     DEVICE_NO_RESPONSE_PREFIX,
 };
-pub use diagnostics::{prune_log_files, LogRetention};
+pub use diagnostics::{
+    collect_log_files, list_log_files_impl, prune_log_files, prune_trace_files, read_log_tail_impl,
+    read_named_log_impl, resolve_log_open_path, LogFileInfo, LogRetention,
+};
 pub use error::FlashError;
 pub use flash_event::{
     FlashEvent, FlashMilestone, FlashPhase, FlashResult, JobDetails, JobSummary,
