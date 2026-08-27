@@ -162,23 +162,15 @@ pub(crate) fn batch_flash_start(
             }
 
             let job = tyutool_core::FlashJob {
-                mode: tyutool_core::FlashMode::Flash,
-                chip_id: config_clone.chip_id.clone(),
-                port: port_clone.clone(),
-                baud_rate: config_clone.baud_rate,
                 firmware_path: Some(config_clone.firmware_path.clone()),
-                segments: None,
                 flash_start_hex: config_clone.flash_start_hex.clone(),
                 flash_end_hex: config_clone.flash_end_hex.clone(),
-                erase_start_hex: None,
-                erase_end_hex: None,
-                read_start_hex: None,
-                read_end_hex: None,
-                read_file_path: None,
-                authorize_uuid: None,
-                authorize_key: None,
-                authorize_storage: None,
-                confirm_overwrite: None,
+                ..tyutool_core::FlashJob::new(
+                    tyutool_core::FlashMode::Flash,
+                    config_clone.chip_id.clone(),
+                    port_clone.clone(),
+                    config_clone.baud_rate,
+                )
             };
 
             let result = tyutool_core::run_job(&job, &cancel_clone, |p| {
@@ -302,23 +294,15 @@ fn run_batch_auth_slot(
     if let Some(ref fw_path) = config.firmware_path {
         if !fw_path.is_empty() {
             let job = tyutool_core::FlashJob {
-                mode: tyutool_core::FlashMode::Flash,
-                chip_id: config.chip_id.clone(),
-                port: port.clone(),
-                baud_rate: config.baud_rate,
                 firmware_path: Some(fw_path.clone()),
-                segments: None,
                 flash_start_hex: config.flash_start_hex.clone(),
                 flash_end_hex: config.flash_end_hex.clone(),
-                erase_start_hex: None,
-                erase_end_hex: None,
-                read_start_hex: None,
-                read_end_hex: None,
-                read_file_path: None,
-                authorize_uuid: None,
-                authorize_key: None,
-                authorize_storage: None,
-                confirm_overwrite: None,
+                ..tyutool_core::FlashJob::new(
+                    tyutool_core::FlashMode::Flash,
+                    config.chip_id.clone(),
+                    port.clone(),
+                    config.baud_rate,
+                )
             };
             log::info!(
                 "[batch-auth] flash start  port={port} chip={} firmware={fw_path}",
