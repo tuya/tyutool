@@ -11,6 +11,7 @@ libudev = ["serialport/libudev"]
 
 [dev-dependencies]
 serde_json = "1"
+tempfile = "3"
 
 [dependencies]
 regex = "1"

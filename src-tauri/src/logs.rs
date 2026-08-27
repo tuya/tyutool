@@ -181,51 +181,18 @@ pub(crate) fn append_text_file(
         .map_err(|e| e.to_string())
 }
 
-const MAX_LOG_FILES: usize = 100;
-const MAX_LOG_BYTES_TOTAL: u64 = 100 * 1024 * 1024; // 100 MB
+/// Session log retention for this binary, sharing the algorithm (and the
+/// 100 files / 100 MB budget) with tyutool-cli via `tyutool_core::prune_log_files`;
+/// the bridge binary uses its own smaller budget and prefix.
+pub(crate) const LOG_RETENTION: tyutool_core::LogRetention = tyutool_core::LogRetention {
+    prefix: "tyutool-",
+    max_files: 100,
+    max_bytes_total: 100 * 1024 * 1024, // 100 MB
+};
 /// Bounded growth for `.trace` files (plaintext batch-auth interaction data).
 /// Independent from `.log` limits — `.trace` is never collected into any
 /// export/archive zip (it has no `tyutool-` prefix and a non-`.log` extension).
 const MAX_TRACE_FILES: usize = 20;
-
-/// Delete the oldest per-session log files until the collection is within both
-/// the file-count and total-size limits. Only manages files whose stem starts
-/// with "tyutool-" (per-session naming); legacy "tyutool.log" is left untouched.
-/// Always retains at least one file.
-pub(crate) fn prune_log_files(log_dir: &std::path::Path) {
-    let mut files: Vec<(std::path::PathBuf, u64)> = std::fs::read_dir(log_dir)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            p.extension().map(|x| x == "log").unwrap_or(false)
-                && p.file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.starts_with("tyutool-"))
-                    .unwrap_or(false)
-        })
-        .map(|p| {
-            let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-            (p, size)
-        })
-        .collect();
-
-    // Timestamped filenames are lexicographically chronological.
-    files.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
-
-    let mut count = files.len();
-    let mut total: u64 = files.iter().map(|(_, s)| s).sum();
-
-    for (path, size) in &files {
-        if count <= 1 || (count <= MAX_LOG_FILES && total <= MAX_LOG_BYTES_TOTAL) {
-            break;
-        }
-        let _ = std::fs::remove_file(path);
-        count -= 1;
-        total = total.saturating_sub(*size);
-    }
-}
 
 /// Plaintext writer for batch-auth device-interaction data (auth-read raw lines,
 /// auth-write responses, verify comparison values). Lives in its own

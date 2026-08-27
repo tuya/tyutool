@@ -282,9 +282,16 @@ fn parse_hex_addr(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
     u64::from_str_radix(raw, 16).map_err(|e| format!("invalid hex address '{}': {}", s, e).into())
 }
 
-const MAX_LOG_FILES: usize = 100;
-const MAX_LOG_BYTES_TOTAL: u64 = 100 * 1024 * 1024; // 100 MB
 const MAX_LOG_BYTES_PER_FILE: u64 = 10 * 1024 * 1024; // 10 MB per session file
+
+/// Session log retention for this binary. Shared with the GUI's budget (100
+/// files / 100 MB) via `tyutool_core::prune_log_files`; the bridge binary uses
+/// its own smaller budget and prefix, see `tyutool-bridge/src/main.rs`.
+const LOG_RETENTION: tyutool_core::LogRetention = tyutool_core::LogRetention {
+    prefix: "tyutool-",
+    max_files: 100,
+    max_bytes_total: 100 * 1024 * 1024, // 100 MB
+};
 
 /// Size-capped log sink for one CLI session. Writes to `tyutool-<stem>.log`
 /// until it reaches `MAX_LOG_BYTES_PER_FILE`, then rolls over to
@@ -355,44 +362,6 @@ impl std::io::Write for SessionLogWriter {
     }
 }
 
-/// Delete the oldest per-session log files until the collection is within both
-/// the file-count and total-size limits. Only manages files whose stem starts
-/// with "tyutool-"; always retains at least one file.
-fn prune_log_files(log_dir: &std::path::Path) {
-    let mut files: Vec<(std::path::PathBuf, u64)> = match std::fs::read_dir(log_dir) {
-        Ok(rd) => rd
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.extension().map(|x| x == "log").unwrap_or(false)
-                    && p.file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.starts_with("tyutool-"))
-                        .unwrap_or(false)
-            })
-            .map(|p| {
-                let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                (p, size)
-            })
-            .collect(),
-        Err(_) => return,
-    };
-
-    files.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
-
-    let mut count = files.len();
-    let mut total: u64 = files.iter().map(|(_, s)| s).sum();
-
-    for (path, size) in &files {
-        if count <= 1 || (count <= MAX_LOG_FILES && total <= MAX_LOG_BYTES_TOTAL) {
-            break;
-        }
-        let _ = std::fs::remove_file(path);
-        count -= 1;
-        total = total.saturating_sub(*size);
-    }
-}
-
 fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -433,7 +402,7 @@ fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error:
     }
 
     dispatch.apply()?;
-    prune_log_files(&log_dir);
+    tyutool_core::prune_log_files(&log_dir, &LOG_RETENTION);
     Ok(log_path)
 }
 
@@ -1001,11 +970,11 @@ mod prune_tests {
     #[test]
     fn prune_removes_oldest_when_over_count_limit() {
         let dir = tempfile::tempdir().unwrap();
-        for i in 1..=(MAX_LOG_FILES + 2) {
+        for i in 1..=(LOG_RETENTION.max_files + 2) {
             touch(dir.path(), &format!("tyutool-20240101-{i:06}.log"), 1024);
         }
-        prune_log_files(dir.path());
-        assert_eq!(names(dir.path()).len(), MAX_LOG_FILES);
+        tyutool_core::prune_log_files(dir.path(), &LOG_RETENTION);
+        assert_eq!(names(dir.path()).len(), LOG_RETENTION.max_files);
         // The oldest two should be gone.
         assert!(!dir.path().join("tyutool-20240101-000001.log").exists());
         assert!(!dir.path().join("tyutool-20240101-000002.log").exists());
@@ -1022,13 +991,13 @@ mod prune_tests {
                 15 * 1024 * 1024,
             );
         }
-        prune_log_files(dir.path());
+        tyutool_core::prune_log_files(dir.path(), &LOG_RETENTION);
         let remaining = names(dir.path());
         let total: u64 = remaining
             .iter()
             .map(|n| std::fs::metadata(dir.path().join(n)).unwrap().len())
             .sum();
-        assert!(total <= MAX_LOG_BYTES_TOTAL);
+        assert!(total <= LOG_RETENTION.max_bytes_total);
     }
 
     #[test]
@@ -1038,9 +1007,9 @@ mod prune_tests {
         touch(
             dir.path(),
             "tyutool-20240101-000001.log",
-            MAX_LOG_BYTES_TOTAL + 1,
+            LOG_RETENTION.max_bytes_total + 1,
         );
-        prune_log_files(dir.path());
+        tyutool_core::prune_log_files(dir.path(), &LOG_RETENTION);
         assert_eq!(names(dir.path()).len(), 1);
     }
 
@@ -1049,7 +1018,7 @@ mod prune_tests {
         let dir = tempfile::tempdir().unwrap();
         // Legacy file should not be touched.
         touch(dir.path(), "tyutool.log", 1024);
-        prune_log_files(dir.path());
+        tyutool_core::prune_log_files(dir.path(), &LOG_RETENTION);
         assert!(dir.path().join("tyutool.log").exists());
     }
 
