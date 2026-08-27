@@ -105,8 +105,19 @@ $ ls .github/ | grep -iE "dependabot|renovate"
 **代价**：已知漏洞无限期驻留，且没有任何机制会告诉你新增了漏洞。
 
 **做法**：加 `.github/dependabot.yml`，覆盖 `cargo` / `npm` / `github-actions` 三个生态，
-月度或周度。**先开 PR 通知，不要开自动合并**——这个仓库有原生依赖（serialport、libudev、
-Tauri），自动升级风险高于收益。
+月度、minor+patch 分组。**不开自动合并**——这个仓库有原生依赖（serialport +
+libudev、Tauri、calamine），一次升级可能只挂某一个 target，而 CI 并不在每个 PR 上
+构建全部 target。
+
+**已完成（2026-08-27）**。但要把范围说清楚：
+
+> ⚠ **`dependabot.yml` 配置的是*版本*更新，不是安全告警。**
+> Dependabot 的安全更新是仓库设置里的开关（Settings → Code security），
+> 与本文件无关。加上这个文件**不会直接消掉那 22 条告警**，
+> 它只是让依赖集开始往前走、不再只出不进。
+>
+> **还需人工确认一步**：到 Settings → Code security 确认
+> Dependabot alerts 与 security updates 已开启。这一步本会话无法代劳。
 
 ### 1.3 lefthook 静默失效（fail-open）
 
