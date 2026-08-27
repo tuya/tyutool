@@ -121,20 +121,19 @@ pre-commit:
 
 ## Section 2：主线（核心下沉，另有专文）
 
-维度 1、2、4、5 收敛到同一条主线上，细节见
-`docs/specs/2026-08-26-core-consolidation-design.md`。这里只记它在总纲中的定位与顺序：
+维度 1、2、4、5 收敛到同一条主线上。
 
-| 阶段 | 内容 | 量级 |
-|---|---|---|
-| P0 | `prune_log_files` 三合一（**上限与前缀需参数化**） | 半天 |
-| P1 | `logs.rs` 纯逻辑层下沉 → CLI 白拿日志导出与脱敏 | 3–4 天 |
-| P2 | `FlashJob` 契约收敛 + `ts-rs` + `to_cli_command()` | 3–5 天 |
-| P3 | updater 纯逻辑下沉（**已降级**，仅 `sha256_hex` 单点化） | 1 天 |
-| P4 | 批量编排下沉 + `excel` feature | 2–3 周，有风险 |
-| P5 | `serial_debug.rs` 审计（共享部分已由 `e01d7f4` 抽走） | 低 |
+**阶段划分、量级与验收标准均以
+`docs/specs/2026-08-26-core-consolidation-design.md` 的「实现顺序」一节为准**——
+那里是主线的唯一真相源。本文**不复制那张阶段表**，否则两处会各自漂移——
+这正是本次规范化要消除的那类重复。
 
-**先做 P0。** 它半天完成、零争议，作用是**验证「下沉」这条路在这个仓库里走得通**——
-包括参数化常量、跨 crate 移动、CI 是否绿。P0 走通之前不要启动 P1 之后的任何阶段。
+本文对主线只提一条立场：
+
+> **先做 P0（`prune_log_files` 三合一），它走通之前不启动后续任何阶段。**
+
+P0 半天完成、零争议，作用不是减那 60 行代码，而是**验证「下沉」这条路在这个
+仓库里走得通**——包括常量参数化、跨 crate 移动、CI 是否绿。
 
 > 维度 4（可观测性）与维度 5（安全与凭据）不单独立项：它们的**规则**已经是全仓库质量最高的
 > 部分（双通道模型、三个文件族的边界、`.trace` 凭据隔离、bridge 的「Origin 是过滤器不是信任根」），
@@ -296,9 +295,21 @@ crates/tyutool-bridge/AGENTS.md:112
 
 Section 3 的两项（工具链固定、SemVer 边界）**先不做**，等触发条件出现。
 
+### 本文不另立 plan
+
+仓库约定 spec 与 plan 成对，但 Section 1 三项合计约一小时、各自独立、无顺序依赖——
+**为它们写一份 checkbox 计划文档比直接做掉还贵**。直接执行，完成后把本文
+移入 `docs/specs/completed/`。
+
+需要 plan 的只有主线，那份归 `docs/plans/2026-08-26-core-consolidation.md`（待立）。
+
 ---
 
 ## 相关文档
 
-- `docs/specs/2026-08-26-core-consolidation-design.md` —— 主线细节，本文 Section 2 的展开
-- 实现计划待立：`docs/plans/2026-08-27-refactor-v3-normalization.md`
+| 文档 | 关系 |
+|---|---|
+| `docs/specs/2026-08-26-core-consolidation-design.md` | 主线的详细设计，**阶段划分以它为准** |
+| `docs/plans/2026-08-26-core-consolidation.md`（待立） | 主线的实现计划，**本仓库唯一一份规范化 plan** |
+
+本文与主线 spec 的分工：**本文回答「做不做、先做哪个」，主线 spec 回答「怎么做」。**
