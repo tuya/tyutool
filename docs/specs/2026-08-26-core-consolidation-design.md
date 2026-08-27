@@ -3,6 +3,8 @@
 **日期：** 2026-08-26
 **状态：** 待实现
 **范围：** `tyutool-core` / `tyutool-cli` / `src-tauri` / `tyutool-bridge` 的职责边界与契约收敛
+**实测基准：** 本文所有行数、行号、计数均实测于 `123a343`。初稿曾误量于一个未同步的
+旧工作树（`e01d7f4` 之前），导致整组数字系统性偏移。**修改本文时请重测并更新此行的 commit。**
 
 ---
 
@@ -15,13 +17,13 @@ AGENTS.md 已经写明「`tyutool-core` is the single source of truth for flash 
 
 | crate | 行数 | 定位 | 实际 |
 |---|---:|---|---|
-| `tyutool-core` | 16578 | 唯一真相源 | plugins ~7000、`authorize.rs` 3335、`serial_debug.rs` 3288 |
-| `tyutool-bridge` | 8798 | WS 助手 | 协议与安全为主，基本合理 |
-| **`src-tauri`** | **6317** | **薄壳** | **不薄** |
+| `tyutool-core` | 17284 | 唯一真相源 | plugins 7891、`authorize.rs` 3335、`serial_debug.rs` 3288 |
+| `tyutool-bridge` | 8698 | WS 助手 | 协议与安全为主，基本合理 |
+| **`src-tauri`** | **5953** | **薄壳** | **不薄** |
 | `tyutool-cli` | 2294 | 薄壳 | `reporter.rs` 562 是终端渲染，合理 |
-| `tyutool-serve` | 2035 | 开发期 WS | — |
+| `tyutool-serve` | 1691 | 开发期 WS | — |
 
-**上层四家合计 19444 行，超过 core 本身。** 一个真正的瘦客户端不该有 6317 行。
+**上层四家合计 18636 行，超过 core 本身（17284）。** 一个真正的瘦客户端不该有 5953 行。
 
 ### 症状一：同一份逻辑写了三遍
 
@@ -35,8 +37,18 @@ src-tauri/src/logs.rs:195               pub(crate) fn prune_log_files(log_dir: &
 「Session log retention for this binary, **mirroring** `prune_log_files` in ...」——
 这是被明确承认的复制。
 
-AGENTS.md 里的日志治理约定（≤100 files / ≤100 MB）现在要靠三处实现同时保持一致。
-改一次要记得改三处，漏一处不会报错。
+三处实现的是**同一套规则**（删最旧直到降到上限内），但**常量各不相同**，而且是刻意的：
+
+| 实现 | 文件数上限 | 总字节上限 | 文件名前缀 |
+|---|---:|---:|---|
+| `tyutool-cli/src/main.rs:285` | 100 | 100 MB | `tyutool-` |
+| `tyutool-bridge/src/main.rs:69` | **20** | **50 MB** | **`tyutool-bridge-`** |
+| `src-tauri/src/logs.rs` | 100 | 100 MB | `tyutool-` |
+
+bridge 的注释说明了理由：它是常驻进程，不是交互工具，所以预算更小。
+
+**所以 P0 不是直接合并，而是把上限与前缀参数化后再合并。** 否则会把 bridge 的
+刻意选择抹掉。真正的问题是“一套规则写了三遍”，不是“三组常量不一致”。
 
 ### 症状二：能力鸿沟
 
@@ -58,12 +70,12 @@ CLI 做授权时不产生 `.trace` 记录；CLI 无法导出脱敏日志包。
 
 | 位置 | 形态 |
 |---|---|
-| `crates/tyutool-core/src/job.rs:26` | `FlashJob`，17 个字段（唯一真相源） |
+| `crates/tyutool-core/src/job.rs:27` | `FlashJob`，17 个字段（唯一真相源） |
 | `crates/tyutool-cli/src/main.rs:37` | clap `Commands` enum，Write/Read/Erase 各重复一遍 device/port/baud/start |
-| `crates/tyutool-cli/src/main.rs:585,644,696` | **三处**手写 `FlashJob { .. }` 字面量，每处把用不上的字段显式写成 `None` |
-| `src/features/firmware-flash/flash-ipc-types.ts` | 手工镜像 `FlashJob` + `FlashEvent`，100+ 行 |
+| `crates/tyutool-cli/src/main.rs:585 / 644 / 696 / 746` | **四处**手写 `FlashJob { .. }` 字面量，每处把用不上的字段显式写成 `None` |
+| `src/features/firmware-flash/flash-ipc-types.ts`（102 行） | 手工镜像 `FlashJob` + `FlashEvent` |
 
-`main.rs:585` 为了发一个 authorize job 写了 12 行 `None`。
+`main.rs:585` 为了发一个 authorize job 写了 11 行 `None`。
 加字段时前三处漏改会编译报错（尚可），**第四处漏改不会报错**——这才是真风险。
 
 ### 正面样板
@@ -99,8 +111,8 @@ cli / bridge / src-tauri 三家共用，AGENTS.md 明写「Never re-inline a per
 |---|---|---:|---|
 | `prune_log_files` | 三处各一份 | ~60×3 | 纯 fs，零平台依赖 |
 | `pick_active_log` / `collect_log_files` / `list_log_files_impl` / `validate_log_filename` / `tail_bytes` / `read_log_tail_impl` / `prune_trace_files` | `src-tauri/src/logs.rs` | ~250 | 纯 fs |
-| `redact_log_content` / `mask_value_range` / `write_logs_zip` / `build_report_info` | `src-tauri/src/logs.rs:883-978` | ~120 | 纯字符串 + zip；承载 `mask` 安全契约 |
-| `is_newer` / `platform_key` / `verify_sha256` / `extract_binary_from_tar_gz` / `extract_binary_from_zip` | `crates/tyutool-cli/src/update.rs` | ~120 | 纯逻辑；`src-tauri/src/updater.rs`(524) 另有同类实现 |
+| `build_report_info` / `mask_value_range` / `redact_log_content` / `write_logs_zip` / `gather_and_write_logs_zip` | `src-tauri/src/logs.rs:865-978` | ~120 | 纯字符串 + zip；承载 `mask` 安全契约 |
+| `is_newer` / `platform_key` / `verify_sha256` / `extract_binary_from_tar_gz` / `extract_binary_from_zip` | `crates/tyutool-cli/src/update.rs:36/57/105/115/135` | ~120 | 纯逻辑。⚙ **注意：`src-tauri/src/updater.rs` 并无同类实现**（详见 P1） |
 | 批量编排：多口并发调度、冲突策略、Excel 读写 | `src-tauri/src/batch.rs`(943) + `batch_auth.rs`(1151) | **2094** | 编排本身与平台无关 |
 | `BatchAuthTraceWriter` | `src-tauri/src/batch.rs` + `logs.rs` | — | 纯 fs，且是 AGENTS.md 的凭据隔离机制 |
 | `calamine` / `rust_xlsxwriter` 依赖 | 仅 `src-tauri/Cargo.toml` | — | Excel 解析是纯数据处理 |
@@ -116,11 +128,17 @@ cli / bridge / src-tauri 三家共用，AGENTS.md 明写「Never re-inline a per
 | Origin allowlist / token grants / audit log | `tyutool-bridge` | bridge 独有的安全模型，AGENTS.md 明确其与 serve 不同 |
 | 芯片插件 | `tyutool-core/src/plugins/` | 已在正确位置 |
 
-### 1.3 待评估
+### 1.3 待评估：一次下沉已经先发生过
 
-`src-tauri/src/serial_debug.rs` 有 1025 行，而 `core/serial_debug.rs` 已有 3288 行，
-`tyutool-serve` 中另有一套 WS 侧处理。三者的边界需要单独审计后再决定，
-本设计不预判结论（见 P4）。
+`src-tauri/src/serial_debug.rs` 现为 **661 行**，`core/serial_debug.rs` 3288 行，
+`tyutool-serve/src/lib.rs` 1691 行。
+
+**关键背景：`e01d7f4` 已经把 serve 与 src-tauri 两份重复的 chunk bridge 抽成了
+`core/serial_debug_bridge.rs`（699 行）**——从 serve 搬走 417 行、从 src-tauri 搬走 429 行。
+那正是本设计倡导的下沉动作，**已经成功做过一次**，应当作为正面样板引用。
+
+所以 P5 的前提不是“三者边界不清”，而是“共享部分已抽走，剩下的 661 行是否还有
+可抽的”——量级比初稿估计的小得多，优先级相应下调。
 
 ---
 
@@ -141,7 +159,7 @@ tyutool-core/
   │    tail_bytes / read_log_tail / validate_log_filename
   │    redact_log_content / write_logs_zip / build_report_info
   │
-  ├─ updater.rs              ← 新增：版本比较 / 平台键 / SHA256 / 解包
+  ├─ updater.rs              ← 新增：版本比较 / 平台键 / 解包（均来自 CLI）+ sha256_hex（唯一真重复项）
   │
   └─ batch/                  ← 新增：批量编排状态机
        mod.rs
@@ -157,20 +175,32 @@ tyutool-core/
 ```toml
 # crates/tyutool-core/Cargo.toml
 [features]
-default = []
+# 不声明 default —— AGENTS.md 明写「tyutool-core declares no `default` feature」
 excel = ["dep:calamine", "dep:rust_xlsxwriter"]
+
+[dependencies]
+calamine = { version = "0.26", features = ["dates"], optional = true }
+rust_xlsxwriter = { version = "0.79", optional = true }
 ```
+
+两个依赖必须标 `optional = true`，`dep:` 语法才成立。
 
 CLI 若要支持批量授权表，显式开启 `features = ["excel"]`；bridge 不开。
 
 ### 2.3 目标行数
 
-| crate | 现在 | 目标 | 变化 |
-|---|---:|---:|---|
-| `src-tauri` | 6317 | ~2500 | Tauri 命令 + 事件桥接 + 编辑器探测 + window |
-| `tyutool-cli` | 2294 | ~1800 | `reporter.rs` 是大头，不动 |
-| `tyutool-bridge` | 8798 | ~7500 | 主体是协议与安全，本就该在自己家 |
-| `tyutool-core` | 16578 | ~19500 | — |
+按本文自己给出的搬迁量逐项相减，不拍脑袋：
+
+| crate | 现在 | P0–P2 后 | 再加 P4（batch） | 构成 |
+|---|---:|---:|---:|---|
+| `src-tauri` | 5953 | ~5520 | ~3430 | −P0 60 −P1 370；P4 再搬 2094 |
+| `tyutool-cli` | 2294 | ~2294 | ~2294 | 只减重复的 `prune_log_files`，同时白拿新能力 |
+| `tyutool-bridge` | 8698 | ~8640 | ~8640 | 只减 `prune_log_files` |
+| `tyutool-core` | 17284 | ~17750 | ~19850 | 受下沉量累加 |
+
+初稿写的「src-tauri → ~2500」算不出来：即使 P4 把 2094 行全搬走，也只到 ~3430。
+剩下的主体是 46 个 Tauri 命令包装、事件桥接、~250 行编辑器探测与 `window.rs`——
+那些按 §1.2 就该留在原地。
 
 ---
 
@@ -227,10 +257,21 @@ pub struct FlashJob {
 **AGENTS.md 中「Frontend types manually mirror the corresponding Rust types」这条约定应随之删除**——
 不再需要人来遵守它。这条约定是否还在，是本项完成与否的可验证信号。
 
-> **风险：** `FlashPhase` / `FlashMilestone` 带 `#[serde(tag)]`，
-> 现在手写成 `{ write_segment: { current, total } }` 这类形状。
-> ts-rs 能按 serde 属性生成对应形状，但**需要实际验证**。
-> 落地顺序：先打通纯 struct 的 `FlashJob`，再推枚举型的 `FlashEvent`。
+> **风险在哪里（实测 `flash_event.rs` 的 serde 属性）：**
+>
+> | 行 | 属性 | 类型 | tag 模式 | ts-rs 风险 |
+> |---|---|---|---|---|
+> | 8 | `tag = "kind"` | `FlashEvent` | **internally tagged** | 高，需实测 |
+> | 39 | `tag = "type"` | `JobDetails` | **internally tagged** | 高，需实测 |
+> | 63 | 仅 `rename_all` | `FlashPhase` | externally tagged | 低 |
+> | 88 | 仅 `rename_all` | `FlashMilestone` | externally tagged | 低 |
+> | 130 | 仅 `rename_all` | `FlashResult` | externally tagged | 低 |
+>
+> `{ write_segment: { current, total } }` 这类形状正是 **externally tagged** 的产物，
+> 也是 ts-rs 支持最好的一档。初稿把它们当成高风险项，**把风险指反了**。
+>
+> 落地顺序：先纯 struct `FlashJob` → 再 3 个 externally tagged 枚举 →
+> 最后才是 `FlashEvent` 与 `JobDetails` 这两个 internally tagged 的。
 
 ### 3.3 命令回显：`to_cli_command()`
 
@@ -252,8 +293,86 @@ impl FlashJob {
 返回 `Option` 是刻意的：QGIS 的 *Copy as qgis_process Command* 明确标注
 「某些参数组合无法表示成命令字符串」。诚实标注优于生成一条跑不通的命令。
 
-**注意**：P3 完成前，批量操作没有等价 CLI 命令可回显，因为 CLI 尚无该能力。
-命令回显在 P3 前只覆盖单设备场景。
+**注意**：P4（批量下沉）完成前，批量操作没有等价 CLI 命令可回显，因为 CLI 尚无该能力。
+命令回显在那之前只覆盖单设备场景。
+
+### 3.4 类型命名：`Flash*` 前缀名不副实
+
+`FlashJob` 不是只针对 flash 的。`FlashMode` 有四个变体，`Flash` 只是其中一个：
+
+```rust
+pub enum FlashMode { Flash, Erase, Read, Authorize }
+```
+
+于是 `Flash` 在同一个类型里承担两种粒度：作为**类型前缀**它泛指整个设备操作域，
+作为**枚举变体**它指“写入固件”这一个动作。结果是 `FlashJob { mode: FlashMode::Authorize }`
+这种写法——一个“烧录任务”的模式是“授权”。`FlashJob` 的 17 个字段里有
+`authorize_uuid` / `authorize_key` / `authorize_storage` / `confirm_overwrite`，与 flash 无关。
+
+#### 目标命名
+
+命名规则：**任务本体是 `Device*`（对设备做什么），执行过程上报的一切是 `Job*`（这次运行发生了什么）。**
+
+| 现在 | 改为 | 理由 |
+|---|---|---|
+| `FlashJob` | `DeviceJob` | 一次针对串口设备的一次性、可取消操作 |
+| `FlashMode` | `DeviceOp` | “mode” 弱化了它的作用；它选定的是要执行的动作 |
+| `FlashEvent` | `JobEvent` | 四种操作共用 |
+| `FlashPhase` | `JobPhase` | 同上 |
+| `FlashMilestone` | `JobMilestone` | 已含 `AuthReadComplete` / `AuthWriteSent` / `AuthConflict` 等纯授权里程碑 |
+| `FlashResult` | `JobResult` | 同上 |
+| `FlashError` | **`DeviceError`**（不是 `JobError`） | ⚙ `tyutool_bridge::JobError`（`lib.rs:237`）**已占用该名**且被 6 个测试文件 import。bridge 同时 use core 与自身类型，重名为 `JobError` 会造成同文件两个 `JobError` |
+| `FlashPlugin` | `ChipPlugin` | **最准确的一项**：`Authorize` 在 `run_job` 里被特判，根本不进插件，所以它确实只服务芯片 |
+| `FlashPluginRegistry` | `ChipPluginRegistry` | 同上 |
+
+已核实：`DeviceJob` / `DeviceOp` / `DeviceError` / `ChipPlugin` / `ChipPluginRegistry`
+全仓库**无占用**。而 `JobSummary`（`flash_event.rs:30`）与 `JobDetails`（:40）已在 core 内
+使用 `Job*` 命名空间，所以 `JobEvent` / `JobPhase` / `JobMilestone` / `JobResult`
+与它们并存反而比现状更一致。
+
+**不改的两个**（它们名副其实）：
+
+- `FlashSegment` —— 只用于 flash 写入分段（`segments` 字段、`ln882h::resolve_segments`）
+- `FlashParams`（`plugins/beken/flash_table.rs`）—— SPI-NOR 芯片参数表（MID、sector_size、wp）
+
+#### 线格式安全性（执行前必读）
+
+实测 `job.rs` / `flash_event.rs` 的 serde 属性，均为 `rename_all` 作用于变体与字段，
+**类型名从不出现在序列化结果里**：
+
+| 改什么 | 是否影响线格式 |
+|---|---|
+| 类型名（`FlashJob` → `DeviceJob`） | 否。纯 Rust 内部重命名 |
+| 枚举变体名（`FlashMode::Flash`） | **是**。出现为 `"flash"` |
+| 字段名（`mode`、`chip_id`） | **是**。camelCase 后进 JSON |
+| Tauri 事件名（`flash-progress`） | 独立字符串，与类型名无关 |
+
+所以本节列出的重命名**全部是线格式安全的**；`mode` 字段名若一并改成 `op`，则会同时打破
+`tyutool-bridge/PROTOCOL.md`、WS 消息与前端镜像类型，必须单独决策。默认不改字段名。
+
+#### 执行时机：随 P2（契约收敛）之后，不单独做
+
+引用规模（口径：`grep -rn --include=*.rs --include=*.ts <名> crates src-tauri src` 的匹配行数）：
+`FlashEvent` **183**、`FlashJob` **113**、`FlashMode` **61**。
+（初稿写的 `FlashJob` 84 是另一种口径——仅 `.rs`、仅词边界，实测为 83。比较时请统一口径。）
+在 ts-rs 落地前，前端那 100+ 行手工镜像类型要人改；落地后它们是生成产物。
+所以重命名排在 **P2 之后**作为一个独立提交，不提前、也不与逻辑改动混在一起。
+
+#### 更深的问题：重命名解决不了
+
+真正的模型缺陷是“授权靠假芯片 + 旁路挤进 flash 结构”：
+
+- `run_job` 对 `FlashMode::Authorize` 特判，绕过整个芯片注册表
+- 前端造了一个 `AUTH_ONLY_CHIP_ID = "other"` 的**假芯片**，`rustPluginId` 为 `"OTHER"`
+
+改名只是让名字诚实，旁路还在。“授权是否应该有自己的 job 类型”是**开放问题**，
+不在本设计范围内；若将来要动模型，应连同重命名一起做，而不是先改名再改模型。
+
+#### 短期（可立即做，半小时）
+
+在 `job.rs` 给 `FlashJob` 与 `FlashMode` 各补一句 doc comment，点破前缀歧义：
+`Flash` 前缀指设备操作域，不是 `FlashMode::Flash` 那个动作。
+现有注释“One flash/erase/read/authorize job”信息在，但没点破歧义。
 
 ---
 
@@ -263,8 +382,8 @@ impl FlashJob {
 
 | 方案 | 否决理由 |
 |---|---|
-| **核心跑成守护进程，GUI 改瘦客户端** | `src-tauri/src/lib.rs:683` 的 40 个命令中，`logs::register_dialog_path`、`reset_main_window_layout`、`tauri-plugin-store`、文件对话框**无法搬入守护进程**，结果是命令表分裂成两半。串口是独占资源，多客户端并发是伪需求。真正的成本在安装 / 自启 / 升级 / 版本漂移 / 端口冲突 / 三套平台服务，是永久运维负担。`tyutool-bridge` 已覆盖「远程 web 客户端」这个唯一真实需求。参照 rclone：`rcd` 是可选模式，本体仍是直接执行的 CLI。 |
-| **把 40 个 Tauri 命令重组成统一命令表** | `serial_debug_*` / `logs::*` / `updater::*` 本就是不同动作，强行统一是过度抽象（违反 AGENTS.md §2 Simplicity First）。 |
+| **核心跑成守护进程，GUI 改瘦客户端** | `src-tauri/src/lib.rs:683` 注册的 46 个命令中，`logs::register_dialog_path`、`reset_main_window_layout`、`tauri-plugin-store`、文件对话框**无法搬入守护进程**，结果是命令表分裂成两半。串口是独占资源，多客户端并发是伪需求。真正的成本在安装 / 自启 / 升级 / 版本漂移 / 端口冲突 / 三套平台服务，是永久运维负担。`tyutool-bridge` 已覆盖「远程 web 客户端」这个唯一真实需求。参照 rclone：`rcd` 是可选模式，本体仍是直接执行的 CLI。 |
+| **把 46 个 Tauri 命令重组成统一命令表** | `serial_debug_*` / `logs::*` / `updater::*` 本就是不同动作，强行统一是过度抽象（违反 AGENTS.md §2 Simplicity First）。 |
 | **引入 `tauri-specta`** | v2 长期停留在 `2.0.0-rc.24`。生产项目不为省类型手工活押注 RC。`ts-rs` 只导出类型、不碰 IPC 层，风险低得多。 |
 | **引入 TauRPC / rspc** | 要求把现有命令重组成 trait / router，改动面远超收益。 |
 | **改动 `tyutool-serve` / `tyutool-bridge` 的协议** | 两者的消息枚举各自保留，只让 payload 类型指向同一批 core 结构。`validate_ws_origin` 按 AGENTS.md 要求「ported verbatim，do not rewrite」。 |
@@ -273,13 +392,14 @@ impl FlashJob {
 
 ## Section 5：验收标准
 
-1. `grep -c "FlashJob {" crates/tyutool-cli/src/main.rs` 结果为 `0`
-2. `grep -rn "fn prune_log_files" crates src-tauri` 只剩一处，位于 `tyutool-core`
+1. `grep -c "FlashJob {" crates/tyutool-cli/src/main.rs` 结果为 `0`（当前值：**4**）
+2. `grep -rn "fn prune_log_files" crates src-tauri` 只剩一处，位于 `tyutool-core`（当前值：3）
 3. `cargo test -p tyutool-core` 产出 `src/bindings/*.ts`，且 `pnpm run build` 类型检查通过
 4. `src/features/firmware-flash/flash-ipc-types.ts` 不再包含手写的 `FlashJobPayload`
 5. 给 `FlashJob` 加一个新字段，**只改 `job.rs` 一处**，`cargo build` + `pnpm run build` 全绿
 6. 真机跑一次烧录，日志中能找到 `to_cli_command()` 输出，复制出来可直接重放
-7. `cargo build -p tyutool-cli` 不链接 `calamine` / `rust_xlsxwriter`（未开 `excel` feature 时）
+   （⚙ 需真机，**进不了 CI 门禁**；且按 §3.3，批量下沉之前只覆盖单设备场景）
+7. `cargo tree -p tyutool-cli | grep -c calamine` 为 `0`（未开 `excel` feature 时）
 8. AGENTS.md 中「Frontend types manually mirror」一条已删除
 
 ---
@@ -288,21 +408,38 @@ impl FlashJob {
 
 | 优先级 | 动作 | 量级 | 收益 |
 |:---:|---|---|---|
-| **P0** | `prune_log_files` 三合一 → `core/diagnostics.rs` | 半天 | 消掉已被承认的复制；验证下沉路径可行 |
-| **P1** | updater 纯逻辑下沉 → `core/updater.rs` | 1–2 天 | 两套版本比较规则合一 |
-| **P2** | `logs.rs` 纯逻辑层（~370 行）下沉 | 3–4 天 | **CLI 白捡日志列举 / tail / 导出 zip / 脱敏**；`mask` 安全契约变成单点实现 |
-| **P2.5** | `FlashJob::Default` + `From<Args>` + `ts-rs` + `to_cli_command()` | 3–5 天 | 契约收敛；命令回显上线 |
-| **P3** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | CLI 获得批量烧录 / 授权能力 |
-| **P4** | `src-tauri/src/serial_debug.rs`(1025) 对照 `tyutool-serve` 审计 | 待评估 | — |
+| **P0** | `prune_log_files` 三合一 → `core/diagnostics.rs`（**上限与前缀需参数化**，见症状一） | 半天 | 消掉已被承认的复制；验证下沉路径可行 |
+| **P1** | `logs.rs` 纯逻辑层（~370 行）下沉 | 3–4 天 | **CLI 白捡日志列举 / tail / 导出 zip / 脱敏**；`mask` 安全契约变成单点实现 |
+| **P2** | `FlashJob::Default` + `From<Args>` + `ts-rs` + `to_cli_command()` | 3–5 天 | 契约收敛；命令回显上线 |
+| **P3** | updater 纯逻辑下沉 → `core/updater.rs` | 1 天 | 仅 `sha256_hex` 单点化（详见下方降级说明） |
+| **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | CLI 获得批量烧录 / 授权能力 |
+| **P5** | `src-tauri/src/serial_debug.rs`（661）对照 `tyutool-serve` 审计 | 低 | 共享部分已由 `e01d7f4` 抽走，剩余量小 |
 
-### P3 的风险须单列
+### P1（原 updater）被降级的理由
+
+初稿把 updater 下沉排在 P1，理由写的是「两套版本比较规则合一」。**实测后不成立：**
+
+```
+$ grep -n "is_newer\|platform_key\|extract_binary" src-tauri/src/updater.rs
+（无输出）
+$ grep -rn "fn sha256_hex" src-tauri crates
+src-tauri/src/lib.rs:327:pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+```
+
+`src-tauri/src/updater.rs` 只做 `update_check` / `update_download` / `update_install`，
+**不含版本比较、不含平台键、不含归档解包**。唯一真实重复的是 SHA-256，
+而它在 `lib.rs:327` 而非 `updater.rs`。初稿是看到 `updater.rs` 有 524 行就推断的，
+没有查内容——收益被高估了一个量级，故降至 P3。
+
+### P4（批量下沉）的风险须单列
 
 2094 行**不是机械搬迁**。GUI 的 batch 深度依赖 Tauri 事件流做多口进度上报，
 必须先把「不含 IO 的编排状态机」与「事件发射」拆开——这本质上是重写而非移动。
 建议 P0–P2 完成、下沉路径经过验证后再评估，不要一开始就啃它。
 
-P0–P2.5 合计约一周半，可将 `src-tauri` 从 6317 降至约 5000，
-并留下一条被验证过、可重复的下沉路径。
+P0–P2 合计约一周半，将 `src-tauri` 从 5953 降至约 **5520**（−P0 60 −P1 370）。
+行数下降不是目的；目的是留下一条被验证过、可重复的下沉路径，并让 CLI 白拿
+日志导出与脱敏能力。
 
 ---
 
@@ -324,5 +461,5 @@ P0–P2.5 合计约一周半，可将 `src-tauri` 从 6317 降至约 5000，
 
 ## 后续文档
 
-实现计划另立 `docs/plans/2026-08-26-core-consolidation.md`，按 P0–P4 拆成
+实现计划另立 `docs/plans/2026-08-26-core-consolidation.md`，按 P0–P5 拆成
 checkbox 任务，遵循本仓库既有 plan 文档格式。

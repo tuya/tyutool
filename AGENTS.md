@@ -107,10 +107,14 @@ pnpm run tauri:build
 
 ```bash
 cargo fmt --all --check
-cargo clippy -p tyutool-core -p tyutool-cli --all-targets -- -D warnings
-cargo clippy -p tyutool-bridge --all-targets -- -D warnings
+cargo clippy -p tyutool-core -p tyutool-cli --all-targets -- -D warnings   # ci.yml:38
+cargo clippy -p tyutool_gui --all-targets -- -D warnings                   # ci.yml:89
+cargo clippy -p tyutool-bridge --all-targets -- -D warnings                # bridge.yml:135
 pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
 ```
+
+`tyutool-serve` is the one crate with **no CI job at all** — no clippy, no test, despite 28
+`#[test]` functions. Run `cargo test -p tyutool-serve` by hand when you touch it.
 
 - **clippy runs with `-D warnings`** — any lint fails the build. Fix the code; only reach for
   `#[allow]` with a comment saying why. New stable lints land regularly and have broken this
