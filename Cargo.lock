@@ -3893,7 +3893,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6031,7 +6031,7 @@ dependencies = [
  "toml 0.8.2",
  "tray-icon",
  "tyutool-core",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
  "winresource",
 ]
 
