@@ -187,6 +187,40 @@ fn pick_active_log(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Read the last `max_bytes` bytes of `path` as UTF-8 (lossy).
+/// Plaintext writer for batch-auth device-interaction data (auth-read raw lines,
+/// auth-write responses, verify comparison values). Lives in its own
+/// `batch-auth-<ts>.trace` file — deliberately NOT a `.log` file and NOT
+/// `tyutool-`-prefixed, so `collect_log_files` / `prune_log_files` /
+/// `list_log_files_impl` / `pick_active_log` all ignore it. The export-for-report
+/// zip therefore can never contain it; only the operator's local machine keeps it.
+///
+/// Retention for what this writes is `prune_trace_files` directly above: the two
+/// halves of the `.trace` contract stay in one file so a change to the naming
+/// scheme cannot update one and miss the other.
+pub struct BatchAuthTraceWriter {
+    file: std::fs::File,
+}
+
+impl BatchAuthTraceWriter {
+    /// Create `<log_dir>/batch-auth-<ts>.trace` (append mode). `ts` should be a
+    /// sortable timestamp stem (matching the `tyutool-<ts>.log` convention).
+    pub fn open(log_dir: &Path, ts: &str) -> std::io::Result<Self> {
+        let path = log_dir.join(format!("batch-auth-{ts}.trace"));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        Ok(Self { file })
+    }
+
+    /// Append one line (trailing newline added). Errors are swallowed — trace
+    /// logging is best-effort and must never break a batch run.
+    pub fn writeln(&mut self, line: &str) {
+        use std::io::Write;
+        let _ = writeln!(self.file, "{line}");
+    }
+}
+
 fn tail_bytes(path: &Path, max_bytes: u64) -> std::io::Result<String> {
     use std::io::{Read, Seek, SeekFrom};
     let len = std::fs::metadata(path)?.len();
@@ -424,6 +458,18 @@ pub fn gather_and_write_logs_zip(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn batch_auth_trace_writer_creates_dot_trace_file_with_plaintext() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = BatchAuthTraceWriter::open(dir.path(), "20260804-120000").unwrap();
+        w.writeln("[verify] wrote uuid=real-uuid authkey=real-secret-key");
+        drop(w);
+        let path = dir.path().join("batch-auth-20260804-120000.trace");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("uuid=real-uuid"));
+        assert!(content.contains("authkey=real-secret-key"));
+    }
 
     #[test]
     fn banner_includes_session_and_metadata() {

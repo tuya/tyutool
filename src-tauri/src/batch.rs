@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::logs;
 use tyutool_core::batch_auth;
 
 pub(crate) struct BatchSlot {
@@ -275,7 +274,7 @@ fn run_batch_auth_slot(
     cancel: Arc<AtomicBool>,
     allocator: Option<Arc<batch_auth::ExcelRowAllocator>>,
     session: Arc<StdMutex<AllocatorSession>>,
-    trace: Option<Arc<StdMutex<logs::BatchAuthTraceWriter>>>,
+    trace: Option<Arc<StdMutex<tyutool_core::BatchAuthTraceWriter>>>,
     conflict_policy: tyutool_core::ConflictPolicy,
     auth_storage: tyutool_core::AuthStorage,
     emit: &dyn Fn(serde_json::Value),
@@ -637,7 +636,7 @@ pub(crate) fn batch_auth_start(
     let trace_writer = match app.path().app_log_dir() {
         Ok(log_dir) => {
             let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-            match logs::BatchAuthTraceWriter::open(&log_dir, &ts) {
+            match tyutool_core::BatchAuthTraceWriter::open(&log_dir, &ts) {
                 Ok(w) => Some(std::sync::Arc::new(std::sync::Mutex::new(w))),
                 Err(e) => {
                     log::warn!("[batch-auth] trace writer unavailable: {e}");

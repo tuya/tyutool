@@ -364,7 +364,10 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
   that need bytes re-encode the text.
 - **Credential isolation (two-channel model):** batch-auth plaintext interaction data
   (verify comparison UUID/AuthKey values) is written to `batch-auth-<ts>.trace` via
-  `BatchAuthTraceWriter`, **never** into `tyutool-*.log`. The `.trace` file uses a non-`.log`
+  `tyutool_core::BatchAuthTraceWriter`, **never** into `tyutool-*.log`. The writer sits
+  directly beside `prune_trace_files` in `core/diagnostics.rs` on purpose: naming and
+  retention are one contract, and splitting them across crates let one be changed
+  without the other. The `.trace` file uses a non-`.log`
   extension and non-`tyutool-` prefix on purpose — `collect_log_files`/`prune_log_files`/
   `list_log_files_impl`/`pick_active_log` all ignore it, so it can never land in an export or
   archive zip. It is the operator's local diagnosis record. `prune_trace_files` bounds growth
