@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { watch, ref, onMounted, onUnmounted, computed } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { confirmDialogState, resolveConfirmDialog } from '@/composables/confirmDialog';
+import { watch, ref, onMounted, onUnmounted, computed } from "vue";
+import { useI18n } from "vue-i18n";
+import {
+  confirmDialogState,
+  resolveConfirmDialog,
+} from "@/composables/confirmDialog";
 
-const { t } = useI18n({ useScope: 'global' });
+const { t } = useI18n({ useScope: "global" });
 
-const dialogRef = ref<HTMLDivElement | null>(null);
 const okBtnRef = ref<HTMLButtonElement | null>(null);
 const extraActionBusy = ref(false);
 
@@ -31,7 +33,7 @@ async function handleExtraAction(): Promise<void> {
 
 function onKeydown(e: KeyboardEvent): void {
   if (!confirmDialogState.visible) return;
-  if (e.key === 'Escape') {
+  if (e.key === "Escape") {
     e.preventDefault();
     handleCancel();
   }
@@ -40,7 +42,7 @@ function onKeydown(e: KeyboardEvent): void {
 // Focus the confirm button when dialog opens for keyboard accessibility.
 watch(
   () => confirmDialogState.visible,
-  visible => {
+  (visible) => {
     if (visible) {
       requestAnimationFrame(() => {
         okBtnRef.value?.focus();
@@ -48,54 +50,58 @@ watch(
     } else {
       extraActionBusy.value = false;
     }
-  }
+  },
 );
 
 onMounted(() => {
-  document.addEventListener('keydown', onKeydown);
+  document.addEventListener("keydown", onKeydown);
 });
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', onKeydown);
+  document.removeEventListener("keydown", onKeydown);
 });
 
 const kindIcon: Record<string, [string, string]> = {
-  info: ['fas', 'circle-info'],
-  warning: ['fas', 'triangle-exclamation'],
-  danger: ['fas', 'triangle-exclamation'],
+  info: ["fas", "circle-info"],
+  warning: ["fas", "triangle-exclamation"],
+  danger: ["fas", "triangle-exclamation"],
 };
 
 /** Hover / assistive hint: what the header icon represents (dialog severity). */
 const dialogIconPurpose = computed(() => {
   const k = confirmDialogState.kind;
-  if (k === 'warning') {
-    return t('common.dialogIconPurposeWarning');
+  if (k === "warning") {
+    return t("common.dialogIconPurposeWarning");
   }
-  if (k === 'danger') {
-    return t('common.dialogIconPurposeDanger');
+  if (k === "danger") {
+    return t("common.dialogIconPurposeDanger");
   }
-  return t('common.dialogIconPurposeInfo');
+  return t("common.dialogIconPurposeInfo");
 });
 
 /** Short visible label next to the icon (what the icon means at a glance). */
 const dialogKindBadge = computed(() => {
   const k = confirmDialogState.kind;
-  if (k === 'warning') {
-    return t('common.dialogKindBadgeWarning');
+  if (k === "warning") {
+    return t("common.dialogKindBadgeWarning");
   }
-  if (k === 'danger') {
-    return t('common.dialogKindBadgeDanger');
+  if (k === "danger") {
+    return t("common.dialogKindBadgeDanger");
   }
-  return t('common.dialogKindBadgeInfo');
+  return t("common.dialogKindBadgeInfo");
 });
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="ty-dialog">
-      <div v-if="confirmDialogState.visible" class="ty-dialog-backdrop" role="presentation" @click.self="handleCancel">
+      <div
+        v-if="confirmDialogState.visible"
+        class="ty-dialog-backdrop"
+        role="presentation"
+        @click.self="handleCancel"
+      >
         <div
-          ref="dialogRef"
           class="ty-dialog-container"
           role="alertdialog"
           aria-modal="true"
@@ -119,7 +125,8 @@ const dialogKindBadge = computed(() => {
               <div
                 class="ty-dialog-icon-circle"
                 :class="{
-                  'ty-dialog-icon-warning': confirmDialogState.kind === 'warning',
+                  'ty-dialog-icon-warning':
+                    confirmDialogState.kind === 'warning',
                   'ty-dialog-icon-danger': confirmDialogState.kind === 'danger',
                   'ty-dialog-icon-info': confirmDialogState.kind === 'info',
                 }"
@@ -133,13 +140,24 @@ const dialogKindBadge = computed(() => {
                   aria-hidden="true"
                 />
               </div>
-              <span class="ty-dialog-kind-badge" aria-hidden="true">{{ dialogKindBadge }}</span>
+              <span class="ty-dialog-kind-badge" aria-hidden="true">{{
+                dialogKindBadge
+              }}</span>
               <h2 id="ty-dialog-title" class="ty-dialog-title">
                 {{ confirmDialogState.title }}
               </h2>
             </div>
-            <button type="button" class="ty-dialog-close" :aria-label="t('common.closeDialog')" @click="handleCancel">
-              <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-4" aria-hidden="true" />
+            <button
+              type="button"
+              class="ty-dialog-close"
+              :aria-label="t('common.closeDialog')"
+              @click="handleCancel"
+            >
+              <FontAwesomeIcon
+                :icon="['fas', 'xmark']"
+                class="size-4"
+                aria-hidden="true"
+              />
             </button>
           </div>
 
@@ -158,7 +176,9 @@ const dialogKindBadge = computed(() => {
           <div
             class="ty-dialog-footer"
             :class="{
-              'ty-dialog-footer--single': !confirmDialogState.showCancel && !confirmDialogState.extraActionLabel,
+              'ty-dialog-footer--single':
+                !confirmDialogState.showCancel &&
+                !confirmDialogState.extraActionLabel,
             }"
           >
             <button
@@ -184,7 +204,8 @@ const dialogKindBadge = computed(() => {
               class="ty-dialog-btn ty-dialog-btn-ok"
               :class="{
                 'ty-dialog-btn-ok-danger':
-                  confirmDialogState.kind === 'danger' || confirmDialogState.kind === 'warning',
+                  confirmDialogState.kind === 'danger' ||
+                  confirmDialogState.kind === 'warning',
                 'ty-dialog-btn-ok-primary': confirmDialogState.kind === 'info',
               }"
               @click="handleConfirm"
@@ -242,15 +263,27 @@ const dialogKindBadge = computed(() => {
 }
 
 .ty-dialog-accent-warning {
-  background: linear-gradient(90deg, var(--ty-accent), color-mix(in srgb, var(--ty-accent) 60%, transparent));
+  background: linear-gradient(
+    90deg,
+    var(--ty-accent),
+    color-mix(in srgb, var(--ty-accent) 60%, transparent)
+  );
 }
 
 .ty-dialog-accent-danger {
-  background: linear-gradient(90deg, var(--ty-danger), color-mix(in srgb, var(--ty-danger) 60%, transparent));
+  background: linear-gradient(
+    90deg,
+    var(--ty-danger),
+    color-mix(in srgb, var(--ty-danger) 60%, transparent)
+  );
 }
 
 .ty-dialog-accent-info {
-  background: linear-gradient(90deg, var(--ty-primary), color-mix(in srgb, var(--ty-primary) 60%, transparent));
+  background: linear-gradient(
+    90deg,
+    var(--ty-primary),
+    color-mix(in srgb, var(--ty-primary) 60%, transparent)
+  );
 }
 
 /* ── Header (icon + title + close) ── */
@@ -314,7 +347,11 @@ const dialogKindBadge = computed(() => {
 }
 
 .ty-dialog-close:hover {
-  background-color: color-mix(in srgb, var(--ty-danger) 12%, var(--ty-surface-muted));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-danger) 12%,
+    var(--ty-surface-muted)
+  );
   border-color: color-mix(in srgb, var(--ty-danger) 40%, var(--ty-border));
   color: var(--ty-danger);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
@@ -430,14 +467,22 @@ const dialogKindBadge = computed(() => {
 }
 
 .ty-dialog-btn-ok-danger {
-  background: linear-gradient(135deg, var(--ty-danger) 0%, color-mix(in srgb, var(--ty-danger) 82%, #000) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--ty-danger) 0%,
+    color-mix(in srgb, var(--ty-danger) 82%, #000) 100%
+  );
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.12),
     0 4px 14px color-mix(in srgb, var(--ty-danger) 28%, transparent);
 }
 
 .ty-dialog-btn-ok-primary {
-  background: linear-gradient(135deg, var(--ty-primary) 0%, var(--ty-primary-hover) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--ty-primary) 0%,
+    var(--ty-primary-hover) 100%
+  );
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.12),
     0 4px 14px color-mix(in srgb, var(--ty-primary) 28%, transparent);
