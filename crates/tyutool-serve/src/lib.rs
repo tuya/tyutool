@@ -327,10 +327,9 @@ fn forbidden(reason: &str) -> tokio_tungstenite::tungstenite::http::Response<Opt
 async fn handle_connection(stream: tokio::net::TcpStream) {
     // Cap WS message size at 16 MiB (default is 64 MiB) to bound per-connection
     // memory amplification from a malicious client streaming a large base64 blob.
-    let ws_config = WebSocketConfig {
-        max_message_size: Some(16 * 1024 * 1024),
-        ..Default::default()
-    };
+    // WebSocketConfig is #[non_exhaustive] since tungstenite 0.26 — set fields
+    // through the builder, not a struct literal.
+    let ws_config = WebSocketConfig::default().max_message_size(Some(16 * 1024 * 1024));
     let ws = match accept_hdr_async_with_config(stream, validate_ws_origin, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(e) => {
@@ -366,7 +365,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 })
                 .unwrap_or_else(|_| "{\"type\":\"error\",\"message\":\"serialize failed\"}".into())
             });
-            if sink_moved.send(Message::Text(text)).await.is_err() {
+            if sink_moved.send(Message::Text(text.into())).await.is_err() {
                 break;
             }
         }

@@ -308,7 +308,7 @@ fn frame_types(frames: &[serde_json::Value]) -> Vec<String> {
 }
 
 async fn send_json(ws: &mut Ws, value: serde_json::Value) {
-    ws.send(Message::Text(value.to_string()))
+    ws.send(Message::Text(value.to_string().into()))
         .await
         .expect("send frame");
 }
