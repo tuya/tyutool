@@ -1,9 +1,9 @@
 # refactor/v3 规范化总纲：先做什么，以及为什么不做其余的
 
 **日期：** 2026-08-27
-**状态：** 待确认
+**状态：** 已确认并执行；Section 1 三项已全部落地（2026-08-28）
 **范围：** refactor/v3 的工程规范化全局，`docs/specs/2026-08-26-core-consolidation-design.md` 是其下的一个子项
-**实测基准：** 本文所有数字实测于 `b22d5f0`。**修改本文时请重测并更新此行。**
+**实测基准：** 正文数字初测于 `b22d5f0`，2026-08-28 在 `cad3731` 重测。**结论一条未变**，四处数字随后续提交漂移，已就地更新：`tyutool-serve` 1691 → 1630 行（测试仍是 28 个）、`Cargo.lock` 716 → 719 个包、CLI 子命令 11 → 12 个（P6 新增 `logs`）、`crates/tyutool-core` 的 `unwrap()` 总数已高于附录 A1 记录的 276，但 A1 的结论（几乎全在 `mod tests` 内）未重新切分，该节按初测日期读。**修改本文时请重测并更新此行。**
 
 ---
 
@@ -68,7 +68,7 @@ $ grep -c "#\[test\]" crates/tyutool-serve/src/lib.rs
   28
 ```
 
-**代价**：1691 行代码、28 个测试，从来没有在 CI 里跑过一次。它是 `pnpm run dev:web`
+**代价**：1630 行代码、28 个测试，从来没有在 CI 里跑过一次。它是 `pnpm run dev:web`
 的后端，坏了会在开发者本地才暴露。
 
 **做法**：`ci.yml` 的两条命令各加 `-p tyutool-serve`。
@@ -100,7 +100,7 @@ $ ls .github/ | grep -iE "dependabot|renovate"
 > 落地前应先到 Security → Dependabot alerts 看具体条目——很可能多数是开发期依赖的传递项，
 > 实际风险低于数字观感。但「无人看」这件事本身是确定的。
 
-依赖规模：`Cargo.lock` 716 个包，`package.json` 62 个直接依赖。
+依赖规模：`Cargo.lock` 719 个包，`package.json` 62 个直接依赖。
 
 **代价**：已知漏洞无限期驻留，且没有任何机制会告诉你新增了漏洞。
 
@@ -289,7 +289,7 @@ $ grep -n "UsbPortSurvey" crates/tyutool-cli/src/main.rs
 105:    UsbPortSurvey,        ← 无 `{`，被 `^\s{4}[A-Z]\w+ \{` 漏掉
 ```
 
-11 个子命令与文档一一对应，**无漂移**。
+11 个子命令与文档一一对应，**无漂移**。（P6 之后是 12 个——`logs` 与 `docs/cli.md` 同 commit 落地。）
 
 ### A3. `PROTOCOL.md` 缺同步义务 —— 已存在
 
