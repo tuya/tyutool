@@ -198,36 +198,6 @@ pub(crate) const LOG_RETENTION: tyutool_core::LogRetention = tyutool_core::LogRe
     max_files: 100,
     max_bytes_total: 100 * 1024 * 1024, // 100 MB
 };
-/// Plaintext writer for batch-auth device-interaction data (auth-read raw lines,
-/// auth-write responses, verify comparison values). Lives in its own
-/// `batch-auth-<ts>.trace` file — deliberately NOT a `.log` file and NOT
-/// `tyutool-`-prefixed, so `tyutool_core::collect_log_files` / `prune_log_files` /
-/// `list_log_files_impl` / `pick_active_log` all ignore it. The export-for-report
-/// zip therefore can never contain it; only the operator's local machine keeps it.
-pub(crate) struct BatchAuthTraceWriter {
-    file: std::fs::File,
-}
-
-impl BatchAuthTraceWriter {
-    /// Create `<log_dir>/batch-auth-<ts>.trace` (append mode). `ts` should be a
-    /// sortable timestamp stem (matching the `tyutool-<ts>.log` convention).
-    pub(crate) fn open(log_dir: &std::path::Path, ts: &str) -> std::io::Result<Self> {
-        let path = log_dir.join(format!("batch-auth-{ts}.trace"));
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        Ok(Self { file })
-    }
-
-    /// Append one line (trailing newline added). Errors are swallowed — trace
-    /// logging is best-effort and must never break a batch run.
-    pub(crate) fn writeln(&mut self, line: &str) {
-        use std::io::Write;
-        let _ = writeln!(self.file, "{line}");
-    }
-}
-
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LogFileOpener {
@@ -692,18 +662,6 @@ pub(crate) fn export_logs_zip(app: AppHandle, dest_path: String) -> Result<(), S
 #[cfg(test)]
 mod log_tools_tests {
     use super::*;
-
-    #[test]
-    fn batch_auth_trace_writer_creates_dot_trace_file_with_plaintext() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut w = BatchAuthTraceWriter::open(dir.path(), "20260804-120000").unwrap();
-        w.writeln("[verify] wrote uuid=real-uuid authkey=real-secret-key");
-        drop(w);
-        let path = dir.path().join("batch-auth-20260804-120000.trace");
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("uuid=real-uuid"));
-        assert!(content.contains("authkey=real-secret-key"));
-    }
 
     #[test]
     fn supported_log_editor_catalog_starts_with_system_default() {
