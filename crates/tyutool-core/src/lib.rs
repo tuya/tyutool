@@ -29,7 +29,7 @@ pub use diagnostics::gather_and_write_logs_zip;
 pub use diagnostics::{
     build_report_info, collect_log_files, list_log_files_impl, prune_log_files, prune_trace_files,
     read_log_tail_impl, read_named_log_impl, redact_log_content, resolve_log_open_path,
-    LogFileInfo, LogRetention, REDACT_PREFIXES,
+    BatchAuthTraceWriter, LogFileInfo, LogRetention, REDACT_PREFIXES,
 };
 pub use error::FlashError;
 pub use flash_event::{
