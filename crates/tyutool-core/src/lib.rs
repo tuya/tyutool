@@ -3,6 +3,8 @@
 mod authorize;
 #[cfg(feature = "excel")]
 pub mod batch_auth;
+#[cfg(feature = "excel")]
+pub mod batch_slot;
 pub mod diagnostics;
 mod error;
 pub mod flash_event;
@@ -24,6 +26,8 @@ pub use authorize::{
 };
 #[cfg(feature = "excel")]
 pub use batch_auth::{ExcelRow, ExcelRowAllocator, ExcelStats, RowStatus};
+#[cfg(feature = "excel")]
+pub use batch_slot::{run_batch_slot, AllocatorSession, BatchAuthStartConfig};
 #[cfg(feature = "zip")]
 pub use diagnostics::gather_and_write_logs_zip;
 pub use diagnostics::{

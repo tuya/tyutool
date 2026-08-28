@@ -661,7 +661,7 @@ pub fn run() {
         })
         .manage(batch::BatchAuthState {
             slots: StdMutex::new(HashMap::new()),
-            session: Arc::new(StdMutex::new(batch::AllocatorSession {
+            session: Arc::new(StdMutex::new(tyutool_core::batch_slot::AllocatorSession {
                 alloc: None,
                 active: 0,
             })),

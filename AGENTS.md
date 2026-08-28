@@ -195,13 +195,17 @@ declares **no `default` feature** — every optional cost is opted into explicit
 feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
 musl builds and CI must leave it off).
 
-**Known outstanding violation — do not add to it.** One remains: the batch-flash
-*orchestration* (`src-tauri/src/batch.rs`, ~930 lines) lives only in `src-tauri`, so no
-other frontend can drive a batch run. Its `AppHandle`/`emit` use is confined to the
-command layer — `run_batch_auth_slot` already takes an `emit` callback instead of an
-`AppHandle`, which is both what makes it testable and the seam a future move would use.
-The Excel half is done: `batch_auth.rs` moved to `tyutool_core::batch_auth` behind the
-`excel` feature.
+**Known outstanding violation — do not add to it.** What is left of `src-tauri/src/batch.rs`
+(~540 lines) is the Tauri command layer for batch runs: `AppHandle`, `State<'_, _>`, the
+per-port thread pool, and the `emit` forwarding. By the table above most of that *belongs*
+here. The open question is not "move the rest" but **what a second frontend actually needs**:
+`tyutool_core::batch_slot::run_batch_slot` already gives it one port's full run driven by an
+`emit` callback, so a CLI would only have to write its own concurrency shell. Decide that
+before moving anything else — see the P4b section of the consolidation spec.
+
+The parts that were unambiguously misplaced are done: `batch_auth.rs` → `tyutool_core::batch_auth`
+(behind `excel`), `BatchAuthTraceWriter` → `core/diagnostics.rs`, and the slot orchestration →
+`tyutool_core::batch_slot`.
 
 The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md`, whose phase
 table is the authority on what is done — read it before moving anything between crates. Delete
@@ -225,7 +229,7 @@ each item here as its stage lands; a fixed item left listed is worse than no lis
 
 | Crate | Binary / lib | Role |
 |-------|--------------|------|
-| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine, the serial-debug chunk bridge shared by `tyutool-serve` and `src-tauri` (`serial_debug_bridge.rs`), and the Excel batch-auth row allocator behind the `excel` feature (`batch_auth.rs`). **No binaries.** |
+| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine, the serial-debug chunk bridge shared by `tyutool-serve` and `src-tauri` (`serial_debug_bridge.rs`), and behind the `excel` feature both the batch-auth row allocator (`batch_auth.rs`) and one port's batch-slot orchestration (`batch_slot.rs`). **No binaries.** |
 | `tyutool-cli` | bin `tyutool_cli` | Interactive CLI. The `serve` subcommand delegates to `tyutool-serve`. |
 | `tyutool-serve` | lib (used by `tyutool-cli serve`) | WS dev-serve backend for `pnpm run dev:web` — **binds 127.0.0.1:9527, loopback `Host` + local-`Origin` handshake check (`validate_ws_origin`), no authentication, dev-only**. Not shipped to end users. |
 | `tyutool-bridge` | bin `tyutool-bridge` ("Cobuilder Bridge") | Resident tray + WS helper for cobuilder-web — **localhost:18730, Origin allowlist + per-connection token grants, single-execution lock, audit log**. Independent release line (`bridge-v*` tags). See `crates/tyutool-bridge/AGENTS.md` and `PROTOCOL.md`. |
