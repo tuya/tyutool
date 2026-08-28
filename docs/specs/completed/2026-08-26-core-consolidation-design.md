@@ -419,7 +419,7 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 | **P4a** | `batch_auth.rs` 下沉 + `excel` feature | 半天（实测） | Excel 行分配器对任意前端可用 | ✅ 已完成 |
 | **P4b-1** | `BatchAuthTraceWriter` 下沉，与 `prune_trace_files` 团聚 | 半天 | `.trace` 契约两半合一 | ✅ 已完成 |
 | **P4b-2** | 单口 slot 编排下沉 → `core/batch_slot.rs` | 一天（实测） | 一个端口的完整批量流程对任意前端可用 | ✅ 已完成 |
-| **P4b-3** | 多口线程池 / `State` 生命周期 | — | — | ⏸ 阻塞于一个设计问题，见下 |
+| ~~**P4b-3**~~ | ~~多口线程池 / `State` 生命周期~~ | — | — | ❌ **已取消**，见下 |
 | **P5** | 弹性归档创建两份合一 → `core/serial_debug.rs` | 低 | 消除一份曾造成手工移植负担的重复 | ✅ 已完成 |
 | — | 修复 P5 暴露的 backfill 目录 bug（GUI 命中 fallback 时索引写错位置） | 半天 | 行为修复，含回归测试 | ✅ 已完成 |
 | **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 半天 | **真正兑现「CLI 能用」** | ✅ 已完成 |
@@ -564,6 +564,27 @@ batch_auth 的 18 个测试跑在 `cargo test -p tyutool_gui` 里；若不动 CI
 选后者，则违规在 P4b-2 之后已实质关闭，P4b-3 不存在。选前者，才需要评估那 470 行。
 **先答这个问题再动手。**
 
+**答案（2026-08-28）：选后者，P4b-3 取消。** 两条独立证据：
+
+1. **CLI 不需要批量烧录授权**——产品决定，不是工程妥协。
+2. **bridge 试过这条路并主动撤了。** `PROTOCOL.md:162` 记着全过程：bridge 曾接
+   `run_batch_auth_slot`，但那条路第一步必须读 MAC（MAC 是查表格行的键），
+   CoBuilder 没有表格，适配层把查表回调写成 `|_mac| None`，MAC 读取却仍是硬前置——
+   2026-07-31 真机上表现为「shell 625 ms 应答、固件探测成功，却报
+   `Failed to read MAC address`」。bridge 改走 `FlashMode::Authorize`，
+   `lib.rs:4695` 的断言写死了「MAC-free 的单设备流程是 Authorize 模式，不是 batch slot」。
+
+于是「批量编排困在 src-tauri，别的前端驱动不了」这条违规**不再有代价可言**：
+没有第二个前端想驱动它。按总纲的判据第 2 条，说不出代价就不做。
+`batch.rs` 剩下的 543 行按 crate 边界规则本就归 `src-tauri`。
+
+**重新打开的条件**：出现一个确实需要多口批量的非 Tauri 前端。届时起点不是那 543 行，
+而是 `core::batch_slot::run_batch_slot` —— 单口完整流程已经在 core 里，新前端只需自己的并发外壳。
+
+P4a / P4b-1 / P4b-2 三次搬迁**不因此白做**，但理由要说准：它们的依据是 AGENTS.md
+的机械判据（不依赖平台特定类型 ⇒ 归 core），以及 P4b-1 合上了 `.trace` 契约被劈成
+两半的问题——不是「为了让 CLI 能跑批量」。
+
 P0–P2 合计约一周半，将 `src-tauri` 从 5953 降至约 **5520**（−P0 60 −P1 370）。
 行数下降不是目的；目的是留下一条被验证过、可重复的下沉路径，并让 CLI 白拿
 日志导出与脱敏能力。
@@ -591,7 +612,6 @@ P0–P2 合计约一周半，将 `src-tauri` 从 5953 降至约 **5520**（−P0
 | 文档 | 关系 |
 |---|---|
 | `docs/specs/2026-08-27-refactor-v3-normalization-design.md` | **上层总纲**。本文是它七个维度中的一条主线；总纲回答「做不做、先做哪个」，本文回答「怎么做」 |
-| `docs/plans/2026-08-26-core-consolidation.md`（待立） | 本文的实现计划，按 P0–P5 拆成 checkbox 任务，遵循仓库既有 plan 格式。**规范化工作共用这一份 plan**，总纲不另立 |
 
 > 本文的「实现顺序」一节是**阶段划分的唯一真相源**。总纲故意不复制那张表，
 > 修改阶段时只需改本文一处。
