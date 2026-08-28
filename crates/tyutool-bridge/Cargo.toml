@@ -23,7 +23,7 @@ anyhow = "1"
 auto-launch = "0.6"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }
-dirs = "5"
+dirs = "6"
 fern = "0.7"
 getrandom = "0.3"
 log = "0.4"
