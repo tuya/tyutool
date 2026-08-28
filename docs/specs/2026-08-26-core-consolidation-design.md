@@ -417,7 +417,9 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 | **P2-2** | `ts-rs` 生成 TS 类型（**仅 `FlashJob` 家族**） | 2–3 天 | 前端手工镜像部分退役；CI 校验无 drift | ✅ 已完成 |
 | ~~**P3**~~ | ~~updater 纯逻辑下沉~~ | — | — | ❌ **已取消**，见下 |
 | **P4a** | `batch_auth.rs` 下沉 + `excel` feature | 半天（实测） | Excel 行分配器对任意前端可用 | ✅ 已完成 |
-| **P4b** | 批量编排（`batch.rs`）下沉 | 待评估 | 代码层面对 CLI 可用 | 待评估 |
+| **P4b-1** | `BatchAuthTraceWriter` 下沉，与 `prune_trace_files` 团聚 | 半天 | `.trace` 契约两半合一 | ✅ 已完成 |
+| **P4b-2** | 单口 slot 编排下沉 → `core/batch_slot.rs` | 一天（实测） | 一个端口的完整批量流程对任意前端可用 | ✅ 已完成 |
+| **P4b-3** | 多口线程池 / `State` 生命周期 | — | — | ⏸ 阻塞于一个设计问题，见下 |
 | **P5** | 弹性归档创建两份合一 → `core/serial_debug.rs` | 低 | 消除一份曾造成手工移植负担的重复 | ✅ 已完成 |
 | — | 修复 P5 暴露的 backfill 目录 bug（GUI 命中 fallback 时索引写错位置） | 半天 | 行为修复，含回归测试 | ✅ 已完成 |
 | **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 半天 | **真正兑现「CLI 能用」** | ✅ 已完成 |
@@ -539,6 +541,28 @@ P4a 顺带暴露了一个 CI 洞：`tyutool-core` 无 default feature，
 batch_auth 的 18 个测试跑在 `cargo test -p tyutool_gui` 里；若不动 CI，
 搬完就没人跑了（`zip` 门后的 2 个测试此前已经处于这个状态）。
 已在 `ci.yml` 增加一步专跑 `--features zip,excel`。
+
+**P4b 同样不是一件事（2026-08-28 实测）。** 剩下的 927 行按耦合再切：
+
+| 部分 | 行数 | Tauri 耦合 | 结论 |
+|---|---:|---|---|
+| `run_batch_auth_slot` + 配置/守卫结构 | ~320 | **零** | P4b-2，已搬 |
+| `BatchAuthTraceWriter`（在 `logs.rs`） | ~40 | 零 | P4b-1，已搬 |
+| `batch_flash_start` / `batch_auth_start` / `batch_auth_read_ports` | ~470 | `AppHandle`、`State`、起线程、转发 emit | 见下 |
+| 4 个 cancel 命令 + 状态结构 | ~110 | `State` | 按判据本就该留在 src-tauri |
+
+那个 270 行的 slot 编排**从来就不需要「先把状态机和事件发射拆开」**——那次拆分早在
+`emit: &dyn Fn(serde_json::Value)` 这个签名里做完了，注释写明是为了可测试。
+所以它是搬迁，不是重写；初稿把 2094 行整体估成「重写」，两次都高估了。
+
+**P4b-3 阻塞于一个设计问题，不是工程量问题：**
+
+> 按 crate 边界规则，`AppHandle` / `State` 的东西本来就该留在 `src-tauri`。
+> 那么「CLI 也能跑批量」到底要求 core 提供什么——一个完整的多口线程池驱动，
+> 还是只提供单口 slot（P4b-2 已交付），由每个前端自己写并发外壳？
+
+选后者，则违规在 P4b-2 之后已实质关闭，P4b-3 不存在。选前者，才需要评估那 470 行。
+**先答这个问题再动手。**
 
 P0–P2 合计约一周半，将 `src-tauri` 从 5953 降至约 **5520**（−P0 60 −P1 370）。
 行数下降不是目的；目的是留下一条被验证过、可重复的下沉路径，并让 CLI 白拿
