@@ -6146,11 +6146,13 @@ dependencies = [
 name = "tyutool-core"
 version = "3.2.9"
 dependencies = [
+ "calamine",
  "crc32fast",
  "espflash",
  "log",
  "md-5",
  "regex",
+ "rust_xlsxwriter",
  "serde",
  "serde_json",
  "serialport",
@@ -6179,11 +6181,9 @@ dependencies = [
 name = "tyutool_gui"
 version = "3.2.9"
 dependencies = [
- "calamine",
  "chrono",
  "log",
  "reqwest 0.12.28",
- "rust_xlsxwriter",
  "serde",
  "serde_json",
  "sha2",

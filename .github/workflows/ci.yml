@@ -44,6 +44,15 @@ jobs:
         run: cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D warnings
       - name: Test
         run: cargo test -p tyutool-core -p tyutool-cli -p tyutool-serve
+      # tyutool-core declares no default feature, so the run above compiles
+      # neither the zip export nor the Excel row allocator — and skips their
+      # tests silently. Lint and run them here rather than in the `tauri` job:
+      # both are pure Rust and need none of the GTK/WebKit system libraries.
+      # `libudev` stays out; it needs a system library this runner lacks.
+      - name: Clippy and test tyutool-core's optional features
+        run: |
+          cargo clippy -p tyutool-core --all-targets --features zip,excel -- -D warnings
+          cargo test -p tyutool-core --features zip,excel
       - name: Bindings are up to date
         run: |
           cargo test -p tyutool-core --features ts-rs
