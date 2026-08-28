@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-27
 **状态：** 已确认并执行；Section 1 三项已全部落地（2026-08-28）
-**范围：** refactor/v3 的工程规范化全局，`docs/specs/2026-08-26-core-consolidation-design.md` 是其下的一个子项
+**范围：** refactor/v3 的工程规范化全局，`docs/specs/completed/2026-08-26-core-consolidation-design.md` 是其下的一个子项
 **实测基准：** 正文数字初测于 `b22d5f0`，2026-08-28 在 `cad3731` 重测。**结论一条未变**，四处数字随后续提交漂移，已就地更新：`tyutool-serve` 1691 → 1630 行（测试仍是 28 个）、`Cargo.lock` 716 → 719 个包、CLI 子命令 11 → 12 个（P6 新增 `logs`）、`crates/tyutool-core` 的 `unwrap()` 总数已高于附录 A1 记录的 276，但 A1 的结论（几乎全在 `mod tests` 内）未重新切分，该节按初测日期读。**修改本文时请重测并更新此行。**
 
 ---
@@ -158,7 +158,7 @@ pre-commit                                          ← 钩子也一直在
 维度 1、2、4、5 收敛到同一条主线上。
 
 **阶段划分、量级与验收标准均以
-`docs/specs/2026-08-26-core-consolidation-design.md` 的「实现顺序」一节为准**——
+`docs/specs/completed/2026-08-26-core-consolidation-design.md` 的「实现顺序」一节为准**——
 那里是主线的唯一真相源。本文**不复制那张阶段表**，否则两处会各自漂移——
 这正是本次规范化要消除的那类重复。
 
@@ -225,7 +225,7 @@ workspace 里、同一次提交中一起改。代价目前是理论的。
 ### 4.1 沿用核心下沉设计中的四条否决
 
 守护进程 + 瘦客户端、统一 46 个 Tauri 命令表、引入 `tauri-specta`、引入 TauRPC / rspc。
-理由见 `2026-08-26-core-consolidation-design.md` Section 4，不在此重复。
+理由见 `completed/2026-08-26-core-consolidation-design.md` Section 4，不在此重复。
 
 ### 4.2 本次新增的否决
 
@@ -335,7 +335,8 @@ Section 3 的两项（工具链固定、SemVer 边界）**先不做**，等触�
 **为它们写一份 checkbox 计划文档比直接做掉还贵**。直接执行，完成后把本文
 移入 `docs/specs/completed/`。
 
-需要 plan 的只有主线，那份归 `docs/plans/2026-08-26-core-consolidation.md`（待立）。
+主线也没有另立 plan：阶段表本身就是任务清单，且每个阶段都在一到两个提交内落地，
+为已经完成的工作补一份 checkbox 文档只会多一处需要同步的真相源。
 
 ---
 
@@ -343,7 +344,6 @@ Section 3 的两项（工具链固定、SemVer 边界）**先不做**，等触�
 
 | 文档 | 关系 |
 |---|---|
-| `docs/specs/2026-08-26-core-consolidation-design.md` | 主线的详细设计，**阶段划分以它为准** |
-| `docs/plans/2026-08-26-core-consolidation.md`（待立） | 主线的实现计划，**本仓库唯一一份规范化 plan** |
+| `docs/specs/completed/2026-08-26-core-consolidation-design.md` | 主线的详细设计，**阶段划分以它为准** |
 
 本文与主线 spec 的分工：**本文回答「做不做、先做哪个」，主线 spec 回答「怎么做」。**

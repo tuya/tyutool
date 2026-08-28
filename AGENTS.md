@@ -195,35 +195,11 @@ declares **no `default` feature** — every optional cost is opted into explicit
 feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
 musl builds and CI must leave it off).
 
-**Known outstanding violation — do not add to it.** What is left of `src-tauri/src/batch.rs`
-(~540 lines) is the Tauri command layer for batch runs: `AppHandle`, `State<'_, _>`, the
-per-port thread pool, and the `emit` forwarding. By the table above most of that *belongs*
-here. The open question is not "move the rest" but **what a second frontend actually needs**:
-`tyutool_core::batch_slot::run_batch_slot` already gives it one port's full run driven by an
-`emit` callback, so a CLI would only have to write its own concurrency shell. Decide that
-before moving anything else — see the P4b section of the consolidation spec.
-
-The parts that were unambiguously misplaced are done: `batch_auth.rs` → `tyutool_core::batch_auth`
-(behind `excel`), `BatchAuthTraceWriter` → `core/diagnostics.rs`, and the slot orchestration →
-`tyutool_core::batch_slot`.
-
-The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md`, whose phase
-table is the authority on what is done — read it before moving anything between crates. Delete
-each item here as its stage lands; a fixed item left listed is worse than no list.
-
-> **Done:** the second violation — helpers reachable in core but not exposed — is closed.
-> `tyutool logs list / tail / export` (P6) now drives the same
-> `tyutool_core::diagnostics` helpers the GUI log viewer uses, so the CLI can list, tail and
-> export logs; `docs/cli.md` documents it and `tyutool-core`'s `zip` feature is enabled for
-> the CLI. Moving code is not the same as shipping the capability — that is why it was its
-> own stage.
->
-> **Done:** `prune_log_files` was implemented three times; P0 merged it into
-> `tyutool_core::prune_log_files(dir, &LogRetention)`, with the three budgets kept distinct as
-> a parameter rather than a constant. P1a and P1b then moved log retention, reading, listing,
-> the report header, credential redaction and zip bundling into `tyutool_core::diagnostics`;
-> `src-tauri/src/logs.rs` went from 1467 to about 790 lines and dropped its own `zip`
-> dependency, which now sits behind core's `zip` feature so bridge and serve do not link it.
+**There is no outstanding violation of this rule today** — the list that used to live here is
+empty and was deleted rather than kept as a monument. The history is in
+`docs/specs/completed/2026-08-26-core-consolidation-design.md`, whose phase table records what
+moved, what was cancelled, and why; read it before moving anything between crates, and note
+that two of its stages were cancelled on evidence rather than completed.
 
 **Crate responsibilities (5 workspace members):**
 
@@ -479,7 +455,7 @@ refactor/v3    ← main development branch (default); feature PRs merge here
   feature's comment in `crates/tyutool-core/Cargo.toml`.
 - Every other frontend type mirroring a Rust type (`FlashEvent` and its payload family in
   `flash-ipc-types.ts`, `serial-debug/types.ts`, etc.) is still hand-written; annotate with a
-  comment pointing to the Rust source. `docs/specs/2026-08-26-core-consolidation-design.md`
+  comment pointing to the Rust source. `docs/specs/completed/2026-08-26-core-consolidation-design.md`
   plans to extend `ts-rs` generation to cover them — update this pair of rules as each family
   moves over, and delete the hand-mirroring rule only once none remain
 - Tauri APIs (`@tauri-apps/api/*`) and `@tauri-apps/plugin-store` must be dynamically imported (`await import(...)`), never top-level imported
