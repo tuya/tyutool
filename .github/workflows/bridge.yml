@@ -117,7 +117,7 @@ jobs:
     name: Bridge (clippy + test)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Same dependency set as the Linux build below — clippy/test have to
       # link the tray stack too. See the build job for the per-package rationale.
@@ -152,7 +152,7 @@ jobs:
       file_label: ${{ steps.v.outputs.file_label }}
       is_tag: ${{ steps.v.outputs.is_tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - id: v
         run: |
@@ -208,7 +208,7 @@ jobs:
             rust_targets: "x86_64-pc-windows-msvc"
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Deliberately much shorter than release.yml's Tauri dependency list:
       #   libgtk-3-dev                  → tao (event loop) + muda (menus)
