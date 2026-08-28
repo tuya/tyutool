@@ -14,6 +14,12 @@ libudev = ["serialport/libudev"]
 # export`); tyutool-serve and tyutool-bridge must leave it disabled so they
 # don't link the zip crate for a capability they don't use.
 zip = ["dep:zip"]
+# Enables the Excel-backed batch-auth row allocator (`batch_auth`), which
+# reads and writes the operator's .xlsx credential sheet. The GUI must enable
+# it (the batch-auth toolbox tool is built on it); tyutool-cli, tyutool-serve
+# and tyutool-bridge must leave it disabled so they don't link two spreadsheet
+# crates for a capability they don't drive.
+excel = ["dep:calamine", "dep:rust_xlsxwriter"]
 # Enables ts-rs-derived TypeScript bindings for the FlashJob family
 # (`FlashJob` / `FlashMode` / `FlashSegment` / `AuthStorage`), written to
 # `src/bindings/` by `cargo test -p tyutool-core --features ts-rs`. Only
@@ -38,3 +44,5 @@ espflash = { version = "4.3", default-features = false, features = ["serialport"
 md-5 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 ts-rs = { version = "12", optional = true }
+calamine = { version = "0.26", features = ["dates"], optional = true }
+rust_xlsxwriter = { version = "0.79", optional = true }

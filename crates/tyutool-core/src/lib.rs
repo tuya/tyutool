@@ -1,6 +1,8 @@
 //! tyutool — shared flash plugin registry, jobs, and serial listing for GUI (Tauri) and CLI.
 
 mod authorize;
+#[cfg(feature = "excel")]
+pub mod batch_auth;
 pub mod diagnostics;
 mod error;
 pub mod flash_event;
@@ -20,6 +22,8 @@ pub use authorize::{
     BatchAuthSlotResult, BatchAuthStep, ConflictPolicy, ReadAuthProbeResult,
     DEVICE_NO_RESPONSE_PREFIX,
 };
+#[cfg(feature = "excel")]
+pub use batch_auth::{ExcelRow, ExcelRowAllocator, ExcelStats, RowStatus};
 #[cfg(feature = "zip")]
 pub use diagnostics::gather_and_write_logs_zip;
 pub use diagnostics::{

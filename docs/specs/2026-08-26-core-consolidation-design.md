@@ -193,7 +193,7 @@ CLI 若要支持批量授权表，显式开启 `features = ["excel"]`；bridge �
 
 | crate | 现在 | P0–P2 后 | 再加 P4（batch） | 构成 |
 |---|---:|---:|---:|---|
-| `src-tauri` | 5953 | ~5520 | ~3430 | −P0 60 −P1 370；P4 再搬 2094 |
+| `src-tauri` | 5953 | ~5520 | ~3430 | −P0 60 −P1 370；P4 再搬 2094（P4a 已搬走其中 1151） |
 | `tyutool-cli` | 2294 | ~2294 | ~2294 | 只减重复的 `prune_log_files`，同时白拿新能力 |
 | `tyutool-bridge` | 8698 | ~8640 | ~8640 | 只减 `prune_log_files` |
 | `tyutool-core` | 17284 | ~17750 | ~19850 | 受下沉量累加 |
@@ -416,7 +416,8 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 | **P2-1** | `FlashJob::new` + 四处字面量收敛 + `to_cli_command()` + 往返测试 | 3–5 天 | 契约收敛；**命令回显上线**（唯一用户可见变化） | ✅ 已完成 |
 | **P2-2** | `ts-rs` 生成 TS 类型（**仅 `FlashJob` 家族**） | 2–3 天 | 前端手工镜像部分退役；CI 校验无 drift | ✅ 已完成 |
 | ~~**P3**~~ | ~~updater 纯逻辑下沉~~ | — | — | ❌ **已取消**，见下 |
-| **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | 代码层面对 CLI 可用 | 待评估 |
+| **P4a** | `batch_auth.rs` 下沉 + `excel` feature | 半天（实测） | Excel 行分配器对任意前端可用 | ✅ 已完成 |
+| **P4b** | 批量编排（`batch.rs`）下沉 | 待评估 | 代码层面对 CLI 可用 | 待评估 |
 | **P5** | 弹性归档创建两份合一 → `core/serial_debug.rs` | 低 | 消除一份曾造成手工移植负担的重复 | ✅ 已完成 |
 | — | 修复 P5 暴露的 backfill 目录 bug（GUI 命中 fallback 时索引写错位置） | 半天 | 行为修复，含回归测试 | ✅ 已完成 |
 | **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 半天 | **真正兑现「CLI 能用」** | ✅ 已完成 |
@@ -519,6 +520,25 @@ fn verify_sha256(data: &[u8], expected_hex: &str) -> bool   // 算 + 比
 2094 行**不是机械搬迁**。GUI 的 batch 深度依赖 Tauri 事件流做多口进度上报，
 必须先把「不含 IO 的编排状态机」与「事件发射」拆开——这本质上是重写而非移动。
 建议 P0–P2 完成、下沉路径经过验证后再评估，不要一开始就啃它。
+
+**修正（2026-08-28）：这 2094 行不是同质的，把它们当成一件事导致了过高的估计。**
+按 Tauri 耦合实测：
+
+| 文件 | 行数 | `AppHandle` | `.emit(` | `tauri::` | 测试 |
+|---|---:|---:|---:|---:|---:|
+| `batch.rs` | 927 | 6 | 6 | 9 | 5 |
+| `batch_auth.rs` | 1151 | **0** | **0** | **0** | 18 |
+
+`batch_auth.rs` 占 55%，`use` 只有 `std` + `calamine` + `rust_xlsxwriter`，
+按 AGENTS.md 的机械判据它今天就该在 core 里。因此拆成 **P4a**（已完成，半天，
+纯 `git mv` + feature 门 + 改 import，18 个测试原样跟随）与 **P4b**（`batch.rs`，
+上面那段风险描述只对它成立）。
+
+P4a 顺带暴露了一个 CI 洞：`tyutool-core` 无 default feature，
+`cargo test -p tyutool-core` 会**静默跳过** feature 门后的测试。搬迁前
+batch_auth 的 18 个测试跑在 `cargo test -p tyutool_gui` 里；若不动 CI，
+搬完就没人跑了（`zip` 门后的 2 个测试此前已经处于这个状态）。
+已在 `ci.yml` 增加一步专跑 `--features zip,excel`。
 
 P0–P2 合计约一周半，将 `src-tauri` 从 5953 降至约 **5520**（−P0 60 −P1 370）。
 行数下降不是目的；目的是留下一条被验证过、可重复的下沉路径，并让 CLI 白拿

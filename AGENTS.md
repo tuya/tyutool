@@ -111,6 +111,8 @@ cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D
 cargo clippy -p tyutool_gui --all-targets -- -D warnings                                    # ci.yml
 cargo clippy -p tyutool-bridge --all-targets -- -D warnings                                 # bridge.yml
 cargo test -p tyutool-core --features ts-rs && git diff --exit-code -- src/bindings/         # ci.yml
+cargo clippy -p tyutool-core --all-targets --features zip,excel -- -D warnings               # ci.yml
+cargo test -p tyutool-core --features zip,excel                                              # ci.yml
 pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
 ```
 
@@ -127,6 +129,10 @@ DNS-rebinding rejections, had never run in CI before 2026-08-27.
   outside the environment that owns `node_modules/.bin`** — on a WSL checkout, driving git from
   Windows-side Git Bash over `\\wsl.localhost` reproduces it every time. Run git from inside
   WSL, and run `cargo fmt --all` yourself rather than trusting the hook either way.
+- **feature-gated code needs its own run** — `tyutool-core` declares no default feature, so
+  a plain `cargo test -p tyutool-core` compiles neither the `zip` export nor the `excel` row
+  allocator and skips their tests without saying so. Any new optional feature must be added
+  to that dedicated CI step, or its tests stop existing as far as CI is concerned.
 - **`typecheck:scripts`, not just `build`** — `build` type-checks `src/` only, and `scripts/`
   drives releases.
 - **`test:coverage`, not `test`** — coverage forces every file named in `vitest.config.ts` to be
@@ -189,11 +195,13 @@ declares **no `default` feature** — every optional cost is opted into explicit
 feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
 musl builds and CI must leave it off).
 
-**Known outstanding violation — do not add to it.** One remains: the batch-flash /
-batch-auth orchestration lives only in `src-tauri` (`batch.rs` + `batch_auth.rs`, ~2100
-lines), so no other frontend can drive it. Note the two halves differ sharply —
-`batch_auth.rs` (1151 lines) has **zero** Tauri coupling, while `batch.rs` concentrates
-its `AppHandle`/`emit` use in the command layer.
+**Known outstanding violation — do not add to it.** One remains: the batch-flash
+*orchestration* (`src-tauri/src/batch.rs`, ~930 lines) lives only in `src-tauri`, so no
+other frontend can drive a batch run. Its `AppHandle`/`emit` use is confined to the
+command layer — `run_batch_auth_slot` already takes an `emit` callback instead of an
+`AppHandle`, which is both what makes it testable and the seam a future move would use.
+The Excel half is done: `batch_auth.rs` moved to `tyutool_core::batch_auth` behind the
+`excel` feature.
 
 The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md`, whose phase
 table is the authority on what is done — read it before moving anything between crates. Delete
@@ -217,7 +225,7 @@ each item here as its stage lands; a fixed item left listed is worse than no lis
 
 | Crate | Binary / lib | Role |
 |-------|--------------|------|
-| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine, and the serial-debug chunk bridge shared by `tyutool-serve` and `src-tauri` (`serial_debug_bridge.rs`). **No binaries.** |
+| `tyutool-core` | lib | Flash logic, chip plugins, serial utils, authorize flow, serial-debug engine, the serial-debug chunk bridge shared by `tyutool-serve` and `src-tauri` (`serial_debug_bridge.rs`), and the Excel batch-auth row allocator behind the `excel` feature (`batch_auth.rs`). **No binaries.** |
 | `tyutool-cli` | bin `tyutool_cli` | Interactive CLI. The `serve` subcommand delegates to `tyutool-serve`. |
 | `tyutool-serve` | lib (used by `tyutool-cli serve`) | WS dev-serve backend for `pnpm run dev:web` — **binds 127.0.0.1:9527, loopback `Host` + local-`Origin` handshake check (`validate_ws_origin`), no authentication, dev-only**. Not shipped to end users. |
 | `tyutool-bridge` | bin `tyutool-bridge` ("Cobuilder Bridge") | Resident tray + WS helper for cobuilder-web — **localhost:18730, Origin allowlist + per-connection token grants, single-execution lock, audit log**. Independent release line (`bridge-v*` tags). See `crates/tyutool-bridge/AGENTS.md` and `PROTOCOL.md`. |
