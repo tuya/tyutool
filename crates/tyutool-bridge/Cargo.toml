@@ -61,7 +61,7 @@ tyutool-core = { path = "../tyutool-core" }
 # major version to the tree. First platform-conditional dependency in the
 # workspace; the section syntax follows `auto-launch`'s own manifest.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.60", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
 # tests/build_config.rs parses the workspace `.cargo/config.toml` to guard the
