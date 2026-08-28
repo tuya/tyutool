@@ -3386,7 +3386,7 @@ async fn handle_connection(
     let (sink_tx, mut sink_rx) = mpsc::channel::<String>(SINK_QUEUE_CAPACITY);
     tokio::spawn(async move {
         while let Some(text) = sink_rx.recv().await {
-            if let Err(e) = sink.send(Message::Text(text)).await {
+            if let Err(e) = sink.send(Message::Text(text.into())).await {
                 log::warn!("bridge WS send failed: {e}");
                 break;
             }

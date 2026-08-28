@@ -352,7 +352,7 @@ async fn next_frame_of_type(ws: &mut Ws, kind: &str) -> serde_json::Value {
 }
 
 async fn send_json(ws: &mut Ws, value: serde_json::Value) {
-    ws.send(Message::Text(value.to_string()))
+    ws.send(Message::Text(value.to_string().into()))
         .await
         .expect("send frame");
 }
