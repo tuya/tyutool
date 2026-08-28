@@ -1,4 +1,5 @@
 use std::io::{IsTerminal as _, Write as _};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -158,11 +159,48 @@ enum Commands {
         #[arg(long)]
         authkey: Option<String>,
     },
+    /// Inspect the session log files on this machine (list / tail / export)
+    Logs {
+        /// Log directory to operate on (default: the CLI's own log dir).
+        /// The GUI writes to its own directory — pass that path to read GUI logs.
+        #[arg(long, global = true)]
+        dir: Option<String>,
+        #[command(subcommand)]
+        cmd: LogsCmd,
+    },
     /// Generate a shell completion script and print it to stdout
     Completions {
         /// Target shell
         #[arg(value_enum)]
         shell: Shell,
+    },
+}
+
+#[derive(Subcommand)]
+enum LogsCmd {
+    /// List session log files, newest first
+    List {
+        /// Output as JSON (array of objects) instead of tab-separated columns
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the tail of a session log (default: the newest one)
+    Tail {
+        /// Log file name inside the log dir (default: newest tyutool-*.log)
+        #[arg(short = 'f', long = "file")]
+        file: Option<String>,
+        /// How many bytes to read back from the end of the file
+        #[arg(short = 'n', long = "bytes", default_value_t = 64 * 1024)]
+        bytes: u64,
+    },
+    /// Bundle the log files into a zip to attach to a bug report
+    Export {
+        /// Destination .zip path
+        dest: String,
+        /// Keep credential values in plaintext. Default redacts them, because
+        /// the bundle is meant to be shared; use this only for a local archive.
+        #[arg(long)]
+        no_redact: bool,
     },
 }
 
@@ -419,10 +457,99 @@ impl std::io::Write for SessionLogWriter {
     }
 }
 
-fn init_logging(verbose: bool) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let log_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("tyutool");
+fn format_log_mtime(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+/// One `logs list` row: name, size in bytes, local mtime.
+fn render_log_row(info: &tyutool_core::LogFileInfo) -> String {
+    format!(
+        "{}\t{}\t{}",
+        info.name,
+        info.size_bytes,
+        format_log_mtime(info.modified_ms)
+    )
+}
+
+/// `tyutool logs` — read-only access to the session logs the Logging Contract's
+/// `log::*` channel writes. Every arm is a thin call into
+/// `tyutool_core::diagnostics`, the same helpers the GUI log viewer uses; no
+/// log-selection, redaction or bundling logic may be re-implemented here.
+fn run_logs(dir: &Path, cmd: LogsCmd) -> Result<(), Box<dyn std::error::Error>> {
+    match cmd {
+        LogsCmd::List { json } => {
+            let files = tyutool_core::list_log_files_impl(dir);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&files)?);
+            } else if files.is_empty() {
+                eprintln!("no tyutool log files in {}", dir.display());
+            } else {
+                for f in &files {
+                    println!("{}", render_log_row(f));
+                }
+            }
+        }
+        LogsCmd::Tail { file, bytes } => {
+            let text = match file {
+                Some(name) => tyutool_core::read_named_log_impl(dir, &name, bytes),
+                None => tyutool_core::read_log_tail_impl(dir, bytes),
+            }
+            // The io::Error would otherwise reach the user Debug-formatted
+            // ("Custom { kind: NotFound, .. }"); say what failed and where.
+            .map_err(|e| -> Box<dyn std::error::Error> {
+                format!("{} ({})", e, dir.display()).into()
+            })?;
+            print!("{text}");
+            std::io::stdout().flush()?;
+        }
+        LogsCmd::Export { dest, no_redact } => {
+            let dest = PathBuf::from(dest);
+            let exe = std::env::current_exe()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "cli".to_string());
+            tyutool_core::gather_and_write_logs_zip(
+                dir,
+                "tyutool-cli",
+                env!("CARGO_PKG_VERSION"),
+                &exe,
+                // The bundle spans past sessions, so this invocation's own
+                // session id would say nothing about its contents; each log
+                // file carries its own `SESSION <id>` banner line instead.
+                "",
+                &dest,
+                !no_redact,
+            )
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            eprintln!(
+                "wrote {} ({})",
+                dest.display(),
+                if no_redact {
+                    "plaintext credentials kept"
+                } else {
+                    "credentials redacted"
+                }
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Where the CLI writes its own session logs. `tyutool logs` reads the same
+/// directory by default; `--dir` points it at another one (the GUI's, say).
+fn default_log_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("tyutool")
+}
+
+fn init_logging(verbose: bool) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let log_dir = default_log_dir();
     std::fs::create_dir_all(&log_dir)?;
     let stem = format!("tyutool-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     let log_path = log_dir.join(format!("{stem}.log"));
@@ -470,9 +597,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Commands whose stdout is machine-consumed (survey JSON, completion
     // scripts): suppress the banner and log-file setup so nothing pollutes the
     // surrounding `eval`/pipe.
+    // `logs` joins this set for a second reason beyond clean stdout: opening a
+    // log file of its own would create a new session log on every `logs list`,
+    // so the command would always report a file it had just made itself.
     let quiet = matches!(
         cli.command,
-        Commands::UsbPortSurvey | Commands::Completions { .. }
+        Commands::UsbPortSurvey | Commands::Completions { .. } | Commands::Logs { .. }
     );
     let log_path = if !quiet {
         Some(init_logging(cli.verbose)?)
@@ -538,6 +668,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("{}\t{}\t{}\t{}\t{}", p.path, vidpid, ifs, role, name);
                 }
             }
+        }
+        Commands::Logs { dir, cmd } => {
+            let dir = dir.map(PathBuf::from).unwrap_or_else(default_log_dir);
+            run_logs(&dir, cmd)?;
         }
         Commands::UsbPortSurvey => {
             let rows = usb_port_survey()?;
@@ -1409,5 +1543,140 @@ mod prune_tests {
         w.flush().unwrap();
         assert!(dir.path().join(format!("{stem}.log")).exists());
         assert!(!dir.path().join(format!("{stem}-1.log")).exists());
+    }
+}
+
+#[cfg(test)]
+mod logs_command_tests {
+    use super::*;
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    #[test]
+    fn render_log_row_is_tab_separated_name_size_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "tyutool-20260828-120000.log", "hello");
+        let files = tyutool_core::list_log_files_impl(dir.path());
+        let row = render_log_row(&files[0]);
+        let cols: Vec<&str> = row.split('\t').collect();
+        assert_eq!(cols.len(), 3, "row was {row:?}");
+        assert_eq!(cols[0], "tyutool-20260828-120000.log");
+        assert_eq!(cols[1], "5");
+        assert_ne!(cols[2], "-", "mtime should render as a local timestamp");
+    }
+
+    /// The `.trace` files hold plaintext batch-auth credentials and share the
+    /// log dir. `logs list` must not surface them and `logs tail` must not read
+    /// them — the gate lives in core, this pins that the CLI goes through it.
+    #[test]
+    fn logs_never_expose_the_credential_trace_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "tyutool-20260828-120000.log",
+            "ordinary log line",
+        );
+        write(
+            dir.path(),
+            "batch-auth-20260828-120000.trace",
+            "uuid=secret",
+        );
+
+        let listed: Vec<String> = tyutool_core::list_log_files_impl(dir.path())
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(listed, vec!["tyutool-20260828-120000.log".to_string()]);
+
+        assert!(run_logs(
+            dir.path(),
+            LogsCmd::Tail {
+                file: Some("batch-auth-20260828-120000.trace".to_string()),
+                bytes: 4096,
+            },
+        )
+        .is_err());
+    }
+
+    /// A traversal attempt must not escape the log dir.
+    #[test]
+    fn logs_tail_rejects_a_path_outside_the_log_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(run_logs(
+            dir.path(),
+            LogsCmd::Tail {
+                file: Some("../tyutool-elsewhere.log".to_string()),
+                bytes: 4096,
+            },
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn logs_export_writes_a_zip_and_redacts_credentials_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "tyutool-20260828-120000.log",
+            "[auth] wrote uuid=real-uuid-value authkey=real-secret\n",
+        );
+        let dest = dir.path().join("bundle.zip");
+        run_logs(
+            dir.path(),
+            LogsCmd::Export {
+                dest: dest.display().to_string(),
+                no_redact: false,
+            },
+        )
+        .unwrap();
+
+        let text = read_zip_entry(&dest, "tyutool-20260828-120000.log");
+        assert!(
+            !text.contains("real-secret") && !text.contains("real-uuid-value"),
+            "export must redact credential values by default, got {text:?}"
+        );
+        assert!(text.contains("[auth] wrote"), "got {text:?}");
+    }
+
+    #[test]
+    fn logs_export_keeps_plaintext_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "tyutool-20260828-120000.log",
+            "[auth] wrote uuid=real-uuid-value authkey=real-secret\n",
+        );
+        let dest = dir.path().join("archive.zip");
+        run_logs(
+            dir.path(),
+            LogsCmd::Export {
+                dest: dest.display().to_string(),
+                no_redact: true,
+            },
+        )
+        .unwrap();
+
+        let text = read_zip_entry(&dest, "tyutool-20260828-120000.log");
+        assert!(text.contains("real-secret"), "got {text:?}");
+    }
+
+    fn read_zip_entry(zip_path: &Path, name: &str) -> String {
+        use std::io::Read as _;
+        let f = std::fs::File::open(zip_path).unwrap();
+        let mut archive = zip::ZipArchive::new(f).unwrap();
+        let mut entry = archive.by_name(name).unwrap();
+        let mut buf = String::new();
+        entry.read_to_string(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn default_log_dir_is_the_tyutool_data_dir() {
+        assert_eq!(
+            default_log_dir().file_name().and_then(|s| s.to_str()),
+            Some("tyutool")
+        );
     }
 }
