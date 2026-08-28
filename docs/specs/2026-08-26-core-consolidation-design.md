@@ -417,7 +417,8 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 | **P2-2** | `ts-rs` 生成 TS 类型（**仅 `FlashJob` 家族**） | 2–3 天 | 前端手工镜像部分退役；CI 校验无 drift | ✅ 已完成 |
 | ~~**P3**~~ | ~~updater 纯逻辑下沉~~ | — | — | ❌ **已取消**，见下 |
 | **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | 代码层面对 CLI 可用 | 待评估 |
-| **P5** | `src-tauri/src/serial_debug.rs`（661）对照 `tyutool-serve` 审计 | 低 | 共享部分已由 `e01d7f4` 抽走 | 待做 |
+| **P5** | 弹性归档创建两份合一 → `core/serial_debug.rs` | 低 | 消除一份曾造成手工移植负担的重复 | ✅ 已完成 |
+| — | 修复 P5 暴露的 backfill 目录 bug（GUI 命中 fallback 时索引写错位置） | 半天 | 行为修复，含回归测试 | ✅ 已完成 |
 | **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 待定 | **真正兑现「CLI 能用」** | 待定，见下 |
 
 ### 一个必须说清的区分：下沉 ≠ CLI 能用
