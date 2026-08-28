@@ -34,7 +34,7 @@ jobs:
       is_beta: ${{ steps.v.outputs.is_beta }}
       file_label: ${{ steps.v.outputs.file_label }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -68,7 +68,7 @@ jobs:
     # Slowest of the last six releases: 0.6 min.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Sync version
         run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
@@ -106,7 +106,7 @@ jobs:
           - { os: macos-latest,   target: aarch64-apple-darwin,       platform: macos,   arch: aarch64, use_cross: false }
           - { os: windows-2022,   target: x86_64-pc-windows-msvc,     platform: windows, arch: x86_64,  use_cross: false }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Sync version
         run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
@@ -194,7 +194,7 @@ jobs:
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Sync version
         run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
@@ -389,7 +389,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v5
         with: { version: 10 }
@@ -470,7 +470,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v5
         with: { version: 10 }
       - uses: actions/setup-node@v6
