@@ -1,5 +1,4 @@
 mod batch;
-mod batch_auth;
 mod logs;
 mod serial_debug;
 mod updater;

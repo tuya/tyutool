@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::batch_auth;
 use crate::logs;
+use tyutool_core::batch_auth;
 
 pub(crate) struct BatchSlot {
     pub cancel: Arc<AtomicBool>,
@@ -407,7 +407,7 @@ fn run_batch_auth_slot(
     let port_for_update = port.clone();
     let excel_err_update = excel_err.clone();
     let update_row = move |row_idx: usize, mac: &str, update: tyutool_core::BatchAuthRowUpdate| {
-        use crate::batch_auth::RowStatus;
+        use tyutool_core::batch_auth::RowStatus;
         use tyutool_core::BatchAuthRowUpdate as U;
         let (status, step_name, error): (RowStatus, Option<&str>, Option<String>) = match update {
             U::MacRead => (RowStatus::MacRead, Some("mac_read"), None),
