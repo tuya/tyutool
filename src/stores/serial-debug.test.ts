@@ -81,8 +81,7 @@ function fakeTransport(): SerialDebugTransport & {
   const readSessionPageCalls: Array<{ start: number; limit: number }> = [];
   let sessionArchiveTotal = 0;
   let sessionPageResponder:
-    | ((start: number, limit: number) => SerialDebugSessionPage)
-    | null = null;
+    ((start: number, limit: number) => SerialDebugSessionPage) | null = null;
   let opened = false;
   let nextFilterId = 1;
   const filters = new Map<
@@ -1416,9 +1415,16 @@ describe("useSerialDebugStore watch chip management", () => {
 describe("useSerialDebugStore.deviceReset", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    // Every deviceReset path ends in appendSysLine, which writes through the
+    // transport. Without the fake it reaches the real ws transport and opens a
+    // real socket to the dev-serve port — harmless while happy-dom had no
+    // WebSocket (the constructor threw and the write was swallowed), a 5s hang
+    // once happy-dom 18 shipped one.
+    __setSerialDebugTransportForTest(fakeTransport());
   });
 
   afterEach(() => {
+    __setSerialDebugTransportForTest(null);
     vi.restoreAllMocks();
   });
 
