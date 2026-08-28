@@ -16,7 +16,7 @@ log = "0.4"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 ctrlc = "3"
-tyutool-core = { path = "../tyutool-core" }
+tyutool-core = { path = "../tyutool-core", features = ["zip"] }
 tyutool-serve = { path = "../tyutool-serve" }
 reqwest = { version = "0.12", features = ["rustls-tls", "blocking", "json"], default-features = false }
 serde = { version = "1", features = ["derive"] }
