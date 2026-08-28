@@ -73,7 +73,7 @@ jobs:
       - name: Sync version
         run: node scripts/bump-version.mjs "${{ needs.prepare.outputs.version }}"
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v7
         with: { node-version: "22", cache: pnpm }
@@ -212,7 +212,7 @@ jobs:
             xdg-utils
 
       # ── Toolchain ──
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v7
         with: { node-version: "22", cache: pnpm }
@@ -391,7 +391,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v7
         with: { node-version: "22", cache: pnpm }
@@ -471,7 +471,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v7
         with: { node-version: "22", cache: pnpm }
