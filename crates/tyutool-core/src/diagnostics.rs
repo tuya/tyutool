@@ -262,9 +262,9 @@ pub fn collect_log_files(dir: &Path) -> Vec<PathBuf> {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogFileInfo {
-    name: String,
-    size_bytes: u64,
-    modified_ms: i64,
+    pub name: String,
+    pub size_bytes: u64,
+    pub modified_ms: i64,
 }
 
 pub fn list_log_files_impl(dir: &Path) -> Vec<LogFileInfo> {

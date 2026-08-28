@@ -10,9 +10,9 @@ description = "Shared flash/erase plugin registry and serial helpers for tyutool
 libudev = ["serialport/libudev"]
 # Enables zip-based log export/archive bundling (write_logs_zip /
 # gather_and_write_logs_zip). The GUI must enable it (export-for-report and
-# archive-batch both zip session logs); tyutool-serve and tyutool-bridge must
-# leave it disabled so they don't link the zip crate for a capability they
-# don't use.
+# archive-batch both zip session logs), and so must the CLI (`tyutool logs
+# export`); tyutool-serve and tyutool-bridge must leave it disabled so they
+# don't link the zip crate for a capability they don't use.
 zip = ["dep:zip"]
 # Enables ts-rs-derived TypeScript bindings for the FlashJob family
 # (`FlashJob` / `FlashMode` / `FlashSegment` / `AuthStorage`), written to

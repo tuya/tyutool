@@ -189,20 +189,23 @@ declares **no `default` feature** — every optional cost is opted into explicit
 feature with who must enable it and who must not; `libudev` is the model (GUI/glibc only — CLI
 musl builds and CI must leave it off).
 
-**Known outstanding violations — do not add to them.** Two remain, and they are different
-kinds of problem:
-
-1. **Wrong crate.** The batch-flash / batch-auth orchestration lives only in `src-tauri`
-   (`batch.rs` + `batch_auth.rs`, ~2100 lines), so no other frontend can drive it.
-2. **Reachable but not exposed.** The log helpers now live in `tyutool-core` and the CLI links
-   them, but **the CLI still has no subcommand that calls them** — a user cannot list, tail or
-   export logs from the CLI. Moving code is not the same as shipping the capability; that step
-   is its own stage in the spec.
+**Known outstanding violation — do not add to it.** One remains: the batch-flash /
+batch-auth orchestration lives only in `src-tauri` (`batch.rs` + `batch_auth.rs`, ~2100
+lines), so no other frontend can drive it. Note the two halves differ sharply —
+`batch_auth.rs` (1151 lines) has **zero** Tauri coupling, while `batch.rs` concentrates
+its `AppHandle`/`emit` use in the command layer.
 
 The consolidation plan is `docs/specs/2026-08-26-core-consolidation-design.md`, whose phase
 table is the authority on what is done — read it before moving anything between crates. Delete
 each item here as its stage lands; a fixed item left listed is worse than no list.
 
+> **Done:** the second violation — helpers reachable in core but not exposed — is closed.
+> `tyutool logs list / tail / export` (P6) now drives the same
+> `tyutool_core::diagnostics` helpers the GUI log viewer uses, so the CLI can list, tail and
+> export logs; `docs/cli.md` documents it and `tyutool-core`'s `zip` feature is enabled for
+> the CLI. Moving code is not the same as shipping the capability — that is why it was its
+> own stage.
+>
 > **Done:** `prune_log_files` was implemented three times; P0 merged it into
 > `tyutool_core::prune_log_files(dir, &LogRetention)`, with the three budgets kept distinct as
 > a parameter rather than a constant. P1a and P1b then moved log retention, reading, listing,

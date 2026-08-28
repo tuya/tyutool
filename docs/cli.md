@@ -11,7 +11,7 @@
 - [Reading this reference](#reading-this-reference)
 - [Global options](#global-options)
 - [Conventions that apply to every command](#conventions-that-apply-to-every-command)
-- Commands: [`write`](#write--flash-firmware-to-a-device) · [`read`](#read--dump-flash-to-a-file) · [`erase`](#erase--erase-a-flash-region) · [`list-ports`](#list-ports--list-serial-ports) · [`reset`](#reset--hardware-reset-via-dtrrts) · [`monitor`](#monitor--live-serial-monitor) · [`authorize`](#authorize-alias-auth--tuyaopen-device-authorization) · [`update`](#update--self-update-the-binary) · [`serve`](#serve--websocket-server-dev-only) · [`completions`](#completions--shell-completion-script) · [`usb-port-survey`](#usb-port-survey--raw-usbserial-metadata)
+- Commands: [`write`](#write--flash-firmware-to-a-device) · [`read`](#read--dump-flash-to-a-file) · [`erase`](#erase--erase-a-flash-region) · [`list-ports`](#list-ports--list-serial-ports) · [`reset`](#reset--hardware-reset-via-dtrrts) · [`monitor`](#monitor--live-serial-monitor) · [`authorize`](#authorize-alias-auth--tuyaopen-device-authorization) · [`update`](#update--self-update-the-binary) · [`serve`](#serve--websocket-server-dev-only) · [`logs`](#logs--inspect-the-session-log-files) · [`completions`](#completions--shell-completion-script) · [`usb-port-survey`](#usb-port-survey--raw-usbserial-metadata)
 - [Device and baud table](#device-and-baud-table)
 - [Output modes](#output-modes)
 - [Exit codes](#exit-codes)
@@ -30,6 +30,7 @@
 | [`authorize`](#authorize-alias-auth--tuyaopen-device-authorization) (`auth`) | Read or write TuyaOpen UUID/AuthKey | yes |
 | [`update`](#update--self-update-the-binary) | Check for and install a newer `tyutool` | no |
 | [`serve`](#serve--websocket-server-dev-only) | Local WebSocket backend for browser mode (dev only) | on request |
+| [`logs`](#logs--inspect-the-session-log-files) | List, tail, or export the session log files | no |
 | [`completions`](#completions--shell-completion-script) | Print a shell completion script | no |
 | [`usb-port-survey`](#usb-port-survey--raw-usbserial-metadata) | Dump raw USB metadata as JSON | no |
 
@@ -146,7 +147,7 @@ So `tyutool list-ports --json | jq .` and `source <(tyutool completions bash)` w
 
 ### Log files
 
-Every run except `usb-port-survey` and `completions` opens a session log file and prints its path in the banner:
+Every run except `usb-port-survey`, `completions` and `logs` opens a session log file and prints its path in the banner:
 
 ```
 tyutool v3.2.8  windows/x86_64
@@ -159,7 +160,7 @@ log: C:\Users\you\AppData\Roaming\tyutool\tyutool-20260818-184752.log
 | macOS | `~/Library/Application Support/tyutool/` |
 | Windows | `%APPDATA%\tyutool\` |
 
-Files are named `tyutool-<YYYYMMDD-HHMMSS>.log`, one per run. A session file is capped at 10 MB and rolls over to `tyutool-<timestamp>-1.log`, `-2.log`, … beyond that. At startup the oldest files are pruned until the directory holds at most 100 files and 100 MB in total (at least one file is always kept). Attach the file for the run that failed when filing a bug report.
+Files are named `tyutool-<YYYYMMDD-HHMMSS>.log`, one per run. A session file is capped at 10 MB and rolls over to `tyutool-<timestamp>-1.log`, `-2.log`, … beyond that. At startup the oldest files are pruned until the directory holds at most 100 files and 100 MB in total (at least one file is always kept). Attach the file for the run that failed when filing a bug report — [`logs export`](#logs--inspect-the-session-log-files) packages them for you, and [`logs list`](#logs--inspect-the-session-log-files) tells you which file belongs to which run.
 
 ## Commands
 
@@ -556,6 +557,66 @@ Press Ctrl+C to stop.
 It binds `127.0.0.1` only, requires a loopback `Host` header (blocking DNS-rebinding tricks), and rejects a handshake whose `Origin` is a remote page — a random web page cannot reach in and flash your hardware. It is still a **development tool**: there is no authentication, and any local process can connect. Do not run it as a background service on a shared machine, and stop it with Ctrl+C when you are done. If the port is taken, the command fails with `failed to bind 127.0.0.1:<port>` — pick another with `--port` and point the client at the same one.
 
 For the shipped, hardened variant of this idea — token grants, an Origin allowlist, an audit log — see the separate `tyutool-bridge` binary.
+
+---
+
+### `logs` — inspect the session log files
+
+```
+tyutool logs [--dir <DIR>] list [--json]
+tyutool logs [--dir <DIR>] tail [-f <FILE>] [-n <BYTES>]
+tyutool logs [--dir <DIR>] export <DEST.zip> [--no-redact]
+```
+
+| Option | Value | Required | Default when omitted |
+|--------|-------|----------|----------------------|
+| `--dir` | Directory to read | no | the CLI's own log directory (see [Log files](#log-files)) |
+| `--json` (`list`) | flag | no | tab-separated columns |
+| `-f`, `--file` (`tail`) | File name inside the directory | no | the newest `tyutool-*.log` |
+| `-n`, `--bytes` (`tail`) | Bytes to read back from the end | no | `65536` |
+| `<DEST.zip>` (`export`) | Destination path | **yes** (positional) | — |
+| `--no-redact` (`export`) | flag | no | credential values are redacted |
+
+Reads the logs already on disk. It talks to no device, and — unlike every other
+command — it opens no log file of its own, so `logs list` never reports a file it
+just created itself.
+
+`list` prints one row per session file, newest first: name, size in bytes, and local
+modification time. `tail` prints the end of one file; with no `-f` it picks the newest,
+which is normally the run you just made.
+
+```bash
+# Which sessions are on this machine?
+tyutool logs list
+
+# What went wrong in the last run?
+tyutool logs tail -n 20000
+
+# A specific session, machine-readable listing for a script
+tyutool logs list --json
+tyutool logs tail -f tyutool-20260828-144739.log
+
+# The GUI keeps its logs elsewhere (Tauri's app log dir, named after the
+# bundle identifier com.tyutool.desktop) — point --dir at them
+tyutool logs --dir ~/.local/share/com.tyutool.desktop/logs list
+
+# Package everything for a bug report
+tyutool logs export ~/tyutool-logs.zip
+```
+
+The zip holds every `tyutool-*.log` in the directory plus a `report-info.txt` header
+(version, OS, arch, install path). **Credential values are redacted by default** — the
+values after `uuid=`, `authkey=`, `existing_uuid=` and `otp_uuid=` are masked, because the
+bundle is meant to be attached to an issue. `--no-redact` keeps them in plaintext; use it
+only for a bundle that stays on your own machine.
+
+Two things this command will not do, both on purpose:
+
+- It only reads files named `tyutool*.log`. The batch-auth `.trace` files share the
+  directory and hold plaintext credentials, so `list` hides them and `tail -f` refuses to
+  open them.
+- `--file` takes a name, not a path. A value containing `/` or `\` is rejected rather
+  than resolved.
 
 ---
 

@@ -419,7 +419,7 @@ pub enum FlashMode { Flash, Erase, Read, Authorize }
 | **P4** | 批量编排下沉 + `excel` feature | **2–3 周，有风险** | 代码层面对 CLI 可用 | 待评估 |
 | **P5** | 弹性归档创建两份合一 → `core/serial_debug.rs` | 低 | 消除一份曾造成手工移植负担的重复 | ✅ 已完成 |
 | — | 修复 P5 暴露的 backfill 目录 bug（GUI 命中 fallback 时索引写错位置） | 半天 | 行为修复，含回归测试 | ✅ 已完成 |
-| **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 待定 | **真正兑现「CLI 能用」** | 待定，见下 |
+| **P6** | 把已下沉的能力接成 CLI 子命令 + 同步 `docs/cli.md` | 半天 | **真正兑现「CLI 能用」** | ✅ 已完成 |
 
 ### 一个必须说清的区分：下沉 ≠ CLI 能用
 
@@ -438,6 +438,22 @@ P1a + P1b 完成后的实际状态是：那些函数**住在 `tyutool-core` 里�
 所以它是一个**独立阶段 P6**，而不是 P1 的附带结果。
 AGENTS.md 的「已知违规」里那条「the CLI cannot do them at all」，
 **只有 P6 落地才能划掉**。
+
+**P6 落地结果（已完成）：** 三个问题的实际答案是——
+
+1. 形态取 `tyutool logs list / tail / export`，`--dir` 作为组内 global 参数，
+   默认 CLI 自己的日志目录，指向别处即可读 GUI 的日志。
+2. `docs/cli.md` 同 commit 更新（新增 `logs` 一节、目录、命令总表、Log files 一节的交叉引用）。
+3. `zip` feature 开了。代价实测为零：`tyutool-cli` 的 updater 早已直接依赖 `zip = "2"`，
+   开启后依赖图不新增 crate。
+
+另外两条实现上的决定值得记一笔：
+
+- **`logs` 加入 `quiet` 集合**（与 `usb-port-survey` / `completions` 并列）。理由不止是
+  stdout 干净：若 `logs` 也开自己的会话日志，`logs list` 每次都会列出它自己刚刚创建的那个文件。
+- **没有在 CLI 侧重写任何日志逻辑**。文件筛选、`.trace` 拒读、路径分隔符拒绝、脱敏、zip 打包
+  全部落在 `tyutool_core::diagnostics` 的既有函数上，CLI 侧只有渲染与参数解析。
+  回归测试锁住了其中两条安全契约（不列举/不读取 `.trace`；`--file` 拒绝路径分隔符）。
 
 ### updater 阶段被取消的完整经过
 
