@@ -57,6 +57,20 @@ impl FlashPluginRegistry {
         Self { plugins }
     }
 
+    /// Register a plugin under its own [`FlashPlugin::id`], replacing whatever
+    /// was held under that id before.
+    ///
+    /// The key goes through [`normalize_chip_id`] so registration and
+    /// [`get`](Self::get) agree on one spelling. Replacement is deliberate: a
+    /// test can swap a real chip id (`T5AI`) for a scripted stand-in and so
+    /// exercise the path a frontend actually takes, instead of a made-up id no
+    /// caller would ever send.
+    pub fn register(&mut self, plugin: Arc<dyn FlashPlugin>) {
+        let key = normalize_chip_id(plugin.id());
+        log::debug!("Registered flash plugin: {}", key);
+        self.plugins.insert(key, plugin);
+    }
+
     pub fn get(&self, chip_id: &str) -> Result<&Arc<dyn FlashPlugin>, FlashError> {
         let key = normalize_chip_id(chip_id);
         self.plugins.get(&key).ok_or(FlashError::UnknownChip(key))
@@ -81,9 +95,27 @@ pub fn default_registry() -> &'static FlashPluginRegistry {
     GLOBAL_REGISTRY.get_or_init(FlashPluginRegistry::new)
 }
 
-/// Run a job against the default registry (CLI and Tauri use this).
+/// Run a job against the default registry (CLI, serve and Tauri all use this).
 /// Emits [`FlashEvent::JobSummary`] at the start and [`FlashEvent::Done`] at the end.
 pub fn run_job<F>(
+    job: &FlashJob,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: F,
+) -> Result<(), FlashError>
+where
+    F: Fn(FlashEvent),
+{
+    run_job_with(default_registry(), job, cancel, progress)
+}
+
+/// [`run_job`] against an explicit registry.
+///
+/// The orchestration lives here and [`run_job`] is a one-line wrapper, so there
+/// is exactly one implementation of the event contract. Tests build a registry
+/// holding a scripted plugin (see the `mock-chip` feature) and drive this
+/// directly; production never passes anything but [`default_registry`].
+pub fn run_job_with<F>(
+    registry: &FlashPluginRegistry,
     job: &FlashJob,
     cancel: &std::sync::atomic::AtomicBool,
     progress: F,
@@ -112,9 +144,8 @@ where
         log::info!("run_job: Authorize mode on port={}", job.port);
         crate::authorize::run_authorize(job, cancel, &progress)
     } else {
-        let reg = default_registry();
         let chip = job.normalized_chip_id();
-        let plugin = reg.get(&chip)?;
+        let plugin = registry.get(&chip)?;
         plugin.run(job, cancel, &progress)
     };
 
@@ -306,6 +337,154 @@ mod tests {
         // Error must NOT be UnknownChip — confirms chip lookup was bypassed.
         if let Err(FlashError::UnknownChip(_)) = res {
             panic!("authorize mode must not reach chip registry");
+        }
+    }
+
+    /// [`run_job_with`]'s orchestration, driven over a scripted plugin.
+    ///
+    /// These assert the contract every frontend depends on — `JobSummary`
+    /// first, `Done` last, a plugin error surfaced as `Done{Err}`, a cancel
+    /// surfaced as `Done{Cancelled}` — and **nothing about any chip protocol**:
+    /// the plugin here never opens a port. See `plugins::mock` for the full
+    /// note on what a mock plugin does and does not buy.
+    #[cfg(feature = "mock-chip")]
+    mod orchestration {
+        use super::*;
+        use crate::flash_event::FlashResult;
+        use crate::plugins::mock::MockPlugin;
+        use std::sync::Mutex;
+
+        /// A full registry with one scripted plugin layered on top. Registering
+        /// under a **real** chip id keeps the tests on the path a frontend
+        /// takes, rather than an invented id no caller would ever send.
+        fn registry_with(plugin: MockPlugin) -> FlashPluginRegistry {
+            let mut reg = FlashPluginRegistry::new();
+            reg.register(Arc::new(plugin));
+            reg
+        }
+
+        fn job(chip_id: &str) -> FlashJob {
+            FlashJob::new(FlashMode::Flash, chip_id, "/dev/mock", 115_200)
+        }
+
+        fn kind(event: &FlashEvent) -> &'static str {
+            match event {
+                FlashEvent::JobSummary(_) => "job_summary",
+                FlashEvent::Phase { .. } => "phase",
+                FlashEvent::Percent { .. } => "percent",
+                FlashEvent::Milestone { .. } => "milestone",
+                FlashEvent::Warning { .. } => "warning",
+                FlashEvent::Done { .. } => "done",
+            }
+        }
+
+        #[test]
+        fn success_brackets_the_plugin_events_with_job_summary_and_done() {
+            let reg = registry_with(MockPlugin::ok("T5AI"));
+            let cancel = AtomicBool::new(false);
+            let seen: Mutex<Vec<FlashEvent>> = Mutex::new(Vec::new());
+
+            let res = run_job_with(&reg, &job("T5AI"), &cancel, |e| {
+                seen.lock().unwrap().push(e);
+            });
+
+            assert!(res.is_ok(), "mock plugin succeeds: {res:?}");
+            let seen = seen.lock().unwrap();
+            assert_eq!(
+                seen.iter().map(kind).collect::<Vec<_>>(),
+                ["job_summary", "phase", "milestone", "percent", "done"],
+                "JobSummary must open the run and Done must close it",
+            );
+            assert!(matches!(
+                seen.last(),
+                Some(FlashEvent::Done {
+                    result: FlashResult::Ok { .. }
+                })
+            ));
+        }
+
+        #[test]
+        fn plugin_error_is_returned_and_also_reported_as_done_err() {
+            let reg = registry_with(MockPlugin::failing("T5AI", "flash id mismatch"));
+            let cancel = AtomicBool::new(false);
+            let seen: Mutex<Vec<FlashEvent>> = Mutex::new(Vec::new());
+
+            let res = run_job_with(&reg, &job("T5AI"), &cancel, |e| {
+                seen.lock().unwrap().push(e);
+            });
+
+            assert!(matches!(res, Err(FlashError::Plugin(ref m)) if m == "flash id mismatch"));
+            // A frontend that only listens to events must still learn it failed,
+            // and must see the plugin's own wording — not a generic message.
+            let seen = seen.lock().unwrap();
+            match seen.last() {
+                Some(FlashEvent::Done {
+                    result: FlashResult::Err { message, .. },
+                }) => assert_eq!(message, "flash id mismatch"),
+                other => panic!("expected Done{{Err}}, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn cancelling_mid_run_is_reported_as_done_cancelled() {
+            let reg = registry_with(MockPlugin::blocking_until_cancelled("T5AI"));
+            let cancel = AtomicBool::new(false);
+            let seen: Mutex<Vec<FlashEvent>> = Mutex::new(Vec::new());
+
+            let res = run_job_with(&reg, &job("T5AI"), &cancel, |e| {
+                // The plugin emits this synchronously *before* it starts polling
+                // the flag, so raising it here cancels the run deterministically
+                // — no sleeps and no cross-thread race.
+                if matches!(e, FlashEvent::Phase { .. }) {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+                seen.lock().unwrap().push(e);
+            });
+
+            assert!(matches!(res, Err(FlashError::Cancelled)), "got {res:?}");
+            assert!(
+                matches!(
+                    seen.lock().unwrap().last(),
+                    Some(FlashEvent::Done {
+                        result: FlashResult::Cancelled { .. }
+                    })
+                ),
+                "a cancelled run must close with Done{{Cancelled}}, not Done{{Err}}",
+            );
+        }
+
+        #[test]
+        fn register_replaces_the_plugin_already_held_under_that_id() {
+            let reg = registry_with(MockPlugin::failing("T5AI", "stand-in ran"));
+            let cancel = AtomicBool::new(false);
+
+            let res = run_job_with(&reg, &job("T5AI"), &cancel, |_| {});
+
+            // The real T5AI plugin would have failed trying to open /dev/mock;
+            // this exact message proves the stand-in took its place.
+            assert!(matches!(res, Err(FlashError::Plugin(ref m)) if m == "stand-in ran"));
+        }
+
+        #[test]
+        fn job_reaches_the_plugin_intact_via_the_legacy_chip_id() {
+            let received: Arc<Mutex<Option<(String, String, u32)>>> = Arc::default();
+            let sink = Arc::clone(&received);
+            let reg = registry_with(MockPlugin::with("T5AI", move |job, _cancel, _progress| {
+                *sink.lock().unwrap() =
+                    Some((job.chip_id.clone(), job.port.clone(), job.baud_rate));
+                Ok(())
+            }));
+            let cancel = AtomicBool::new(false);
+
+            // `t5` is the legacy spelling; lookup normalizes it to `T5AI`.
+            run_job_with(&reg, &job("t5"), &cancel, |_| {}).expect("mock plugin succeeds");
+
+            assert_eq!(
+                received.lock().unwrap().clone(),
+                // Normalization applies to the *lookup* only — the plugin still
+                // sees the job exactly as the caller submitted it.
+                Some(("t5".to_string(), "/dev/mock".to_string(), 115_200)),
+            );
         }
     }
 }
