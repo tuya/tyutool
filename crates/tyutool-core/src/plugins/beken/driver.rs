@@ -40,6 +40,21 @@ pub(crate) fn run_beken(
 
     // ── Open serial port ────────────────────────────────────────────
     let serial_io = SerialIo::open(&job.port, chip.initial_baud()).map_err(to_flash_err)?;
+
+    // With the `record-io` feature and `TYUTOOL_RECORD_IO` set, every transport
+    // call is appended to that file, so `ReplayIo` can serve the real device's
+    // own bytes back in a test. The branch exists only because the transport
+    // type differs — below it is the same flow on the same `Transport`.
+    #[cfg(feature = "record-io")]
+    if let Some(path) = std::env::var_os(super::transport::RecordIo::<SerialIo>::ENV) {
+        let recorder = super::transport::RecordIo::new(serial_io, &path)
+            .map_err(|e| FlashError::Plugin(format!("cannot open recording {path:?}: {e}")))?;
+        let mut transport = Transport::new(recorder, &job.port, chip.initial_baud(), cancel, &log);
+        run_beken_on_transport(job, &mut transport, progress, chip, is_t5ai)?;
+        log::info!("Beken plugin completed successfully: chip={}", chip.name());
+        return Ok(());
+    }
+
     let mut transport = Transport::new(serial_io, &job.port, chip.initial_baud(), cancel, &log);
 
     run_beken_on_transport(job, &mut transport, progress, chip, is_t5ai)?;
@@ -552,5 +567,77 @@ mod tests {
             has(&|m| matches!(m, FlashMilestone::Rebooted)),
             "missing Rebooted; got {milestones:?}"
         );
+    }
+
+    // ── Replay of a real device ──────────────────────────────────────────
+    //
+    // The tests above answer "does the driver do what we think the chip wants?"
+    // — the responses are ours. This one answers "does the chip still get asked
+    // what it was actually asked?", because the bytes come from a T5AI on a
+    // bench. See the record/replay note in `super::transport`.
+    //
+    // It is a snapshot, and that is the deal: a deliberate protocol change makes
+    // it stale, and refreshing it needs the hardware back. Re-record with the
+    // `record-io` feature — never hand-edit the fixture to make this pass.
+    mod replay {
+        use super::*;
+        use crate::plugins::beken::chip::T5AISpec;
+        use crate::plugins::beken::transport::ReplayIo;
+
+        /// One 4 KiB read: reset, handshake, flash id, the read itself, reboot.
+        const T5AI_READ_4K: &str = include_str!("t5ai-read-4k.trace");
+
+        #[test]
+        fn t5ai_read_still_asks_the_device_exactly_what_it_asked_before() {
+            let out = tempfile::NamedTempFile::new().expect("a temp output file");
+            // Byte-for-byte the job the recorded CLI run built.
+            let job = FlashJob {
+                read_start_hex: Some("0x0".into()),
+                read_end_hex: Some("0x00001000".into()),
+                read_file_path: Some(out.path().to_string_lossy().into_owned()),
+                ..FlashJob::new(FlashMode::Read, "T5AI", "COM34", 921_600)
+            };
+
+            let chip = T5AISpec;
+            let cancel = AtomicBool::new(false);
+            let log = |_: &str| {};
+            let mut transport = Transport::new(
+                ReplayIo::parse(T5AI_READ_4K),
+                "COM34",
+                chip.initial_baud(),
+                &cancel,
+                &log,
+            );
+
+            run_beken_on_transport(&job, &mut transport, &|_| {}, &chip, true)
+                .expect("the recorded exchange should still drive the read to completion");
+
+            // A driver that stops early is as much a change as one that asks for
+            // more, and only this catches it.
+            assert_eq!(
+                transport.io.remaining(),
+                0,
+                "the driver stopped before the end of the recording",
+            );
+
+            let data = std::fs::read(out.path()).expect("the read should have written its output");
+            assert_eq!(data.len(), 0x1000, "4 KiB was requested");
+        }
+
+        /// The fixture is only worth anything while it still parses as one, so a
+        /// corrupted or truncated line has to fail loudly rather than quietly
+        /// shortening the replay.
+        #[test]
+        fn the_fixture_carries_its_provenance_and_a_full_exchange() {
+            let ops = T5AI_READ_4K
+                .lines()
+                .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+                .count();
+            assert!(
+                T5AI_READ_4K.starts_with("# Recorded from real T5AI hardware"),
+                "the fixture must say where it came from",
+            );
+            assert!(ops > 100, "expected a full exchange, got {ops} ops");
+        }
     }
 }

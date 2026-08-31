@@ -111,8 +111,8 @@ cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D
 cargo clippy -p tyutool_gui --all-targets -- -D warnings                                    # ci.yml
 cargo clippy -p tyutool-bridge --all-targets -- -D warnings                                 # bridge.yml
 cargo test -p tyutool-core --features ts-rs && git diff --exit-code -- src/bindings/         # ci.yml
-cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip -- -D warnings     # ci.yml
-cargo test -p tyutool-core --features zip,excel,mock-chip                                    # ci.yml
+cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io -- -D warnings   # ci.yml
+cargo test -p tyutool-core --features zip,excel,mock-chip,record-io                                  # ci.yml
 pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
 ```
 

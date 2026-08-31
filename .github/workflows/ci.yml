@@ -51,11 +51,14 @@ jobs:
       # `libudev` stays out; it needs a system library this runner lacks.
       # `mock-chip` is here for the same reason: it gates the scripted plugin
       # that drives `run_job_with`'s orchestration tests, and without this step
-      # those tests would not exist as far as CI is concerned.
+      # those tests would not exist as far as CI is concerned. `record-io` gates
+      # `RecordIo`, which has no tests of its own — it is compiled here so it
+      # cannot rot unnoticed, since it is only ever exercised by hand against
+      # real hardware when refreshing a replay fixture.
       - name: Clippy and test tyutool-core's optional features
         run: |
-          cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip -- -D warnings
-          cargo test -p tyutool-core --features zip,excel,mock-chip
+          cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io -- -D warnings
+          cargo test -p tyutool-core --features zip,excel,mock-chip,record-io
       - name: Bindings are up to date
         run: |
           cargo test -p tyutool-core --features ts-rs

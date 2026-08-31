@@ -317,3 +317,55 @@ Create `crates/tyutool-core/tests/shipped_crates_exclude_mock_chip.rs`
 - src-tauri 套件 32 → 36 全绿，且新用例不在任何 `cfg` 门控的模块里
 - 产线改动仅限 `flash_run` 的签名泛型化，无行为变化
 - GUI 的 release 构建干净
+
+---
+
+# Phase 4：录制回放，给协议一条真实基线
+
+**前提：** 需要一次真实硬件。本次用的是 T5AI 开发板（CH342，A 口 COM34）。
+
+## Task 18: `RecordIo` / `ReplayIo`
+
+**Files:** Modify `crates/tyutool-core/src/plugins/beken/transport.rs`, `Cargo.toml`,
+`crates/tyutool-core/src/plugins/beken/driver.rs`
+
+- [x] **Step 1:** 线格式 `TraceOp`：每行一个操作的十六进制文本（不用 JSON/base64，不引
+  新依赖，而且 fixture 的 diff 能看）。编解码共一份，`cfg(any(feature, test))`
+- [x] **Step 2:** `RecordIo<T>` 包住活 transport，追写到 `TYUTOOL_RECORD_IO`；`record-io` feature
+- [x] **Step 3:** `ReplayIo`（`#[cfg(test)]`）回放并校验
+- [x] **Step 4:** `run_beken` 里接上 env 分支（`Transport` 本就泛型，包一层即可）
+- [x] **Step 5:** `record-io` 加进守卫测试的 `TEST_ONLY_FEATURES`，并把守卫泛化为按列表检查
+
+## Task 19: 实机录制
+
+- [x] **Step 1:** 先做**无损**探测（读 4 KiB）确认链路通，再碰写操作
+- [x] **Step 2:** 带 `--features tyutool-core/record-io` 构建 Windows CLI（COM34 在 Windows 侧）
+- [x] **Step 3:** 录制 `read -s 0x0 -l 0x1000` → 163 个操作 / 9021 字节
+- [x] **Step 4:** 烧录 `auth-firmware-t5ai-1.1.1.bin`（2.36 MiB / 50.2s），回读前 4 KiB 与固件
+  逐字节比对一致
+- [x] **Step 5:** ⚠ 烧录**之后重录**一次。首次录制里的 4 KiB 是旧固件内容，内容不明；
+  重录后 fixture 里就是那份公开固件的头部
+
+## Task 20: 回放测试
+
+- [x] **Step 1:** fixture 放 `plugins/beken/t5ai-read-4k.trace`（比照 `ln882h/ram.bin` 的位置），
+  头部写明出处、设备、命令、不要手改
+- [x] **Step 2:** 回放测试驱动 `run_beken_on_transport`，断言读出 4 KiB 且
+  `remaining() == 0`
+- [x] **Step 3:** 首次回放在 op 14 分叉。**不是 bug**：`recv_frame` 由真实时间截止，回放时
+  读取瞬返回、循环多转了几圈。改为「下一个录制操作不是读取时返回超时且不消耗操作」
+  ——**读取宽松，写入严格**
+- [x] **Step 4:** ⚠ **金标准必须阴性验证**。改 fixture 里一条写入的一个字节 → 测试如期失败
+  并指出 op 位置与两边字节串；已还原
+
+## Task 21: CI 与文档
+
+- [x] **Step 1:** `record-io` 加进 `ci.yml` 的 optional-features 一步（它自己没测试，
+  放进去是为了不让它默默腐掉），同步 `AGENTS.md`
+
+## Phase 4 验收标准
+
+- 回放测试跑在**普通** `cargo test -p tyutool-core` 里（`#[cfg(test)]`，不要 feature）
+- 金标准经过阴性验证
+- fixture 头部说清楚出处，且其中设备内容不含秘密
+- 真实烧录路径实机验证无回归
