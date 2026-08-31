@@ -180,8 +180,75 @@ MockPlugin::simulated(id)             // 按真实时间走完一次烧录，全
 
 ## 后续阶段（不在本次范围）
 
-| 阶段 | 内容 | 前置条件 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| 二 | 用 `tauri::test::mock_builder` 测 `flash_run` | `src-tauri` dev-deps 加 `tauri = { features = ["test"] }` |
-| 三 | 测 `tyutool-serve` 的连接循环；已发现其 `Cancel` / `AuthorizeConfirm` 在任务运行期间读不到（`lib.rs:446` 的 `.await` 阻塞了消息循环），待坐实 | `tyutool-serve` 目前**没有任何 dev-dependencies** |
-| 四 | `ReplayIo`：录制真实串口字节流，回放做协议基线 | 需要一次真实硬件录制 |
+| 二 | 测 `tyutool-serve` 的连接循环 | ✅ 已完成，见下 |
+| 三 | 用 `tauri::test::mock_builder` 测 `flash_run` | 待做；需给 `src-tauri` dev-deps 加 `tauri = { features = ["test"] }` |
+| 四 | `ReplayIo`：录制真实串口字节流，回放做协议基线 | 待做；需要一次真实硬件录制 |
+
+---
+
+## 阶段二的结果：`tyutool-serve` 的取消失效（已坐实并修复）
+
+假设备铺好后，第一件用它验的事就报了错。
+
+**症状：** `handle_connection` 的消息循环是单任务顺序的，而 `handle_run_job(..)` 是在循环体里
+`.await` 的。任务一旦跑起来，这条连接就**再也读不到客户端消息**——而 `Cancel` 和
+`AuthorizeConfirm` 恰恰是客户端仅有的两种「任务进行中」消息。
+
+**坐实：** 一个 MOCK 任务跑到一半发 `cancel`，它照样跑完了：
+
+```
+cancel was sent mid-job, but the run ended as
+  {"kind":"done","result":{"ok":{"elapsed_secs":1.505489093}}}
+instead of cancelled
+```
+
+**影响面：** 仅 `pnpm run dev:web`（serve 是开发期后端，不发给最终用户）。GUI 没这个问题，
+因为 Tauri 的每个命令是独立调用，`flash_cancel` 不需要排在 `flash_run` 后面。
+
+**修法：** 把 `handle_run_job` 从循环里 `tokio::spawn` 出去，循环继续读消息。连带的两件事：
+
+1. **一条连接同时只允许一个任务**，第二个回 `error` 帧。以前这是靠「循环被阻住」隐含保证的；
+   循环一旦不阻塞，`cancel.store(false)` 就会把前一个任务的取消一并清掉，必须明确拒绝。
+2. **连接关闭时等任务退干净**再丢 sink，避免任务活得比连接还长、串口迟迟不释放。
+
+前端不用改：`ws-transport.ts` 的 runJob 路径本就处理 `type === "error"`，新的拒绝会直接变成
+一个 reject。（顺带观察到一个**不属于本次范围**的前端弱点：runJob 每次挂一个 message
+handler，若真有人绕过 `canFlash` 等计算属性并发发两次，拒绝帧会串到第一个 handler 上。
+UI 上发不出并发任务，所以是理论风险。）
+
+**没盖到的：** `AuthorizeConfirm` 的死锁由同一处修改一并解决，但**没有直接的测试**：
+Authorize 模式在 `run_job` 里早于插件查表就分发给了 `run_authorize`，绕开了注册表，
+假芯片插不进去。要盖它得先给 authorize 流程开一个同类的缝隙，不在本次范围。
+
+### serve 怎么拿到假芯片
+
+`mock-chip` 不能写进 serve 的普通依赖（守卫测试禁止），也不能用 `#[cfg(feature)]`（serve 没声明
+这个 feature）。用的是 **dev-dependency**：
+
+```toml
+[dev-dependencies]
+tyutool-core = { path = "../tyutool-core", features = ["mock-chip"] }
+```
+
+cargo 在构建测试时合并 normal + dev 依赖的 feature，所以 serve 的单测里 `MOCK` 存在；而
+`cargo build --release` **根本不编译 dev-dependency**，所以按构造就进不了产物。这也是守卫
+测试将 `dev-dependencies` 列为唯一例外的依据。
+
+例外是**验过的不是假设的**：`cargo build --release -p tyutool-cli` 会拉进 tyutool-serve，
+若 dev-dependency 的 feature 泄进了那次构建，`src/lib.rs` 的 `compile_error!` 会当场炸。
+实测：构建成功。
+
+#### 一个必须记下的副作用：feature 统一
+
+这个 dev-dependency 不只影响 serve 自己。CI 把三个 crate 放在**一条** `cargo test` 里跑
+（`ci.yml:46`），cargo 会在这条命令内统一 feature，于是 `tyutool-cli` 的测试也看得到 `MOCK`。
+
+实际后果：`tyutool-cli` 的 `device_list_matches_registry`（它断言 `SUPPORTED_DEVICES` 不得与
+注册表漂移）当场报错，多出一个 `mock`。处理方式是在那个测试里**显式排除**它并注明原因
+——假芯片本就不属于那份契约。
+
+这里要说清楚的是：统一只发生在**测试二进制**上。`cargo build` / `cargo build --release`
+不编译 dev-dependency，所以发布产物不受影响。但意味着「没人开这个 feature」不再是一个可依赖
+的前提，**封锁完全靠那两道保障**。以后又有哪个 crate 断言注册表内容时，记得同样排除。

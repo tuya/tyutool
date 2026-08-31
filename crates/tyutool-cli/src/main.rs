@@ -870,6 +870,15 @@ mod tests {
             .list_chip_ids()
             .into_iter()
             .map(|s| s.to_ascii_lowercase())
+            // The fake device from tyutool-core's `mock-chip` feature is not a
+            // supported device and must never be listed in SUPPORTED_DEVICES.
+            // It can still turn up here: CI runs `cargo test -p tyutool-core -p
+            // tyutool-cli -p tyutool-serve` as one invocation, and cargo unifies
+            // features across it — tyutool-serve's dev-dependency switches the
+            // feature on for the tyutool-core all three share. That reaches test
+            // binaries only; no shipped artifact can carry it (see the feature's
+            // comment in crates/tyutool-core/Cargo.toml for the two guards).
+            .filter(|id| id != "mock")
             .collect();
         from_registry.sort();
         assert_eq!(
