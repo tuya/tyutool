@@ -1,5 +1,29 @@
 //! tyutool — shared flash plugin registry, jobs, and serial listing for GUI (Tauri) and CLI.
 
+// ── `mock-chip` must never reach a user ──────────────────────────────────────
+//
+// The feature registers a fake device in the *default* registry, so a build
+// that carries it would offer users a chip that silently pretends to flash.
+// Two independent guards keep it out of a shipped artifact; both must stay:
+//
+//  1. This one. Every release artifact is built with `debug_assertions` off
+//     (`cargo build --release -p tyutool-cli`, `tauri build`,
+//     `cargo build --release -p tyutool-bridge` — and nothing in this repo
+//     overrides `debug-assertions` for the release profile), so enabling the
+//     feature there fails the compile outright rather than shipping quietly.
+//     It also means `cargo test --release --features mock-chip` will not build;
+//     no workflow or script does that today. If one ever needs to, replace this
+//     guard with a narrower signal — do not simply delete it.
+//  2. `tests/shipped_crates_exclude_mock_chip.rs` — no crate that produces a
+//     shipped binary may name the feature in its manifest. That guard runs on
+//     the ordinary `cargo test -p tyutool-core`, feature off.
+#[cfg(all(feature = "mock-chip", not(debug_assertions)))]
+compile_error!(
+    "the `mock-chip` feature registers a fake chip plugin in the default registry and must \
+     never be enabled in a release build — drop it from this build's --features flag or from \
+     the Cargo.toml that pulled it in"
+);
+
 mod authorize;
 #[cfg(feature = "excel")]
 pub mod batch_auth;

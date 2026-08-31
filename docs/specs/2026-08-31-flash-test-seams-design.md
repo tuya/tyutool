@@ -96,7 +96,51 @@ MockPlugin::with(id, |job, cancel, progress| { ... })   // 全能形式
 MockPlugin::ok(id)                    // 发几个事件后成功
 MockPlugin::failing(id, msg)          // 立即失败
 MockPlugin::blocking_until_cancelled(id)  // 转圈等取消
+MockPlugin::simulated(id)             // 按真实时间走完一次烧录，全程检查取消
 ```
+
+### 4. `MOCK` 进默认注册表
+
+开着 `mock-chip` 时，`FlashPluginRegistry::new()` 额外注册一颗 id 为 `MOCK` 的假芯片
+（`MockPlugin::simulated`）。
+
+这一条看似微小，却是整套东西能不能用到上层的关键。`run_job_with` 只能服务于 core 自己
+的测试：`tyutool-serve` 的 `handle_run_job` 和 `src-tauri` 的 `flash_run` 都直接调 `run_job`，
+想让它们用假芯片，要么给两个 crate 各自凿一个注入口（改两处产线函数签名），要么就是
+这一行。选后者：**三个前端一个签名都不用改**，发一个 `chipId: "MOCK"` 的任务就行。
+
+附带收益：开发前端时手上没板子也能真的把 GUI 跑起来——选 MOCK，进度条会走，取消会生效。
+
+`simulated` 故意要花时间（约 1.5 秒，每 50 ms 看一次取消标志）。一个瞬时返回的任务根本无法被
+中途取消，而「用户还能不能取消」正是这套假件要验证的东西。
+
+---
+
+## 封锁：`mock-chip` 绝不能进发布产物
+
+把假芯片放进**默认**注册表，意味着一个误带该 feature 的构建会给用户一颗「能选、会走进度条、
+但什么也没烧」的芯片。这不能靠约定，必须有硬保障。**两道，缺一不可：**
+
+| | 拦什么 | 实现 |
+|---|---|---|
+| 一 | 命令行上的 `--features` 流进 release 构建 | `src/lib.rs` 顶部 `#[cfg(all(feature = "mock-chip", not(debug_assertions)))] compile_error!` |
+| 二 | 某个出包 crate 把它写进了 manifest | `tests/shipped_crates_exclude_mock_chip.rs` |
+
+**为什么 `debug_assertions` 是可靠信号：**三条发布路径全是 release ——
+`cargo build --release -p tyutool-cli --target <triple>`（release.yml:132）、
+`npx @tauri-apps/cli build`（release.yml:277）、
+`cargo build --release -p tyutool-bridge`（bridge.yml:248）——而仓库里没有任何地方覆盖
+`[profile.release].debug-assertions`。代价是 `cargo test --release --features mock-chip` 编不过；
+目前没有任何 workflow 或 script 这么跑。将来若真需要，**换一个更窄的信号，不要直接删掉**。
+
+第二道结构化遍历整份 manifest（不是扫文本，所以注释里提到 feature 名不会误报），两种写法都盖：
+`tyutool-core = { features = ["mock-chip"] }` 和 `[features]` 里的转发形式
+`"tyutool-core/mock-chip"`。它**不带** feature 门控，跑在普通的 `cargo test -p tyutool-core` 里，
+也就是每次 push 都会跑的那一步。形状照搬 `crates/tyutool-bridge/tests/build_config.rs`（它用同
+样的办法守 `+crt-static`）。
+
+两道都做过阴性验证：release 带 feature 确实编译失败；往 cli 的 manifest 里加 `mock-chip`、
+往 serve 的 manifest 里加转发项，守卫测试都如期报错。
 
 ---
 

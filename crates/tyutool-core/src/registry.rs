@@ -22,6 +22,14 @@ pub fn normalize_chip_id(raw: &str) -> String {
     }
 }
 
+/// Registry key of the fake device supplied by the `mock-chip` feature.
+///
+/// A job carrying this chip id runs [`crate::plugins::mock::MockPlugin::simulated`]
+/// instead of touching a serial port. Only present when the feature is on, which
+/// no shipped build may do.
+#[cfg(feature = "mock-chip")]
+pub const MOCK_CHIP_ID: &str = "MOCK";
+
 /// Global registry of chip plugins (Python `FlashInterface.SocList` equivalent).
 pub struct FlashPluginRegistry {
     plugins: HashMap<String, Arc<dyn FlashPlugin>>,
@@ -53,6 +61,19 @@ impl FlashPluginRegistry {
         log::debug!("Registered flash plugin: ESP32S3");
         plugins.insert("LN882H".to_string(), Arc::new(Ln882hPlugin));
         log::debug!("Registered flash plugin: LN882H");
+
+        // A fake device in the default registry, so `run_job` — and therefore
+        // every frontend, unchanged — can drive a job that behaves like
+        // hardware without any. See the `mock-chip` feature in Cargo.toml for
+        // the two guards that keep it out of a shipped artifact.
+        #[cfg(feature = "mock-chip")]
+        {
+            plugins.insert(
+                MOCK_CHIP_ID.to_string(),
+                Arc::new(crate::plugins::mock::MockPlugin::simulated(MOCK_CHIP_ID)),
+            );
+            log::debug!("Registered flash plugin: {}", MOCK_CHIP_ID);
+        }
 
         Self { plugins }
     }
@@ -255,7 +276,10 @@ mod tests {
     fn list_chip_ids_only_real_plugins() {
         let r = FlashPluginRegistry::new();
         let ids = r.list_chip_ids();
-        assert_eq!(ids.len(), 11);
+        // The 11 real chips, plus the fake device when `mock-chip` is on. Any
+        // other entry means something got registered that should not have been.
+        let expected = if cfg!(feature = "mock-chip") { 12 } else { 11 };
+        assert_eq!(ids.len(), expected, "unexpected registry contents: {ids:?}");
         assert!(ids.contains(&"BK7231N".to_string()));
         assert!(ids.contains(&"T2".to_string()));
         assert!(ids.contains(&"T3".to_string()));
@@ -484,6 +508,56 @@ mod tests {
                 // Normalization applies to the *lookup* only — the plugin still
                 // sees the job exactly as the caller submitted it.
                 Some(("t5".to_string(), "/dev/mock".to_string(), 115_200)),
+            );
+        }
+
+        #[test]
+        fn default_registry_offers_the_mock_chip() {
+            let reg = default_registry();
+            assert!(reg.get(MOCK_CHIP_ID).is_ok());
+            assert!(reg.get("mock").is_ok(), "chip ids are case-insensitive");
+        }
+
+        /// The payoff of putting the fake device in the *default* registry: a
+        /// frontend needs no new API to drive it. This goes through the plain
+        /// [`run_job`] — byte for byte the call `tyutool-cli`, `tyutool-serve`
+        /// and `src-tauri` already make — and cancels it mid-flight.
+        #[test]
+        fn mock_chip_runs_through_plain_run_job_and_honours_cancel() {
+            use std::sync::mpsc;
+
+            let cancel = Arc::new(AtomicBool::new(false));
+            let (tx, rx) = mpsc::channel::<FlashEvent>();
+
+            let worker_cancel = Arc::clone(&cancel);
+            let worker = std::thread::spawn(move || {
+                let job = FlashJob::new(FlashMode::Flash, MOCK_CHIP_ID, "/dev/mock", 115_200);
+                run_job(&job, &worker_cancel, move |e| {
+                    let _ = tx.send(e);
+                })
+            });
+
+            // Wait until the run is demonstrably underway before cancelling, so
+            // this exercises a mid-flight cancel and not one that won a race
+            // against the job even starting.
+            let saw_progress = rx
+                .iter()
+                .any(|event| matches!(event, FlashEvent::Percent { .. }));
+            assert!(saw_progress, "the mock chip should report progress");
+            cancel.store(true, Ordering::SeqCst);
+
+            let res = worker.join().expect("worker thread should not panic");
+            assert!(matches!(res, Err(FlashError::Cancelled)), "got {res:?}");
+
+            let tail: Vec<FlashEvent> = rx.into_iter().collect();
+            assert!(
+                matches!(
+                    tail.last(),
+                    Some(FlashEvent::Done {
+                        result: FlashResult::Cancelled { .. }
+                    })
+                ),
+                "a cancelled run must still close with Done{{Cancelled}}; tail was {tail:?}",
             );
         }
     }
