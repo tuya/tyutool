@@ -6,7 +6,7 @@ description = "tyutool WebSocket serve layer — shared by tyutool-cli serve and
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 futures-util = "0.3"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
