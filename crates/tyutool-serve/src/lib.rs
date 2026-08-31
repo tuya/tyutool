@@ -5,7 +5,7 @@
 //! Usage: tyutool-cli serve [--port 9527]
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -339,9 +339,12 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
     };
 
     let (sink, mut stream) = ws.split();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let pending_confirm: Arc<Mutex<Option<std::sync::mpsc::Sender<bool>>>> =
-        Arc::new(Mutex::new(None));
+    // Per-connection job control. `CancelSlot` hands each job a fresh flag
+    // rather than resetting a shared one, so a new job cannot clear the cancel
+    // an older one is still watching — a property of the slot itself, no longer
+    // something the "one job at a time" check below has to be relied on for.
+    let cancel_slot = Arc::new(tyutool_core::CancelSlot::new());
+    let pending_confirm = Arc::new(tyutool_core::ConfirmSlot::new());
     // The in-flight flash job, if any.
     //
     // It runs on its own task rather than being awaited inside the message loop
@@ -446,12 +449,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 let _ = sink_tx.send(msg);
             }
             ClientMessage::Cancel => {
-                cancel.store(true, Ordering::Relaxed);
+                cancel_slot.cancel();
                 // Wake any thread blocked in confirm_overwrite so it can return Cancelled.
-                let mut g = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(tx) = g.take() {
-                    let _ = tx.send(false);
-                }
+                pending_confirm.resolve(false);
             }
             ClientMessage::RunJob {
                 job,
@@ -471,10 +471,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                     });
                     continue;
                 }
-                cancel.store(false, Ordering::Relaxed);
                 running_job = Some(tokio::spawn(handle_run_job(
                     sink_tx.clone(),
-                    Arc::clone(&cancel),
+                    cancel_slot.begin(),
                     job,
                     file_content,
                     file_contents,
@@ -836,10 +835,7 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 }
             }
             ClientMessage::AuthorizeConfirm { confirmed } => {
-                let mut guard = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(tx) = guard.take() {
-                    let _ = tx.send(confirmed);
-                }
+                pending_confirm.resolve(confirmed);
             }
         }
     }
@@ -847,13 +843,8 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
     // Best-effort: wake any auth thread blocked on confirm_overwrite, and signal cancel.
     // Without this, a WS disconnect during an AuthConflict prompt would park the
     // blocking thread forever (holding the serial port open).
-    cancel.store(true, Ordering::Relaxed);
-    {
-        let mut g = pending_confirm.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(tx) = g.take() {
-            let _ = tx.send(false);
-        }
-    }
+    cancel_slot.cancel();
+    pending_confirm.resolve(false);
 
     // Let the cancelled job finish unwinding before the sink goes away, so the
     // serial port is released and its task does not outlive the connection.
@@ -889,7 +880,7 @@ async fn handle_run_job(
     mut job: FlashJob,
     file_content: Option<String>,
     file_contents: Option<Vec<String>>,
-    pending_confirm: Arc<Mutex<Option<std::sync::mpsc::Sender<bool>>>>,
+    pending_confirm: Arc<tyutool_core::ConfirmSlot>,
 ) {
     let mut temp_paths: Vec<String> = Vec::new();
 
@@ -958,6 +949,8 @@ async fn handle_run_job(
     let confirm_store = Arc::clone(&pending_confirm);
     job_clone.confirm_overwrite = Some(Box::new(move |existing_uuid, existing_authkey| {
         use tyutool_core::{FlashEvent, FlashMilestone};
+        // Raising the prompt is this frontend's business; the handshake that
+        // follows is not, and lives in `ConfirmSlot`.
         if let Ok(v) = serde_json::to_value(FlashEvent::Milestone {
             milestone: FlashMilestone::AuthConflict {
                 existing_uuid,
@@ -966,12 +959,7 @@ async fn handle_run_job(
         }) {
             let _ = sink_for_confirm.send(ServerMessage::Progress { payload: v });
         }
-        let (tx, rx) = std::sync::mpsc::channel::<bool>();
-        {
-            let mut guard = confirm_store.lock().unwrap_or_else(|e| e.into_inner());
-            *guard = Some(tx);
-        }
-        rx.recv().unwrap_or(false)
+        confirm_store.ask()
     }));
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
