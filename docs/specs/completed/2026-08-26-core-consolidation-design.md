@@ -509,7 +509,7 @@ fn verify_sha256(data: &[u8], expected_hex: &str) -> bool   // 算 + 比
    或再造一个 feature，机械成本超过省下的 5 行。
 3. SHA-256 是固定标准，两份实现**不可能产生行为漂移**，只有写法差异。
 
-按 `docs/specs/2026-08-27-refactor-v3-normalization-design.md` 定的筛选判据
+按 `docs/specs/completed/2026-08-27-refactor-v3-normalization-design.md` 定的筛选判据
 （有实测证据 + 不做有具体代价），**这一项两条都不满足**。
 
 #### 重新打开的条件
@@ -611,7 +611,7 @@ P0–P2 合计约一周半，将 `src-tauri` 从 5953 降至约 **5520**（−P0
 
 | 文档 | 关系 |
 |---|---|
-| `docs/specs/2026-08-27-refactor-v3-normalization-design.md` | **上层总纲**。本文是它七个维度中的一条主线；总纲回答「做不做、先做哪个」，本文回答「怎么做」 |
+| `docs/specs/completed/2026-08-27-refactor-v3-normalization-design.md` | **上层总纲**。本文是它七个维度中的一条主线；总纲回答「做不做、先做哪个」，本文回答「怎么做」 |
 
 > 本文的「实现顺序」一节是**阶段划分的唯一真相源**。总纲故意不复制那张表，
 > 修改阶段时只需改本文一处。

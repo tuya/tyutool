@@ -554,7 +554,7 @@ tyutool-cli serve listening on ws://127.0.0.1:9527
 Press Ctrl+C to stop.
 ```
 
-It binds `127.0.0.1` only, requires a loopback `Host` header (blocking DNS-rebinding tricks), and rejects a handshake whose `Origin` is a remote page — a random web page cannot reach in and flash your hardware. It is still a **development tool**: there is no authentication, and any local process can connect. Do not run it as a background service on a shared machine, and stop it with Ctrl+C when you are done. If the port is taken, the command fails with `failed to bind 127.0.0.1:<port>` — pick another with `--port` and point the client at the same one.
+It binds `127.0.0.1` only, requires a loopback `Host` header (blocking DNS-rebinding tricks), and rejects a handshake whose `Origin` is a remote page — a random web page cannot reach in and flash your hardware. It is still a **development tool**: there is no authentication, and any local process can connect. Do not run it as a background service on a shared machine, and stop it with Ctrl+C when you are done. If the port is taken, the command fails with `failed to bind 127.0.0.1:<port>`. Free 9527 rather than moving the server: the browser client has `9527` hard-coded (`src/transport/ws-transport.ts`) with no setting for it, so pointing `serve` elsewhere leaves the page connecting to nothing. (`pnpm run dev:web` does honour `TYUTOOL_SERVE_PORT`, but that moves only the server half.) `--port` is for a host that tells its own client where to connect — tuyaopen-ide does that by injecting `__TUYAOPEN_IDE_CONFIG.wsUrl`.
 
 For the shipped, hardened variant of this idea — token grants, an Origin allowlist, an audit log — see the separate `tyutool-bridge` binary.
 

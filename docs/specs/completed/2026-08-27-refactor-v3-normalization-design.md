@@ -1,7 +1,9 @@
 # refactor/v3 规范化总纲：先做什么，以及为什么不做其余的
 
 **日期：** 2026-08-27
-**状态：** 已确认并执行；Section 1 三项已全部落地（2026-08-28）
+**状态：** 已完成并归档（2026-08-31）。Section 1 三项全部落地，§5.1 的规则已写入根 `AGENTS.md`
+（「Dispatching read-only sub-agents」一节）。**唯一遗留需人工操作**：GitHub Settings → Code security
+里开启 Dependabot alerts / security updates 并 triage 存量告警——仓库文件无法代劳，见 §1.2。
 **范围：** refactor/v3 的工程规范化全局，`docs/specs/completed/2026-08-26-core-consolidation-design.md` 是其下的一个子项
 **实测基准：** 正文数字初测于 `b22d5f0`，2026-08-28 在 `cad3731` 重测。**结论一条未变**，四处数字随后续提交漂移，已就地更新：`tyutool-serve` 1691 → 1630 行（测试仍是 28 个）、`Cargo.lock` 716 → 719 个包、CLI 子命令 11 → 12 个（P6 新增 `logs`）、`crates/tyutool-core` 的 `unwrap()` 总数已高于附录 A1 记录的 276，但 A1 的结论（几乎全在 `mod tests` 内）未重新切分，该节按初测日期读。**修改本文时请重测并更新此行。**
 
@@ -249,7 +251,7 @@ crate 边界判据、CI 门槛。剩一条来自**本次协作事故**的教训�
 
 它并未违反字面指令——它显然认为「checkout 到临时状态再改回来」不算「修改文件」。
 
-**建议写入 AGENTS.md**：
+**已写入根 `AGENTS.md`（2026-08-31）**，见「Dispatching read-only sub-agents」一节。原始措辞：
 
 > 派发只读调查类 agent 时，不要只说「不要修改文件」。明确列出允许的命令
 > （`git show` / `git log` / `git diff` / `grep` / `wc` / `find`），并**明确禁止**

@@ -52,7 +52,8 @@ updates:
   # Covers the pinned actions in ci.yml / bridge.yml / release.yml and friends.
   # Note `dtolnay/rust-toolchain@stable` is a floating tag, not a version, so
   # Dependabot cannot track it — the Rust toolchain stays unpinned by design.
-  # See "Rust 工具链不固定" in docs/specs/2026-08-27-refactor-v3-normalization-design.md
+  # See "Rust 工具链不固定" in
+  # docs/specs/completed/2026-08-27-refactor-v3-normalization-design.md
   # for why that is a held decision rather than an oversight.
   - package-ecosystem: github-actions
     directory: "/"
