@@ -587,6 +587,19 @@ mod tests {
         /// One 4 KiB read: reset, handshake, flash id, the read itself, reboot.
         const T5AI_READ_4K: &str = include_str!("t5ai-read-4k.trace");
 
+        /// One 16 KiB write: the same preamble, then unprotect, four sector
+        /// erases, the write with its per-sector CRC verification, protect,
+        /// reboot. The most intricate path in the driver, and the one where a
+        /// mistake costs a device.
+        const T5AI_WRITE_16K: &str = include_str!("t5ai-write-16k.trace");
+
+        /// The exact bytes that recording pushed — the head of the public auth
+        /// firmware. Committed rather than reconstructed from the trace on
+        /// purpose: the trace holds *framed* payloads, and recovering file bytes
+        /// from them would mean re-implementing the framing this test exists to
+        /// check, which would make it prove itself.
+        const T5AI_WRITE_16K_INPUT: &[u8] = include_bytes!("t5ai-write-16k-input.bin");
+
         #[test]
         fn t5ai_read_still_asks_the_device_exactly_what_it_asked_before() {
             let out = tempfile::NamedTempFile::new().expect("a temp output file");
@@ -622,6 +635,43 @@ mod tests {
 
             let data = std::fs::read(out.path()).expect("the read should have written its output");
             assert_eq!(data.len(), 0x1000, "4 KiB was requested");
+        }
+
+        #[test]
+        fn t5ai_write_still_asks_the_device_exactly_what_it_asked_before() {
+            let firmware = tempfile::NamedTempFile::new().expect("a temp firmware file");
+            // The driver reads this file to decide what to put on the wire, so
+            // it has to be what the recording actually sent — anything else
+            // diverges at the first data sector rather than at a real change.
+            std::fs::write(firmware.path(), T5AI_WRITE_16K_INPUT).expect("write temp firmware");
+            assert_eq!(T5AI_WRITE_16K_INPUT.len(), 16 * 1024);
+
+            let job = FlashJob {
+                firmware_path: Some(firmware.path().to_string_lossy().into_owned()),
+                flash_start_hex: Some("0x0".into()),
+                flash_end_hex: Some("0x00004000".into()),
+                ..FlashJob::new(FlashMode::Flash, "T5AI", "COM34", 921_600)
+            };
+
+            let chip = T5AISpec;
+            let cancel = AtomicBool::new(false);
+            let log = |_: &str| {};
+            let mut transport = Transport::new(
+                ReplayIo::parse(T5AI_WRITE_16K),
+                "COM34",
+                chip.initial_baud(),
+                &cancel,
+                &log,
+            );
+
+            run_beken_on_transport(&job, &mut transport, &|_| {}, &chip, true)
+                .expect("the recorded exchange should still drive the write to completion");
+
+            assert_eq!(
+                transport.io.remaining(),
+                0,
+                "the driver stopped before the end of the recording",
+            );
         }
 
         /// The fixture is only worth anything while it still parses as one, so a
