@@ -4,6 +4,13 @@ on:
   - push
   - delete
 
+# One global group: this job mirrors every ref, so per-branch grouping would still
+# let two runs race. Not cancel-in-progress, so an in-flight push is never cut in
+# half; bursts still coalesce, as GitHub keeps one pending run per group.
+concurrency:
+  group: gitee-mirror
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -11,21 +18,49 @@ jobs:
       - name: Checkout GitHub code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # 获取完整历史记录
+          fetch-depth: 0  # full history
 
       - name: Configure Git
         run: |
-          git config --global user.name "Github Action"  # 保留，不需要修改
-          git config --global user.email "action@github.com"  # 保留，不需要修改
+          git config --global user.name "Github Action"  # keep as is
+          git config --global user.email "action@github.com"  # keep as is
 
       - name: Add Gitee Remote
         run: |
           # git remote add gitee https://${{ secrets.GITEE_USER }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_REPO }}.git
           git remote add gitee https://flyingcys:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_REPO }}.git  # token from flyingcys
 
+      # Absorb a burst of merges. Costs no freshness: the refresh below runs after
+      # the sleep, so we mirror the state at wake-up.
+      - name: Settle
+        run: sleep 30
+
       - name: Push to Gitee
         run: |
-          # 真镜像：以 origin 为准同步全部分支和 tag，--prune 会删除 Gitee 上已不存在的分支/tag
-          git remote set-head origin -d || true  # 移除 origin/HEAD 符号引用，避免被当作 HEAD 分支推送
-          git push gitee "+refs/remotes/origin/*:refs/heads/*" --prune
-          git push gitee "+refs/tags/*:refs/tags/*" --prune
+          set -u
+
+          # Re-fetch right before pushing: a branch deleted since checkout is the
+          # "reference does not exist" rejection.
+          refresh() {
+            git fetch --prune --prune-tags --force origin \
+              "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
+            git remote set-head origin -d || true  # drop origin/HEAD so it is not pushed as a branch
+          }
+
+          # True mirror: origin wins for every branch and tag; --prune deletes
+          # refs that no longer exist here.
+          push_all() {
+            git push gitee "+refs/remotes/origin/*:refs/heads/*" --prune &&
+            git push gitee "+refs/tags/*:refs/tags/*" --prune
+          }
+
+          refresh
+          if push_all; then
+            exit 0
+          fi
+
+          # Both known failure modes are transient races. Refresh and try once more.
+          echo "::warning::first mirror push failed, refreshing refs and retrying once"
+          sleep 15
+          refresh
+          push_all
