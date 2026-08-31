@@ -29,16 +29,29 @@ excel = ["dep:calamine", "dep:rust_xlsxwriter"]
 ts-rs = ["dep:ts-rs"]
 # Enables the scripted mock chip plugin (`plugins::mock::MockPlugin`), which
 # answers a flash job without ever touching a serial port, so `run_job`'s
-# orchestration can be driven in tests. Test-only: every shipped binary must
-# leave it off — only `cargo test` invocations turn it on. It sits behind a
-# feature rather than `#[cfg(test)]` because a `#[cfg(test)]` item exists only
-# while compiling *this* crate's own tests, and the tyutool-serve / src-tauri
-# suites are separate compilation units that could never see it.
+# orchestration can be driven in tests. It sits behind a feature rather than
+# `#[cfg(test)]` because a `#[cfg(test)]` item exists only while compiling
+# *this* crate's own tests, and the tyutool-serve / src-tauri suites are
+# separate compilation units that could never see it.
+#
+# WARNING: it also registers a `MOCK` chip in the **default** registry, so any
+# binary built with it would offer users a device that only pretends to flash.
+# It must never ship. Turn it on from a `cargo test --features` command line and
+# nowhere else — in particular never add it to a consumer's
+# `tyutool-core = { features = [..] }`. Two guards enforce that and both must
+# stay: the block at the top of src/lib.rs (a release build carrying it fails to
+# compile) and tests/shipped_crates_exclude_mock_chip.rs (no shipped manifest
+# may name it).
 mock-chip = []
 
 [dev-dependencies]
 serde_json = "1"
 tempfile = "3"
+# tests/shipped_crates_exclude_mock_chip.rs parses the workspace's other
+# manifests to prove none of them enables `mock-chip`. 0.8 is already in the
+# workspace lock (tyutool-bridge's dev-dependencies), so no new version enters
+# the tree.
+toml = "0.8"
 
 [dependencies]
 regex = "1"

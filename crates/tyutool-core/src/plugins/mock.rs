@@ -33,6 +33,15 @@ type MockBehavior = Box<
 /// Bailing out with a named error turns that into an ordinary failing test.
 const CANCEL_WAIT_LIMIT: Duration = Duration::from_secs(5);
 
+/// Wall-clock length of a [`MockPlugin::simulated`] run, and how often it looks
+/// at the cancel flag.
+///
+/// Long enough that a frontend driving it over an IPC boundary can watch
+/// progress arrive and still get a cancel in edgewise — which is the whole
+/// point of the simulated run — and short enough not to drag a suite out.
+const SIMULATED_RUN: Duration = Duration::from_millis(1_500);
+const SIMULATED_STEP: Duration = Duration::from_millis(50);
+
 /// A chip plugin whose behaviour is supplied by the test.
 pub struct MockPlugin {
     id: &'static str,
@@ -73,6 +82,82 @@ impl MockPlugin {
         let message = message.into();
         Self::with(id, move |_job, _cancel, _progress| {
             Err(FlashError::Plugin(message.clone()))
+        })
+    }
+
+    /// Walks a full, plausible flash in real time — handshake, flash id, erase,
+    /// a `Percent` ramp, verify, reboot — checking the cancel flag throughout.
+    ///
+    /// This is the variant registered as the `MOCK` chip in
+    /// [`crate::registry::FlashPluginRegistry::new`], so every frontend can
+    /// drive a job that behaves like hardware without any. Unlike the other
+    /// constructors it deliberately **takes time**: a run that returns instantly
+    /// cannot be cancelled mid-flight, and "can the user still cancel?" is
+    /// exactly the sort of wiring these fakes exist to check.
+    pub fn simulated(id: &'static str) -> Self {
+        Self::with(id, |_job, cancel, progress| {
+            let check = |cancel: &AtomicBool| {
+                if cancel.load(Ordering::SeqCst) {
+                    return Err(FlashError::Cancelled);
+                }
+                Ok(())
+            };
+
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Handshake,
+            });
+            check(cancel)?;
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::HandshakeComplete,
+            });
+
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::ReadFlashId,
+            });
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::FlashIdRead {
+                    mid: Some(0x00c8_4013),
+                },
+            });
+
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Erase,
+            });
+            check(cancel)?;
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::EraseComplete,
+            });
+
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Write,
+            });
+            let steps = (SIMULATED_RUN.as_millis() / SIMULATED_STEP.as_millis()).max(1) as u32;
+            for step in 1..=steps {
+                std::thread::sleep(SIMULATED_STEP);
+                check(cancel)?;
+                progress(FlashEvent::Percent {
+                    value: (step * 100 / steps) as u8,
+                });
+            }
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::WriteComplete,
+            });
+
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Verify,
+            });
+            check(cancel)?;
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::VerifyPassed,
+            });
+
+            progress(FlashEvent::Phase {
+                phase: FlashPhase::Reboot,
+            });
+            progress(FlashEvent::Milestone {
+                milestone: FlashMilestone::Rebooted,
+            });
+            Ok(())
         })
     }
 

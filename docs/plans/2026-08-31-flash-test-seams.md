@@ -169,3 +169,55 @@ cargo test  -p tyutool_gui
 - 上面全部门禁通过，且基线计数只增不减（core ≥ 313 + 新增，其余不变）
 - `cargo test -p tyutool-core`（不带 feature）仍然全绿——假插件不得泄漏进默认编译
 - 产线代码路径零改动：`run_job` 的三个调用方（cli / serve / src-tauri）一行未动
+
+---
+
+# Phase 1.5：把假设备铺到所有前端
+
+**动机：** `run_job_with` 只有 core 自己的测试用得上。serve 的 `handle_run_job` 和
+src-tauri 的 `flash_run` 都直接调 `run_job`，要让它们也能跑假芯片，只需要把 `MOCK` 注册
+进**默认**注册表——三个前端一个签名都不用改。代价是假芯片进了默认表，因此必须同时上锁。
+
+## Task 7: `MockPlugin::simulated`
+
+**Files:** Modify `crates/tyutool-core/src/plugins/mock.rs`
+
+- [x] **Step 1:** 加 `simulated(id)`：按真实时间走完 handshake → flash id → erase →
+  `Percent` 爬坡 → verify → reboot，全程检查取消标志。故意耗时（约 1.5 秒，每 50 ms 一
+  步）——瞬时返回的任务无法被中途取消，而那正是要验证的行为。
+
+## Task 8: `MOCK` 进默认注册表
+
+**Files:** Modify `crates/tyutool-core/src/registry.rs`
+
+- [x] **Step 1:** 加 `pub const MOCK_CHIP_ID: &str = "MOCK"`（feature 门控）
+- [x] **Step 2:** `FlashPluginRegistry::new()` 末尾按 feature 注册 `MockPlugin::simulated`
+- [x] **Step 3:** 修 `list_chip_ids_only_real_plugins`——它硬断言 `len() == 11`，开着
+  feature 会变 12。改成按 `cfg!(feature = ...)` 取期望值，并保留「多一个都不行」的语义
+
+## Task 9: 两道封锁
+
+**Files:** Modify `crates/tyutool-core/src/lib.rs`, `Cargo.toml`;
+Create `crates/tyutool-core/tests/shipped_crates_exclude_mock_chip.rs`
+
+- [x] **Step 1:** `lib.rs` 顶部加
+  `#[cfg(all(feature = "mock-chip", not(debug_assertions)))] compile_error!(..)`，
+  注释写明为什么 `debug_assertions` 是可靠信号、代价是什么、将来要换不要删
+- [x] **Step 2:** 新建守卫测试，结构化遍历四个出包 crate 的 manifest，两种写法都盖
+  （`features = ["mock-chip"]` 与 `"tyutool-core/mock-chip"` 转发）。**不加 feature 门控**
+- [x] **Step 3:** `toml = "0.8"` 进 dev-dependencies（已在 workspace lock 里，不引入新版本）
+- [x] **Step 4:** 更新 `Cargo.toml` 里 feature 的注释，写明两道保障
+
+## Task 10: 阴性验证
+
+- [x] **Step 1:** `cargo build --release -p tyutool-core --features mock-chip` → **必须编译失败**
+- [x] **Step 2:** `cargo build --release -p tyutool-core` → 必须成功
+- [x] **Step 3:** 临时给 `crates/tyutool-cli/Cargo.toml` 加 `"mock-chip"` → 守卫测试必须失败；还原
+- [x] **Step 4:** 临时给 `crates/tyutool-serve/Cargo.toml` 加转发项 → 守卫测试必须失败；还原
+
+## Phase 1.5 验收标准
+
+- 两道封锁都经过**阴性验证**——只确认「正常情况下测试通过」是不够的，必须确认它们
+  在该拦的时候真的拦得住
+- `cargo test -p tyutool-core`（不带 feature）仍然全绿，且守卫测试在这一次里也跑到了
+- 产线代码路径依旧零改动
