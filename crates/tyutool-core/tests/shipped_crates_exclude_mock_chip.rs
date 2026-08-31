@@ -33,6 +33,17 @@ const FEATURE: &str = "mock-chip";
 /// The forwarding spelling, as it would appear in a `[features]` entry.
 const FORWARDED: &str = "tyutool-core/mock-chip";
 
+/// The one exemption, and the reason for it: **cargo never compiles a
+/// dev-dependency into a `cargo build` / `cargo build --release`**, so a
+/// dev-dependency edge cannot reach a shipped artifact no matter what features
+/// it names. That is how `tyutool-serve` gets a fake device for its own tests
+/// without gaining a feature of its own.
+///
+/// The exemption is checked, not assumed: `cargo build --release -p tyutool-cli`
+/// pulls in tyutool-serve, and if the dev-dependency's features leaked into that
+/// build, the `compile_error!` in src/lib.rs would fire.
+const EXEMPT_TABLE: &str = "dev-dependencies";
+
 fn workspace_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is crates/tyutool-core.
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -55,6 +66,11 @@ fn workspace_root() -> PathBuf {
 fn enables_mock_chip(value: &toml::Value) -> bool {
     match value {
         toml::Value::Table(table) => table.iter().any(|(key, child)| {
+            // Skipped at any nesting depth, so `[target.'cfg(..)'.dev-dependencies]`
+            // is covered by the same reasoning as the plain table.
+            if key == EXEMPT_TABLE {
+                return false;
+            }
             if key == "tyutool-core" && dependency_features(child).contains(&FEATURE) {
                 return true;
             }

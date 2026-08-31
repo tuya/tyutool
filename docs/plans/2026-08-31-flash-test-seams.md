@@ -221,3 +221,51 @@ Create `crates/tyutool-core/tests/shipped_crates_exclude_mock_chip.rs`
   在该拦的时候真的拦得住
 - `cargo test -p tyutool-core`（不带 feature）仍然全绿，且守卫测试在这一次里也跑到了
 - 产线代码路径依旧零改动
+
+---
+
+# Phase 2：用假设备验 `tyutool-serve` 的消息循环
+
+**前提：** 本阶段是本次工作里**第一个会改产线代码的**阶段。顺序必须是「先立住复现
+测试，看它红，再改代码，看它绿」——先改后补测试无法证明测试真的能抓到这个 bug。
+
+## Task 11: 给 serve 接上假设备
+
+**Files:** Modify `crates/tyutool-serve/Cargo.toml`,
+`crates/tyutool-core/tests/shipped_crates_exclude_mock_chip.rs`
+
+- [x] **Step 1:** serve 加 `[dev-dependencies] tyutool-core = { features = ["mock-chip"] }`。
+  不能用普通依赖（守卫禁止），也不能用 `#[cfg(feature)]`（serve 未声明该 feature）
+- [x] **Step 2:** 守卫测试排除 `dev-dependencies` 表（任意嵌套层级），并写明依据：
+  `cargo build --release` 根本不编译 dev-dependency
+- [x] **Step 3:** 验证例外安全：`cargo build --release -p tyutool-cli`（它依赖 serve）
+  必须成功——若 feature 泄漏，第一道封锁会当场炸
+
+## Task 12: 复现测试（先看它红）
+
+**Files:** Modify `crates/tyutool-serve/src/lib.rs`
+
+- [x] **Step 1:** 在 `mod tests` 下新增 `mod loop_responsiveness`，起真实 `run_serve`、
+  用真实 WS 客户端连接、跑 `chipId: "MOCK"` 的任务
+- [x] **Step 2:** 基线用例：一个 MOCK 任务能通过 WS 完整跑完（应当直接通过）
+- [x] **Step 3:** 复现用例：任务跑到一半发 `cancel`，断言收到 `Done{Cancelled}`
+  → **实测失败**，任务照样跑完 1.505 秒后报 `ok`。bug 坐实
+
+## Task 13: 修复（再看它绿）
+
+**Files:** Modify `crates/tyutool-serve/src/lib.rs`
+
+- [x] **Step 1:** `handle_run_job` 改为 `tokio::spawn`，不再在循环体里 `.await`；
+  签名改成按值接收 `sink_tx` 与 `job`
+- [x] **Step 2:** 新增「一条连接同时只一个任务」的拒绝。以前靠循环阻塞隐含保证，
+  现在不拒的话，第二个任务会把第一个的取消标志清掉
+- [x] **Step 3:** 连接关闭时 `await` 任务句柄，再丢 sink
+- [x] **Step 4:** 复现用例转绿；补一个拒绝并发任务的用例（新行为必须有证据）
+- [x] **Step 5:** 核对前端：`ws-transport.ts` 的 runJob 路径已处理 `type === "error"`，
+  不需改动
+
+## Phase 2 验收标准
+
+- 复现测试在修复前**确实失败过**，修复后通过；先绿的测试不算复现
+- serve 套件 28 → 31 全绿
+- 假设备仍然进不了发布产物（例外验过）

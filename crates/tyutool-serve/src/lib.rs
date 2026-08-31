@@ -342,6 +342,16 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
     let cancel = Arc::new(AtomicBool::new(false));
     let pending_confirm: Arc<Mutex<Option<std::sync::mpsc::Sender<bool>>>> =
         Arc::new(Mutex::new(None));
+    // The in-flight flash job, if any.
+    //
+    // It runs on its own task rather than being awaited inside the message loop
+    // below. Awaiting it there meant the loop could not read the socket for the
+    // whole duration of a job — so `Cancel` and `AuthorizeConfirm`, the only two
+    // messages a client has any reason to send *during* a job, sat unread in the
+    // receive buffer. Cancel silently did nothing, and an authorize run that hit
+    // a credential conflict deadlocked: the blocking thread waited for a
+    // confirmation that could never be read.
+    let mut running_job: Option<tokio::task::JoinHandle<()>> = None;
 
     // ── mpsc sink pump ───────────────────────────────────────────────────────
     // Background tasks (progress callbacks, serial-debug reader thread) need to
@@ -444,20 +454,32 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                 }
             }
             ClientMessage::RunJob {
-                mut job,
+                job,
                 file_content,
                 file_contents,
             } => {
+                // One job at a time per connection. Previously this was implicit
+                // — the loop blocked on the job, so a second one could not be
+                // read — and clearing the shared cancel flag below was safe only
+                // because of that. Now that the loop keeps running, the limit has
+                // to be stated: without it, a second job would reset the flag out
+                // from under the first.
+                if running_job.as_ref().is_some_and(|h| !h.is_finished()) {
+                    let _ = sink_tx.send(ServerMessage::Error {
+                        message: "a job is already running on this connection".into(),
+                        request_id: None,
+                    });
+                    continue;
+                }
                 cancel.store(false, Ordering::Relaxed);
-                handle_run_job(
-                    &sink_tx,
+                running_job = Some(tokio::spawn(handle_run_job(
+                    sink_tx.clone(),
                     Arc::clone(&cancel),
-                    &mut job,
+                    job,
                     file_content,
                     file_contents,
                     Arc::clone(&pending_confirm),
-                )
-                .await;
+                )));
             }
             ClientMessage::SerialDebugOpen { cfg } => {
                 let mut guard = debug_session.lock().unwrap();
@@ -833,6 +855,12 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         }
     }
 
+    // Let the cancelled job finish unwinding before the sink goes away, so the
+    // serial port is released and its task does not outlive the connection.
+    if let Some(handle) = running_job.take() {
+        let _ = handle.await;
+    }
+
     // Clean up any open serial-debug session before dropping the sink.
     if let Ok(mut guard) = debug_session.lock() {
         if let Some(s) = guard.take() {
@@ -853,10 +881,12 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
 
 // ── Run job handler ──────────────────────────────────────────────────────────
 
+/// Takes its sender and job by value because it runs on a task of its own — see
+/// `running_job` in [`handle_connection`] for why it must not be awaited inline.
 async fn handle_run_job(
-    sink_tx: &tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    sink_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
     cancel: Arc<AtomicBool>,
-    job: &mut FlashJob,
+    mut job: FlashJob,
     file_content: Option<String>,
     file_contents: Option<Vec<String>>,
     pending_confirm: Arc<Mutex<Option<std::sync::mpsc::Sender<bool>>>>,
@@ -1625,5 +1655,179 @@ mod tests {
         );
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // ── 消息循环的响应性 ──────────────────────────────────────────────────
+    //
+    // 这里驱动的是真实的 WS 服务端（run_serve）和真实的 run_job，只是芯片换成了
+    // tyutool-core 的 MOCK 假设备（见本 crate 的 dev-dependency）。全程不需要硬件。
+    //
+    // 验的不是协议，而是一件单看代码很难发现、手点更难发现的事：任务跑起来之后，
+    // 这条连接是否还接得进下一条客户端消息。
+    mod loop_responsiveness {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::net::TcpStream;
+        use tokio::time::{timeout, Duration};
+        use tokio_tungstenite::tungstenite::Message;
+        use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+        type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+        /// MOCK 芯片的模拟烧录约 1.5 秒，这里留足余量；帧一直不来时也能快速失败。
+        const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+
+        /// Asks the OS for a free port and lets go of it again. A tiny race with
+        /// another process remains; a fixed port would instead collide with a
+        /// developer running `tyutool-cli serve`, which is worse.
+        async fn start_server() -> u16 {
+            let port = {
+                let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+                    .await
+                    .expect("binding a loopback port");
+                probe.local_addr().expect("probe has an address").port()
+            };
+            tokio::spawn(super::super::run_serve(port));
+
+            for _ in 0..100 {
+                if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                    return port;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("run_serve never started listening on port {port}");
+        }
+
+        async fn connect(port: u16) -> Ws {
+            let (ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}"))
+                .await
+                .expect("dev-serve should accept a loopback client sending no Origin header");
+            ws
+        }
+
+        async fn send(ws: &mut Ws, frame: serde_json::Value) {
+            ws.send(Message::Text(frame.to_string().into()))
+                .await
+                .expect("client frame should reach the server");
+        }
+
+        /// Reads until a `progress` frame carrying `kind` arrives and returns its
+        /// payload. Anything else on the wire is skipped.
+        async fn read_progress(ws: &mut Ws, kind: &str) -> serde_json::Value {
+            let found = timeout(REPLY_TIMEOUT, async {
+                while let Some(Ok(msg)) = ws.next().await {
+                    let Message::Text(text) = msg else { continue };
+                    let Ok(frame) = serde_json::from_str::<serde_json::Value>(text.as_str()) else {
+                        continue;
+                    };
+                    if frame.get("type").and_then(|v| v.as_str()) != Some("progress") {
+                        continue;
+                    }
+                    let payload = frame.get("payload").cloned().unwrap_or_default();
+                    if payload.get("kind").and_then(|v| v.as_str()) == Some(kind) {
+                        return Some(payload);
+                    }
+                }
+                None
+            })
+            .await;
+
+            match found {
+                Ok(Some(payload)) => payload,
+                Ok(None) => panic!("the connection closed before any {kind} frame arrived"),
+                Err(_) => panic!("no {kind} frame within {REPLY_TIMEOUT:?}"),
+            }
+        }
+
+        /// Like [`read_progress`], but for an `error` frame; returns its message.
+        async fn read_error(ws: &mut Ws) -> String {
+            let found = timeout(REPLY_TIMEOUT, async {
+                while let Some(Ok(msg)) = ws.next().await {
+                    let Message::Text(text) = msg else { continue };
+                    let Ok(frame) = serde_json::from_str::<serde_json::Value>(text.as_str()) else {
+                        continue;
+                    };
+                    if frame.get("type").and_then(|v| v.as_str()) == Some("error") {
+                        return frame
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                    }
+                }
+                None
+            })
+            .await;
+
+            match found {
+                Ok(Some(message)) => message,
+                Ok(None) => panic!("the connection closed before any error frame arrived"),
+                Err(_) => panic!("no error frame within {REPLY_TIMEOUT:?}"),
+            }
+        }
+
+        fn mock_job() -> serde_json::Value {
+            serde_json::json!({
+                "type": "run_job",
+                "job": {
+                    "mode": "flash",
+                    "chipId": "MOCK",
+                    "port": "/dev/mock",
+                    "baudRate": 115200
+                }
+            })
+        }
+
+        /// 基线：一个 MOCK 任务确实能通过 WS 从头跑到尾。
+        #[tokio::test]
+        async fn a_mock_job_runs_to_completion_over_the_socket() {
+            let port = start_server().await;
+            let mut ws = connect(port).await;
+
+            send(&mut ws, mock_job()).await;
+            let done = read_progress(&mut ws, "done").await;
+
+            assert!(
+                done.pointer("/result/ok").is_some(),
+                "a job left alone should finish Ok; got {done}",
+            );
+        }
+
+        /// 任务运行期间发出的 cancel，必须被读到并生效。
+        #[tokio::test]
+        async fn cancel_sent_while_a_job_runs_is_acted_on() {
+            let port = start_server().await;
+            let mut ws = connect(port).await;
+
+            send(&mut ws, mock_job()).await;
+            // 等到任务确实在跑，免得取消只是赢在了任务开始之前。
+            read_progress(&mut ws, "percent").await;
+
+            send(&mut ws, serde_json::json!({ "type": "cancel" })).await;
+
+            let done = read_progress(&mut ws, "done").await;
+            assert!(
+                done.pointer("/result/cancelled").is_some(),
+                "cancel was sent mid-job, but the run ended as {done} instead of cancelled \
+                 — the connection stopped reading client frames while the job held the loop",
+            );
+        }
+
+        /// 一条连接上同时只跑一个任务。以前这是靠「循环被阻住」隐含保证的，现在
+        /// 循环不再阻塞，就得明确拒绝——否则第二个任务会把共享的取消标志清掉，
+        /// 把第一个任务的取消一并取消了。
+        #[tokio::test]
+        async fn a_second_job_on_the_same_connection_is_refused() {
+            let port = start_server().await;
+            let mut ws = connect(port).await;
+
+            send(&mut ws, mock_job()).await;
+            read_progress(&mut ws, "percent").await;
+            send(&mut ws, mock_job()).await;
+
+            let message = read_error(&mut ws).await;
+            assert!(
+                message.contains("already running"),
+                "a second job should be refused while one is in flight; got {message:?}",
+            );
+        }
     }
 }
