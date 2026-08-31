@@ -36,7 +36,7 @@ muda = "0.17"
 # no new version to the tree.
 png = "0.17"
 tao = "0.34"
-tray-icon = "0.21"
+tray-icon = "0.24"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The GUI-process locale, read from CFLocale / GetUserDefaultLocaleName rather
