@@ -102,7 +102,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Dump raw USB/serial metadata for cross-OS survey (JSON). See `tmp/usb-port-survey.md`.
+    /// Dump raw USB/serial metadata for cross-OS survey (JSON).
     UsbPortSurvey,
     /// Hardware-reset the device via DTR/RTS (UART)
     Reset {

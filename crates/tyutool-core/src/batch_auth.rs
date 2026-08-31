@@ -1,4 +1,3 @@
-// src-tauri/src/batch_auth.rs
 //! Excel-based authorization row allocator for batch auth.
 
 use std::collections::HashSet;

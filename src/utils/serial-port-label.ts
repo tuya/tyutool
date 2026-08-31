@@ -65,11 +65,8 @@ export type TauriSerialPortRow = {
 };
 
 /**
- * Builds the dropdown / log label: `path (product)` plus optional i18n role suffix
- * when `portRole` matches `flash.portRoles.<role>`.
- */
-/**
- * Hover hint for VID/PID `1a86:55d2` only, keyed by USB interface (see `tmp/usb-port-survey.md`).
+ * Hover hint for VID/PID `1a86:55d2` only, keyed by USB interface (interface numbers
+ * measured on real hardware via the CLI `usb-port-survey` subcommand).
  * When the OS omits `usbInterface` (common on Linux), returns a generic dual-port hint instead of no tooltip.
  * macOS exposes CDC data interfaces (`1` / `3`), while Windows reports the paired control interfaces (`0` / `2`).
  * Returns `null` when not this probe or interface is outside those known dual-serial pairs.
@@ -101,6 +98,10 @@ export function tuyaDualSerialHoverTooltip(
   return null;
 }
 
+/**
+ * Builds the dropdown / log label: `path (product)` plus optional i18n role suffix
+ * when `portRole` matches `flash.portRoles.<role>`.
+ */
 export function formatSerialPortLabel(
   p: TauriSerialPortRow,
   t: (key: string) => string,

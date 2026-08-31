@@ -512,7 +512,9 @@ export const useFlashStore = defineStore("flash", () => {
         kind === "authorize" ? authorizeUuid.value.trim() || null : null,
       authorizeKey:
         kind === "authorize" ? authorizeAuthKey.value.trim() || null : null,
-      // TODO: expose authorizeStorage for T5AI when single-device auth UI supports OTP
+      // authorizeStorage is deliberately left unset (Rust defaults it to "kv"):
+      // single-device authorize never writes OTP. OTP is irreversible, so it is
+      // offered only on the batch-flash-auth path, behind its own warning.
     };
   }
 
