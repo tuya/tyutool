@@ -421,6 +421,19 @@ refactor/v3    ← main development branch (default); feature PRs merge here
   crate existing is not by itself a reason. A rule that applies repo-wide belongs in the root
   `AGENTS.md`, once; do not restate it in a scoped file.
 
+### Dispatching read-only sub-agents
+
+"Don't modify any files" is not a sufficient brief. An agent that reads it literally can still
+`git checkout <rev> -- .` to look at an older tree and consider that a read — that is exactly
+what happened once here, reverting and staging 29 tracked files on top of the caller's
+uncommitted work.
+
+- **List the commands the agent may run**: `git show` / `git log` / `git diff` / `grep` / `wc` /
+  `find` / `cat`.
+- **Explicitly forbid** `git checkout`, `git restore`, `git reset`, `git stash` and `git clean`
+  — *including* a temporary switch that gets switched back. The working tree is shared with the
+  caller, and one temporary switch overwrites whatever the caller has not committed.
+
 ### Documentation layout
 
 | Path | Contents |
