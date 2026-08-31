@@ -269,3 +269,51 @@ Create `crates/tyutool-core/tests/shipped_crates_exclude_mock_chip.rs`
 - 复现测试在修复前**确实失败过**，修复后通过；先绿的测试不算复现
 - serve 套件 28 → 31 全绿
 - 假设备仍然进不了发布产物（例外验过）
+
+---
+
+# Phase 3：用无头 mock 运行时测 `src-tauri` 的 flash 命令
+
+**动机：** 这是**发给用户的那条路径**。`flash_run` 里取消 Arc 的原子替换、等旧线程
+3 秒、confirm 通道，是仓库里最难看懂的几十行，而 979 行的 `lib.rs` 只有 32 个测试。
+
+## Task 14: dev-dependencies
+
+**Files:** Modify `src-tauri/Cargo.toml`
+
+- [x] **Step 1:** 加 `tauri = { version = "2", features = ["test"] }`（无头 mock 运行时）
+- [x] **Step 2:** 加 `tyutool-core = { features = ["mock-chip"] }`，同样走 dev-dependency
+  ——`tauri build` 底下是 `cargo build --release`，不编译 dev-dependency
+
+## Task 15: `flash_run` 泛型化（唯一的产线修改）
+
+**Files:** Modify `src-tauri/src/lib.rs`
+
+- [x] **Step 1:** `fn flash_run<R: Runtime>(app: AppHandle<R>, ..)`。裸写的 `AppHandle` 带
+  `#[default_runtime]`，实际是 `AppHandle<Wry>`，需要真实 WebView，测试里造不出来。
+  只改签名，行为不变；`generate_handler!` 依旧解析到 app 自己的运行时
+
+## Task 16: 测试
+
+**Files:** Modify `src-tauri/src/lib.rs`
+
+- [x] **Step 1:** 在**主** `mod tests` 下新增 `mod flash_commands`，用
+  `mock_builder` + `mock_context(noop_assets())` 造 app，`manage` 两个 state
+- [x] **Step 2:** 四个用例：任务跑完且进度以 `flash-progress` 送达；中途 `flash_cancel`
+  生效；启动第二个任务把第一个取消（验证那段注释声称的性质）；无待决确认时
+  `authorize_confirm_cmd` 报错
+- [x] **Step 3:** ⚠ 落点必须是主 `mod tests`。测试最初落在了 `mod xdg_command_tests`，
+  而它带 `#[cfg(target_os = "linux")]`——ubuntu CI 上照跑，但 Windows / macOS 上会静默
+  消失。已移回
+
+## Task 17: 封锁验证
+
+- [x] **Step 1:** 守卫测试仍通过（dev-dependencies 是已写明依据的例外）
+- [x] **Step 2:** `cargo build --release -p tyutool_gui` 必须成功——假芯片若泄进 GUI 产物，
+  第一道封锁会当场编译失败
+
+## Phase 3 验收标准
+
+- src-tauri 套件 32 → 36 全绿，且新用例不在任何 `cfg` 门控的模块里
+- 产线改动仅限 `flash_run` 的签名泛型化，无行为变化
+- GUI 的 release 构建干净
