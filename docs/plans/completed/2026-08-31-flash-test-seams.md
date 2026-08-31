@@ -1,6 +1,9 @@
 # 烧录编排可测缝隙 实施计划
 
-**Spec:** `docs/specs/2026-08-31-flash-test-seams-design.md`
+**Spec:** `docs/specs/completed/2026-08-31-flash-test-seams-design.md`
+
+**状态：** 已交付——PR #171，rebase-merge 至 `refactor/v3`，末位提交 `869fcb1`。
+CI 全绿（core+cli+serve 1m41s、tauri 2m8s、bridge 2m26s、frontend 51s）。
 
 **Goal:** 给 `tyutool-core` 开一个插件注入缝隙，并提供一个 feature 门控的假芯片插件，
 使 `run_job` 的编排逻辑（事件顺序、取消、错误映射）第一次可以在没有硬件的情况下被测试。

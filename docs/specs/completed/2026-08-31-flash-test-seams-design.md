@@ -1,9 +1,13 @@
 # 烧录编排的可测缝隙设计：假芯片插件
 
 **日期：** 2026-08-31
-**状态：** 待实现
-**范围：** `tyutool-core` 的插件注册与 `run_job` 调度入口
-**计划：** `docs/plans/2026-08-31-flash-test-seams.md`
+**状态：** 已实现（PR #171，rebase-merge 至 `refactor/v3`，末位提交 `869fcb1`）
+**范围：** `tyutool-core` 的插件注册与 `run_job` 调度入口；实际向上延伸到了
+`tyutool-serve`（修复取消失效）与 `src-tauri`（命令测试）
+**计划：** `docs/plans/completed/2026-08-31-flash-test-seams.md`
+**未完成部分：** 四个阶段均已交付，但本文列举的几项缺口仍在：
+`AuthorizeConfirm` 死锁无直接测试、录制回放只盖读取路径且只盖 Beken 系。
+另外「`flash_run` 与 `handle_run_job` 重复编排」未合并，另起一份 spec。
 **实测基准：** 本文所有计数、行号均实测于 `edece84`（`refactor/v3`）。修改本文时请重测并更新此行的 commit。
 
 ---
