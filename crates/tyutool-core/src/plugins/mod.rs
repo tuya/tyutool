@@ -7,6 +7,8 @@ pub mod esp32c6;
 pub mod esp32p4;
 pub mod esp32s3;
 pub mod ln882h;
+#[cfg(feature = "mock-chip")]
+pub mod mock;
 pub mod t1;
 pub mod t2;
 pub mod t3;
@@ -19,6 +21,8 @@ pub use esp32c6::Esp32c6Plugin;
 pub use esp32p4::Esp32p4Plugin;
 pub use esp32s3::Esp32s3Plugin;
 pub use ln882h::Ln882hPlugin;
+#[cfg(feature = "mock-chip")]
+pub use mock::MockPlugin;
 pub use t1::T1Plugin;
 pub use t2::T2Plugin;
 pub use t3::T3Plugin;

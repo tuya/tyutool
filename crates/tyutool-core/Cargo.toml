@@ -27,6 +27,14 @@ excel = ["dep:calamine", "dep:rust_xlsxwriter"]
 # tyutool-bridge never derive `TS` and must leave this disabled so they don't
 # link the ts-rs macro crate for a capability they don't use.
 ts-rs = ["dep:ts-rs"]
+# Enables the scripted mock chip plugin (`plugins::mock::MockPlugin`), which
+# answers a flash job without ever touching a serial port, so `run_job`'s
+# orchestration can be driven in tests. Test-only: every shipped binary must
+# leave it off — only `cargo test` invocations turn it on. It sits behind a
+# feature rather than `#[cfg(test)]` because a `#[cfg(test)]` item exists only
+# while compiling *this* crate's own tests, and the tyutool-serve / src-tauri
+# suites are separate compilation units that could never see it.
+mock-chip = []
 
 [dev-dependencies]
 serde_json = "1"
