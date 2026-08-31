@@ -5,7 +5,7 @@ mod updater;
 mod window;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::thread::JoinHandle;
@@ -21,14 +21,17 @@ use tyutool_core::{
 static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 struct FlashState {
-    /// Cancel signal for the **current** operation. Wrapped in a Mutex so
-    /// flash_run can atomically swap in a fresh Arc for the new operation while
-    /// leaving the old Arc signalled — preventing the old thread's cancel from
-    /// being cleared when a new operation starts.
-    cancel: StdMutex<Arc<AtomicBool>>,
+    /// Cancel signal for the current operation. The slot guarantees a new
+    /// operation gets a *fresh* flag rather than a reset one, so starting a job
+    /// can never clear the cancel an older thread is still watching.
+    cancel: tyutool_core::CancelSlot,
     /// Handle to the running flash thread, if any. Joined (with 3 s timeout)
     /// before a new operation spawns, ensuring the serial port is fully
     /// released. On timeout the new operation is rejected rather than racing.
+    ///
+    /// Stays here rather than in the slot: waiting for the previous thread is
+    /// this frontend's policy (tyutool-serve refuses instead), and the handle
+    /// type is `std::thread`'s, not tokio's.
     thread: StdMutex<Option<JoinHandle<()>>>,
 }
 
@@ -36,7 +39,7 @@ struct FlashState {
 /// overwrite-confirmation dialog. The sender is set by `flash_run` before
 /// blocking; `authorize_confirm_cmd` resolves it with the user's choice.
 struct ConfirmState {
-    sender: Arc<StdMutex<Option<std::sync::mpsc::Sender<bool>>>>,
+    slot: Arc<tyutool_core::ConfirmSlot>,
 }
 
 /// Detect the installation type at runtime based on the executable's path.
@@ -165,20 +168,11 @@ fn flash_run<R: Runtime>(
     );
 
     // Clear any stale confirm sender from a previous run that exited abnormally.
-    if let Ok(mut g) = confirm_state.sender.lock() {
-        *g = None;
-    }
+    confirm_state.slot.clear();
 
-    // Create a fresh cancel flag for this operation and signal the old one.
-    // Swapping atomically under the mutex ensures the old Arc stays `true`
-    // while the new Arc starts at `false` — the two operations never share a
-    // cancel flag, so starting a new job cannot un-cancel the previous one.
-    let new_cancel = Arc::new(AtomicBool::new(false));
-    let old_cancel = {
-        let mut guard = state.cancel.lock().map_err(|e| e.to_string())?;
-        std::mem::replace(&mut *guard, new_cancel.clone())
-    };
-    old_cancel.store(true, Ordering::SeqCst);
+    // Signal the previous operation and take a fresh flag for this one. The two
+    // never share a flag — see `CancelSlot`.
+    let cancel = state.cancel.begin();
 
     // Wait up to 3 seconds for the previous thread to exit.  If it hasn't
     // finished — e.g. blocked on a serial read with a long timeout — reject
@@ -200,18 +194,11 @@ fn flash_run<R: Runtime>(
         }
     }
 
-    let cancel = new_cancel;
-
     // Inject confirm callback: blocks until the frontend calls authorize_confirm_cmd.
     // AuthConflict is already emitted by core's progress callback; no need to re-emit here.
-    let confirm_sender = Arc::clone(&confirm_state.inner().sender);
+    let confirm = Arc::clone(&confirm_state.inner().slot);
     job.confirm_overwrite = Some(Box::new(move |_existing_uuid, _existing_authkey| {
-        let (tx, rx) = std::sync::mpsc::channel::<bool>();
-        {
-            let mut guard = confirm_sender.lock().unwrap_or_else(|e| e.into_inner());
-            *guard = Some(tx);
-        }
-        rx.recv().unwrap_or(false)
+        confirm.ask()
     }));
 
     let app = app.clone();
@@ -228,27 +215,21 @@ fn flash_run<R: Runtime>(
 #[tauri::command]
 fn flash_cancel(state: State<'_, FlashState>, confirm_state: State<'_, ConfirmState>) {
     log::info!("[Flash] User cancelled operation");
-    if let Ok(guard) = state.cancel.lock() {
-        guard.store(true, Ordering::SeqCst);
-    }
+    state.cancel.cancel();
     // Wake any thread blocked in confirm_overwrite so it can return Cancelled.
-    if let Ok(mut sender_guard) = confirm_state.sender.lock() {
-        if let Some(tx) = sender_guard.take() {
-            let _ = tx.send(false);
-        }
-    }
+    confirm_state.slot.resolve(false);
 }
 
 /// Resolve a pending overwrite-confirmation from `run_authorize`.
 /// Called by the frontend after the user responds to the AuthConflict dialog.
 #[tauri::command]
 fn authorize_confirm_cmd(state: State<'_, ConfirmState>, confirmed: bool) -> Result<(), String> {
-    let mut guard = state.sender.lock().map_err(|e| e.to_string())?;
-    if let Some(tx) = guard.take() {
-        let _ = tx.send(confirmed);
+    if state.slot.resolve(confirmed) {
         log::info!("[auth] confirm resolved: {}", confirmed);
         Ok(())
     } else {
+        // Not cosmetic: succeeding here with nothing pending would let the
+        // frontend believe a dialog it never raised had been dealt with.
         log::warn!("[auth] confirm called with no pending authorization");
         Err("no pending authorization confirmation".into())
     }
@@ -640,7 +621,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(FlashState {
-            cancel: StdMutex::new(Arc::new(AtomicBool::new(false))),
+            cancel: tyutool_core::CancelSlot::new(),
             thread: StdMutex::new(None),
         })
         .manage({
@@ -671,7 +652,7 @@ pub fn run() {
             })),
         })
         .manage(ConfirmState {
-            sender: Arc::new(StdMutex::new(None)),
+            slot: Arc::new(tyutool_core::ConfirmSlot::new()),
         })
         .manage(updater::UpdateState {
             pending: StdMutex::new(None),
@@ -929,11 +910,11 @@ mod tests {
         fn test_app() -> App<MockRuntime> {
             mock_builder()
                 .manage(FlashState {
-                    cancel: StdMutex::new(Arc::new(AtomicBool::new(false))),
+                    cancel: tyutool_core::CancelSlot::new(),
                     thread: StdMutex::new(None),
                 })
                 .manage(ConfirmState {
-                    sender: Arc::new(StdMutex::new(None)),
+                    slot: Arc::new(tyutool_core::ConfirmSlot::new()),
                 })
                 .build(mock_context(noop_assets()))
                 .expect("the mock app should build")

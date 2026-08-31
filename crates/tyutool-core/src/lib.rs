@@ -33,6 +33,7 @@ pub mod diagnostics;
 mod error;
 pub mod flash_event;
 mod job;
+mod job_control;
 mod plugin;
 pub mod plugins;
 mod registry;
@@ -64,6 +65,7 @@ pub use flash_event::{
     FlashEvent, FlashMilestone, FlashPhase, FlashResult, JobDetails, JobSummary,
 };
 pub use job::{FlashJob, FlashMode};
+pub use job_control::{CancelSlot, ConfirmSlot};
 pub use plugin::FlashPlugin;
 #[cfg(feature = "mock-chip")]
 pub use plugins::mock::MockPlugin;
