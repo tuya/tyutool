@@ -1,4 +1,5 @@
-//! Raw serial/USB enumeration for cross-OS surveys (see `tmp/usb-port-survey.md`).
+//! Raw serial/USB enumeration for cross-OS surveys; exposed as the CLI `usb-port-survey`
+//! subcommand.
 //! Uses the same `usbportinfo-interface` data as the rest of the crate; independent of
 //! `list_serial_ports` filtering except for the `wouldListInTyutool` hint.
 

@@ -1,6 +1,7 @@
 //! Known Tuya / dev-board USB dual-serial role hints: `(VID, PID, interface)` → role string for UI.
 //!
-//! Populate [`USB_PORT_ROLE_RULES`] from hardware docs and `tmp/usb-port-survey.md` measurements.
+//! Populate [`USB_PORT_ROLE_RULES`] from hardware docs and real-hardware measurements
+//! (the CLI `usb-port-survey` subcommand dumps them).
 //! Wrong rules mislabel ports — prefer empty table until verified.
 
 /// Stable machine keys consumed by the Vue i18n tree `flash.portRoles.*`.
