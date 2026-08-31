@@ -463,6 +463,449 @@ impl<'a, T: IoTransport> Transport<'a, T> {
         let _ = self.io.clear_buffers();
     }
 }
+// ─────────────────────────────────────────────────────────────────────────
+// Record / replay of the byte stream
+// ─────────────────────────────────────────────────────────────────────────
+//
+// A hand-written mock proves the driver matches *our understanding* of a chip.
+// It cannot prove that understanding is right — the responses were invented by
+// whoever wrote the test. Recording a real device once and replaying it closes
+// that gap for the paths that get recorded: the bytes are the device's own.
+//
+// Cost, stated plainly: a recording is a snapshot. Any deliberate protocol
+// change makes it stale, and refreshing it needs the hardware again. So record
+// a small, central path — not everything.
+//
+// ⚠ Never record an authorize run. The credential frames would land in the file
+// in plaintext, and this file is a committed fixture. See the credential
+// isolation contract in AGENTS.md.
+
+/// One transport call, as stored in a recording.
+///
+/// The wire format is one op per line, hex-encoded, so a reviewer can read a
+/// diff of the fixture and see what actually changed on the wire.
+#[cfg(any(feature = "record-io", test))]
+#[derive(Debug, Clone, PartialEq)]
+pub enum TraceOp {
+    WriteAll(Vec<u8>),
+    Write { data: Vec<u8>, returned: usize },
+    Read(Vec<u8>),
+    ReadErr(String),
+    SetBaudRate(u32),
+    SetDtr(bool),
+    SetRts(bool),
+    ClearBuffers,
+    Flush,
+    SetTimeout(u128),
+}
+
+#[cfg(any(feature = "record-io", test))]
+impl TraceOp {
+    fn to_hex(bytes: &[u8]) -> String {
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            out.push_str(&format!("{b:02x}"));
+        }
+        out
+    }
+
+    fn from_hex(text: &str) -> Option<Vec<u8>> {
+        if !text.len().is_multiple_of(2) {
+            return None;
+        }
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
+            .collect()
+    }
+
+    pub fn encode(&self) -> String {
+        match self {
+            Self::WriteAll(data) => format!("W {}", Self::to_hex(data)),
+            Self::Write { data, returned } => format!("w {returned} {}", Self::to_hex(data)),
+            Self::Read(data) => format!("R {}", Self::to_hex(data)),
+            Self::ReadErr(kind) => format!("E {kind}"),
+            Self::SetBaudRate(baud) => format!("B {baud}"),
+            Self::SetDtr(level) => format!("D {}", u8::from(*level)),
+            Self::SetRts(level) => format!("T {}", u8::from(*level)),
+            Self::ClearBuffers => "C".to_string(),
+            Self::Flush => "F".to_string(),
+            Self::SetTimeout(millis) => format!("O {millis}"),
+        }
+    }
+
+    pub fn decode(line: &str) -> Option<Self> {
+        let line = line.trim();
+        let (tag, rest) = match line.split_once(' ') {
+            Some((tag, rest)) => (tag, rest),
+            None => (line, ""),
+        };
+        match tag {
+            "W" => Some(Self::WriteAll(Self::from_hex(rest)?)),
+            "w" => {
+                let (returned, hex) = rest.split_once(' ')?;
+                Some(Self::Write {
+                    data: Self::from_hex(hex)?,
+                    returned: returned.parse().ok()?,
+                })
+            }
+            "R" => Some(Self::Read(Self::from_hex(rest)?)),
+            "E" => Some(Self::ReadErr(rest.to_string())),
+            "B" => Some(Self::SetBaudRate(rest.parse().ok()?)),
+            "D" => Some(Self::SetDtr(rest == "1")),
+            "T" => Some(Self::SetRts(rest == "1")),
+            "C" => Some(Self::ClearBuffers),
+            "F" => Some(Self::Flush),
+            "O" => Some(Self::SetTimeout(rest.parse().ok()?)),
+            _ => None,
+        }
+    }
+}
+
+/// Wraps a live transport and appends every call to a recording file.
+///
+/// Switched on by the `TYUTOOL_RECORD_IO` environment variable naming the output
+/// path; see `run_beken`. Behind the `record-io` feature so no shipped binary
+/// carries it.
+#[cfg(feature = "record-io")]
+pub struct RecordIo<T: IoTransport> {
+    inner: T,
+    sink: std::io::BufWriter<std::fs::File>,
+}
+
+#[cfg(feature = "record-io")]
+impl<T: IoTransport> RecordIo<T> {
+    /// Environment variable naming the recording's output path.
+    pub const ENV: &'static str = "TYUTOOL_RECORD_IO";
+
+    pub fn new(inner: T, path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        let file = std::fs::File::create(path.as_ref())?;
+        log::info!("[record-io] recording transport to {:?}", path.as_ref());
+        Ok(Self {
+            inner,
+            sink: std::io::BufWriter::new(file),
+        })
+    }
+
+    fn put(&mut self, op: TraceOp) {
+        use std::io::Write as _;
+        let _ = writeln!(self.sink, "{}", op.encode());
+    }
+}
+
+#[cfg(feature = "record-io")]
+impl<T: IoTransport> Drop for RecordIo<T> {
+    fn drop(&mut self) {
+        use std::io::Write as _;
+        let _ = self.sink.flush();
+    }
+}
+
+#[cfg(feature = "record-io")]
+impl<T: IoTransport> IoTransport for RecordIo<T> {
+    fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+        let result = self.inner.write_all(data);
+        if result.is_ok() {
+            self.put(TraceOp::WriteAll(data.to_vec()));
+        }
+        result
+    }
+
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        let result = self.inner.write(data);
+        if let Ok(returned) = result {
+            self.put(TraceOp::Write {
+                data: data.to_vec(),
+                returned,
+            });
+        }
+        result
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let result = self.inner.read(buf);
+        match &result {
+            Ok(n) => self.put(TraceOp::Read(buf[..*n].to_vec())),
+            // Timeouts are ordinary here, and the driver branches on them, so
+            // they are part of the recording rather than an abort.
+            Err(e) => self.put(TraceOp::ReadErr(format!("{:?}", e.kind()))),
+        }
+        result
+    }
+
+    fn set_baud_rate(&mut self, baud: u32) -> io::Result<()> {
+        let result = self.inner.set_baud_rate(baud);
+        if result.is_ok() {
+            self.put(TraceOp::SetBaudRate(baud));
+        }
+        result
+    }
+
+    fn set_dtr(&mut self, level: bool) -> io::Result<()> {
+        let result = self.inner.set_dtr(level);
+        if result.is_ok() {
+            self.put(TraceOp::SetDtr(level));
+        }
+        result
+    }
+
+    fn set_rts(&mut self, level: bool) -> io::Result<()> {
+        let result = self.inner.set_rts(level);
+        if result.is_ok() {
+            self.put(TraceOp::SetRts(level));
+        }
+        result
+    }
+
+    fn clear_buffers(&mut self) -> io::Result<()> {
+        let result = self.inner.clear_buffers();
+        if result.is_ok() {
+            self.put(TraceOp::ClearBuffers);
+        }
+        result
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let result = self.inner.flush();
+        if result.is_ok() {
+            self.put(TraceOp::Flush);
+        }
+        result
+    }
+
+    fn set_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        let result = self.inner.set_timeout(timeout);
+        if result.is_ok() {
+            self.put(TraceOp::SetTimeout(timeout.as_millis()));
+        }
+        result
+    }
+}
+
+/// Serves a recording back to the driver, checking that it still asks for the
+/// same things in the same order.
+///
+/// Divergence panics rather than returning an error: this is a test double, and
+/// the useful outcome is a message naming the op index and what changed, not a
+/// failure funnelled through the driver's own error handling.
+#[cfg(test)]
+pub struct ReplayIo {
+    ops: std::collections::VecDeque<TraceOp>,
+    /// Bytes of a recorded read the caller's buffer was too small to take.
+    /// A faithful replay never needs this — the driver passes the same buffer
+    /// sizes it did when recording — but silently truncating would be worse.
+    pending: Vec<u8>,
+    consumed: usize,
+}
+
+#[cfg(test)]
+impl ReplayIo {
+    /// Parses a recording. Blank lines and `#` comments are ignored, so a
+    /// fixture can carry a header saying where it came from.
+    pub fn parse(text: &str) -> Self {
+        let ops = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                TraceOp::decode(line).unwrap_or_else(|| panic!("bad recording line: {line:?}"))
+            })
+            .collect();
+        Self {
+            ops,
+            pending: Vec::new(),
+            consumed: 0,
+        }
+    }
+
+    /// How many ops are left. A replay test asserts this is zero at the end:
+    /// a driver that stops early is as much a change as one that asks for more.
+    pub fn remaining(&self) -> usize {
+        self.ops.len()
+    }
+
+    fn next_op(&mut self, expected: &str) -> TraceOp {
+        self.consumed += 1;
+        self.ops.pop_front().unwrap_or_else(|| {
+            panic!(
+                "recording exhausted at op {}: the driver asked for {expected} but the device \
+                 never saw that call. It is doing more than it did when this was recorded.",
+                self.consumed
+            )
+        })
+    }
+
+    fn mismatch(&self, called: &str, recorded: &TraceOp) -> ! {
+        panic!(
+            "recording diverged at op {}: the driver called {called}, but the device next saw \
+             {recorded:?}",
+            self.consumed
+        )
+    }
+
+    /// Whether the next recorded op is something the device answered a read
+    /// with. See the note on extra polls in [`IoTransport::read`] below.
+    fn next_is_a_read(&self) -> bool {
+        matches!(
+            self.ops.front(),
+            Some(TraceOp::Read(_)) | Some(TraceOp::ReadErr(_))
+        )
+    }
+}
+
+#[cfg(test)]
+impl IoTransport for ReplayIo {
+    fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+        match self.next_op("write_all") {
+            TraceOp::WriteAll(recorded) => {
+                if recorded != data {
+                    panic!(
+                        "recording diverged at op {}: the driver wrote {} but the recording has {}",
+                        self.consumed,
+                        TraceOp::to_hex(data),
+                        TraceOp::to_hex(&recorded),
+                    );
+                }
+                Ok(())
+            }
+            other => self.mismatch("write_all", &other),
+        }
+    }
+
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        match self.next_op("write") {
+            TraceOp::Write {
+                data: recorded,
+                returned,
+            } => {
+                if recorded != data {
+                    panic!(
+                        "recording diverged at op {}: the driver wrote {} but the recording has {}",
+                        self.consumed,
+                        TraceOp::to_hex(data),
+                        TraceOp::to_hex(&recorded),
+                    );
+                }
+                Ok(returned)
+            }
+            other => self.mismatch("write", &other),
+        }
+    }
+
+    /// A read is a *question*, and silence is a legitimate answer — so an extra
+    /// poll is not a protocol divergence.
+    ///
+    /// This matters because the driver bounds some read loops by wall-clock
+    /// (`recv_frame`'s deadline). Replayed reads return instantly, so the same
+    /// loop gets through more iterations than it did against real hardware and
+    /// asks a few more times before giving up. Answering those extra polls with
+    /// a timeout — without consuming a recorded op — reproduces exactly what the
+    /// device did: it said nothing.
+    ///
+    /// Strictness lives on the write side instead, which is where the protocol
+    /// assertions actually are. A driver that skips or reorders a recorded
+    /// exchange still trips the check on its next write.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if !self.pending.is_empty() {
+            let n = self.pending.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.pending[..n]);
+            self.pending.drain(..n);
+            return Ok(n);
+        }
+        if !self.next_is_a_read() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "replay: the device had nothing more to say at this point",
+            ));
+        }
+        match self.next_op("read") {
+            TraceOp::Read(recorded) => {
+                let n = recorded.len().min(buf.len());
+                buf[..n].copy_from_slice(&recorded[..n]);
+                if n < recorded.len() {
+                    self.pending = recorded[n..].to_vec();
+                }
+                Ok(n)
+            }
+            TraceOp::ReadErr(kind) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("replay: recorded read error {kind}"),
+            )),
+            other => self.mismatch("read", &other),
+        }
+    }
+
+    fn set_baud_rate(&mut self, baud: u32) -> io::Result<()> {
+        match self.next_op("set_baud_rate") {
+            TraceOp::SetBaudRate(recorded) => {
+                assert_eq!(
+                    recorded, baud,
+                    "recording diverged at op {}: baud rate",
+                    self.consumed
+                );
+                Ok(())
+            }
+            other => self.mismatch("set_baud_rate", &other),
+        }
+    }
+
+    fn set_dtr(&mut self, level: bool) -> io::Result<()> {
+        match self.next_op("set_dtr") {
+            TraceOp::SetDtr(recorded) => {
+                assert_eq!(
+                    recorded, level,
+                    "recording diverged at op {}: DTR level",
+                    self.consumed
+                );
+                Ok(())
+            }
+            other => self.mismatch("set_dtr", &other),
+        }
+    }
+
+    fn set_rts(&mut self, level: bool) -> io::Result<()> {
+        match self.next_op("set_rts") {
+            TraceOp::SetRts(recorded) => {
+                assert_eq!(
+                    recorded, level,
+                    "recording diverged at op {}: RTS level",
+                    self.consumed
+                );
+                Ok(())
+            }
+            other => self.mismatch("set_rts", &other),
+        }
+    }
+
+    fn clear_buffers(&mut self) -> io::Result<()> {
+        match self.next_op("clear_buffers") {
+            TraceOp::ClearBuffers => Ok(()),
+            other => self.mismatch("clear_buffers", &other),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self.next_op("flush") {
+            TraceOp::Flush => Ok(()),
+            other => self.mismatch("flush", &other),
+        }
+    }
+
+    fn set_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        match self.next_op("set_timeout") {
+            TraceOp::SetTimeout(recorded) => {
+                assert_eq!(
+                    recorded,
+                    timeout.as_millis(),
+                    "recording diverged at op {}: read timeout",
+                    self.consumed
+                );
+                Ok(())
+            }
+            other => self.mismatch("set_timeout", &other),
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Mock I/O for testing

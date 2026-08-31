@@ -29,9 +29,14 @@ const SHIPPED_MANIFESTS: &[&str] = &[
     "src-tauri/Cargo.toml",
 ];
 
-const FEATURE: &str = "mock-chip";
-/// The forwarding spelling, as it would appear in a `[features]` entry.
-const FORWARDED: &str = "tyutool-core/mock-chip";
+/// Every tyutool-core feature that exists for tests and must never be built into
+/// something a user receives.
+///
+/// `mock-chip` registers a fake device in the default registry — a shipped build
+/// carrying it would offer users a chip that only pretends to flash. `record-io`
+/// writes raw serial traffic to a file, and the authorize flow's traffic carries
+/// credentials in plaintext.
+const TEST_ONLY_FEATURES: &[&str] = &["mock-chip", "record-io"];
 
 /// The one exemption, and the reason for it: **cargo never compiles a
 /// dev-dependency into a `cargo build` / `cargo build --release`**, so a
@@ -57,13 +62,14 @@ fn workspace_root() -> PathBuf {
 /// `[target.'cfg(...)'.dependencies]` entry or a future table shape cannot slip
 /// past. Two ways in are checked:
 ///
-///   * a `tyutool-core` dependency whose `features` array holds `mock-chip`;
-///   * any array holding the forwarding string `tyutool-core/mock-chip`, which
+///   * a `tyutool-core` dependency whose `features` array holds the feature;
+///   * any array holding the forwarding string `tyutool-core/<feature>`, which
 ///     is how a `[features]` entry would pull it in.
 ///
-/// Both are structural — a *comment* mentioning the feature is fine, which a
+/// Both are structural — a *comment* mentioning a feature is fine, which a
 /// plain text scan could not manage given this file's own prose.
-fn enables_mock_chip(value: &toml::Value) -> bool {
+fn enables(value: &toml::Value, feature: &str) -> bool {
+    let forwarded = format!("tyutool-core/{feature}");
     match value {
         toml::Value::Table(table) => table.iter().any(|(key, child)| {
             // Skipped at any nesting depth, so `[target.'cfg(..)'.dev-dependencies]`
@@ -71,14 +77,14 @@ fn enables_mock_chip(value: &toml::Value) -> bool {
             if key == EXEMPT_TABLE {
                 return false;
             }
-            if key == "tyutool-core" && dependency_features(child).contains(&FEATURE) {
+            if key == "tyutool-core" && dependency_features(child).contains(&feature) {
                 return true;
             }
-            enables_mock_chip(child)
+            enables(child, feature)
         }),
         toml::Value::Array(items) => items
             .iter()
-            .any(|item| item.as_str() == Some(FORWARDED) || enables_mock_chip(item)),
+            .any(|item| item.as_str() == Some(forwarded.as_str()) || enables(item, feature)),
         _ => false,
     }
 }
@@ -92,7 +98,7 @@ fn dependency_features(dependency: &toml::Value) -> Vec<&str> {
 }
 
 #[test]
-fn no_shipped_crate_enables_mock_chip() {
+fn no_shipped_crate_enables_a_test_only_feature() {
     let root = workspace_root();
 
     for relative in SHIPPED_MANIFESTS {
@@ -103,13 +109,16 @@ fn no_shipped_crate_enables_mock_chip() {
             .parse()
             .unwrap_or_else(|e| panic!("cannot parse {relative}: {e}"));
 
-        assert!(
-            !enables_mock_chip(&manifest),
-            "{relative} enables tyutool-core's `{FEATURE}` feature.\n\
-             That feature registers a fake chip plugin in the default registry and must never \
-             reach a shipped artifact. Enable it on the `cargo test` command line instead \
-             (`cargo test -p tyutool-core --features {FEATURE}`), never in a manifest.",
-        );
+        for feature in TEST_ONLY_FEATURES {
+            assert!(
+                !enables(&manifest, feature),
+                "{relative} enables tyutool-core's `{feature}` feature.\n\
+                 That feature exists for tests only and must never reach a shipped artifact. \
+                 Turn it on from a `cargo test --features {feature}` command line, or through a \
+                 dev-dependency (never compiled into a release build) — never through a normal \
+                 dependency or a `[features]` entry.",
+            );
+        }
     }
 }
 
