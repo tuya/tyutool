@@ -183,7 +183,7 @@ MockPlugin::simulated(id)             // 按真实时间走完一次烧录，全
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | 二 | 测 `tyutool-serve` 的连接循环 | ✅ 已完成，见下 |
-| 三 | 用 `tauri::test::mock_builder` 测 `flash_run` | 待做；需给 `src-tauri` dev-deps 加 `tauri = { features = ["test"] }` |
+| 三 | 用 `tauri::test::mock_builder` 测 `flash_run` | ✅ 已完成，见下 |
 | 四 | `ReplayIo`：录制真实串口字节流，回放做协议基线 | 待做；需要一次真实硬件录制 |
 
 ---
@@ -252,3 +252,35 @@ cargo 在构建测试时合并 normal + dev 依赖的 feature，所以 serve 的
 这里要说清楚的是：统一只发生在**测试二进制**上。`cargo build` / `cargo build --release`
 不编译 dev-dependency，所以发布产物不受影响。但意味着「没人开这个 feature」不再是一个可依赖
 的前提，**封锁完全靠那两道保障**。以后又有哪个 crate 断言注册表内容时，记得同样排除。
+
+---
+
+## 阶段三的结果：`src-tauri` 的 flash 命令终于可测
+
+`flash_run` 是仓库里最难看懂的几十行之一（取消 Arc 的原子替换、等旧线程 3 秒、confirm
+通道），而 979 行的 `lib.rs` 只有 32 个测试，这段一行未测。
+
+用 Tauri 官方的无头 mock 运行时（`tauri::test::mock_builder`）+ `MOCK` 假设备，现在可以在
+没有 WebView、没有硬件的情况下直接驱动它。四个用例：任务跑完并以 `flash-progress`
+事件送达前端；中途 `flash_cancel` 生效；**启动第二个任务会把第一个取消而不是两者共用
+标志位**（那段注释声称的性质，这回有证据了）；无待决确认时 `authorize_confirm_cmd` 报错。
+
+结论：GUI 没有 serve 那个取消失效问题——但这一点以前是推断，现在是测试。
+
+### 一处产线修改：`flash_run` 泛型化
+
+裸写的 `AppHandle` 带 `#[default_runtime]`，实际是 `AppHandle<Wry>`，而 `Wry` 需要真实
+WebView，测试里造不出来。改成 `fn flash_run<R: Runtime>(app: AppHandle<R>, ..)`，
+`tauri::generate_handler!` 依旧把它解析到 app 自己的运行时。**只改签名，行为不变**，
+这也是 Tauri 自己文档推荐的可测写法。
+
+### 一个差点踩到的坑
+
+测试最初落在了 `mod xdg_command_tests` 里——而那个模块带 `#[cfg(target_os = "linux")]`。
+它在 ubuntu 的 CI 上照跑不误，但在 Windows / macOS 上会**静默消失**。已移到主 `mod tests`。
+往这个文件加测试时看一眼落点所在的模块有没有 `cfg`。
+
+### 封锁对 GUI 同样验过
+
+src-tauri 拿假设备走的也是 dev-dependency。`cargo build --release -p tyutool_gui`（`tauri
+build` 底下就是它）构建成功，假芯片若泄进去会当场编译失败。

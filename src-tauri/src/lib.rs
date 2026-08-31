@@ -11,7 +11,7 @@ use std::sync::Mutex as StdMutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use tyutool_core::{
     create_serial_debug_state_resilient, serial_debug_archive_dir, SerialDebugGeneration,
@@ -145,9 +145,13 @@ fn list_serial_ports_cmd() -> Result<Vec<tyutool_core::SerialPortEntry>, String>
     Ok(ports)
 }
 
+/// Generic over the runtime so the headless `tauri::test` mock runtime can drive
+/// it. A bare `AppHandle` means `AppHandle<Wry>`, which needs a real WebView and
+/// so cannot be built in a test; `tauri::generate_handler!` resolves the
+/// parameter to the app's own runtime either way. Behaviour is unchanged.
 #[tauri::command]
-fn flash_run(
-    app: AppHandle,
+fn flash_run<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, FlashState>,
     confirm_state: State<'_, ConfirmState>,
     mut job: tyutool_core::FlashJob,
@@ -903,6 +907,145 @@ mod tests {
         assert!(dest.join("auth.bin").exists());
         assert!(dest.join("batch-summary.json").exists());
         assert!(!dest.join("codes.xlsx").exists());
+    }
+
+    // ── flash 命令（Tauri 无头 mock 运行时）────────────────────────────────
+    //
+    // 用 `tauri::test` 的 mock 运行时驱动真实的 `flash_run` / `flash_cancel`，
+    // 芯片是 tyutool-core 的 `MOCK` 假设备（见本 crate 的 dev-dependency）。
+    // 没有 WebView，也没有硬件。
+    //
+    // 盖的是 `flash_run` 里真正算逻辑的那部分——取消标志的原子替换、等待上一个
+    // 任务退出、以及进度确实以 `flash-progress` 事件送到了监听者手上。979 行的
+    // lib.rs 里这一段此前一行未测。
+    mod flash_commands {
+        use super::*;
+        use std::sync::mpsc;
+        use std::time::Instant;
+        use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+        use tauri::{App, Listener};
+
+        /// 只挂 flash 命令用得到的两个 state；其余 manage 的东西这些用例碰不到。
+        fn test_app() -> App<MockRuntime> {
+            mock_builder()
+                .manage(FlashState {
+                    cancel: StdMutex::new(Arc::new(AtomicBool::new(false))),
+                    thread: StdMutex::new(None),
+                })
+                .manage(ConfirmState {
+                    sender: Arc::new(StdMutex::new(None)),
+                })
+                .build(mock_context(noop_assets()))
+                .expect("the mock app should build")
+        }
+
+        fn mock_job() -> tyutool_core::FlashJob {
+            tyutool_core::FlashJob::new(
+                tyutool_core::FlashMode::Flash,
+                "MOCK",
+                "/dev/mock",
+                115_200,
+            )
+        }
+
+        /// Subscribes to `flash-progress` and forwards each payload down a channel.
+        fn progress_channel(app: &App<MockRuntime>) -> mpsc::Receiver<serde_json::Value> {
+            let (tx, rx) = mpsc::channel();
+            app.listen("flash-progress", move |event| {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    let _ = tx.send(value);
+                }
+            });
+            rx
+        }
+
+        /// Waits for the next payload whose `kind` matches, skipping the rest.
+        fn wait_for(rx: &mpsc::Receiver<serde_json::Value>, kind: &str) -> serde_json::Value {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+                match rx.recv_timeout(remaining) {
+                    Ok(payload) => {
+                        if payload.get("kind").and_then(|v| v.as_str()) == Some(kind) {
+                            return payload;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            panic!("no {kind} event arrived within the deadline");
+        }
+
+        /// 基线：任务跑得起来，而且进度真的以事件形式到达前端。
+        #[test]
+        fn flash_run_streams_progress_and_finishes_ok() {
+            let app = test_app();
+            let rx = progress_channel(&app);
+
+            flash_run(app.handle().clone(), app.state(), app.state(), mock_job())
+                .expect("flash_run should accept the job");
+
+            let done = wait_for(&rx, "done");
+            assert!(
+                done.pointer("/result/ok").is_some(),
+                "an uninterrupted job should finish Ok; got {done}",
+            );
+        }
+
+        /// GUI 侧的取消。serve 那边同样的场景曾经是失效的（消息循环读不到 cancel）；
+        /// Tauri 每个命令独立调用，所以这里应当本来就是好的——但没有测试就没有证据。
+        #[test]
+        fn flash_cancel_stops_a_running_job() {
+            let app = test_app();
+            let rx = progress_channel(&app);
+
+            flash_run(app.handle().clone(), app.state(), app.state(), mock_job())
+                .expect("flash_run should accept the job");
+            // 等到任务确实在跑，免得取消只是赢在了任务开始之前。
+            wait_for(&rx, "percent");
+
+            flash_cancel(app.state(), app.state());
+
+            let done = wait_for(&rx, "done");
+            assert!(
+                done.pointer("/result/cancelled").is_some(),
+                "cancel was issued mid-job, but the run ended as {done}",
+            );
+        }
+
+        /// `flash_run` 在互斥锁里把 cancel Arc 原子替换掉，再等旧线程退出。这条
+        /// 用例盯的就是那段注释所说的性质：新任务不会把旧任务的取消清掉，两者
+        /// 从不共用一个标志位。
+        #[test]
+        fn starting_a_second_job_cancels_the_first() {
+            let app = test_app();
+            let rx = progress_channel(&app);
+
+            flash_run(app.handle().clone(), app.state(), app.state(), mock_job())
+                .expect("the first job should be accepted");
+            wait_for(&rx, "percent");
+
+            flash_run(app.handle().clone(), app.state(), app.state(), mock_job())
+                .expect("the second job should be accepted once the first has stopped");
+
+            let superseded = wait_for(&rx, "done");
+            assert!(
+                superseded.pointer("/result/cancelled").is_some(),
+                "the superseded job should end cancelled, not {superseded}",
+            );
+            let replacement = wait_for(&rx, "done");
+            assert!(
+                replacement.pointer("/result/ok").is_some(),
+                "the replacing job should run to completion; got {replacement}",
+            );
+        }
+
+        /// 没有待决确认时，`authorize_confirm_cmd` 必须报错而不是静默吞掉——
+        /// 静默成功会让前端以为对话框已经处理了。
+        #[test]
+        fn authorize_confirm_without_a_pending_prompt_is_an_error() {
+            let app = test_app();
+            assert!(authorize_confirm_cmd(app.state(), true).is_err());
+        }
     }
 }
 

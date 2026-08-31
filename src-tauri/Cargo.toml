@@ -35,3 +35,13 @@ chrono = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+# `tauri::test::mock_builder` — a headless mock runtime, so the flash commands can
+# be driven without a WebView. `tauri` is already a normal dependency; this only
+# turns on its `test` feature for the test build.
+tauri = { version = "2", features = ["test"] }
+# The `MOCK` fake device, so a flash job can run with no hardware attached.
+# A dev-dependency deliberately: `cargo build --release` (and `tauri build`)
+# never compiles one, so the fake chip cannot reach the GUI bundle. See that
+# feature's comment in crates/tyutool-core/Cargo.toml for the two guards, and
+# crates/tyutool-core/tests/shipped_crates_exclude_mock_chip.rs for the check.
+tyutool-core = { path = "../crates/tyutool-core", features = ["mock-chip"] }
