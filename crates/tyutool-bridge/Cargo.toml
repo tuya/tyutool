@@ -35,7 +35,7 @@ muda = "0.17"
 # Already in the workspace lock at 0.17 (pulled by the Tauri side), so this adds
 # no new version to the tree.
 png = "0.17"
-tao = "0.34"
+tao = "0.35"
 tray-icon = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
