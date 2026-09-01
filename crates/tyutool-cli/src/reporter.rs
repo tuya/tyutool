@@ -321,6 +321,7 @@ pub(crate) fn phase_label(phase: &FlashPhase) -> String {
         FlashPhase::Reboot => "Reboot".into(),
         FlashPhase::Read => "Read".into(),
         FlashPhase::Save => "Save".into(),
+        FlashPhase::FetchRamLoader => "Fetch RAM loader".into(),
         FlashPhase::LoadRam => "Load RAM".into(),
         FlashPhase::SwitchBaud => "Switch Baud".into(),
         FlashPhase::Connect => "Connect".into(),

@@ -1,0 +1,138 @@
+name: Release ram-loader
+
+# Manually-triggered publish of the RAM loader assets LN882H and GD32VW553 cannot
+# be flashed without. Reads the loader bins from assets/ram-loader/, generates
+# ram-loader.json, and publishes both to the fixed `ram-loader` release tag on
+# GitHub and Gitee. Idempotent: existing bins are skipped (a loader version is
+# immutable), ram-loader.json is always overwritten.
+#
+# Publishing an asset is only half of shipping a new loader — the consuming
+# plugin pins (chip, version, sha256) and has to be updated and released too.
+# See assets/ram-loader/README.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize runs so two concurrent dispatches can't interleave release uploads.
+# Don't cancel an in-flight publish mid-upload — let it finish.
+concurrency:
+  group: release-ram-loader
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate GitHub manifest
+        env:
+          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/ram-loader
+          SOURCE_DIR: assets/ram-loader
+          OUTPUT: ram-loader.json
+        run: pnpm exec tsx scripts/generate-ram-loader-manifest.ts
+
+      - name: Publish to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=ram-loader
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "creating release $TAG"
+            gh release create "$TAG" \
+              --title "RAM 引导固件 (ram-loader)" \
+              --notes "LN882H / GD32VW553 刷写所需的 RAM 引导固件，工具按需下载并缓存。资产由 release-ram-loader workflow 自动维护。" \
+              --prerelease
+          fi
+          mapfile -t existing < <(gh release view "$TAG" --json assets -q '.assets[].name')
+          is_existing() { printf '%s\n' "${existing[@]}" | grep -qxF "$1"; }
+          while IFS= read -r bin; do
+            name="$(basename "$bin")"
+            if is_existing "$name"; then
+              echo "skip existing bin: $name"
+            else
+              echo "upload bin: $name"
+              gh release upload "$TAG" "$bin"
+            fi
+          done < <(find assets/ram-loader -mindepth 2 -maxdepth 2 -type f -name '*.bin' | sort)
+          echo "upload manifest (clobber): ram-loader.json"
+          gh release upload "$TAG" ram-loader.json --clobber
+
+      - name: Generate Gitee manifest
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GITEE_TOKEN}" ]]; then
+            echo "::notice::GITEE_TOKEN not set — skipping Gitee manifest."
+            exit 0
+          fi
+          if [[ -z "${GITEE_REPO}" ]]; then
+            echo "::error::GITEE_REPO must be set when GITEE_TOKEN is set."
+            exit 1
+          fi
+          if [[ "${GITEE_REPO}" != */* && -z "${GITEE_USER}" ]]; then
+            echo "::error::GITEE_USER is required when GITEE_REPO has no '/'."
+            exit 1
+          fi
+          if [[ "${GITEE_REPO}" == */* ]]; then
+            GPATH="${GITEE_REPO}"
+          else
+            GPATH="${GITEE_USER}/${GITEE_REPO}"
+          fi
+          BASE_URL="https://gitee.com/${GPATH}/releases/download/ram-loader" \
+          SOURCE_DIR=assets/ram-loader \
+          OUTPUT=ram-loader.json \
+            pnpm exec tsx scripts/generate-ram-loader-manifest.ts
+
+      - name: Publish to Gitee release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          GITEE_TARGET_COMMITISH: ${{ vars.GITEE_TARGET_COMMITISH }}
+          TAG: ram-loader
+          ASSET_DIR: assets/ram-loader
+          MANIFEST_FILE: ram-loader.json
+          RELEASE_NAME: RAM 引导固件 (ram-loader)
+          RELEASE_BODY: LN882H / GD32VW553 刷写所需的 RAM 引导固件，工具按需下载并缓存。资产由 release-ram-loader workflow 自动维护。
+        run: bash scripts/publish-firmware-assets-gitee.sh
+
+      # The Tuya CDN copy is uploaded by hand (flat, under
+      # smart/embed/pruduct/tyutool/ram-loader/). Regenerate the manifest with
+      # that BASE_URL and upload it alongside the bins; the mirror is the third
+      # entry in tyutool_core::ram_loader::MANIFEST_MIRRORS.
+      - name: Generate CDN manifest for manual upload
+        env:
+          BASE_URL: https://airtake-public-data-1254153901.cos.ap-shanghai.myqcloud.com/smart/embed/pruduct/tyutool/ram-loader
+          SOURCE_DIR: assets/ram-loader
+          OUTPUT: cdn/ram-loader.json
+        run: |
+          mkdir -p cdn
+          pnpm exec tsx scripts/generate-ram-loader-manifest.ts
+          cp assets/ram-loader/*/*.bin cdn/
+
+      # Everything in `cdn/` goes into the CDN directory verbatim, flat, keeping
+      # these names — the manifest's URLs are built from them.
+      - name: Upload the CDN bundle as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ram-loader-cdn
+          path: cdn/
+          if-no-files-found: error

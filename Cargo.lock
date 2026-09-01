@@ -6172,10 +6172,12 @@ version = "3.2.9"
 dependencies = [
  "calamine",
  "crc32fast",
+ "dirs",
  "espflash",
  "log",
  "md-5",
  "regex",
+ "reqwest 0.12.28",
  "rust_xlsxwriter",
  "serde",
  "serde_json",

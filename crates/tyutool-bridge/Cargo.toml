@@ -46,7 +46,10 @@ sys-locale = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.30"
 futures-util = "0.3"
-tyutool-core = { path = "../tyutool-core" }
+# `download` because the bridge flashes: LN882H and GD32VW553 need their RAM loader
+# asset fetched on first use, and no binary embeds it any more (see
+# tyutool_core::ram_loader).
+tyutool-core = { path = "../tyutool-core", features = ["download"] }
 
 # `AttachConsole` only. The tray binary is linked as a GUI-subsystem app so it
 # never allocates its own console window (see `main.rs`), but that also means a

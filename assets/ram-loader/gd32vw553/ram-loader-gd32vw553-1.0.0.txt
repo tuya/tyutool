@@ -1,0 +1,14 @@
+GD32VW553 RAM downloader (vendor binary).
+
+Lifted byte for byte out of a USB capture of the vendor tool driving a real
+module (CH340 bridge, gd32_1.pcapng, 2026-09-01). Treat it as opaque: it is the
+only thing that knows how to talk to this part's flash controller.
+
+The vendor ships no version number of its own — the image's own banner reads
+"SDK release version:" followed by nothing. What it does carry:
+
+  SDK build revision: 94fb25571b15fbea
+  SDK build date:     2025/07/04 10:29:16
+
+15600 bytes; uploaded over the mask-ROM AN3155 bootloader to 0x20002000 and
+entered there. The 1.0.0 above is tyutool's own asset version, not the vendor's.

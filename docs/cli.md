@@ -145,6 +145,38 @@ Everything humans read — the startup banner, progress, phase lines, prompts, m
 
 So `tyutool list-ports --json | jq .` and `source <(tyutool completions bash)` work with no extra flags. `usb-port-survey` and `completions` additionally suppress the banner and skip log-file setup entirely, so their stdout stays byte-clean even if a redirect merges the two streams.
 
+### RAM loader downloads (LN882H and GD32VW553 only)
+
+Those two chips cannot be flashed by their own mask ROM: tyutool has to upload a vendor
+RAM loader first and let *that* program the flash. The loader images are **not** part of
+the binary — they are published assets, fetched once over HTTPS and then cached:
+
+| Platform | Cache directory |
+|----------|-----------------|
+| Linux | `~/.cache/tyutool/ram-loader/<chip>/` |
+| macOS | `~/Library/Caches/tyutool/ram-loader/<chip>/` |
+| Windows | `%LOCALAPPDATA%\tyutool\ram-loader\<chip>\` |
+
+The fetch happens before the port is opened, so a network failure leaves the device
+untouched, and it happens once per loader version — every later run, and the GUI, reuse
+the same cache. Every download is checked against a SHA-256 digest compiled into the
+tool, so a wrong or tampered file is refused rather than uploaded to your device. Sources
+tried in order: GitHub, Gitee, the Tuya CDN.
+
+For a machine with no internet access, download `ram-loader-<chip>-<version>.bin` from the
+[`ram-loader` release](https://github.com/tuya/tyutool/releases/tag/ram-loader) on a
+machine that does have it, and point `TYUTOOL_RAM_LOADER_DIR` at the directory holding it:
+
+```bash
+export TYUTOOL_RAM_LOADER_DIR=/opt/tyutool/loaders
+tyutool write -d ln882h -p /dev/ttyUSB0 -f app.bin
+```
+
+Both layouts are accepted in that directory: the files flat, or in `<chip>/`
+subdirectories as the release lays them out. When the variable is set the directory is
+read but never written, and a file that is present but does not match the expected digest
+fails the job instead of being ignored. No other command or flag is affected.
+
 ### Log files
 
 Every run except `usb-port-survey`, `completions` and `logs` opens a session log file and prints its path in the banner:
@@ -763,6 +795,8 @@ Flash OK  3.2s
 | `cannot open log file '<path>': …` | `monitor -l` could not create or append to the path. Check the directory exists and is writable. |
 | `--- Monitor stopped: serial port <p> disconnected or unavailable. ---` | The adapter went away mid-session (unplugged, or the device reset the USB link). Not a failure — exit code is 0. |
 | Unreadable garbage in `monitor` | Wrong baud. The monitor defaults are 460800 for `t5ai` and 115200 elsewhere — different from the flash defaults. Try `-b 921600`. |
+| `LN882H needs its RAM loader ram-loader-ln882h-<v>.bin, which is not cached locally and …` | The loader could not be fetched (no network, or a blocked mirror). Connect once so it can be cached, or supply it by hand with `TYUTOOL_RAM_LOADER_DIR` — see [RAM loader downloads](#ram-loader-downloads-ln882h-and-gd32vw553-only). |
+| `ram-loader-<chip>-<v>.bin SHA-256 mismatch: expected …, got …` | The file in `TYUTOOL_RAM_LOADER_DIR` (or a corrupt cache entry) is not the loader this build pins. Replace it with the one from the `ram-loader` release matching your tyutool version. |
 | `All update sources failed. Check your network connection.` | Neither manifest could be fetched. On a mainland-China network try `--source tuya`. |
 | `SHA256 checksum mismatch! Download may be corrupted.` | The download did not match the manifest; nothing was replaced. Retry, or fetch the archive from Releases by hand. |
 | `Unknown source 'x'. Use 'github' or 'tuya'.` | `--source` accepts only those two values. |

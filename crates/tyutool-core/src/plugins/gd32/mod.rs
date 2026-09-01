@@ -6,12 +6,14 @@
 //! flash. [`protocol`] holds the wire format for both stages and the per-step calls;
 //! this module is the job-level flow and the user-visible event stream.
 //!
-//! **[`LOADER_BIN`] is a vendor binary** — the same downloader GigaDevice's and Tuya's
+//! **[`LOADER`] names a vendor binary** — the same downloader GigaDevice's and Tuya's
 //! tools upload, lifted byte for byte out of a USB capture of one of them (see
 //! `protocol`'s module docs). It reports `SDK build revision 94fb25571b15fbea`,
 //! `2025/07/04`. Treat it as opaque: it is 15 600 bytes, loads and enters at
 //! [`protocol::LOADER_LOAD_ADDR`], and is the only thing that knows how to talk to this
-//! part's flash controller. The precedent is `plugins/ln882h/ram.bin`.
+//! part's flash controller. It is not compiled in: [`crate::ram_loader`] downloads and
+//! caches it on first use, verifying it against the digest pinned below. The precedent
+//! is LN882H's own RAM code, which works the same way.
 //!
 //! Not supported: [`FlashMode::Read`] — the loader exposes erase, program, verify and
 //! reset, and no way to read flash back.
@@ -26,14 +28,22 @@ use crate::error::FlashError;
 use crate::flash_event::{FlashEvent, FlashMilestone, FlashPhase};
 use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
+use crate::ram_loader::RamLoaderRef;
 
 use protocol::{
     Gd32Io, FLASH_BASE, FRAME_DATA_LEN, FRAME_UNITS, ISP_BAUD, ISP_PARITY, LOADER_LOAD_ADDR,
     SECTOR_SIZE,
 };
 
-/// The RAM loader uploaded over the ROM bootloader. See the module docs on provenance.
-const LOADER_BIN: &[u8] = include_bytes!("loader.bin");
+/// The RAM loader uploaded over the ROM bootloader — an on-demand asset, pinned by
+/// digest. See the module docs on provenance and `assets/ram-loader/README.md` on how a
+/// new version is published (both halves are needed: the asset, then this constant).
+const LOADER: RamLoaderRef = RamLoaderRef {
+    chip: "gd32vw553",
+    version: "1.0.0",
+    size: 15_600,
+    sha256: "2559d822553f2af8f9f4ff26201fffac151f8e13ec29b6b1c0241215445d373e",
+};
 
 /// Registry key.
 pub const CHIP_ID: &str = "GD32VW553";
@@ -183,8 +193,20 @@ fn run_flash(
         )));
     }
 
+    // Before the port: a loader we cannot get hold of should fail the job while the
+    // device is still untouched.
+    let loader = crate::ram_loader::resolve(&LOADER, progress)?;
+
     let mut io = protocol::open_port(&job.port, ISP_BAUD, ISP_PARITY)?;
-    flash_with(&mut io, offset, &image, job.baud_rate, cancel, progress)
+    flash_with(
+        &mut io,
+        &loader,
+        offset,
+        &image,
+        job.baud_rate,
+        cancel,
+        progress,
+    )
 }
 
 fn run_erase(
@@ -193,13 +215,18 @@ fn run_erase(
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     let (offset, length) = plan_erase(job)?;
+    let loader = crate::ram_loader::resolve(&LOADER, progress)?;
     let mut io = protocol::open_port(&job.port, ISP_BAUD, ISP_PARITY)?;
-    erase_with(&mut io, offset, length, cancel, progress)
+    erase_with(&mut io, &loader, offset, length, cancel, progress)
 }
 
 /// Reset into the ROM bootloader, upload the RAM loader and hand control to it.
+///
+/// `loader` is the resolved [`LOADER`] image; the caller fetches it before opening the
+/// port so this step cannot fail on a device that is already mid-handshake.
 fn bring_up_loader(
     io: &mut dyn Gd32Io,
+    loader: &[u8],
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
@@ -213,9 +240,9 @@ fn bring_up_loader(
     });
     log::info!(
         "uploading {} byte RAM loader to 0x{LOADER_LOAD_ADDR:08X}",
-        LOADER_BIN.len()
+        loader.len()
     );
-    protocol::isp_write_memory(io, LOADER_LOAD_ADDR, LOADER_BIN, cancel)?;
+    protocol::isp_write_memory(io, LOADER_LOAD_ADDR, loader, cancel)?;
     protocol::isp_go(io, LOADER_LOAD_ADDR, cancel)?;
 
     let chip_id = protocol::loader_handshake(io, cancel)?;
@@ -232,6 +259,7 @@ fn bring_up_loader(
 /// Erase, program and verify `image` at flash `offset`, then reboot the device.
 fn flash_with(
     io: &mut dyn Gd32Io,
+    loader: &[u8],
     offset: u32,
     image: &[u8],
     transfer_baud: u32,
@@ -254,7 +282,7 @@ fn flash_with(
     // verified afterwards.
     protocol::loader_verify_command(offset, length)?;
 
-    bring_up_loader(io, cancel, progress)?;
+    bring_up_loader(io, loader, cancel, progress)?;
 
     progress(FlashEvent::Phase {
         phase: FlashPhase::Erase,
@@ -318,13 +346,14 @@ fn flash_with(
 /// Erase `[offset, offset + length)` and reboot the device.
 fn erase_with(
     io: &mut dyn Gd32Io,
+    loader: &[u8],
     offset: u32,
     length: u32,
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     let sectors = erase_sectors(length)?;
-    bring_up_loader(io, cancel, progress)?;
+    bring_up_loader(io, loader, cancel, progress)?;
 
     progress(FlashEvent::Phase {
         phase: FlashPhase::Erase,
@@ -726,6 +755,15 @@ mod tests {
         (0..len).map(|i| (i * 7 + 3) as u8).collect()
     }
 
+    /// Stands in for the resolved [`LOADER`] image. The flows only care that whatever
+    /// bytes they were handed reach RAM intact, and using a short stand-in keeps these
+    /// tests off the asset (and off the network) entirely — the real image is checked
+    /// once, by `the_pinned_loader_matches_the_published_asset`. A whole number of
+    /// `ISP_CHUNK`s, as the real one is.
+    fn fake_loader() -> Vec<u8> {
+        test_image(protocol::ISP_CHUNK * 3)
+    }
+
     #[test]
     fn plugin_id_is_the_registry_key() {
         assert_eq!(Gd32vw553Plugin.id(), "GD32VW553");
@@ -746,13 +784,11 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_loader_is_the_captured_one() {
-        assert_eq!(LOADER_BIN.len(), 15_600);
-        assert_eq!(LOADER_BIN.len() % protocol::ISP_CHUNK, 0);
-        assert_eq!(
-            hex(&Sha256::digest(LOADER_BIN)),
-            "2559d822553f2af8f9f4ff26201fffac151f8e13ec29b6b1c0241215445d373e"
-        );
+    fn the_pinned_loader_matches_the_published_asset() {
+        // Verifies size and digest against LOADER; all that is left to check here is the
+        // framing assumption isp_write_memory relies on.
+        let bytes = crate::ram_loader::repo_asset_bytes(&LOADER);
+        assert_eq!(bytes.len() % protocol::ISP_CHUNK, 0);
     }
 
     #[test]
@@ -762,11 +798,20 @@ mod tests {
         let events = Events::default();
         let cancel = AtomicBool::new(false);
 
-        flash_with(&mut dev, 0x1000, &image, 2_000_000, &cancel, &events.sink())
-            .expect("flash succeeds against a scripted device");
+        let loader = fake_loader();
+        flash_with(
+            &mut dev,
+            &loader,
+            0x1000,
+            &image,
+            2_000_000,
+            &cancel,
+            &events.sink(),
+        )
+        .expect("flash succeeds against a scripted device");
 
         // The loader arrived intact, at the address the ROM was told to jump to.
-        assert_eq!(dev.ram_image(), LOADER_BIN);
+        assert_eq!(dev.ram_image(), loader);
         assert_eq!(dev.ram[0].0, LOADER_LOAD_ADDR);
         // Exactly the image footprint was erased, and the image is in flash.
         assert_eq!(dev.erased, vec![(0x1000, 2)]);
@@ -834,8 +879,16 @@ mod tests {
         let image = test_image(8192);
         let cancel = AtomicBool::new(false);
 
-        flash_with(&mut dev, 0, &image, 2_000_000, &cancel, &|_| {})
-            .expect("flash succeeds against a scripted device");
+        flash_with(
+            &mut dev,
+            &fake_loader(),
+            0,
+            &image,
+            2_000_000,
+            &cancel,
+            &|_| {},
+        )
+        .expect("flash succeeds against a scripted device");
 
         assert_eq!(dev.erased, vec![(0, 3)]);
         assert_eq!(&dev.flash[..image.len()], &image[..]);
@@ -853,6 +906,7 @@ mod tests {
 
         flash_with(
             &mut dev,
+            &fake_loader(),
             0,
             &test_image(64),
             2_000_000,
@@ -884,8 +938,16 @@ mod tests {
         let image = test_image(FRAME_DATA_LEN + 5);
         let cancel = AtomicBool::new(false);
 
-        flash_with(&mut dev, 0, &image, 2_000_000, &cancel, &|_| {})
-            .expect("a NAKed frame is resent, not fatal");
+        flash_with(
+            &mut dev,
+            &fake_loader(),
+            0,
+            &image,
+            2_000_000,
+            &cancel,
+            &|_| {},
+        )
+        .expect("a NAKed frame is resent, not fatal");
 
         assert_eq!(dev.naks_sent, 1);
         assert_eq!(&dev.flash[..image.len()], &image[..]);
@@ -897,8 +959,16 @@ mod tests {
         dev.corrupt_digest = true;
         let cancel = AtomicBool::new(false);
 
-        let err = flash_with(&mut dev, 0, &test_image(64), 2_000_000, &cancel, &|_| {})
-            .expect_err("a wrong digest must not pass");
+        let err = flash_with(
+            &mut dev,
+            &fake_loader(),
+            0,
+            &test_image(64),
+            2_000_000,
+            &cancel,
+            &|_| {},
+        )
+        .expect_err("a wrong digest must not pass");
         assert!(
             matches!(err, FlashError::Plugin(ref m) if m.contains("verification failed")),
             "{err}"
@@ -911,8 +981,16 @@ mod tests {
     fn cancelling_stops_the_job() {
         let mut dev = FakeDevice::new();
         let cancel = AtomicBool::new(true);
-        let err = flash_with(&mut dev, 0, &test_image(64), 2_000_000, &cancel, &|_| {})
-            .expect_err("a cancelled job must not run");
+        let err = flash_with(
+            &mut dev,
+            &fake_loader(),
+            0,
+            &test_image(64),
+            2_000_000,
+            &cancel,
+            &|_| {},
+        )
+        .expect_err("a cancelled job must not run");
         assert!(matches!(err, FlashError::Cancelled), "{err}");
     }
 
@@ -923,8 +1001,15 @@ mod tests {
         let events = Events::default();
         let cancel = AtomicBool::new(false);
 
-        erase_with(&mut dev, 0x2000, 0x4000, &cancel, &events.sink())
-            .expect("erase succeeds against a scripted device");
+        erase_with(
+            &mut dev,
+            &fake_loader(),
+            0x2000,
+            0x4000,
+            &cancel,
+            &events.sink(),
+        )
+        .expect("erase succeeds against a scripted device");
 
         assert_eq!(dev.erased, vec![(0x2000, 4)]);
         assert!(dev.flash[0x2000..0x6000].iter().all(|&b| b == 0xFF));

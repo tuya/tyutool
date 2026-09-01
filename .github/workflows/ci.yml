@@ -63,11 +63,14 @@ jobs:
       # those tests would not exist as far as CI is concerned. `record-io` gates
       # `RecordIo`, which has no tests of its own — it is compiled here so it
       # cannot rot unnoticed, since it is only ever exercised by hand against
-      # real hardware when refreshing a replay fixture.
+      # real hardware when refreshing a replay fixture. `download` gates the RAM
+      # loader fetch (`ram_loader::net`), which every shipped binary enables and
+      # which nothing else in this job would compile; the tests it adds are
+      # offline (cache, digest and manifest parsing) and reach no network.
       - name: Clippy and test tyutool-core's optional features
         run: |
-          cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io -- -D warnings
-          cargo test -p tyutool-core --features zip,excel,mock-chip,record-io
+          cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download -- -D warnings
+          cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download
       - name: Bindings are up to date
         run: |
           cargo test -p tyutool-core --features ts-rs

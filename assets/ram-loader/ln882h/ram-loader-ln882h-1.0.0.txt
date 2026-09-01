@@ -1,0 +1,12 @@
+LN882H RAM code (vendor binary).
+
+XMODEM-uploaded to 0x20000000 over the ROM download mode, then probed with the
+console "version" command, which answers "RAMCODE" once it is up. Extracted from
+the vendor flash tool; scripts/extract_ln882h_ram.py records how.
+
+The vendor ships no version information at all: the image carries no build date,
+no revision and no version string — its "version" console command is a mode
+probe that only ever replies "RAMCODE". The 1.0.0 above is tyutool's own asset
+version.
+
+37872 bytes.

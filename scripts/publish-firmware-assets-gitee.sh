@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Idempotently publish auth-firmware assets to a Gitee Release (API v5).
+# Idempotently publish one firmware-asset family to a Gitee Release (API v5).
+#
+# Shared by both families — auth-firmware (assets/auth-firmware, tag auth-firmware)
+# and ram-loader (assets/ram-loader, tag ram-loader). Only the env below differs;
+# the release plumbing is identical, so it lives here once.
 #
 # Preserves immutable firmware:
-#   - <name>.bin    : skip if an attachment with the same name already exists, else upload.
-#   - auth-firmware.json : delete the old attachment (if any), then upload (overwrite).
+#   - <name>.bin        : skip if an attachment with the same name already exists, else upload.
+#   - <MANIFEST_FILE>   : delete the old attachment (if any), then upload (overwrite).
 #
 # Env: GITEE_TOKEN, GITEE_USER, GITEE_REPO
-# Optional: TAG (default auth-firmware), AUTH_FIRMWARE_DIR (default assets/auth-firmware),
-#           MANIFEST_FILE (default auth-firmware.json),
+# Optional: TAG (default auth-firmware), ASSET_DIR (default assets/<TAG>),
+#           MANIFEST_FILE (default <TAG>.json),
+#           RELEASE_NAME / RELEASE_BODY (only used when creating the release),
 #           GITEE_TARGET_COMMITISH (default: the tag; use a branch name if the tag isn't on Gitee yet)
 set -euo pipefail
 
 if [[ -z "${GITEE_TOKEN:-}" ]]; then
-  echo "::notice::GITEE_TOKEN not set — skipping Gitee auth-firmware publish."
+  echo "::notice::GITEE_TOKEN not set — skipping Gitee firmware-asset publish."
   exit 0
 fi
 
@@ -26,12 +31,14 @@ if [[ "${GITEE_REPO}" != */* && -z "${GITEE_USER:-}" ]]; then
 fi
 
 TAG="${TAG:-auth-firmware}"
-AUTH_FIRMWARE_DIR="${AUTH_FIRMWARE_DIR:-assets/auth-firmware}"
-MANIFEST_FILE="${MANIFEST_FILE:-auth-firmware.json}"
+ASSET_DIR="${ASSET_DIR:-assets/${TAG}}"
+MANIFEST_FILE="${MANIFEST_FILE:-${TAG}.json}"
 MANIFEST_NAME="$(basename "$MANIFEST_FILE")"
+RELEASE_NAME="${RELEASE_NAME:-${TAG}}"
+RELEASE_BODY="${RELEASE_BODY:-资产由 release-${TAG} workflow 自动维护。}"
 
-if [[ ! -d "$AUTH_FIRMWARE_DIR" ]]; then
-  echo "::error::AUTH_FIRMWARE_DIR is not a directory: ${AUTH_FIRMWARE_DIR}"
+if [[ ! -d "$ASSET_DIR" ]]; then
+  echo "::error::ASSET_DIR is not a directory: ${ASSET_DIR}"
   exit 1
 fi
 if [[ ! -f "$MANIFEST_FILE" ]]; then
@@ -88,8 +95,8 @@ if [[ "$HTTP_CODE" == "404" ]]; then
   CREATE_CODE="$(
     jq -n \
       --arg tag "$TAG" \
-      --arg name "默认授权固件 (${TAG})" \
-      --arg body "batch-flash-auth 默认授权固件。资产由 release-auth-firmware workflow 自动维护。" \
+      --arg name "$RELEASE_NAME" \
+      --arg body "$RELEASE_BODY" \
       --arg tc "$TGT" \
       '{tag_name: $tag, name: $name, body: $body, target_commitish: $tc, prerelease: false}' \
       | gitee_curl -o "$tmp_create" -w "%{http_code}" \
@@ -152,7 +159,7 @@ while IFS= read -r bin; do
     echo "upload bin: ${name}"
     upload_attachment "$bin"
   fi
-done < <(find "$AUTH_FIRMWARE_DIR" -mindepth 2 -maxdepth 2 -type f -name '*.bin' | sort)
+done < <(find "$ASSET_DIR" -mindepth 2 -maxdepth 2 -type f -name '*.bin' | sort)
 
 # --- Manifest: delete old then upload (overwrite) ---------------------------
 OLD_ID="$(attachment_id_by_name "$MANIFEST_NAME")"
@@ -169,4 +176,4 @@ fi
 echo "upload manifest: ${MANIFEST_NAME}"
 upload_attachment "$MANIFEST_FILE"
 
-echo "Gitee auth-firmware publish finished for ${OWNER}/${REPO} @ ${TAG}"
+echo "Gitee ${TAG} publish finished for ${OWNER}/${REPO} @ ${TAG}"

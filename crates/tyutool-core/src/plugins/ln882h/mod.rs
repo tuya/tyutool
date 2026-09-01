@@ -8,13 +8,26 @@ use crate::error::FlashError;
 use crate::flash_event::{FlashEvent, FlashMilestone, FlashPhase};
 use crate::job::{FlashJob, FlashMode, FlashSegment};
 use crate::plugin::FlashPlugin;
+use crate::ram_loader::RamLoaderRef;
 
 use protocol::{
     flush_buffers, read_flash_chunk, read_response, send_command, wait_for_response_containing,
     XmodemSend,
 };
 
-const RAM_BIN: &[u8] = include_bytes!("ram.bin");
+/// The vendor RAM code XMODEM-uploaded to 0x20000000 before anything else can happen.
+///
+/// Not compiled in: [`crate::ram_loader`] downloads and caches it on first use, verifying
+/// it against the digest pinned here. The vendor ships no version information in the
+/// image at all, so `version` is tyutool's own asset version — provenance lives in the
+/// asset's `.txt` notes. See `assets/ram-loader/README.md` on publishing a new one (both
+/// halves are needed: the asset, then this constant).
+const RAM_LOADER: RamLoaderRef = RamLoaderRef {
+    chip: "ln882h",
+    version: "1.0.0",
+    size: 37_872,
+    sha256: "6bd437c6f8366b9cca0fb8de0c80c70788516e3681c6c43d654512feb7a0c723",
+};
 
 pub struct Ln882hPlugin;
 
@@ -74,6 +87,7 @@ fn check_ram_mode(port: &mut Box<dyn SerialPort>) -> Result<bool, FlashError> {
 /// The user must reset the device with the BOOT/A9 pin held LOW before invoking the tool.
 fn boot(
     port: &mut Box<dyn SerialPort>,
+    ram_bin: &[u8],
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashEvent),
     switch_baud: bool,
@@ -130,10 +144,10 @@ fn boot(
         progress(FlashEvent::Phase {
             phase: FlashPhase::LoadRam,
         });
-        let cmd = format!("download [rambin] [0x20000000] [{}]", RAM_BIN.len());
+        let cmd = format!("download [rambin] [0x20000000] [{}]", ram_bin.len());
         send_command(port, &cmd)?;
 
-        match XmodemSend::new(port, RAM_BIN, 1024).send("ram.bin", cancel, &|_, _| {}) {
+        match XmodemSend::new(port, ram_bin, 1024).send("ram.bin", cancel, &|_, _| {}) {
             Ok(()) => {}
             Err(FlashError::Cancelled) => return Err(FlashError::Cancelled),
             Err(_) => continue, // XMODEM failed: retry outer loop with BOOT pin message
@@ -217,8 +231,12 @@ fn run_read(
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| FlashError::InvalidJob("missing read_file_path".into()))?;
 
+    // Before the port: a loader we cannot get hold of should fail the job while the
+    // device is still untouched.
+    let ram_bin = crate::ram_loader::resolve(&RAM_LOADER, progress)?;
+
     let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress, false)?;
+    boot(&mut port, &ram_bin, cancel, progress, false)?;
 
     progress(FlashEvent::Phase {
         phase: FlashPhase::Read,
@@ -321,9 +339,11 @@ fn run_erase(
         ));
     }
 
+    let ram_bin = crate::ram_loader::resolve(&RAM_LOADER, progress)?;
+
     // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress, true)?;
+    boot(&mut port, &ram_bin, cancel, progress, true)?;
 
     progress(FlashEvent::Phase {
         phase: FlashPhase::Erase,
@@ -349,10 +369,11 @@ fn run_flash(
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
     let segments = resolve_segments(job)?;
+    let ram_bin = crate::ram_loader::resolve(&RAM_LOADER, progress)?;
 
     // LN882H always boots at 115200 then switches to 921600; job.baud_rate is intentionally ignored.
     let mut port = open_port(&job.port, 115200)?;
-    boot(&mut port, cancel, progress, true)?;
+    boot(&mut port, &ram_bin, cancel, progress, true)?;
 
     let total_segs = segments.len();
     for (idx, seg) in segments.iter().enumerate() {
@@ -492,6 +513,13 @@ mod tests {
     #[test]
     fn plugin_id_is_ln882h() {
         assert_eq!(Ln882hPlugin.id(), "LN882H");
+    }
+
+    /// The image is no longer compiled in, so this is the only thing standing between a
+    /// wrong `RAM_LOADER` constant and a published asset nothing can verify.
+    #[test]
+    fn the_pinned_ram_loader_matches_the_published_asset() {
+        crate::ram_loader::repo_asset_bytes(&RAM_LOADER);
     }
 
     #[test]

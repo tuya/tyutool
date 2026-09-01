@@ -43,6 +43,14 @@ ts-rs = ["dep:ts-rs"]
 # compile) and tests/shipped_crates_exclude_mock_chip.rs (no shipped manifest
 # may name it).
 mock-chip = []
+# Enables downloading the on-demand RAM loader assets (`ram_loader`) over HTTPS when
+# they are not already cached. Every *shipped* binary that can flash must enable it
+# (tyutool-cli, src-tauri, tyutool-bridge) — LN882H and GD32VW553 cannot be flashed
+# without their loader, and nothing embeds it any more. Leaving it off keeps the crate
+# HTTP-free and restricts `ram_loader::resolve` to the local cache and
+# `TYUTOOL_RAM_LOADER_DIR`: that is the right shape for tyutool-serve (a dev shim whose
+# only binary, tyutool-cli, already turns the feature on) and for tests.
+download = ["dep:reqwest"]
 # Enables `RecordIo`, which wraps the live serial transport and appends every
 # call to the file named by `TYUTOOL_RECORD_IO`. Used once, by hand, against
 # real hardware, to capture the fixture that `ReplayIo` replays in tests.
@@ -66,6 +74,10 @@ toml = "0.8"
 
 [dependencies]
 regex = "1"
+# Resolves the user cache directory the RAM loader assets are cached in
+# (`ram_loader::cache_dir`). Already in the workspace lock (tyutool-cli, tyutool-bridge),
+# so it adds no version to the tree.
+dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -79,5 +91,8 @@ md-5 = "0.10"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 ts-rs = { version = "12", optional = true }
+# Downloads the RAM loader assets; see the `download` feature. rustls rather than
+# native-tls so the CLI's musl builds keep working, matching tyutool-cli's own copy.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"], optional = true }
 calamine = { version = "0.26", features = ["dates"], optional = true }
 rust_xlsxwriter = { version = "0.79", optional = true }

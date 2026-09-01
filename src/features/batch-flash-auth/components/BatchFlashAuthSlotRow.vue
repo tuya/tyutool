@@ -46,6 +46,7 @@ const FLASH_PHASE_STATUS_LABELS = computed<Record<string, string>>(() => ({
   connect: t("batchFlashAuth.status.connecting"),
   switch_baud: t("batchFlashAuth.status.connecting"),
   read_flash_id: t("batchFlashAuth.status.connecting"),
+  fetch_ram_loader: t("batchFlashAuth.status.connecting"),
   load_ram: t("batchFlashAuth.status.connecting"),
   erase: t("batchFlashAuth.status.erasing"),
   write: t("batchFlashAuth.status.writing"),
