@@ -209,7 +209,17 @@ enum LogsCmd {
 // runtime — instead `device_list_matches_registry` asserts the two agree, so a
 // chip added to the registry can't silently drift out of the CLI.
 const SUPPORTED_DEVICES: &[&str] = &[
-    "bk7231n", "t2", "t3", "t1", "t5ai", "ln882h", "esp32", "esp32c3", "esp32c6", "esp32p4",
+    "bk7231n",
+    "t2",
+    "t3",
+    "t1",
+    "t5ai",
+    "ln882h",
+    "gd32vw553",
+    "esp32",
+    "esp32c3",
+    "esp32c6",
+    "esp32p4",
     "esp32s3",
 ];
 
@@ -241,6 +251,9 @@ fn default_baud(device: &str) -> u32 {
     match device.to_ascii_lowercase().as_str() {
         "ln882h" => 115200,
         "esp32" | "esp32c3" | "esp32c6" | "esp32p4" | "esp32s3" => 460800,
+        // The RAM loader is told this rate and follows the host to it; 2 Mbaud is what
+        // the vendor tool uses.
+        "gd32vw553" => 2000000,
         _ => 921600,
     }
 }
@@ -743,7 +756,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mode
             );
             let job = authorize_job(chip_id, port, uuid, authkey);
-            let reporter = CliReporter::new(force_plain);
+            let reporter = CliReporter::new(force_plain, cli.verbose);
             run_job(&job, &cancel, reporter.callback())
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         }
@@ -781,7 +794,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 file
             );
 
-            let reporter = CliReporter::new(force_plain);
+            let reporter = CliReporter::new(force_plain, cli.verbose);
 
             let job = write_job(chip_id, port, baud, start, end, file);
             run_job(&job, &cancel, reporter.callback())
@@ -815,7 +828,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 file
             );
 
-            let reporter = CliReporter::new(force_plain);
+            let reporter = CliReporter::new(force_plain, cli.verbose);
 
             let job = read_job(chip_id, port, baud, start, end, file);
             run_job(&job, &cancel, reporter.callback())
@@ -847,7 +860,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 end
             );
 
-            let reporter = CliReporter::new(force_plain);
+            let reporter = CliReporter::new(force_plain, cli.verbose);
 
             let job = erase_job(chip_id, port, baud, start, end);
             run_job(&job, &cancel, reporter.callback())
@@ -937,6 +950,8 @@ mod tests {
             ("T3", "t3"),
             ("T1", "t1"),
             ("LN882H", "ln882h"),
+            ("GD32VW553", "gd32vw553"),
+            ("Gd32Vw553", "gd32vw553"),
             ("ESP32", "esp32"),
             ("ESP32C3", "esp32c3"),
             ("ESP32C6", "esp32c6"),
@@ -966,6 +981,8 @@ mod tests {
     fn default_baud_per_chip_family() {
         assert_eq!(default_baud("ln882h"), 115200);
         assert_eq!(default_baud("LN882H"), 115200);
+        assert_eq!(default_baud("gd32vw553"), 2000000);
+        assert_eq!(default_baud("GD32VW553"), 2000000);
         assert_eq!(default_baud("esp32"), 460800);
         assert_eq!(default_baud("esp32c3"), 460800);
         assert_eq!(default_baud("esp32c6"), 460800);
@@ -987,6 +1004,7 @@ mod tests {
         assert_eq!(monitor_default_baud(Some("t1")), 115200);
         assert_eq!(monitor_default_baud(Some("t2")), 115200);
         assert_eq!(monitor_default_baud(Some("ln882h")), 115200);
+        assert_eq!(monitor_default_baud(Some("gd32vw553")), 115200);
         assert_eq!(monitor_default_baud(Some("esp32")), 115200);
         assert_eq!(monitor_default_baud(None), 115200);
     }

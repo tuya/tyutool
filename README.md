@@ -10,7 +10,7 @@ Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform de
 
 ## Supported Chips
 
-Supports **11 chips** across 4 families:
+Supports **12 chips** across 5 families:
 
 | Family    | Chips |
 |-----------|-------|
@@ -18,6 +18,7 @@ Supports **11 chips** across 4 families:
 | Beken     | BK7231N |
 | Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-P4, ESP32-S3 |
 | Lightning | LN882H |
+| GigaDevice | GD32VW553 (write/erase only — no flash read-back) |
 
 ## Download
 
@@ -101,7 +102,7 @@ tyutool write -d bk7231n -p /dev/ttyUSB0 -f firmware.bin
 tyutool write -d <DEVICE> -p <PORT> -b <BAUD> -s <START_ADDR> --end <END_ADDR> -f <FILE>
 ```
 
-Supported `-d` values (same as the [Supported Chips](#supported-chips) table above): `bk7231n`, `t1`, `t2`, `t3`, `t5ai` (alias `t5`), `ln882h`, `esp32`, `esp32c3`, `esp32c6`, `esp32p4`, `esp32s3`.
+Supported `-d` values (same as the [Supported Chips](#supported-chips) table above): `bk7231n`, `t1`, `t2`, `t3`, `t5ai` (alias `t5`), `ln882h`, `gd32vw553`, `esp32`, `esp32c3`, `esp32c6`, `esp32p4`, `esp32s3`.
 
 ### Read flash
 

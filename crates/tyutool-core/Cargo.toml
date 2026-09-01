@@ -74,6 +74,9 @@ crc32fast = "1"
 log = "0.4"
 espflash = { version = "4.3", default-features = false, features = ["serialport"] }
 md-5 = "0.10"
+# GD32VW553 verifies a write by having the device SHA-256 what it stored; the same
+# RustCrypto family as md-5 above, and already in the workspace lock.
+sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 ts-rs = { version = "12", optional = true }
 calamine = { version = "0.26", features = ["dates"], optional = true }

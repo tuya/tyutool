@@ -175,7 +175,7 @@ tyutool write -d <DEVICE> -f <FILE> [-p <PORT>] [-b <BAUD>] [-s <START>] [--end 
 | `-d`, `--device` | chip name | **yes** | — |
 | `-f`, `--file` | path to a firmware `.bin` | **yes** | — |
 | `-p`, `--port` | serial port (`/dev/ttyUSB0`, `COM3`) | no | [auto-detect or prompt](#port-selection) |
-| `-b`, `--baud` | baud rate, decimal | no | [chip-specific](#device-and-baud-table) — 921600 Beken/T-series, 460800 ESP32, 115200 LN882H |
+| `-b`, `--baud` | baud rate, decimal | no | [chip-specific](#device-and-baud-table) — 921600 Beken/T-series, 460800 ESP32, 115200 LN882H, 2000000 GD32VW553 |
 | `-s`, `--start` | flash start address, hex | no | `0x00000000` |
 | `--end` | flash end address, hex (no short form) | no | `start + file size`, formatted `0x%08X` |
 
@@ -206,6 +206,8 @@ tyutool --plain --verbose write -d ln882h -f app.bin -p /dev/ttyUSB0
 
 LN882H needs the BOOT/A9 pin held low to enter download mode; the CLI prints that as an actionable warning while it waits.
 
+GD32VW553 needs the board in boot mode. If **DTR is wired to RESET and RTS to BOOT0**, the tool gets it there itself; on a board whose BOOT is a button, hold it down and reset or power-cycle — the CLI prints an actionable warning as soon as the boot ROM stays quiet and keeps retrying (resetting for you on each try) for 30 s, so you can do it after starting the command. It is then flashed in two stages: a RAM loader goes in over the boot ROM at 57600 baud, and that loader erases, programs and SHA-256-verifies the image at `-b` (2000000 by default). `-s` accepts either a flash offset (`0x0`) or the mapped address the datasheet uses (`0x08000000`), and must be 4 KiB aligned.
+
 ---
 
 ### `read` — dump flash to a file
@@ -223,7 +225,7 @@ tyutool read -d <DEVICE> -f <FILE> [-p <PORT>] [-b <BAUD>] [-s <START>] [-l <LEN
 | `-s`, `--start` | read start address, hex | no | `0x00000000` |
 | `-l`, `--length` | number of bytes to read, hex | no | `0x200000` (2 MiB) |
 
-The region read is `start` up to `start + length`. Note that the `0x200000` default is the *whole* flash on a 2 MiB part but only a quarter of a T5AI — pass `-l` when you want a full dump of a larger chip. The output file is **created or overwritten** — there is no confirmation prompt, so mind the path. Reads are performed in whole sectors, so the file can be slightly longer than `--length` when the region does not end on a sector boundary. On BK7231N the dump is CRC-checked against the device before it is saved; T5AI verifies per sector during the read.
+The region read is `start` up to `start + length`. Note that the `0x200000` default is the *whole* flash on a 2 MiB part but only a quarter of a T5AI — pass `-l` when you want a full dump of a larger chip. The output file is **created or overwritten** — there is no confirmation prompt, so mind the path. Reads are performed in whole sectors, so the file can be slightly longer than `--length` when the region does not end on a sector boundary. On BK7231N the dump is CRC-checked against the device before it is saved; T5AI verifies per sector during the read. **GD32VW553 cannot be read**: its download loader offers erase, program and verify and no way to read flash back, so `read -d gd32vw553` fails with that message instead of opening the port.
 
 ```bash
 # Default 2 MiB from address 0 — on BK7231N/T2/LN882H that is the whole flash
@@ -257,7 +259,7 @@ tyutool erase -d <DEVICE> [-p <PORT>] [-b <BAUD>] [-s <START>] [-l <LENGTH>]
 | `-s`, `--start` | erase start address, hex | no | `0x00000000` |
 | `-l`, `--length` | erase length, hex | no | `0x200000` (2 MiB) |
 
-The region erased is `start` up to `start + length`, rounded outwards to the chip's 4 KiB sector size — an unaligned request therefore erases slightly more than you asked for. **There is no confirmation prompt.** With no `-s`/`-l` this wipes the first 2 MiB of flash, firmware included; on BK7231N, T2, and LN882H (2 MiB parts) that is the whole chip.
+The region erased is `start` up to `start + length`, rounded outwards to the chip's 4 KiB sector size — an unaligned request therefore erases slightly more than you asked for. **There is no confirmation prompt.** With no `-s`/`-l` this wipes the first 2 MiB of flash, firmware included; on BK7231N, T2, and LN882H (2 MiB parts) that is the whole chip. LN882H and GD32VW553 are the exceptions to the rounding: they reject an unaligned `-s`/`-l` outright rather than erase more than was asked for.
 
 ```bash
 # Wipe the first 2 MiB (the defaults) — on BK7231N that is the entire flash
@@ -341,7 +343,7 @@ tyutool reset [-p <PORT>] [-d <DEVICE>]
 | `-p`, `--port` | serial port | no | [auto-detect or prompt](#port-selection) |
 | `-d`, `--device` | chip name | no | `bk7231n` |
 
-Toggles the DTR/RTS lines to reboot the device without touching flash. `-d` matters because the pulse differs per family: the Beken/T-series parts use the same pulse as their flash handshake (`bk7231n`/`t2` differ from `t5ai`/`t3`/`t1`), and the ESP32 parts use espflash's hard-reset sequence. Using the wrong family usually means the device simply does not reboot.
+Toggles the DTR/RTS lines to reboot the device without touching flash. `-d` matters because the pulse differs per family: the Beken/T-series parts use the same pulse as their flash handshake (`bk7231n`/`t2` differ from `t5ai`/`t3`/`t1`), the ESP32 parts use espflash's hard-reset sequence, and `gd32vw553` pulses RESET with BOOT0 left released, so it comes up in its application rather than in the boot ROM. Using the wrong family usually means the device simply does not reboot.
 
 **Success is silent.** The command prints only the startup banner and exits 0; the confirmation is a diagnostic log line, so add `--verbose` if you want to see it on screen.
 
@@ -704,6 +706,7 @@ tyutool usb-port-survey | jq '.[] | select(.wouldListInTyutool == false)'
 | `t1` | T1 | 921600 | 115200 | 8 MiB (`0x800000`) |
 | `t5ai` (alias `t5`) | T5AI | 921600 | **460800** | 8 MiB (`0x800000`) |
 | `ln882h` | LN882H | 115200 | 115200 | 2 MiB (`0x200000`) |
+| `gd32vw553` | GD32VW553 | 2000000 | 115200 | 4 MiB (`0x400000`) |
 | `esp32` | ESP32 | 460800 | 115200 | 4 MiB (`0x400000`) |
 | `esp32c3` | ESP32-C3 | 460800 | 115200 | 4 MiB (`0x400000`) |
 | `esp32c6` | ESP32-C6 | 460800 | 115200 | 8 MiB (`0x800000`) |
@@ -719,6 +722,8 @@ The flash size is what bounds a sensible `-s`/`-l`; the CLI does not clamp them 
 **Rich mode** — stderr is an interactive terminal and `--plain` was not passed: spinner, redrawn progress bar, ANSI color, `✓`/`✗` marks.
 
 **Plain mode** — stderr is not a terminal (CI, pipe, redirect), or `--plain` was passed: fixed-width phase labels, 10 %-step percent ticks on long phases, ASCII-only separators, one append-only line per phase.
+
+With `--verbose`, `log::*` diagnostics share stderr with that output, so a phase label is no longer left waiting inline for its `OK` — it takes its own line and the `OK` follows below, keeping diagnostics out of the middle of it.
 
 ```
 tyutool v3.2.8  linux/x86_64
