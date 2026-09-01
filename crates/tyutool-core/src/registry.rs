@@ -7,7 +7,7 @@ use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
 use crate::plugins::{
     Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32p4Plugin, Esp32s3Plugin,
-    Ln882hPlugin, T1Plugin, T2Plugin, T3Plugin, T5AIPlugin,
+    Gd32vw553Plugin, Ln882hPlugin, T1Plugin, T2Plugin, T3Plugin, T5AIPlugin,
 };
 
 /// Canonicalize a user-supplied chip id: trim, upper-case, and rewrite legacy
@@ -61,6 +61,8 @@ impl FlashPluginRegistry {
         log::debug!("Registered flash plugin: ESP32S3");
         plugins.insert("LN882H".to_string(), Arc::new(Ln882hPlugin));
         log::debug!("Registered flash plugin: LN882H");
+        plugins.insert("GD32VW553".to_string(), Arc::new(Gd32vw553Plugin));
+        log::debug!("Registered flash plugin: GD32VW553");
 
         // A fake device in the default registry, so `run_job` — and therefore
         // every frontend, unchanged — can drive a job that behaves like
@@ -276,9 +278,9 @@ mod tests {
     fn list_chip_ids_only_real_plugins() {
         let r = FlashPluginRegistry::new();
         let ids = r.list_chip_ids();
-        // The 11 real chips, plus the fake device when `mock-chip` is on. Any
+        // The 12 real chips, plus the fake device when `mock-chip` is on. Any
         // other entry means something got registered that should not have been.
-        let expected = if cfg!(feature = "mock-chip") { 12 } else { 11 };
+        let expected = if cfg!(feature = "mock-chip") { 13 } else { 12 };
         assert_eq!(ids.len(), expected, "unexpected registry contents: {ids:?}");
         assert!(ids.contains(&"BK7231N".to_string()));
         assert!(ids.contains(&"T2".to_string()));
@@ -291,6 +293,7 @@ mod tests {
         assert!(ids.contains(&"ESP32P4".to_string()));
         assert!(ids.contains(&"ESP32S3".to_string()));
         assert!(ids.contains(&"LN882H".to_string()));
+        assert!(ids.contains(&"GD32VW553".to_string()));
     }
 
     #[test]

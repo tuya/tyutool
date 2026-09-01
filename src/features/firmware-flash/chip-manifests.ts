@@ -149,6 +149,20 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
       fullChipNoRf: { start: "0x00000000", end: "0x001EDFFF" },
     },
   },
+  gd32vw553: {
+    rustPluginId: "GD32VW553",
+    // The RAM loader is told this rate and the host follows it; 2 Mbaud is what the
+    // vendor tool negotiates. The two earlier stages (57600 for the boot ROM, 115200
+    // for the loader handshake) are fixed by the protocol and not user-selectable.
+    defaultBaudRate: 2000000,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
+    flashSize: "0x00400000", // 4 MiB
+    eraseRequires4KAlignment: true,
+    erasePresets: {
+      fullChip: { start: "0x00000000", end: "0x00400000" },
+    },
+  },
   ln882h: {
     rustPluginId: "LN882H",
     defaultBaudRate: 115200,

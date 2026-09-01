@@ -6180,6 +6180,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
  "toml 0.8.2",

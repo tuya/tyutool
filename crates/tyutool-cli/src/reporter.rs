@@ -16,10 +16,15 @@ struct Inner {
     inline: bool,          // phase label printed but no newline yet (plain mode)
     show_percent: bool,    // current phase emits Percent events
     percent_on_line: bool, // a milestone was eprint!-ed without a trailing newline
+    // `--verbose` sends log::* to stderr as well, so nothing may be left waiting on a
+    // half-written line: a diagnostic would be printed into the middle of it.
+    logs_share_stderr: bool,
 }
 
 impl CliReporter {
-    pub fn new(force_plain: bool) -> Self {
+    /// `logs_share_stderr` is `--verbose`: it makes stderr carry `log::*` output beside
+    /// this reporter's, which suppresses the inline `label … OK` layout (see [`Inner`]).
+    pub fn new(force_plain: bool, logs_share_stderr: bool) -> Self {
         let is_plain = force_plain || !console::Term::stderr().is_term();
 
         let pb = ProgressBar::new(100);
@@ -45,6 +50,7 @@ impl CliReporter {
                 inline: false,
                 show_percent: false,
                 percent_on_line: false,
+                logs_share_stderr,
             }),
         }
     }
@@ -150,7 +156,7 @@ impl Inner {
         self.show_percent = show_percent;
 
         if self.is_plain {
-            if self.show_percent {
+            if self.show_percent || self.logs_share_stderr {
                 eprintln!("{}", label);
             } else {
                 eprint!("{:<16}", label);
@@ -436,7 +442,7 @@ mod tests {
 
     #[test]
     fn force_plain_overrides_tty_detection() {
-        let reporter = CliReporter::new(true);
+        let reporter = CliReporter::new(true, false);
         assert!(reporter.is_plain());
     }
 
@@ -448,7 +454,7 @@ mod tests {
 
     #[test]
     fn plain_erase_phase_not_inline() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Erase,
@@ -462,7 +468,7 @@ mod tests {
 
     #[test]
     fn plain_write_phase_not_inline() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Write,
@@ -476,7 +482,7 @@ mod tests {
 
     #[test]
     fn plain_read_phase_not_inline() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Read,
@@ -488,8 +494,19 @@ mod tests {
     }
 
     #[test]
+    fn verbose_keeps_no_phase_label_inline() {
+        // With --verbose, log::* lands on stderr too; a label left waiting for its " OK"
+        // would get a diagnostic printed into the middle of it.
+        let r = CliReporter::new(true, true);
+        (r.callback())(FlashEvent::Phase {
+            phase: FlashPhase::Handshake,
+        });
+        assert!(!r.is_inline());
+    }
+
+    #[test]
     fn plain_handshake_phase_is_inline() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Handshake,
@@ -500,7 +517,7 @@ mod tests {
 
     #[test]
     fn plain_protect_phase_is_inline() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Protect,
@@ -510,7 +527,7 @@ mod tests {
 
     #[test]
     fn plain_reboot_phase_is_inline() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Reboot,
@@ -522,7 +539,7 @@ mod tests {
     // finish_current_phase knows to emit "100%" instead of "OK".
     #[test]
     fn percent_phase_show_percent_flag_remains_after_phase_start() {
-        let r = CliReporter::new(true);
+        let r = CliReporter::new(true, false);
         let cb = r.callback();
         cb(FlashEvent::Phase {
             phase: FlashPhase::Erase,

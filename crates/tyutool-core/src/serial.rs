@@ -431,9 +431,16 @@ const ESP_USB_SERIAL_JTAG_PID: u16 = 0x1001;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeviceResetStrategy {
-    Esp32HardReset { usb_pid: u16 },
+    Esp32HardReset {
+        usb_pid: u16,
+    },
     BekenBk,
     BekenT5Ai,
+    /// GD32VW553: DTR is RESET, RTS is BOOT0. Unlike the Beken strategies, this one is
+    /// *not* the download-mode entry the plugin uses — it leaves BOOT0 released so the
+    /// part boots its application. Pulsing it the plugin's way would park the chip in
+    /// the boot ROM, where the log viewer this button serves would see nothing.
+    Gd32Reset,
 }
 
 fn device_reset_strategy_for_chip(chip_id: &str, usb_pid: u16) -> DeviceResetStrategy {
@@ -443,6 +450,9 @@ fn device_reset_strategy_for_chip(chip_id: &str, usb_pid: u16) -> DeviceResetStr
     }
     if matches!(key.as_str(), "T5AI" | "T3" | "T1") {
         return DeviceResetStrategy::BekenT5Ai;
+    }
+    if key.starts_with("GD32") {
+        return DeviceResetStrategy::Gd32Reset;
     }
     DeviceResetStrategy::BekenBk
 }
@@ -494,6 +504,13 @@ fn device_reset_with_strategy(
             write_rts(port, false)?;
             Ok(())
         }
+        DeviceResetStrategy::Gd32Reset => {
+            write_rts(port, false)?; // leave BOOT0 alone — this is a plain reset
+            write_dtr(port, true)?;
+            sleep(Duration::from_millis(100));
+            write_dtr(port, false)?;
+            Ok(())
+        }
         DeviceResetStrategy::Esp32HardReset { usb_pid } => {
             sleep(Duration::from_millis(100));
             if usb_pid == ESP_USB_SERIAL_JTAG_PID {
@@ -529,6 +546,8 @@ pub(crate) fn device_reset_serial_port(
 ///   `reset_into_download_mode_t5ai` (T5AI/T3/T1), matching `plugins::beken::ops::shake`.
 /// - **ESP32 (all variants)**: espflash `hard_reset` / `reset_after_flash` (USB PID–aware), matching
 ///   post-flash reset in `plugins::esp::common::run_esp`.
+/// - **GD32VW553**: a plain reset pulse on DTR with BOOT0 released — deliberately *not*
+///   `plugins::gd32::protocol::enter_isp_mode`, which would leave the part in the boot ROM.
 pub fn device_reset_dtr_rts(port: &str, chip_id: &str) -> Result<(), FlashError> {
     let mut handle = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(500))
@@ -562,6 +581,18 @@ mod hw_reset_tests {
         assert_eq!(
             device_reset_strategy_for_chip("BK7231N", 0),
             DeviceResetStrategy::BekenBk
+        );
+    }
+
+    #[test]
+    fn gd32_routes_to_its_own_plain_reset() {
+        assert_eq!(
+            device_reset_strategy_for_chip("GD32VW553", 0),
+            DeviceResetStrategy::Gd32Reset
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("gd32vw553", 0),
+            DeviceResetStrategy::Gd32Reset
         );
     }
 

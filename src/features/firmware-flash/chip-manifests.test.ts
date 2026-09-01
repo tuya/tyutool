@@ -89,6 +89,15 @@ describe("chipManifest", () => {
     expect(m.rustPluginId).toBe("BK7231N");
   });
 
+  it("returns manifest for gd32vw553", () => {
+    const m = chipManifest("gd32vw553");
+    expect(m.rustPluginId).toBe("GD32VW553");
+    // Must stay in step with `default_baud` in crates/tyutool-cli/src/main.rs:
+    // the RAM loader is told this rate and the host follows it.
+    expect(m.defaultBaudRate).toBe(2000000);
+    expect(m.flashSize).toBe("0x00400000");
+  });
+
   it("returns manifest for ESP32 chips", () => {
     expect(chipManifest("esp32").rustPluginId).toBe("ESP32");
     expect(chipManifest("esp32c3").rustPluginId).toBe("ESP32C3");
