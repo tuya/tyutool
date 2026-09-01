@@ -5,9 +5,16 @@
 **范围：** `tyutool-core` 的插件注册与 `run_job` 调度入口；实际向上延伸到了
 `tyutool-serve`（修复取消失效）与 `src-tauri`（命令测试）
 **计划：** `docs/plans/completed/2026-08-31-flash-test-seams.md`
-**未完成部分：** 四个阶段均已交付，但本文列举的几项缺口仍在：
-`AuthorizeConfirm` 死锁无直接测试、录制回放只盖读取路径且只盖 Beken 系。
-另外「`flash_run` 与 `handle_run_job` 重复编排」未合并，另起一份 spec。
+**本文遗留缺口的去向（后来都已收口，在别处）：**
+
+| 缺口 | 结果 | 在哪 |
+|---|---|---|
+| 写入路径无协议基线 | 已补上（实机录制 16 KiB 写入） | `completed/2026-09-01-write-path-replay-design.md` |
+| `AuthorizeConfirm` 死锁无直接测试 | **重新定义**：同根因已有哨兵；真正的题是 authorize 流程没有任何假件，需另行立题 | 同上 |
+| ESP 系无法录制 | **已评估，不做**（结构性限制，非投入问题） | 同上 |
+| `flash_run` 与 `handle_run_job` 重复编排 | 已做**窄的提取**（`CancelSlot` / `ConfirmSlot`） | `completed/2026-08-31-job-control-slots-design.md` |
+
+下文「代价，说清楚」一节写于那些缺口还开着的时候，保留原样作为当时的判断记录。
 **实测基准：** 本文所有计数、行号均实测于 `edece84`（`refactor/v3`）。修改本文时请重测并更新此行的 commit。
 
 ---
