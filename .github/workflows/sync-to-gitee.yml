@@ -14,6 +14,14 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Dependabot-triggered runs read a separate secret store, so every
+    # `secrets.GITEE_*` below expands to an empty string and the remote URL
+    # collapses to `https://gitee.com/.git` -- `fatal: repository not found`,
+    # every single time. That was the bulk of this workflow's failures. Skipping
+    # loses no mirroring: the branches Dependabot pushes are excluded from the
+    # mirror below anyway, and merging its PRs is a human action whose own push
+    # event still runs this job.
+    if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout GitHub code
         uses: actions/checkout@v7
@@ -39,12 +47,26 @@ jobs:
         run: |
           set -u
 
+          # Dependabot's PR branches are transient and worth nothing on the mirror,
+          # and they are where the remaining ref races came from: a batch of merges
+          # deletes several of them while a mirror run is in flight, and the
+          # force-push then reports "incorrect old value provided" or "reference
+          # does not exist". Dropping the remote-tracking refs keeps them out of
+          # the push, and --prune deletes the ones already on Gitee. The pattern is
+          # a literal prefix, which git matches up to a slash, so it covers the
+          # full refs/remotes/origin/dependabot/<ecosystem>/<dep> shape.
+          drop_dependabot_refs() {
+            git for-each-ref --format='%(refname)' refs/remotes/origin/dependabot |
+              while read -r ref; do git update-ref -d "$ref"; done
+          }
+
           # Re-fetch right before pushing: a branch deleted since checkout is the
           # "reference does not exist" rejection.
           refresh() {
             git fetch --prune --prune-tags --force origin \
               "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
             git remote set-head origin -d || true  # drop origin/HEAD so it is not pushed as a branch
+            drop_dependabot_refs
           }
 
           # True mirror: origin wins for every branch and tag; --prune deletes
