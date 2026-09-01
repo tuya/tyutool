@@ -129,7 +129,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: { key: "bridge-check" }
+        with:
+          key: "bridge-check"
+          # This one deliberately still saves on PR refs, unlike ci.yml's two rust
+          # caches. A run only ever falls back to the DEFAULT branch's caches (or,
+          # for a PR, its base branch) -- and this workflow never runs on
+          # `refactor/v3`: see the `on:` block, where push is `bridge/main` +
+          # `bridge-v*` only. So there is no default-branch copy for a PR to
+          # restore, and gating the save on the default branch would mean this
+          # cache is never written at all, turning every bridge PR into a cold
+          # ~530 MB dependency build. The per-PR copy is reused across pushes
+          # within that PR and dies with it.
 
       - name: Clippy
         run: cargo clippy -p tyutool-bridge --all-targets -- -D warnings
@@ -235,7 +245,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: "${{ matrix.rust_targets }}" }
       - uses: Swatinem/rust-cache@v2
-        with: { key: "bridge-${{ matrix.platform }}-${{ matrix.arch }}" }
+        with:
+          key: "bridge-${{ matrix.platform }}-${{ matrix.arch }}"
+          # Restore-only: this job runs only on a `bridge-v*` tag (it needs
+          # `prepare`), and a tag-scoped cache is unreadable by the next tag.
+          save-if: false
 
       # bash on every platform (git-bash on Windows) so one loop covers both the
       # single-target and the two-target (macOS universal) case.

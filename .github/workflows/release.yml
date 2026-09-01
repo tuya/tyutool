@@ -114,7 +114,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: "${{ matrix.target }}" }
       - uses: Swatinem/rust-cache@v2
-        with: { key: "cli-${{ matrix.target }}" }
+        with:
+          key: "cli-${{ matrix.target }}"
+          # Restore-only. This job runs on a `v*.*.*` tag, and a cache saved
+          # under `refs/tags/...` is visible only to a re-run of that exact tag
+          # -- the next release cannot read it. Writing it only spends repo
+          # cache budget (shared with ci.yml, which does get hits) and adds a
+          # multi-hundred-MB upload to every release job.
+          save-if: false
 
       - name: Install cross
         if: matrix.use_cross
@@ -223,9 +230,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # shared-key replaces the per-job key suffix so a target's cache is reusable
-          # across runs; each target now compiles in a single job, so always persist it.
+          # across runs -- but only across runs on the SAME ref, and this job only ever
+          # runs on a `v*.*.*` tag, whose cache scope no later tag can read. So it is
+          # restore-only: a tag run still reads the default branch's caches, while its
+          # own multi-GB writes stop competing with ci.yml for the 10 GB repo quota.
           shared-key: "gui-${{ matrix.target }}"
-          save-if: true
+          save-if: false
 
       # ── Frontend dist (pre-built, platform-independent) ──
       - uses: actions/download-artifact@v8

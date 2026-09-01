@@ -37,7 +37,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: { key: "ci-rust" }
+        with:
+          key: "ci-rust"
+          # Save on the default branch only. A cache written by a PR run is
+          # scoped to that PR's ref and can be read by nothing else, so every
+          # PR minted its own private copy of this key -- three live copies of
+          # `ci-rust` plus three of `ci-tauri` had the repo pinned at GitHub's
+          # 10 GB ceiling, evicting the caches that do get hit. PR runs still
+          # RESTORE from the default branch, which is where their hits came
+          # from all along.
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: Format check
         run: cargo fmt --all --check
       - name: Clippy
@@ -109,7 +118,12 @@ jobs:
           exit 1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: { key: "ci-tauri" }
+        with:
+          # Default branch only -- see the `rust` job. This is the largest
+          # cache in the repo (~1.8 GB a copy), so it is where the per-PR
+          # duplicates cost the most.
+          key: "ci-tauri"
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: Clippy
         run: cargo clippy -p tyutool_gui --all-targets -- -D warnings
       - name: Test
