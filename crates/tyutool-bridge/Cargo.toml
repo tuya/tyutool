@@ -25,7 +25,7 @@ base64 = "0.23"
 chrono = { version = "0.4", features = ["clock"] }
 dirs = "6"
 fern = "0.7"
-getrandom = "0.3"
+getrandom = "0.4"
 log = "0.4"
 muda = "0.17"
 # Decodes the embedded tray artwork (see `tray_glyph`). `tray_icon::Icon` only

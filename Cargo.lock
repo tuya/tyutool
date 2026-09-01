@@ -6119,7 +6119,7 @@ dependencies = [
  "dirs",
  "fern",
  "futures-util",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "log",
  "muda 0.17.1",
  "png 0.17.16",
