@@ -1,6 +1,8 @@
 # 写入路径录制回放 实施计划
 
-**Spec:** `docs/specs/2026-09-01-write-path-replay-design.md`
+**Spec:** `docs/specs/completed/2026-09-01-write-path-replay-design.md`
+
+**状态：** 已交付——PR #174，rebase-merge 至 `refactor/v3`，提交 `06fa5af`。
 
 **Goal:** 给 Beken 驱动的写入路径（解保护 → 擦除 → 写 → 每扇区 CRC → 保护）补一条来自真实
 硬件的协议基线，并把上一轮遗留的另外两个缺口各自定性收口。

@@ -1,9 +1,10 @@
 # 任务控制的两个共用槽位：`CancelSlot` 与 `ConfirmSlot`
 
 **日期：** 2026-08-31
-**状态：** 待实现
+**状态：** 已实现（PR #173，rebase-merge 至 `refactor/v3`，提交 `36997e0`）。
+两个前端的测试数量一个未变（serve 31、tauri 36）——行为未变的证据。
 **范围：** `tyutool-core` 新增 `job_control` 模块；`src-tauri` 与 `tyutool-serve` 改为使用它
-**计划：** `docs/plans/2026-08-31-job-control-slots.md`
+**计划：** `docs/plans/completed/2026-08-31-job-control-slots.md`
 **前置：** `docs/specs/completed/2026-08-31-flash-test-seams-design.md`（那轮给两边都补上了测试，
 本次重构才有网可依）
 **实测基准：** 行号实测于 `869fcb1`（`refactor/v3`）。

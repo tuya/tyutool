@@ -1,6 +1,8 @@
 # 任务控制槽位 实施计划
 
-**Spec:** `docs/specs/2026-08-31-job-control-slots-design.md`
+**Spec:** `docs/specs/completed/2026-08-31-job-control-slots-design.md`
+
+**状态：** 已交付——PR #173，rebase-merge 至 `refactor/v3`，提交 `36997e0`。
 
 **Goal:** 把「同一时刻只跑一个任务，且新任务不得抹掉旧任务的取消」这个不变量，以及确认握手，
 从 `src-tauri` 与 `tyutool-serve` 各自的实现中提取到 `tyutool-core`，让正确性成为数据结构

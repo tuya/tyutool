@@ -1,9 +1,9 @@
 # 写入路径的录制回放基线
 
 **日期：** 2026-09-01
-**状态：** 待实现
+**状态：** 已实现（PR #174，rebase-merge 至 `refactor/v3`，提交 `06fa5af`）
 **范围：** `tyutool-core` 的 Beken 驱动写入路径（`plugins/beken`）
-**计划：** `docs/plans/2026-09-01-write-path-replay.md`
+**计划：** `docs/plans/completed/2026-09-01-write-path-replay.md`
 **前置：** `docs/specs/completed/2026-08-31-flash-test-seams-design.md` 建立了
 `RecordIo` / `ReplayIo` 与第一条读取基线；本文补上写入路径。
 
