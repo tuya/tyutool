@@ -66,6 +66,7 @@ describe("dynamic key families", () => {
       "connect",
       "switch_baud",
       "read_flash_id",
+      "fetch_ram_loader",
       "load_ram",
       "erase",
       "write",

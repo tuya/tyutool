@@ -77,6 +77,9 @@ pub enum FlashPhase {
     Reboot,
     Read,
     Save,
+    /// Fetching the chip's RAM loader asset, because it was not in the local cache.
+    /// Only LN882H and GD32VW553 have one; see `crate::ram_loader`.
+    FetchRamLoader,
     LoadRam,
     SwitchBaud,
     Connect,

@@ -104,6 +104,8 @@ jobs:
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
           GITEE_TARGET_COMMITISH: ${{ vars.GITEE_TARGET_COMMITISH }}
           TAG: auth-firmware
-          AUTH_FIRMWARE_DIR: assets/auth-firmware
+          ASSET_DIR: assets/auth-firmware
           MANIFEST_FILE: auth-firmware.json
-        run: bash scripts/publish-auth-firmware-gitee.sh
+          RELEASE_NAME: 默认授权固件 (auth-firmware)
+          RELEASE_BODY: batch-flash-auth 默认授权固件。资产由 release-auth-firmware workflow 自动维护。
+        run: bash scripts/publish-firmware-assets-gitee.sh

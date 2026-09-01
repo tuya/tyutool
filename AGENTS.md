@@ -111,8 +111,8 @@ cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D
 cargo clippy -p tyutool_gui --all-targets -- -D warnings                                    # ci.yml
 cargo clippy -p tyutool-bridge --all-targets -- -D warnings                                 # bridge.yml
 cargo test -p tyutool-core --features ts-rs && git diff --exit-code -- src/bindings/         # ci.yml
-cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io -- -D warnings   # ci.yml
-cargo test -p tyutool-core --features zip,excel,mock-chip,record-io                                  # ci.yml
+cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download -- -D warnings   # ci.yml
+cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download                                  # ci.yml
 pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
 ```
 
@@ -150,6 +150,9 @@ tyutool/
 │   └── (see Cargo.toml [workspace].members — 5 crates total)
 ├── src-tauri/          # Tauri 2 shell (Rust backend for the desktop GUI)
 │   └── src/lib.rs      # Tauri commands bridging the WebView to tyutool-core
+├── assets/             # Published firmware assets — sources for the release workflows, never compiled in
+│   ├── auth-firmware/  # batch-flash-auth's default authorization firmware list (user-selected)
+│   └── ram-loader/     # LN882H / GD32VW553 RAM loaders (mandatory, pinned by digest in the plugin)
 ├── scripts/            # Build/release orchestration only (not runtime shared code)
 ├── vite/               # Vite plugins and Node helpers (dev toolchain, not bundled)
 ├── src/                # Vue 3 frontend (Vite, Pinia, Tailwind CSS v4, DaisyUI)
@@ -218,6 +221,44 @@ that two of its stages were cancelled on evidence rather than completed.
 #### Chip plugin system (Rust)
 
 Each supported chip is a `FlashPlugin` (`crates/tyutool-core/src/plugin.rs`). Plugins are registered in `FlashPluginRegistry` (`registry.rs`) by uppercase ID (e.g. `"BK7231N"`, `"T5AI"`). To add a chip: implement `FlashPlugin`, add the file under `crates/tyutool-core/src/plugins/`, and register it in `FlashPluginRegistry::new()`.
+
+#### Published firmware assets (`assets/`)
+
+Vendor firmware images are **published assets, never compiled in**. Two families share one
+layout, one generator core and one Gitee publisher, and differ only in prefix, manifest key
+and release tag:
+
+| Family | Source dir / tag | Consumer | How a version is chosen |
+|---|---|---|---|
+| `auth-firmware` | `assets/auth-firmware/` | batch-flash-auth UI | the operator picks one from the manifest |
+| `ram-loader` | `assets/ram-loader/` | `tyutool_core::ram_loader` (LN882H, GD32VW553) | **the plugin pins one `(chip, version, sha256)`**; the manifest is only a lookup table |
+
+```
+assets/<family>/<chip>/<family>-<chip>-<version>.bin   # immutable once published
+assets/<family>/<chip>/<family>-<chip>-<version>.txt   # optional notes → manifest `notes`
+```
+
+- **Do not `include_bytes!` a vendor image.** Both RAM loaders used to be embedded; they are
+  not any more, and neither is anything comparable. Behaviour that needs a blob at runtime
+  fetches it through `ram_loader` (or the auth-firmware path) and verifies it.
+- **The digest lives in the code, not in the manifest.** `ram_loader::resolve` checks the
+  bytes against the plugin's `RamLoaderRef`, so a rolled or tampered manifest cannot swap
+  the loader, and publishing a new version never changes what a shipped tool uploads.
+  Shipping a new loader is therefore two halves — publish the asset, *then* bump the
+  constant and release the tool.
+- **Naming and scanning rules are enforced by the generator**, shared in
+  `scripts/lib/firmware-asset-manifest.ts`; each family adds only a thin entry point
+  (`scripts/generate-{auth-firmware,ram-loader}-manifest.ts`). Adding a third family means
+  another entry point, not another copy of the scanner or of
+  `scripts/publish-firmware-assets-gitee.sh`.
+- **Adding a mirror touches three places**: `ram_loader::MANIFEST_MIRRORS`,
+  `AUTH_FIRMWARE_SOURCES` in `src/features/batch-flash-auth/auth-firmware.ts`, and
+  `ALLOWED_FETCH_HOSTS` in `src-tauri/src/updater.rs`.
+- **Tests never reach the network.** The pinned constant is checked against the repo asset
+  by `ram_loader::repo_asset_bytes`; flow tests feed the plugins synthetic loader bytes.
+- `TYUTOOL_RAM_LOADER_DIR` is the air-gapped escape hatch (read-only, documented in
+  `docs/cli.md`). A file that is present but fails verification is an error, never a
+  silent re-download.
 
 #### Chip manifest system (Frontend)
 

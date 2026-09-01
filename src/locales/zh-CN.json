@@ -762,6 +762,7 @@
       "connect": "连接",
       "switch_baud": "切换波特率",
       "read_flash_id": "读取Flash ID",
+      "fetch_ram_loader": "下载引导固件",
       "load_ram": "加载",
       "erase": "擦除",
       "write": "写入",

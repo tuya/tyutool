@@ -36,6 +36,7 @@ mod job;
 mod job_control;
 mod plugin;
 pub mod plugins;
+pub mod ram_loader;
 mod registry;
 mod serial;
 mod serial_debug;

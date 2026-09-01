@@ -25,6 +25,7 @@ export type FlashPhase =
   | "reboot"
   | "read"
   | "save"
+  | "fetch_ram_loader"
   | "load_ram"
   | "switch_baud"
   | "connect"
