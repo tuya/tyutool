@@ -34,6 +34,7 @@ mod error;
 pub mod flash_event;
 mod job;
 mod job_control;
+pub mod paths;
 mod plugin;
 pub mod plugins;
 pub mod ram_loader;

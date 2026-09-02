@@ -86,9 +86,9 @@ Key constants: `DEFAULT_PORT = 18730`, `PROTOCOL_VERSION = 1`, `ORIGIN_ALLOWLIST
 
 The bridge is a resident process with a **separate** log file namespace from the CLI/GUI:
 
-- **File:** `tyutool-bridge-<timestamp>.log` in the OS data dir. Pruned at startup (`MAX_LOG_FILES = 20`, `MAX_LOG_BYTES_TOTAL = 50 MB`) — a smaller budget than the interactive tools, since it runs continuously.
+- **File:** `tyutool-bridge-<timestamp>.log` in the OS log location under the bridge's own id (`tyutool_core::paths::log_dir(BRIDGE_ID)`; it was the data dir before the ids were unified). Pruned at startup (`MAX_LOG_FILES = 20`, `MAX_LOG_BYTES_TOTAL = 50 MB`) — a smaller budget than the interactive tools, since it runs continuously.
 - **Banner:** uses the shared `tyutool_core::diagnostics::log_session_banner` (name/type/version/OS/session id) — never re-inline a per-binary banner.
-- **`grants.json`** at `{config_dir}/tyutool-bridge/grants.json` (unix `0600`, atomic temp-file + rename) **contains tokens and is a credential** — never attach it to an issue or log it. On read/parse failure the bridge starts as "no grants" and warns, it does not crash.
+- **`grants.json`** at `{config_dir}/com.tyutool.bridge/grants.json` (unix `0600`, atomic temp-file + rename; `migrate_legacy_config_files` moves it and `autostart.json` once from the old `tyutool-bridge` directory) **contains tokens and is a credential** — never attach it to an issue or log it. On read/parse failure the bridge starts as "no grants" and warns, it does not crash.
 - **Audit channel** (`AuditSink` → log target `bridge::audit`): one line per event, format frozen — see PROTOCOL.md §审计行. Every dangerous op leaves exactly one `confirm` line (incl. `preauthorized` / `execution_busy` / `cancelled`).
 
 The bridge's redaction discipline is stricter than the rest of the repo because it sits closest to credentials crossing the wire.
