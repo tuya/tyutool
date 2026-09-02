@@ -27,7 +27,7 @@ dirs = "6"
 fern = "0.7"
 getrandom = "0.4"
 log = "0.4"
-muda = "0.17"
+muda = "0.19"
 # Decodes the embedded tray artwork (see `tray_glyph`). `tray_icon::Icon` only
 # takes raw RGBA, and `Icon::from_path` would mean shipping a loose file and
 # resolving it inside the `.app` bundle at runtime — embedding the PNG and
@@ -36,7 +36,7 @@ muda = "0.17"
 # no new version to the tree.
 png = "0.17"
 tao = "0.35"
-tray-icon = "0.21"
+tray-icon = "0.24"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The GUI-process locale, read from CFLocale / GetUserDefaultLocaleName rather
