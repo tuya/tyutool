@@ -27,7 +27,7 @@ dirs = "6"
 fern = "0.7"
 getrandom = "0.4"
 log = "0.4"
-muda = "0.17"
+muda = "0.19"
 # Decodes the embedded tray artwork (see `tray_glyph`). `tray_icon::Icon` only
 # takes raw RGBA, and `Icon::from_path` would mean shipping a loose file and
 # resolving it inside the `.app` bundle at runtime — embedding the PNG and
