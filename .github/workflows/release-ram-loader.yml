@@ -11,6 +11,15 @@ name: Release ram-loader
 # See assets/ram-loader/README.md.
 on:
   workflow_dispatch:
+    inputs:
+      publish_gitee:
+        description: >-
+          Also publish to the Gitee mirror. Off by default: creating the
+          `ram-loader` release on Gitee currently fails with HTTP 400
+          "创建标签失败" because no valid `target_commitish` is configured
+          (see the Gitee steps below). Turn this on once that is fixed.
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -72,7 +81,15 @@ jobs:
           echo "upload manifest (clobber): ram-loader.json"
           gh release upload "$TAG" ram-loader.json --clobber
 
+      # Both Gitee steps are opt-in while the mirror publish is broken. The release
+      # creation fails with HTTP 400 "创建标签失败：ram-loader": the publisher script
+      # falls back to `target_commitish = <tag>` when GITEE_TARGET_COMMITISH is unset,
+      # and that ref does not exist on Gitee — it is the very tag being created. Set an
+      # Actions variable GITEE_TARGET_COMMITISH to a real Gitee branch (e.g. `master`)
+      # and re-enable, rather than leaving these steps to fail the whole run and take
+      # the CDN artifact down with them.
       - name: Generate Gitee manifest
+        if: ${{ inputs.publish_gitee }}
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_USER: ${{ secrets.GITEE_USER }}
@@ -102,6 +119,7 @@ jobs:
             pnpm exec tsx scripts/generate-ram-loader-manifest.ts
 
       - name: Publish to Gitee release
+        if: ${{ inputs.publish_gitee }}
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_USER: ${{ secrets.GITEE_USER }}
