@@ -74,7 +74,9 @@ const LOADER: RamLoaderRef = RamLoaderRef {
 
 1. `TYUTOOL_RAM_LOADER_DIR`（若设置）——只读本地目录，绝不联网，产线/内网机器用。
    同时接受平铺和 `<chip>/` 两种摆法。
-2. 缓存 `<cache_dir>/tyutool/ram-loader/<chip>/<file>`——CLI / GUI / bridge 共用一份，
+2. 缓存 `<cache_dir>/com.tyutool.shared/ram-loader/<chip>/<file>`——CLI / GUI / bridge 共用一份，
+   （本文实现时写的是 `<cache_dir>/tyutool/ram-loader`，次日被
+   `2026-09-02-user-dir-layout-design.md` 的统一命名取代），
    一次下载三端复用。
 3. 下载（`download` feature，三个镜像依次尝试）。
 

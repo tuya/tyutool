@@ -120,13 +120,14 @@ fn load_from_dir(dir: &Path, loader: &RamLoaderRef) -> Option<Result<Vec<u8>, St
     })
 }
 
-/// Where downloaded loaders are kept: `<user cache dir>/tyutool/ram-loader`.
+/// Where downloaded loaders are kept: `<user cache dir>/com.tyutool.shared/ram-loader`.
 ///
 /// One directory for every frontend, so a loader the CLI fetched is one the GUI and the
-/// bridge already have. Deliberately not the log directory and not the GUI's
-/// `app_cache_dir()`, which is per-bundle-id.
+/// bridge already have — which is why it sits under [`paths::SHARED_ID`] rather than any
+/// one product's id, and in the cache class rather than beside the logs: the images are
+/// re-downloadable, so the OS is welcome to reclaim them.
 pub fn cache_dir() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("tyutool").join("ram-loader"))
+    crate::paths::cache_dir(crate::paths::SHARED_ID).map(|d| d.join("ram-loader"))
 }
 
 /// Cache path for one loader under `root`.

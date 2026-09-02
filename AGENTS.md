@@ -326,9 +326,40 @@ Use `log::info!` / `log::debug!` / `log::warn!` / `log::error!` for diagnostic i
 
 | Platform | FlashEvent | log::* |
 |----------|-----------|--------|
-| CLI | CliReporter → stderr | `{data_dir}/tyutool/tyutool-<timestamp>.log` (`--verbose` also → stderr) |
+| CLI | CliReporter → stderr | `{log_dir}/com.tyutool.cli/tyutool-<timestamp>.log` (`--verbose` also → stderr) |
 | GUI (Tauri) | Tauri event → UI | tauri-plugin-log → file (level controlled by developer setting) |
 | Web/IDE | WebSocket JSON → browser UI | CLI-side log file |
+
+### Per-user file locations
+
+`tyutool_core::paths` is the single source of truth. Two rules, and the second is the one
+that keeps getting broken:
+
+1. **One reverse-DNS id per shipped product**, used unchanged wherever that product
+   writes: `com.tyutool.desktop` (the GUI's real Tauri identifier), `com.tyutool.cli`,
+   `com.tyutool.bridge` (the bridge's packager identifier). `com.tyutool.shared` covers
+   what no single product owns — today the RAM loader cache and the serial-debug archive,
+   both written by more than one binary.
+2. **The OS directory is chosen by what the data *is*, never by convenience.** Logs go in
+   the log location, user configuration where the system backs it up, re-fetchable data in
+   the cache location the system is free to reclaim. A program being "spread across three
+   directories" is correct and must not be tidied into one: merging them either backs up a
+   re-downloadable cache on every Time Machine run or lets a disk sweep delete a
+   credential. `paths::log_dir` reproduces Tauri's `app_log_dir()` formula exactly so the
+   GUI (which resolves through Tauri) and the other two land in the same shape.
+
+Three things are **not** paths and must not be renamed along with them: the Tauri
+`identifier` (bundle identity, code signing, and the Windows/Linux WebView profile
+directory), the bridge's `AUTOSTART_APP_NAME` (a LaunchAgent label / `.desktop` file name /
+`HKCU\Run` value — renaming orphans every existing registration, which nothing repairs),
+and the GUI's `tauri-plugin-store` file names.
+
+Never merge two binaries' logs into one directory: `pick_active_log` resolves "the active
+log" as the newest `*.log` by mtime, and `prune_log_files` budgets are per-directory, so a
+shared directory would let one binary's files shadow and evict the other's. A directory
+rename that carries user configuration needs a one-time migration beside it —
+`tyutool-bridge`'s `migrate_legacy_config_files` is the model: move named files, never the
+directory; a file already at the destination always wins; failure warns and continues.
 
 ### Issue-reporting support
 
@@ -350,7 +381,7 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
   once in `tyutool_core::prune_log_files`; each binary passes its own `LogRetention`. Change the
   algorithm there, and the budgets at the call site — never fork the function again.
 - **Bounded growth — serial-debug session archive:** the serial-debug archive
-  (`{temp_dir}/tyutool/serial-debug/serial-debug-session-<ts>-<pid>-<seq>.ndjson`
+  (`{temp_dir}/com.tyutool.shared/serial-debug/serial-debug-session-<ts>-<pid>-<seq>.ndjson`
   plus its `.idx` sidecar) is a *third* file family with its own bounds, because
   a 921600-baud port writes ~1.74 GiB/hour into it. Per session it is size-capped
   (default 256 MiB, user-settable 16–4096 MiB via

@@ -67,15 +67,12 @@ pub struct AutostartPreference {
 }
 
 impl AutostartPreference {
-    /// Production location: `{config_dir}/tyutool-bridge/autostart.json`.
+    /// Production location: `{config_dir}/com.tyutool.bridge/autostart.json`.
     ///
-    /// The config dir, alongside `grants.json`, for the same reason given there:
+    /// The config class, alongside `grants.json`, for the same reason given there:
     /// this is user configuration, not a diagnostic artefact.
     pub fn open() -> anyhow::Result<Self> {
-        let dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("no platform config directory"))?
-            .join("tyutool-bridge");
-        Ok(Self::at(dir.join("autostart.json")))
+        Ok(Self::at(crate::config_dir()?.join("autostart.json")))
     }
 
     pub fn at(path: impl Into<PathBuf>) -> Self {

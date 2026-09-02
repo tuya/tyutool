@@ -153,9 +153,13 @@ the binary — they are published assets, fetched once over HTTPS and then cache
 
 | Platform | Cache directory |
 |----------|-----------------|
-| Linux | `~/.cache/tyutool/ram-loader/<chip>/` |
-| macOS | `~/Library/Caches/tyutool/ram-loader/<chip>/` |
-| Windows | `%LOCALAPPDATA%\tyutool\ram-loader\<chip>\` |
+| Linux | `~/.cache/com.tyutool.shared/ram-loader/<chip>/` |
+| macOS | `~/Library/Caches/com.tyutool.shared/ram-loader/<chip>/` |
+| Windows | `%LOCALAPPDATA%\com.tyutool.shared\ram-loader\<chip>\` |
+
+`com.tyutool.shared` rather than any one binary's id: whichever of the three downloads a
+loader first, the other two reuse it. It sits in the cache location because the images
+can always be fetched again — the OS is welcome to reclaim the space.
 
 The fetch happens before the port is opened, so a network failure leaves the device
 untouched, and it happens once per loader version — every later run, and the GUI, reuse
@@ -183,14 +187,22 @@ Every run except `usb-port-survey`, `completions` and `logs` opens a session log
 
 ```
 tyutool v3.2.8  windows/x86_64
-log: C:\Users\you\AppData\Roaming\tyutool\tyutool-20260818-184752.log
+log: C:\Users\you\AppData\Local\com.tyutool.cli\logs\tyutool-20260818-184752.log
 ```
 
 | Platform | Directory |
 |----------|-----------|
-| Linux | `~/.local/share/tyutool/` |
-| macOS | `~/Library/Application Support/tyutool/` |
-| Windows | `%APPDATA%\tyutool\` |
+| Linux | `~/.local/share/com.tyutool.cli/logs/` |
+| macOS | `~/Library/Logs/com.tyutool.cli/` |
+| Windows | `%LOCALAPPDATA%\com.tyutool.cli\logs\` |
+
+Each of the three tyutool binaries keeps its files under its own reverse-DNS id —
+`com.tyutool.cli` here, `com.tyutool.desktop` for the GUI, `com.tyutool.bridge` for the
+bridge — and within each, in the location the platform reserves for that *kind* of data:
+logs in the log location, settings where the system backs them up, caches where it is
+free to reclaim them. Earlier versions wrote the CLI's logs to `{data dir}/tyutool/`,
+which on Windows meant the roaming profile carried this machine's diagnostics between
+machines; old files are left where they are, and `logs --dir` still reads them.
 
 Files are named `tyutool-<YYYYMMDD-HHMMSS>.log`, one per run. A session file is capped at 10 MB and rolls over to `tyutool-<timestamp>-1.log`, `-2.log`, … beyond that. At startup the oldest files are pruned until the directory holds at most 100 files and 100 MB in total (at least one file is always kept). Attach the file for the run that failed when filing a bug report — [`logs export`](#logs--inspect-the-session-log-files) packages them for you, and [`logs list`](#logs--inspect-the-session-log-files) tells you which file belongs to which run.
 
@@ -630,9 +642,10 @@ tyutool logs tail -n 20000
 tyutool logs list --json
 tyutool logs tail -f tyutool-20260828-144739.log
 
-# The GUI keeps its logs elsewhere (Tauri's app log dir, named after the
-# bundle identifier com.tyutool.desktop) — point --dir at them
-tyutool logs --dir ~/.local/share/com.tyutool.desktop/logs list
+# Each binary logs under its own id — point --dir at another one's directory
+tyutool logs --dir ~/.local/share/com.tyutool.desktop/logs list   # the GUI
+tyutool logs --dir ~/.local/share/com.tyutool.bridge/logs list    # the bridge
+tyutool logs --dir ~/.local/share/tyutool list                    # CLI logs from earlier versions
 
 # Package everything for a bug report
 tyutool logs export ~/tyutool-logs.zip

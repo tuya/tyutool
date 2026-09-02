@@ -20,7 +20,7 @@
 //! one click is persisted as an Origin-bound token which a later connection
 //! presents as `?token=` on the handshake (a token the store does not recognize
 //! only downgrades the connection, it never refuses it); grants live in
-//! `{config_dir}/tyutool-bridge/grants.json` (0600), never expire, and are
+//! `{config_dir}/com.tyutool.bridge/grants.json` (0600), never expire, and are
 //! cleared by revoking. The gate re-checks that token against the store on
 //! every dangerous operation rather than trusting a handshake-time verdict, so
 //! revoking takes a connection's privilege away immediately instead of only for
@@ -473,7 +473,64 @@ struct GrantFile {
     grants: Vec<WireGrant>,
 }
 
-/// Persistent [`TokenStore`]: JSON at `{config_dir}/tyutool-bridge/grants.json`,
+/// The directory name this crate used before the per-product ids were unified.
+///
+/// On Linux it held only the two JSON files below; on macOS and Windows
+/// `config_dir()` and `data_dir()` are the same directory, so it also holds the old
+/// session logs — which is why [`migrate_legacy_config_files`] moves the two files by
+/// name instead of moving the directory.
+const LEGACY_CONFIG_DIR_NAME: &str = "tyutool-bridge";
+
+/// The two files the bridge keeps in its config directory. Both are user configuration:
+/// losing either costs the user a decision they already made.
+const CONFIG_FILE_NAMES: [&str; 2] = ["grants.json", "autostart.json"];
+
+/// `{config_dir}/com.tyutool.bridge` — the bridge's own id, not the desktop app's.
+///
+/// Deliberately a separate root from `com.tyutool.desktop`: macOS uninstaller utilities
+/// match by bundle identifier, so a user removing only the GUI would otherwise take the
+/// bridge's grants with it.
+pub fn config_dir() -> anyhow::Result<std::path::PathBuf> {
+    let dir = tyutool_core::paths::config_dir(tyutool_core::paths::BRIDGE_ID)
+        .ok_or_else(|| anyhow::anyhow!("no platform config directory"))?;
+    if let Some(legacy) = dirs::config_dir().map(|d| d.join(LEGACY_CONFIG_DIR_NAME)) {
+        migrate_legacy_config_files(&legacy, &dir);
+    }
+    Ok(dir)
+}
+
+/// Move `grants.json` / `autostart.json` from the pre-unification directory, once.
+///
+/// Best-effort by design: this runs inside a resident helper at startup, and the worst
+/// case of a failed move is that the user re-authorizes an origin and re-ticks autostart.
+/// Refusing to start over it would be far worse. A file already present at the new
+/// location always wins — never overwrite current state with a stale copy.
+fn migrate_legacy_config_files(legacy_dir: &std::path::Path, current_dir: &std::path::Path) {
+    if legacy_dir == current_dir || !legacy_dir.is_dir() {
+        return;
+    }
+    for name in CONFIG_FILE_NAMES {
+        let from = legacy_dir.join(name);
+        let to = current_dir.join(name);
+        if !from.is_file() || to.exists() {
+            continue;
+        }
+        if let Err(e) = std::fs::create_dir_all(current_dir) {
+            log::warn!("migrate {name}: create {}: {e}", current_dir.display());
+            return;
+        }
+        // Same directory tree in practice, so a rename succeeds; copy+remove covers the
+        // case where the two resolve onto different volumes.
+        let moved = std::fs::rename(&from, &to)
+            .or_else(|_| std::fs::copy(&from, &to).and_then(|_| std::fs::remove_file(&from)));
+        match moved {
+            Ok(_) => log::info!("migrated {name} to {}", to.display()),
+            Err(e) => log::warn!("could not migrate {name} from {}: {e}", from.display()),
+        }
+    }
+}
+
+/// Persistent [`TokenStore`]: JSON at `{config_dir}/com.tyutool.bridge/grants.json`,
 /// mode 0600 on unix.
 ///
 /// It exists so a reboot does not cost the user another confirmation. Grants
@@ -490,15 +547,15 @@ pub struct FileTokenStore {
 }
 
 impl FileTokenStore {
-    /// Production location: `{config_dir}/tyutool-bridge/grants.json`.
+    /// Production location: `{config_dir}/com.tyutool.bridge/grants.json`.
     ///
-    /// The *config* dir, not the data dir the session logs live in: a grant is
-    /// user configuration ("this origin may flash"), not a diagnostic artefact.
+    /// The *config* class, not the log class: a grant is user configuration ("this
+    /// origin may flash"), so it must be somewhere the OS backs up and never reclaims.
+    /// Only Linux actually separates the two directories — on macOS and Windows
+    /// `config_dir()` and `data_dir()` are one and the same — but the class is still
+    /// what decides where this belongs.
     pub fn open() -> anyhow::Result<Self> {
-        let dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("no platform config directory"))?
-            .join("tyutool-bridge");
-        Self::open_at(&dir.join("grants.json"))
+        Self::open_at(&config_dir()?.join("grants.json"))
     }
 
     /// Load (or start) the grant file at `path`, creating missing parents.
@@ -4416,6 +4473,81 @@ fn command_first_line(program: &str, args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The grant file is a credential and the autostart file a user choice, so the move
+    /// to the unified id has to carry them — without overwriting what is already at the
+    /// new location, and without dragging along the old session logs that share the
+    /// directory on macOS and Windows.
+    #[test]
+    fn legacy_config_files_move_once_without_clobbering_or_taking_logs() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "tyutool-bridge-migrate-{}-{unique}",
+            std::process::id()
+        ));
+        let legacy = base.join(LEGACY_CONFIG_DIR_NAME);
+        let current = base.join(tyutool_core::paths::BRIDGE_ID);
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(legacy.join("grants.json"), b"legacy grants").unwrap();
+        std::fs::write(legacy.join("autostart.json"), b"legacy autostart").unwrap();
+        std::fs::write(
+            legacy.join("tyutool-bridge-20260101-000000Z.log"),
+            b"old log",
+        )
+        .unwrap();
+        // Already decided at the new location: the stale copy must not win.
+        std::fs::write(current.join("autostart.json"), b"current autostart").unwrap();
+
+        migrate_legacy_config_files(&legacy, &current);
+
+        assert_eq!(
+            std::fs::read(current.join("grants.json")).unwrap(),
+            b"legacy grants"
+        );
+        assert!(
+            !legacy.join("grants.json").exists(),
+            "the credential must be moved, not duplicated"
+        );
+        assert_eq!(
+            std::fs::read(current.join("autostart.json")).unwrap(),
+            b"current autostart",
+            "a file already at the new location wins"
+        );
+        assert!(
+            legacy.join("autostart.json").is_file(),
+            "a file that did not move must be left where it was"
+        );
+        assert!(
+            legacy.join("tyutool-bridge-20260101-000000Z.log").is_file(),
+            "logs are not config and must stay behind"
+        );
+
+        // Running again on a half-migrated directory changes nothing.
+        migrate_legacy_config_files(&legacy, &current);
+        assert_eq!(
+            std::fs::read(current.join("grants.json")).unwrap(),
+            b"legacy grants"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A fresh install has no legacy directory at all; that is not an error.
+    #[test]
+    fn migration_is_a_no_op_without_a_legacy_directory() {
+        let base = std::env::temp_dir().join(format!(
+            "tyutool-bridge-migrate-none-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let current = base.join(tyutool_core::paths::BRIDGE_ID);
+        migrate_legacy_config_files(&base.join(LEGACY_CONFIG_DIR_NAME), &current);
+        assert!(!current.exists(), "nothing to migrate must create nothing");
+    }
 
     #[test]
     fn concurrent_stagings_of_identical_firmware_get_separate_files() {

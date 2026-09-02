@@ -947,11 +947,12 @@ impl SerialDebugArchive {
 // avoid startup panic when archive dir is unwritable` 的修复因此要手工移植两次
 // 才能落到两个宿主上。下沉到这里之后，下一次这样的修复只需要改一处。
 
-/// `{temp_dir}/tyutool/serial-debug` — the preferred archive root. Both the
-/// Tauri GUI and `tyutool-serve` computed this identically before it was
-/// consolidated here; see the "Archive isolation" contract in `AGENTS.md`.
+/// `{temp_dir}/com.tyutool.shared/serial-debug` — the preferred archive root.
+/// Under the shared id rather than one product's, because the Tauri GUI and
+/// `tyutool-serve` both write here; both computed this identically before it
+/// was consolidated here. See the "Archive isolation" contract in `AGENTS.md`.
 pub fn serial_debug_archive_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("tyutool").join("serial-debug")
+    crate::paths::temp_dir(crate::paths::SHARED_ID).join("serial-debug")
 }
 
 /// Create the serial-debug archive + filter index without panicking the host

@@ -309,16 +309,19 @@ fn init_logging(headless: bool) {
     }
 }
 
-/// Create `{data_dir}/tyutool-bridge/tyutool-bridge-<UTC timestamp>.log` and
+/// Create `{log_dir}/com.tyutool.bridge/tyutool-bridge-<UTC timestamp>.log` and
 /// prune older sessions. The name follows the CLI's `tyutool-<timestamp>.log`
 /// scheme so "newest `*.log` by mtime" stays a valid way to find the live file.
+///
+/// The platform's *log* location under the bridge's own id — the same shape the GUI and
+/// the CLI use under theirs (`tyutool_core::paths`). It used to be `data_dir()`, which
+/// on Windows meant the roaming profile carried this machine's diagnostics around.
 ///
 /// TODO: no in-session size rollover yet (the CLI's `SessionLogWriter` caps a
 /// single file at 10 MB); add it when the bridge grows chatty enough to matter.
 fn open_session_log() -> anyhow::Result<(std::path::PathBuf, std::fs::File)> {
-    let dir = dirs::data_dir()
-        .ok_or_else(|| anyhow::anyhow!("no platform data directory"))?
-        .join("tyutool-bridge");
+    let dir = tyutool_core::paths::log_dir(tyutool_core::paths::BRIDGE_ID)
+        .ok_or_else(|| anyhow::anyhow!("no platform log directory"))?;
     std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("create {}: {e}", dir.display()))?;
     tyutool_core::prune_log_files(&dir, &LOG_RETENTION);
 

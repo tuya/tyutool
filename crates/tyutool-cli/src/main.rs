@@ -555,10 +555,18 @@ fn run_logs(dir: &Path, cmd: LogsCmd) -> Result<(), Box<dyn std::error::Error>> 
 
 /// Where the CLI writes its own session logs. `tyutool logs` reads the same
 /// directory by default; `--dir` points it at another one (the GUI's, say).
+///
+/// This is the platform's *log* location under the CLI's own id, the same shape the
+/// GUI and the bridge use under theirs (see `tyutool_core::paths`). It used to be
+/// `data_dir()/tyutool`, which on Windows put machine-local diagnostics into the
+/// roaming profile.
+///
+/// The fallback is the temp directory, not the working directory: a tool that cannot
+/// find a log location should not start littering whatever directory the user happened
+/// to run it from.
 fn default_log_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("tyutool")
+    tyutool_core::paths::log_dir(tyutool_core::paths::CLI_ID)
+        .unwrap_or_else(|| tyutool_core::paths::temp_dir(tyutool_core::paths::CLI_ID).join("logs"))
 }
 
 fn init_logging(verbose: bool) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -1699,11 +1707,20 @@ mod logs_command_tests {
         buf
     }
 
+    /// The CLI's logs live in the platform log location under its own id — never in the
+    /// working directory, which is where the old `data_dir()` fallback sent them.
     #[test]
-    fn default_log_dir_is_the_tyutool_data_dir() {
+    fn default_log_dir_is_the_platform_log_dir_for_the_cli_id() {
+        let dir = default_log_dir();
+        assert!(dir.is_absolute(), "{dir:?}");
+        assert!(
+            dir.to_string_lossy().contains(tyutool_core::paths::CLI_ID),
+            "{dir:?}"
+        );
         assert_eq!(
-            default_log_dir().file_name().and_then(|s| s.to_str()),
-            Some("tyutool")
+            dir,
+            tyutool_core::paths::log_dir(tyutool_core::paths::CLI_ID).unwrap(),
+            "must agree with the shared resolver, not re-derive the path"
         );
     }
 }

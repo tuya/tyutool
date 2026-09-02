@@ -430,7 +430,7 @@ Bridge 是常驻在用户机器上的本地 helper，它能烧录固件、能覆
      一律照常 accept（`hello` + `ports` + `serial_debug_*` 都可用），只是下次危险操作再问一次用户。
 4. **绑定 Origin**：查询键是 (token, Origin) 二元组，签发给 `http://localhost:3000` 的 token
    在 `http://127.0.0.1:3000` 上不生效，会退回弹确认。
-5. **落盘**：`{config_dir}/tyutool-bridge/grants.json`（JSON，`{"version":1,"grants":[…]}`），
+5. **落盘**：`{config_dir}/com.tyutool.bridge/grants.json`（JSON，`{"version":1,"grants":[…]}`），
    unix 下权限 **0600**、经同目录临时文件 + rename 原子替换；进程重启后授权仍然有效。
    文件读不出或解析失败**不致命**：按「无授权」启动并告警，下一次授权覆盖它。
    ⚠ 该文件**含凭证**，提 issue / 发日志时**不要附带**。
