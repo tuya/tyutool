@@ -1,5 +1,6 @@
 import { onActivated, onDeactivated, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { invoke } from "@tauri-apps/api/core";
 import type { useSerialDebugStore } from "@/stores/serial-debug";
 import { rLog } from "@/utils/log";
 import {
@@ -100,7 +101,6 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
    * `backfillPromise`), so waiting until then costs no ordering.
    */
   async function backfillFromArchive(path: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
     let start = 0;
     let total: number | null = null;
     try {
@@ -144,7 +144,6 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     currentFlushPromise = (async () => {
       flushInFlight = true;
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
         // Ordering guarantee: nothing live may reach the file before the
         // pre-enable backfill has finished, otherwise the file would read
         // newest-then-oldest around the handoff.
@@ -211,7 +210,6 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
    */
   async function registerAutoSaveDir(dir: string): Promise<void> {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       await invoke("register_dialog_path", { path: dir });
     } catch (e) {
       rLog.warn(

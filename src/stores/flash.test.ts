@@ -156,6 +156,7 @@ describe("flash store", () => {
     vi.mocked(wsTransport.runJob).mockClear();
     vi.mocked(wsTransport.cancelJob).mockClear();
     vi.mocked(wsTransport.authorizeConfirm).mockClear();
+    vi.mocked(wsTransport.deviceReset).mockClear();
     vi.mocked(showConfirmDialog).mockClear();
     vi.mocked(saveFlashWorkspaceToStorage).mockClear();
     vi.mocked(loadFlashWorkspaceFromStorage).mockClear();

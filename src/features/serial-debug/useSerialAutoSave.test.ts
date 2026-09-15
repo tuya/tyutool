@@ -13,7 +13,7 @@ import { useSerialAutoSave } from "./useSerialAutoSave";
 import { formatTs } from "./utils";
 import type { SerialDebugLine, SerialDebugSessionPage } from "./types";
 
-const invokeSpy = vi.fn();
+const invokeSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeSpy,
@@ -257,6 +257,7 @@ describe("useSerialAutoSave", () => {
     s.autoSaveDir = "/logs";
     s.open = true;
     await nextTick();
+    await settle();
     // Let the session-start authorization renewal land before the per-call
     // mocks below, so they apply to the file writes.
     await settle();
@@ -333,6 +334,7 @@ describe("useSerialAutoSave", () => {
     // The final flush first awaits the (empty) archive backfill, so give it more
     // than a couple of microtask rounds.
     await settle();
+    await vi.waitFor(() => expect(s.sessionAutoSavePath).toBeNull());
 
     expect(appendCalls().length).toBeGreaterThan(1);
     expect(s.sessionAutoSavePath).toBeNull();

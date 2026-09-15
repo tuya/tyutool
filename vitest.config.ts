@@ -25,12 +25,14 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/**/*.d.ts', 'src/main.ts', 'src/vite-env.d.ts'],
-      // Set just below the current baseline (Stmts 80%, Branch 83%, Funcs 78%,
-      // Lines 80%) so obvious regressions fail CI without flaking on noise.
+      // Vitest 4's V8 remapping is more accurate than Vitest 3's, so the
+      // percentages are lower even though the covered code is unchanged.
+      // Keep the thresholds just below the new baseline so obvious regressions
+      // fail CI without flaking on noise.
       thresholds: {
-        statements: 80,
-        branches: 83,
-        functions: 78,
+        statements: 78,
+        branches: 73,
+        functions: 80,
         lines: 80,
       },
     },
