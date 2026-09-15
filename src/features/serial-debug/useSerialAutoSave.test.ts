@@ -299,6 +299,83 @@ describe("useSerialAutoSave", () => {
     expect(s.sessionAutoSavePath).toBeNull();
   });
 
+  it.each([
+    [
+      "auto-save is disabled",
+      (s: ReturnType<typeof useSerialDebugStore>) => {
+        s.autoSave = false;
+      },
+    ],
+    [
+      "the auto-save directory is cleared",
+      (s: ReturnType<typeof useSerialDebugStore>) => {
+        s.autoSaveDir = "";
+      },
+    ],
+  ])(
+    "flushes pending lines and closes the session when %s",
+    async (_reason, stopAutoSave) => {
+      const s = useSerialDebugStore();
+      mountAutoSave(s);
+      invokeSpy.mockResolvedValue(undefined);
+
+      s.port = "/dev/ttyUSB0";
+      s.autoSave = true;
+      s.autoSaveDir = "/logs";
+      s.open = true;
+      await nextTick();
+      await settle();
+
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 1000,
+        bytes: [...Buffer.from("pending\n")],
+      });
+      stopAutoSave(s);
+      await nextTick();
+      await settle();
+
+      expect(writtenContents()).toEqual([
+        `[${formatTs(1000)}] [RX ] pending\n`,
+      ]);
+      expect(s.sessionAutoSavePath).toBeNull();
+    },
+  );
+
+  it("stops auto-save and reports a write failure", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file") throw new Error("disk full");
+    });
+
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("will fail\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    expect(s.sessionAutoSavePath).toBeNull();
+    expect(
+      s.lines.some(
+        (line) => line.text === "serialDebug.autoSave.errWrite: disk full",
+      ),
+    ).toBe(true);
+
+    const failedWrites = appendCalls().length;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(appendCalls()).toHaveLength(failedWrites);
+  });
+
   it("drains a large close-time backlog in bounded append batches", async () => {
     const s = useSerialDebugStore();
     host = document.createElement("div");
