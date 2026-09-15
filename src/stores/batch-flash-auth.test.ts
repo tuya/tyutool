@@ -1190,7 +1190,18 @@ describe("startBatch — firmware toggle in Tauri mode", () => {
   });
 
   it("omits firmware fields when firmware flashing is disabled", async () => {
-    const invoke = vi.fn().mockResolvedValue(undefined);
+    const invoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "validate_excel_cmd") {
+        return {
+          total: 1,
+          used: 0,
+          inProgress: 0,
+          remaining: 1,
+          invalid: 0,
+        };
+      }
+      return undefined;
+    });
     vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
@@ -1218,6 +1229,12 @@ describe("startBatch — firmware toggle in Tauri mode", () => {
       invalid: 0,
     };
 
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("validate_excel_cmd", {
+        path: "/auth.xlsx",
+      }),
+    );
+    invoke.mockClear();
     await store.startBatch();
 
     expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
@@ -1734,8 +1751,7 @@ describe("startAuth — flash-only in Tauri mode", () => {
 // store methods and assert ownership transitions.
 describe("port-manager integration", () => {
   let authProgressCb:
-    | ((ev: { payload: { port: string; step: string } }) => void)
-    | null = null;
+    ((ev: { payload: { port: string; step: string } }) => void) | null = null;
 
   beforeEach(() => {
     vi.resetModules();
@@ -1901,8 +1917,7 @@ describe("port-manager integration", () => {
 
   it("readPort acquires the port transiently and releases when the probe ends", async () => {
     let readCb:
-      | ((ev: { payload: { port: string; step: string } }) => void)
-      | null = null;
+      ((ev: { payload: { port: string; step: string } }) => void) | null = null;
     const invoke = vi.fn().mockImplementation(async (cmd: string) => {
       if (cmd === "validate_excel_cmd")
         return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
