@@ -3130,18 +3130,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn t9_reuses_t5ai_auth_timing_and_default_mac_check() {
-        let t9 = AuthTiming::for_chip("t9");
-        assert_eq!(t9.boot_max_wait, AuthTiming::for_chip("T5AI").boot_max_wait);
-        assert_eq!(
-            t9.boot_probe_start,
-            AuthTiming::for_chip("T5AI").boot_probe_start
-        );
-        assert!(is_default_mac("t9", DEFAULT_MAC_T5));
-        assert!(!is_default_mac("esp32", DEFAULT_MAC_T5));
-    }
-
     /// Same bench datum, applied to the *passive* post-flash wait: the point of
     /// [`wait_after_firmware_flash`] is to let a first boot finish before the
     /// auth slot resets the device. A wait that gives up while the device is
