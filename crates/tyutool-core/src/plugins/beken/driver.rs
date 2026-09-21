@@ -1,5 +1,5 @@
 //! Shared Beken driver — the flash/erase/read job runner used by every
-//! Beken-family plugin (BK7231N, T1, T2, T3, T5AI).
+//! Beken-family plugin (BK7231N, T1, T2, T3, T5AI, T9).
 //!
 //! This lives in the shared `beken` module rather than in a chip-specific file
 //! so that `log::*` records emitted here are attributed to

@@ -182,6 +182,7 @@
     "deviceReset": "Reset device",
     "deviceResetHints": {
       "t5ai": "DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
+      "t9": "Same as T5AI: DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
       "t1": "Same as T5AI: DTR/RTS download-mode pulse (longer hold)—same timing as the link handshake when connecting. Free the serial port first.",
       "t3": "DTR/RTS pulse with longer hold—same handshake family when connecting. Free the serial port first.",
       "t2": "DTR/RTS shorter pulse—same as the handshake when connecting. Free the serial port first.",
@@ -213,6 +214,7 @@
       "t2": "T2",
       "t3": "T3",
       "t5ai": "T5AI",
+      "t9": "T9",
       "t1": "T1",
       "other": "Other"
     },

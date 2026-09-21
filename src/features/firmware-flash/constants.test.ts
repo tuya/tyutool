@@ -30,6 +30,7 @@ describe("CHIP_IDS", () => {
     expect(CHIP_IDS).toContain("esp32c6");
     expect(CHIP_IDS).toContain("esp32s3");
     expect(CHIP_IDS).toContain("t5ai");
+    expect(CHIP_IDS).toContain("t9");
     expect(CHIP_IDS).toContain("t2");
     expect(CHIP_IDS).toContain("bk7231n");
     expect(CHIP_IDS).toContain("gd32vw553");

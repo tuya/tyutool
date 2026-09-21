@@ -12,6 +12,7 @@ export const CHIP_IDS = [
   "t2",
   "t3",
   "t5ai",
+  "t9",
 ] as const;
 
 export type ChipId = (typeof CHIP_IDS)[number];

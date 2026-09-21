@@ -109,7 +109,7 @@ enum Commands {
         /// Serial port (default: first available)
         #[arg(short = 'p', long = "port")]
         port: Option<String>,
-        /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5ai/t3/t1); ESP32* uses espflash hard_reset
+        /// Chip id: Beken uses the same DTR/RTS pulse as flash handshake (bk7231n/t2 vs t5ai/t3/t1/t9); ESP32* uses espflash hard_reset
         #[arg(short = 'd', long = "device", default_value = "bk7231n", value_parser = chip_value_parser())]
         device: String,
     },
@@ -136,7 +136,7 @@ enum Commands {
         /// Uart baud rate (default: chip-specific monitor baud; 115200 without -d)
         #[arg(short = 'b', long = "baud")]
         baud: Option<u32>,
-        /// Chip type — selects the default monitor baud (t5ai/t3: 460800, others: 115200)
+        /// Chip type — selects the default monitor baud (t5ai/t3/t9: 460800, others: 115200)
         #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
         device: Option<String>,
         /// Append received data to this file
@@ -214,6 +214,7 @@ const SUPPORTED_DEVICES: &[&str] = &[
     "t3",
     "t1",
     "t5ai",
+    "t9",
     "ln882h",
     "gd32vw553",
     "esp32",
@@ -259,13 +260,13 @@ fn default_baud(device: &str) -> u32 {
 }
 
 // Must stay in sync with `defaultLogBaudRate` in
-// src/features/firmware-flash/chip-manifests.ts: T5AI and T3 log at 460800,
+// src/features/firmware-flash/chip-manifests.ts: T5AI, T3 and T9 log at 460800,
 // every other chip (and no `-d`) at 115200. The GUI reads the same port at the
 // same rate, so a chip listed at 460800 there and 115200 here would show the
 // user solid garbage in one of the two.
 fn monitor_default_baud(device: Option<&str>) -> u32 {
     match device.map(|d| d.to_ascii_lowercase()).as_deref() {
-        Some("t5ai") | Some("t3") => 460800,
+        Some("t5ai") | Some("t3") | Some("t9") => 460800,
         _ => 115200,
     }
 }
@@ -957,6 +958,7 @@ mod tests {
             ("T2", "t2"),
             ("T3", "t3"),
             ("T1", "t1"),
+            ("T9", "t9"),
             ("LN882H", "ln882h"),
             ("GD32VW553", "gd32vw553"),
             ("Gd32Vw553", "gd32vw553"),
@@ -1008,6 +1010,8 @@ mod tests {
         assert_eq!(monitor_default_baud(Some("T5AI")), 460800);
         assert_eq!(monitor_default_baud(Some("t3")), 460800);
         assert_eq!(monitor_default_baud(Some("T3")), 460800);
+        assert_eq!(monitor_default_baud(Some("t9")), 460800);
+        assert_eq!(monitor_default_baud(Some("T9")), 460800);
         assert_eq!(monitor_default_baud(Some("bk7231n")), 115200);
         assert_eq!(monitor_default_baud(Some("t1")), 115200);
         assert_eq!(monitor_default_baud(Some("t2")), 115200);

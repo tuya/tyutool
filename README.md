@@ -10,11 +10,11 @@ Firmware flash tool for Tuya-class IoT devices. Available as a cross-platform de
 
 ## Supported Chips
 
-Supports **12 chips** across 5 families:
+Supports **13 chips** across 5 families:
 
 | Family    | Chips |
 |-----------|-------|
-| Tuya      | T1, T2, T3, T5AI |
+| Tuya      | T1, T2, T3, T5AI, T9 |
 | Beken     | BK7231N |
 | Espressif | ESP32, ESP32-C3, ESP32-C6, ESP32-P4, ESP32-S3 |
 | Lightning | LN882H |

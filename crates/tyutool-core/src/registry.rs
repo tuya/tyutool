@@ -7,7 +7,7 @@ use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
 use crate::plugins::{
     Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32p4Plugin, Esp32s3Plugin,
-    Gd32vw553Plugin, Ln882hPlugin, T1Plugin, T2Plugin, T3Plugin, T5AIPlugin,
+    Gd32vw553Plugin, Ln882hPlugin, T1Plugin, T2Plugin, T3Plugin, T5AIPlugin, T9Plugin,
 };
 
 /// Canonicalize a user-supplied chip id: trim, upper-case, and rewrite legacy
@@ -49,6 +49,8 @@ impl FlashPluginRegistry {
         log::debug!("Registered flash plugin: T5AI");
         plugins.insert("T1".to_string(), Arc::new(T1Plugin));
         log::debug!("Registered flash plugin: T1");
+        plugins.insert("T9".to_string(), Arc::new(T9Plugin));
+        log::debug!("Registered flash plugin: T9");
         plugins.insert("ESP32".to_string(), Arc::new(Esp32Plugin));
         log::debug!("Registered flash plugin: ESP32");
         plugins.insert("ESP32C3".to_string(), Arc::new(Esp32c3Plugin));
@@ -230,6 +232,7 @@ mod tests {
     #[test]
     fn normalize_chip_id_leaves_other_ids_alone() {
         assert_eq!(normalize_chip_id("T5AI"), "T5AI");
+        assert_eq!(normalize_chip_id("T9"), "T9");
         assert_eq!(normalize_chip_id("esp32"), "ESP32");
         assert_eq!(normalize_chip_id("BK7231N"), "BK7231N");
     }
@@ -259,6 +262,8 @@ mod tests {
         assert!(r.get("T5AI").is_ok());
         assert!(r.get("t1").is_ok());
         assert!(r.get("T1").is_ok());
+        assert!(r.get("t9").is_ok());
+        assert!(r.get("T9").is_ok());
         assert!(r.get("esp32").is_ok());
         assert!(r.get("ESP32").is_ok());
         assert!(r.get("esp32c3").is_ok());
@@ -278,15 +283,16 @@ mod tests {
     fn list_chip_ids_only_real_plugins() {
         let r = FlashPluginRegistry::new();
         let ids = r.list_chip_ids();
-        // The 12 real chips, plus the fake device when `mock-chip` is on. Any
+        // The 13 real chips, plus the fake device when `mock-chip` is on. Any
         // other entry means something got registered that should not have been.
-        let expected = if cfg!(feature = "mock-chip") { 13 } else { 12 };
+        let expected = if cfg!(feature = "mock-chip") { 14 } else { 13 };
         assert_eq!(ids.len(), expected, "unexpected registry contents: {ids:?}");
         assert!(ids.contains(&"BK7231N".to_string()));
         assert!(ids.contains(&"T2".to_string()));
         assert!(ids.contains(&"T3".to_string()));
         assert!(ids.contains(&"T5AI".to_string()));
         assert!(ids.contains(&"T1".to_string()));
+        assert!(ids.contains(&"T9".to_string()));
         assert!(ids.contains(&"ESP32".to_string()));
         assert!(ids.contains(&"ESP32C3".to_string()));
         assert!(ids.contains(&"ESP32C6".to_string()));
