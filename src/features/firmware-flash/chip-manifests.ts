@@ -105,10 +105,6 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
     flashSize: "0x00800000", // 8 MiB
     eraseRequires4KAlignment: true,
     erasePresets: {
-      // TuyaOpen platform/T9 tuya_app partitions (8 MiB):
-      // tuya_data 0x7E4000 (104 KiB) holds KV / UF / auth; usr_config is 8 KiB
-      // immediately before it. sys_rf (0x7FE000) and sys_net (0x7FF000) are
-      // the last 8 KiB and are preserved by both presets.
       authInfo: { start: "0x007E4000", end: "0x007FDFFF" },
       fullChipNoRf: { start: "0x00000000", end: "0x007FDFFF" },
     },
