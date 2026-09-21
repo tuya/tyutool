@@ -448,7 +448,7 @@ fn device_reset_strategy_for_chip(chip_id: &str, usb_pid: u16) -> DeviceResetStr
     if key.starts_with("ESP32") {
         return DeviceResetStrategy::Esp32HardReset { usb_pid };
     }
-    if matches!(key.as_str(), "T5AI" | "T3" | "T1") {
+    if matches!(key.as_str(), "T5AI" | "T3" | "T1" | "T9") {
         return DeviceResetStrategy::BekenT5Ai;
     }
     if key.starts_with("GD32") {
@@ -572,6 +572,10 @@ mod hw_reset_tests {
         );
         assert_eq!(
             device_reset_strategy_for_chip("T1", 0),
+            DeviceResetStrategy::BekenT5Ai
+        );
+        assert_eq!(
+            device_reset_strategy_for_chip("T9", 0),
             DeviceResetStrategy::BekenT5Ai
         );
         assert_eq!(

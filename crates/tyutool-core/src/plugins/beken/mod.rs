@@ -1,4 +1,4 @@
-//! Beken chip protocol layer shared by the BK7231N, T1, T2, T3 and T5AI plugins.
+//! Beken chip protocol layer shared by the BK7231N, T1, T2, T3, T5AI and T9 plugins.
 
 pub mod chip;
 pub mod command;

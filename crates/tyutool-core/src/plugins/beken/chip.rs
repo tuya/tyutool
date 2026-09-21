@@ -358,6 +358,60 @@ impl ChipSpec for T3Spec {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// T9
+// ─────────────────────────────────────────────────────────────────────────
+
+/// T9 chip specification.
+///
+/// T9 uses the T5AI protocol variant (extended reset sequence, per-sector CRC,
+/// skip blank sectors, post-handshake ChipID read, 20ms baud-switch delay).
+/// UART0 is the download port; 8 MiB QIO layout matches T5AI-class flash,
+/// with `tuya_data` at 0x7E4000.
+pub struct T9Spec;
+
+impl ChipSpec for T9Spec {
+    fn name(&self) -> &'static str {
+        "T9"
+    }
+
+    fn handshake_interval_ms(&self) -> u64 {
+        1
+    }
+
+    fn baud_switch_delay_ms(&self) -> u8 {
+        20
+    }
+
+    fn needs_post_handshake(&self) -> bool {
+        true
+    }
+
+    fn uses_extended_reset_sequence(&self) -> bool {
+        true
+    }
+
+    fn use_extended_frame(&self, _addr: u32) -> bool {
+        true
+    }
+
+    fn has_per_sector_crc(&self) -> bool {
+        true
+    }
+
+    fn skip_blank_sectors(&self) -> bool {
+        true
+    }
+
+    fn use_extended_flash_mid(&self) -> bool {
+        true
+    }
+
+    fn use_extended_flash_ops(&self) -> bool {
+        true
+    }
+}
+
 /// Post-handshake: read ChipID for chips that need it (T5AI, T2, etc.).
 ///
 /// Tries each register address in `CHIP_ID_REGS` in order; logs the result.
@@ -510,6 +564,24 @@ mod tests {
     }
 
     #[test]
+    fn t9_spec_getters() {
+        let s = T9Spec;
+        assert_eq!(s.name(), "T9");
+        assert_eq!(s.handshake_interval_ms(), 1);
+        assert_eq!(s.baud_switch_delay_ms(), 20);
+        assert!(s.needs_post_handshake());
+        assert!(s.uses_extended_reset_sequence());
+        assert!(s.use_extended_frame(0));
+        assert!(s.has_per_sector_crc());
+        assert!(s.skip_blank_sectors());
+        assert!(s.use_extended_flash_mid());
+        assert!(s.use_extended_flash_ops());
+        // Inherited defaults.
+        assert!(!s.use_extended_erase());
+        assert!(s.use_block_erase_64k());
+    }
+
+    #[test]
     fn chip_id_reg_tables() {
         let expected = &[0x4401_0004u32, 0x0080_0000, 0x3401_0004];
         assert_eq!(T5AI_CHIP_ID_REGS, expected);
@@ -525,8 +597,9 @@ mod tests {
             Box::new(T1Spec),
             Box::new(T2Spec),
             Box::new(T3Spec),
+            Box::new(T9Spec),
         ];
         let names: Vec<&str> = specs.iter().map(|s| s.name()).collect();
-        assert_eq!(names, vec!["BK7231N", "T5AI", "T1", "T2", "T3"]);
+        assert_eq!(names, vec!["BK7231N", "T5AI", "T1", "T2", "T3", "T9"]);
     }
 }

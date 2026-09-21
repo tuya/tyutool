@@ -14,6 +14,7 @@ pub mod t1;
 pub mod t2;
 pub mod t3;
 pub mod t5ai;
+pub mod t9;
 
 pub use bk7231n::Bk7231nPlugin;
 pub use esp32::Esp32Plugin;
@@ -29,3 +30,4 @@ pub use t1::T1Plugin;
 pub use t2::T2Plugin;
 pub use t3::T3Plugin;
 pub use t5ai::T5AIPlugin;
+pub use t9::T9Plugin;

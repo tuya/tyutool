@@ -103,10 +103,10 @@ const PLACEHOLDER_UUID: &str = "uuidxxxxxxxxxxxxxxxx";
 /// 读到此 MAC 意味着设备 MAC 区尚未个性化，不应进行授权。
 const DEFAULT_MAC_T5: &str = "C8:47:8C:00:00:18";
 
-/// 返回 true 当 chip_id 为 T5 系列且 mac 是出厂默认值。
+/// 返回 true 当 chip_id 为 T5 系列或 T9 且 mac 是出厂默认值。
 fn is_default_mac(chip_id: &str, mac: &str) -> bool {
     let id = chip_id.to_ascii_uppercase();
-    (id == "T5AI" || id == "T5") && mac.eq_ignore_ascii_case(DEFAULT_MAC_T5)
+    (id == "T5AI" || id == "T5" || id == "T9") && mac.eq_ignore_ascii_case(DEFAULT_MAC_T5)
 }
 
 // ── Per-chip timing ───────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ type ChipTimingRow = (
 #[rustfmt::skip]
 const CHIP_TIMING: &[ChipTimingRow] = &[
     //                                            start  int   max   idle settle drain_q  mac_ret mac_ms auth_ret auth_ms
-    (&["T5AI", "T5"],                              600,  50, 30000,  50,  3000,   800,       3,    500,      2,    200), // warm ready 627/636/642ms (3 runs, 2026-07-31), RTT ~11ms; max_wait=30000 is a CONSERVATIVE ESTIMATE, NOT a measurement — see the note below
+    (&["T5AI", "T5", "T9"],                        600,  50, 30000,  50,  3000,   800,       3,    500,      2,    200), // warm ready 627/636/642ms (3 runs, 2026-07-31), RTT ~11ms; max_wait=30000 is a CONSERVATIVE ESTIMATE, NOT a measurement — see the note below
     (&["ESP32", "ESP32C3", "ESP32C6", "ESP32S3"], 1000,  50,  3500, 120,  3000,   400,       3,    500,      2,    200), // warm ready ~1108ms, RTT 20–40ms (2026-06-25); no cold-boot misdetect observed yet — if one appears, raise max_wait the same way
 ];
 
@@ -3128,6 +3128,18 @@ mod tests {
             "T5AI boot window {window:?} closes before the {measured_silence:?} of silence \
              measured on a real first cold boot"
         );
+    }
+
+    #[test]
+    fn t9_reuses_t5ai_auth_timing_and_default_mac_check() {
+        let t9 = AuthTiming::for_chip("t9");
+        assert_eq!(t9.boot_max_wait, AuthTiming::for_chip("T5AI").boot_max_wait);
+        assert_eq!(
+            t9.boot_probe_start,
+            AuthTiming::for_chip("T5AI").boot_probe_start
+        );
+        assert!(is_default_mac("t9", DEFAULT_MAC_T5));
+        assert!(!is_default_mac("esp32", DEFAULT_MAC_T5));
     }
 
     /// Same bench datum, applied to the *passive* post-flash wait: the point of

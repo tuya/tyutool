@@ -37,9 +37,9 @@ describe("CHIP_MANIFEST", () => {
   });
 
   it("Beken chips have authInfo and fullChipNoRf presets", () => {
-    const bekenIds = (["bk7231n", "t1", "t2", "t3", "t5ai"] as const).filter(
-      (id) => CHIP_IDS.includes(id),
-    );
+    const bekenIds = (
+      ["bk7231n", "t1", "t2", "t3", "t5ai", "t9"] as const
+    ).filter((id) => CHIP_IDS.includes(id));
     for (const id of bekenIds) {
       const m = CHIP_MANIFEST[id];
       expect(m.erasePresets.authInfo).toBeDefined();
@@ -135,6 +135,7 @@ describe("chipManifest", () => {
 describe("rustPluginIdForChip", () => {
   it("maps known UI IDs to Rust plugin IDs", () => {
     expect(rustPluginIdForChip("t5ai")).toBe("T5AI");
+    expect(rustPluginIdForChip("t9")).toBe("T9");
     expect(rustPluginIdForChip("t1")).toBe("T1");
     expect(rustPluginIdForChip("t2")).toBe("T2");
     expect(rustPluginIdForChip("bk7231n")).toBe("BK7231N");
