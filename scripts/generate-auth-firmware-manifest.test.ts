@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   buildManifest,
@@ -106,6 +107,31 @@ describe('compareVersionDesc', () => {
 });
 
 describe('buildManifest', () => {
+  it('scans the repository assets with the GD32 entry intact', () => {
+    const sourceDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      '..',
+      'assets',
+      'auth-firmware',
+    );
+    const manifest = buildManifest(sourceDir, BASE);
+    const gd32 = manifest.firmwares.find(
+      (entry) => entry.chip === 'gd32vw553',
+    );
+
+    expect(gd32).toEqual({
+      chip: 'gd32vw553',
+      version: '1.0.0',
+      url: `${BASE}/auth-firmware-gd32vw553-1.0.0.bin`,
+      size: 1298452,
+      sha256:
+        '25bf8be94939876ec6d5a8a43f0c4d4835dfada5a917fa49173302241b26bbdf',
+    });
+    expect(manifest.firmwares.map((entry) => entry.chip)).toEqual(
+      expect.arrayContaining(['esp32', 't5ai']),
+    );
+  });
+
   it('builds one entry with sha256 (lowercase hex of file bytes), size, and url', () => {
     const content = Buffer.from('tyutool firmware payload');
     writeBin('esp32', 'v1.0.0', content);
