@@ -69,8 +69,8 @@ new loader version never changes what an already-shipped tool uploads.
 Shipping a new loader therefore takes both halves:
 
 1. Drop `ram-loader-<chip>-<new version>.bin` here (plus notes) and run the
-   release workflow. Published versions are immutable — never modify a published
-   bin.
+   release workflow. The repository source and GitHub assets are immutable —
+   never modify a published GitHub bin. The Gitee copy is a replaceable mirror.
 2. Update that chip's `RamLoaderRef` (version + sha256 + size) and release a
    tool version. Until then the new asset simply sits unused.
 
@@ -81,9 +81,11 @@ Actions page. The workflow:
 
 - Runs `scripts/generate-ram-loader-manifest.ts` to scan this directory, compute
   sha256/size, build the download URL, and write `ram-loader.json`.
-- Uploads to the `ram-loader` release on GitHub and Gitee. **Existing bins are
-  skipped (a loader version is immutable); `ram-loader.json` is always
-  overwritten.**
+- Uploads the bins and `ram-loader.json` to the `ram-loader` release on GitHub.
+  Existing GitHub bins are skipped because published source assets are
+  immutable.
+- Refreshes the Gitee mirror by deleting and re-uploading the requested bins
+  and manifest, so a repeated run converges to the repository contents.
 
 The Tuya CDN copy is uploaded by hand, flat, under
 `smart/embed/pruduct/tyutool/ram-loader/`; regenerate the manifest with that

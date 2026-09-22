@@ -234,7 +234,7 @@ and release tag:
 | `ram-loader` | `assets/ram-loader/` | `tyutool_core::ram_loader` (LN882H, GD32VW553) | **the plugin pins one `(chip, version, sha256)`**; the manifest is only a lookup table |
 
 ```
-assets/<family>/<chip>/<family>-<chip>-<version>.bin   # immutable once published
+assets/<family>/<chip>/<family>-<chip>-<version>.bin   # source/GitHub asset is immutable
 assets/<family>/<chip>/<family>-<chip>-<version>.txt   # optional notes → manifest `notes`
 ```
 
@@ -250,7 +250,8 @@ assets/<family>/<chip>/<family>-<chip>-<version>.txt   # optional notes → mani
   `scripts/lib/firmware-asset-manifest.ts`; each family adds only a thin entry point
   (`scripts/generate-{auth-firmware,ram-loader}-manifest.ts`). Adding a third family means
   another entry point, not another copy of the scanner or of
-  `scripts/publish-firmware-assets-gitee.sh`.
+  `scripts/publish-gitee-release-assets.sh`, which treats Gitee as a
+  replaceable mirror while source and GitHub assets remain immutable.
 - **Adding a mirror touches three places**: `ram_loader::MANIFEST_MIRRORS`,
   `AUTH_FIRMWARE_SOURCES` in `src/features/batch-flash-auth/auth-firmware.ts`, and
   `ALLOWED_FETCH_HOSTS` in `src-tauri/src/updater.rs`.

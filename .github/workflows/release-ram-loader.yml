@@ -3,8 +3,8 @@ name: Release ram-loader
 # Manually-triggered publish of the RAM loader assets LN882H and GD32VW553 cannot
 # be flashed without. Reads the loader bins from assets/ram-loader/, generates
 # ram-loader.json, and publishes both to the fixed `ram-loader` release tag on
-# GitHub and Gitee. Idempotent: existing bins are skipped (a loader version is
-# immutable), ram-loader.json is always overwritten.
+# GitHub and a mirror release on Gitee. GitHub keeps immutable bins; the Gitee
+# mirror is refreshed by deleting/re-uploading the requested files.
 #
 # Publishing an asset is only half of shipping a new loader — the consuming
 # plugin pins (chip, version, sha256) and has to be updated and released too.
@@ -14,12 +14,9 @@ on:
     inputs:
       publish_gitee:
         description: >-
-          Also publish to the Gitee mirror. Off by default: creating the
-          `ram-loader` release on Gitee currently fails with HTTP 400
-          "创建标签失败" because no valid `target_commitish` is configured
-          (see the Gitee steps below). Turn this on once that is fixed.
+          Also publish to the Gitee mirror.
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
@@ -81,13 +78,9 @@ jobs:
           echo "upload manifest (clobber): ram-loader.json"
           gh release upload "$TAG" ram-loader.json --clobber
 
-      # Both Gitee steps are opt-in while the mirror publish is broken. The release
-      # creation fails with HTTP 400 "创建标签失败：ram-loader": the publisher script
-      # falls back to `target_commitish = <tag>` when GITEE_TARGET_COMMITISH is unset,
-      # and that ref does not exist on Gitee — it is the very tag being created. Set an
-      # Actions variable GITEE_TARGET_COMMITISH to a real Gitee branch (e.g. `master`)
-      # and re-enable, rather than leaving these steps to fail the whole run and take
-      # the CDN artifact down with them.
+      # Gitee is a mirror and may be refreshed repeatedly. The fixed branch is used
+      # only when the release must be created for the first time; GitHub uploads
+      # above retain their immutable-bin behavior.
       - name: Generate Gitee manifest
         if: ${{ inputs.publish_gitee }}
         env:
@@ -97,8 +90,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${GITEE_TOKEN}" ]]; then
-            echo "::notice::GITEE_TOKEN not set — skipping Gitee manifest."
-            exit 0
+            echo "::error::GITEE_TOKEN must be set for Gitee publishing."
+            exit 1
           fi
           if [[ -z "${GITEE_REPO}" ]]; then
             echo "::error::GITEE_REPO must be set when GITEE_TOKEN is set."
@@ -124,13 +117,15 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_USER: ${{ secrets.GITEE_USER }}
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
-          GITEE_TARGET_COMMITISH: ${{ vars.GITEE_TARGET_COMMITISH }}
           TAG: ram-loader
-          ASSET_DIR: assets/ram-loader
-          MANIFEST_FILE: ram-loader.json
+          GITEE_TARGET_COMMITISH: refactor/v3
           RELEASE_NAME: RAM 引导固件 (ram-loader)
           RELEASE_BODY: LN882H / GD32VW553 刷写所需的 RAM 引导固件，工具按需下载并缓存。资产由 release-ram-loader workflow 自动维护。
-        run: bash scripts/publish-firmware-assets-gitee.sh
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find assets/ram-loader -mindepth 2 -maxdepth 2 -type f -name '*.bin' | sort)
+          assets+=(ram-loader.json)
+          bash scripts/publish-gitee-release-assets.sh "${assets[@]}"
 
       # The Tuya CDN copy is uploaded by hand (flat, under
       # smart/embed/pruduct/tyutool/ram-loader/). Regenerate the manifest with
