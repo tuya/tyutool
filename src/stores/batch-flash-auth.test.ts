@@ -75,6 +75,20 @@ describe("opMode", () => {
     store.authConfig.excelPath = "/path/to/auth.xlsx";
     expect(store.opMode).toBe("auth-only");
   });
+
+  it("keeps GD32 auth-only even when firmware and Excel are selected", async () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "gd32vw553";
+    store.firmwarePath = "/fw.bin";
+    store.authConfig.excelPath = "/auth.xlsx";
+    expect(store.canFlash).toBe(false);
+    expect(store.opMode).toBe("auth-only");
+
+    store.authorizeEnabled = false;
+    await nextTick();
+    expect(store.authorizeEnabled).toBe(true);
+    expect(store.opMode).toBe("auth-only");
+  });
 });
 
 describe("canFlash", () => {
@@ -89,6 +103,12 @@ describe("canFlash", () => {
   it("is false for other", () => {
     const store = useBatchFlashAuthStore();
     store.chipId = "other";
+    expect(store.canFlash).toBe(false);
+  });
+
+  it("is false for gd32vw553", () => {
+    const store = useBatchFlashAuthStore();
+    store.chipId = "gd32vw553";
     expect(store.canFlash).toBe(false);
   });
 });

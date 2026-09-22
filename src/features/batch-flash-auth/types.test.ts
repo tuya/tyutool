@@ -22,4 +22,9 @@ describe("batch auth chip lists", () => {
     expect(BATCH_AUTH_TOOL_CHIP_OPTIONS).toContain("t9");
     expect(BATCH_FLASH_CAPABLE_CHIPS).toContain("t9");
   });
+
+  it("gd32vw553 is selectable but not flash-capable", () => {
+    expect(BATCH_AUTH_TOOL_CHIP_OPTIONS).toContain("gd32vw553");
+    expect(BATCH_FLASH_CAPABLE_CHIPS).not.toContain("gd32vw553");
+  });
 });
