@@ -66,15 +66,10 @@ fn workspace_cargo_config_forces_static_crt_for_windows_msvc() {
     );
 }
 
-/// Second line of defence that runs only where it is meaningful: when the test
-/// suite itself is compiled for an MSVC target, the flag from the workspace
-/// config must actually have taken effect on this very build.
-#[cfg(all(windows, target_env = "msvc"))]
-#[test]
-fn msvc_test_build_actually_links_crt_statically() {
-    assert!(
-        cfg!(target_feature = "crt-static"),
-        "this MSVC build did not apply `+crt-static` — the produced exe would \
-         require VCRUNTIME140.dll at runtime"
-    );
-}
+/// Fail compilation immediately if an MSVC build does not use the statically
+/// linked CRT required by the bridge distribution.
+#[cfg(all(windows, target_env = "msvc", not(target_feature = "crt-static")))]
+compile_error!(
+    "this MSVC build did not apply `+crt-static` — the produced exe would \
+     require VCRUNTIME140.dll at runtime"
+);

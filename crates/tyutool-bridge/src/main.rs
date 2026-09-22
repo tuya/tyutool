@@ -395,6 +395,7 @@ fn dialog_labels(lang: Lang) -> DialogLabels {
 /// Seconds the dialog waits before giving up by itself, matching the bridge's own
 /// confirmation timeout. Both paths end in the same `user_rejected`, so the race
 /// between them is harmless.
+#[cfg(unix)]
 const DIALOG_TIMEOUT_SECS: u32 = 60;
 
 /// The real human-in-the-loop gate: a modal the user has to answer before
