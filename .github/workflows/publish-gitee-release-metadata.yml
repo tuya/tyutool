@@ -1,0 +1,95 @@
+name: Publish Gitee application metadata
+
+# Gitee is an application-update metadata mirror only. Application installers,
+# CLI archives, and updater signatures remain GitHub Release assets.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Git tag whose GitHub release contains the two manifests
+        required: true
+        type: string
+    secrets:
+      GITEE_TOKEN:
+        required: true
+      GITEE_REPO:
+        required: true
+      GITEE_USER:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag whose release metadata should be mirrored
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-gitee-release-metadata-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Mirror latest.json and release.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate Gitee configuration
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GITEE_TOKEN}" ]] || { echo "::error::GITEE_TOKEN is required"; exit 1; }
+          [[ -n "${GITEE_REPO}" ]] || { echo "::error::GITEE_REPO is required"; exit 1; }
+          if [[ "${GITEE_REPO}" != */* && -z "${GITEE_USER}" ]]; then
+            echo "::error::GITEE_USER is required when GITEE_REPO has no '/'"
+            exit 1
+          fi
+
+      - name: Validate release tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::tag must match v<major>.<minor>.<patch>: ${TAG}"; exit 1; }
+
+      - name: Download metadata from the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p gitee-metadata
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern latest.json \
+            --pattern release.json \
+            --dir gitee-metadata
+          test -s gitee-metadata/latest.json
+          test -s gitee-metadata/release.json
+
+      - name: Publish metadata-only Gitee release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          TAG: ${{ inputs.tag }}
+          GITEE_TARGET_COMMITISH: ${{ inputs.tag }}
+          RELEASE_NAME: tyutool ${{ inputs.tag }}
+          RELEASE_BODY: Gitee metadata mirror for ${{ inputs.tag }}; application binaries remain on GitHub.
+          PRUNE_UNLISTED: "true"
+          WAIT_FOR_TARGET_TAG: "true"
+          TARGET_TAG_WAIT_SECONDS: "600"
+          TARGET_TAG_POLL_SECONDS: "10"
+        run: |
+          set -euo pipefail
+          bash scripts/publish-gitee-release-assets.sh \
+            gitee-metadata/latest.json \
+            gitee-metadata/release.json

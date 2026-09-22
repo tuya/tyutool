@@ -469,10 +469,23 @@ jobs:
             latest.json
             release.json
 
+  # The Gitee application mirror is metadata-only. Keep it after the GitHub
+  # draft has both manifests, and before publish so a mirror failure leaves the
+  # GitHub release draft for investigation. This is deliberately tag-only:
+  # workflow_dispatch is the beta build path and must not touch Gitee.
+  publish-gitee-release-metadata:
+    name: Publish Gitee metadata mirror
+    needs: [prepare, create-release]
+    if: startsWith(github.ref, 'refs/tags/v') && needs.create-release.result == 'success'
+    uses: ./.github/workflows/publish-gitee-release-metadata.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
+
   # ── Verify draft release, then publish ──────────────────────────────────────
   publish:
     name: Verify & Publish
-    needs: [prepare, create-release]
+    needs: [prepare, create-release, publish-gitee-release-metadata]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     # Slowest of the last six releases: 0.3 min.

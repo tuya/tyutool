@@ -153,3 +153,17 @@ jobs:
       # vitest.config.ts. Plain `pnpm run test` leaves them unchecked.
       - run: pnpm run test:coverage
       - run: pnpm run build
+
+  # The Gitee publisher is exercised against a local HTTP mock. This keeps the
+  # destructive attachment replacement and metadata-only pruning paths covered
+  # without credentials or network access.
+  gitee-publisher:
+    name: Gitee publisher shell tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check publisher shell syntax
+        run: bash -n scripts/publish-gitee-release-assets.sh scripts/publish-gitee-release-assets.test.sh
+      - name: Run publisher mock tests
+        run: bash scripts/publish-gitee-release-assets.test.sh

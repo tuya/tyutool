@@ -52,9 +52,12 @@ GitHub Actions page. The workflow:
 
 - Runs `scripts/generate-auth-firmware-manifest.ts` to scan this directory,
   compute sha256/size, build the download URL, and write the manifest.
-- Uploads to the `auth-firmware` release on GitHub and Gitee. **Existing bins
-  are skipped (firmware is immutable per version); `auth-firmware.json` is
-  always overwritten.**
+- Uploads the bins and `auth-firmware.json` to the `auth-firmware` release on
+  GitHub. Existing GitHub bins are skipped because published source assets are
+  immutable.
+- Refreshes the Gitee mirror by deleting and re-uploading the requested bins
+  and manifest, so a repeated run converges to the repository contents.
 
-Once published, a firmware version is immutable. To ship a new version, drop
-a bin with a new `<version>` — never modify a published bin.
+The repository source and GitHub assets remain immutable per version. To ship a
+new version, drop a bin with a new `<version>` — never modify a published
+GitHub bin. Gitee is a replaceable mirror and may be overwritten by CI.
