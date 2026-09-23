@@ -130,8 +130,12 @@ fi
 # --- Resolve or create the release -----------------------------------------
 REL_URL="${API_BASE}/repos/${ENC_OWNER}/${ENC_REPO}/releases/tags/${ENC_TAG}"
 HTTP_CODE="$(gitee_curl -o "$tmp_get" -w '%{http_code}' "$REL_URL")"
+if [[ "$HTTP_CODE" == "200" ]] && jq -e 'type == "null"' "$tmp_get" >/dev/null 2>&1; then
+  # Gitee returns HTTP 200 with a JSON null when a tag has no Release yet.
+  HTTP_CODE=404
+fi
 if [[ "$HTTP_CODE" == "200" ]]; then
-  RELEASE_ID="$(jq -r '.id // empty' "$tmp_get")"
+  RELEASE_ID="$(jq -r 'if type == "object" then .id // empty else empty end' "$tmp_get")"
   [[ -n "$RELEASE_ID" ]] || api_error "Gitee release lookup returned no id" "$HTTP_CODE"
   echo "Reusing Gitee release id=${RELEASE_ID} for tag ${TAG}"
 elif [[ "$HTTP_CODE" == "404" ]]; then
