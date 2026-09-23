@@ -460,11 +460,20 @@ jobs:
           RELEASE_NOTES: ${{ steps.notes.outputs.body }}
         run: pnpm exec tsx scripts/generate-manifest.ts
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-metadata
+          path: |
+            latest.json
+            release.json
+          if-no-files-found: error
+
       # latest.json: url → GitHub. release.json: mainland-China variant (url → Tuya OSS);
       # the external tuyaopen-oss-publish pipeline copies it to .../tyutool/latest/release.json.
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
+          draft: true
           files: |
             latest.json
             release.json
