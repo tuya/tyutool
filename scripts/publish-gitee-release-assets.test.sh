@@ -37,7 +37,11 @@ state="${MOCK_STATE:?MOCK_STATE is required}"
 body='{}'
 code=200
 if [[ "$method" == GET && "$url" == */releases/tags/* ]]; then
-  if [[ "$scenario" == create-missing-target || "$scenario" == create-no-target ]]; then
+  if [[ "$scenario" == create-null-200 ]]; then
+    body='null'
+  elif [[ "$scenario" == create-invalid-200 ]]; then
+    body='{}'
+  elif [[ "$scenario" == create-missing-target || "$scenario" == create-no-target ]]; then
     code=404
   else
     body='{"id":123}'
@@ -162,6 +166,24 @@ test_create_requires_target_commitish() {
   fi
 }
 
+test_create_when_missing_release_is_null_200() {
+  local state="${TEST_ROOT}/create-null-200.json"
+  printf '[]' > "$state"
+  PATH="${MOCK_BIN}:$PATH" GITEE_TOKEN=test-token GITEE_REPO=owner/repo TAG=asset-tag \
+    GITEE_TARGET_COMMITISH=refactor/v3 MOCK_STATE="$state" MOCK_SCENARIO=create-null-200 \
+    bash "$SCRIPT" "${TEST_ROOT}/a.bin" >/dev/null
+  [[ "$(jq --arg n a.bin '[.[] | select(.name == $n)] | length' "$state")" == 1 ]]
+}
+
+test_invalid_release_lookup_response_aborts() {
+  local state="${TEST_ROOT}/create-invalid-200.json"
+  printf '[]' > "$state"
+  if run_publish "$state" create-invalid-200 "${TEST_ROOT}/a.bin" >/dev/null 2>&1; then
+    return 1
+  fi
+  [[ "$(jq 'length' "$state")" == 0 ]]
+}
+
 test_wait_uses_exact_tag_from_paginated_list() {
   local state="${TEST_ROOT}/wait.json"
   printf '[]' > "$state"
@@ -187,6 +209,8 @@ test_prune_removes_unlisted_attachments
 test_delete_failure_aborts
 test_upload_failure_aborts
 test_create_requires_target_commitish
+test_create_when_missing_release_is_null_200
+test_invalid_release_lookup_response_aborts
 test_wait_uses_exact_tag_from_paginated_list
 test_tag_auth_failure_is_immediate
 echo 'publish-gitee-release-assets mock tests passed'
