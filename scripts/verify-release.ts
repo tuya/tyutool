@@ -4,7 +4,6 @@
  * Env: TAG (e.g. v3.0.14), VERSION (e.g. 3.0.14). Uses `gh` (GH_TOKEN in CI).
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 
 import {
   checkAssetCompleteness,
@@ -24,14 +23,44 @@ function gh(args: string[]): string {
   return execFileSync('gh', args, { encoding: 'utf-8' });
 }
 
-// Asset list actually attached to the (draft) release.
-const assetsJson = gh(['release', 'view', TAG, '--json', 'assets']);
-const assets = (JSON.parse(assetsJson).assets as { name: string }[]).map((a) => a.name);
+// The tag lookup can return an empty asset list after a draft changes state.
+// Resolve the release once, then query its assets by the stable release ID.
+const repo =
+  process.env.GITHUB_REPOSITORY ||
+  gh([
+    'repo',
+    'view',
+    '--json',
+    'nameWithOwner',
+    '--jq',
+    '.nameWithOwner',
+  ]).trim();
+const releaseId = JSON.parse(
+  gh(['release', 'view', TAG, '--json', 'databaseId']),
+).databaseId as number;
+const releaseAssets = JSON.parse(
+  gh(['api', `repos/${repo}/releases/${releaseId}/assets?per_page=100`]),
+) as {
+  id: number;
+  name: string;
+}[];
+const assets = releaseAssets.map((a) => a.name);
 const assetSet = new Set(assets);
 
-// latest.json from the release.
-gh(['release', 'download', TAG, '--pattern', 'latest.json', '--clobber']);
-const manifest = JSON.parse(readFileSync('latest.json', 'utf-8')) as Manifest;
+function readReleaseJson(name: string): Manifest {
+  const asset = releaseAssets.find((a) => a.name === name);
+  if (!asset) throw new Error(`Release 缺少 ${name}`);
+  return JSON.parse(
+    gh([
+      'api',
+      `repos/${repo}/releases/assets/${asset.id}`,
+      '-H',
+      'Accept: application/octet-stream',
+    ]),
+  ) as Manifest;
+}
+
+const manifest = readReleaseJson('latest.json');
 
 const errors = [
   ...checkAssetCompleteness(VERSION, assetSet),
@@ -43,8 +72,7 @@ const errors = [
 if (!assetSet.has('release.json')) {
   errors.push('缺少 release.json（latest.json 的大陆版，url 指向 Tuya OSS）');
 } else {
-  gh(['release', 'download', TAG, '--pattern', 'release.json', '--clobber']);
-  const releaseManifest = JSON.parse(readFileSync('release.json', 'utf-8')) as Manifest;
+  const releaseManifest = readReleaseJson('release.json');
   try {
     const expected = JSON.stringify(toChinaManifest(manifest));
     if (JSON.stringify(releaseManifest) !== expected) {
