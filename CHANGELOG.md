@@ -2,6 +2,46 @@
 
 本项目所有重要变更记录于此 / All notable changes are documented here.
 
+## [3.2.10] - 2026-09-23
+
+### 新功能
+
+- `firmware-flash`：新增 GD32VW553 烧录与擦除支持，写入后由设备校验 SHA-256；需要手动进入启动模式的开发板会收到操作提示。该芯片的下载程序不支持读取 Flash，因此不提供读取功能
+- `firmware-flash` / `batch-auth`：新增 T9 芯片支持，可烧录、读取 Flash 和授权，并在批量授权中使用 T9 的 KV 配置
+- `cli`：新增 `logs list`、`logs tail` 和 `logs export` 命令，可查看会话日志并导出排障压缩包；导出默认对凭证脱敏
+- `core`：LN882H 和 GD32VW553 的 RAM loader 改为按需下载、校验并缓存；离线环境可通过 `TYUTOOL_RAM_LOADER_DIR` 提供已校验的文件
+
+### 问题修复
+
+- `firmware-flash`：恢复 ZG25Q64B Flash 芯片的写保护参数，避免 T5AI 等设备擦除后校验失败
+- `batch-auth`：修正 GD32VW553 授权固件资源及其批量授权芯片配置
+
+### 工程改进
+
+- `logging`：按 CLI、GUI 和 Bridge 分离日志目录，并将可重新下载的 RAM loader 放入系统缓存目录
+- `dev:web`：修复烧录任务运行期间取消请求无法处理的问题
+- `ci`：补充 Gitee 发布元数据和固件资源镜像流程，并更新构建依赖
+
+---
+
+### Features
+
+- `firmware-flash`: Add GD32VW553 flashing and erase support with device-side SHA-256 verification. Boards that need manual boot-mode entry show an actionable prompt. Flash reading is unavailable because the download loader does not support it
+- `firmware-flash` / `batch-auth`: Add T9 support for flashing, flash reads, authorization, and T9 KV settings in batch authorization
+- `cli`: Add `logs list`, `logs tail`, and `logs export` to inspect session logs and create a diagnostic archive; exports redact credentials by default
+- `core`: Download, verify, and cache the LN882H and GD32VW553 RAM loaders on demand; offline setups can provide verified files through `TYUTOOL_RAM_LOADER_DIR`
+
+### Bug Fixes
+
+- `firmware-flash`: Restore ZG25Q64B flash write-protection settings to prevent erase verification failures on devices including T5AI
+- `batch-auth`: Correct the GD32VW553 authorization firmware asset and its batch authorization chip settings
+
+### Engineering
+
+- `logging`: Separate CLI, GUI, and Bridge log directories, and store re-downloadable RAM loaders in the system cache
+- `dev:web`: Process cancellation requests while a flash job is running
+- `ci`: Add Gitee release-metadata and firmware-asset mirroring, and update build dependencies
+
 ## [3.2.9] - 2026-08-26
 
 ### 新功能
