@@ -24,7 +24,7 @@ pub enum RowStatus {
     Available,
     /// MAC 已读取并绑定到本行，凭据已分配，但 auth 命令尚未发出。
     MacRead,
-    /// auth 写命令已发出；OTP 可能已烧。此状态起永远不归还 Available。
+    /// auth 写入已持久预留，命令可能已发出；此状态起永远不归还 Available。
     AuthWritten,
     /// auth-read 验证通过。
     AuthVerified,

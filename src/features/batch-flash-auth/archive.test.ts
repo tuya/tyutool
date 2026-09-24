@@ -116,11 +116,11 @@ describe("buildSlotsCsv", () => {
     const csv = buildSlotsCsv(baseInput().slots, ["COM3", "COM4", "COM5"]);
     const lines = csv.split("\r\n");
     expect(lines[0]).toBe(
-      "port,inBatch,status,mac,uuid,cancelledAfterWrite,error,excelError",
+      "port,inBatch,status,mac,uuid,cancelledAfterWrite,writeUncertain,error,excelError",
     );
     expect(lines).toHaveLength(6); // header + 4 rows + trailing empty
-    expect(lines[1]).toBe("COM3,true,done,AA:BB,uuid-3,false,,");
-    expect(lines[4]).toBe("COM9,false,done,,,false,,");
+    expect(lines[1]).toBe("COM3,true,done,AA:BB,uuid-3,false,false,,");
+    expect(lines[4]).toBe("COM9,false,done,,,false,false,,");
   });
 
   it("quotes cells containing commas or quotes", () => {

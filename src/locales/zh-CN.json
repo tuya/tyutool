@@ -718,9 +718,9 @@
       "readHint": "读取 MAC 和授权状态",
       "notAuthorized": "未授权",
       "readError": "读取失败",
-      "cancelledAfterWriteBadge": "写入后取消",
-      "cancelledAfterWriteLabel": "授权数据已发往设备但未完成验证；KV 可覆盖、OTP 永久写入。请物理隔离并人工核查。",
-      "cancelledAfterWriteError": "授权写入后取消 — 设备可能已携带凭证",
+      "cancelledAfterWriteBadge": "授权写入状态不确定",
+      "cancelledAfterWriteLabel": "授权命令可能已发往设备，也可能尚未发送；写入结果未经验证。KV 可覆盖、OTP 永久写入。请物理隔离并人工核查。",
+      "cancelledAfterWriteError": "取消时授权命令可能已发送 — 设备状态未经验证",
       "emptyHintNoPorts": "未检测到串口；请插入设备后点击自动分配"
     },
     "defaultMacError": "设备 MAC 未烧写（出厂默认值），请先烧写 MAC 再授权",

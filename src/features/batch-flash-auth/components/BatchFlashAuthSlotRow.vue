@@ -55,15 +55,17 @@ const FLASH_PHASE_STATUS_LABELS = computed<Record<string, string>>(() => ({
 }));
 
 const isCancelledAfterWrite = computed(
-  () =>
-    props.portSlot.status === "failed" &&
-    props.portSlot.cancelledAfterWrite === true,
+  () => props.portSlot.cancelledAfterWrite === true,
 );
 
-const isQuarantineRequired = computed(() => isCancelledAfterWrite.value);
+const isWriteUncertain = computed(() => props.portSlot.writeUncertain === true);
+
+const isQuarantineRequired = computed(
+  () => isCancelledAfterWrite.value || isWriteUncertain.value,
+);
 
 const statusLabel = computed(() => {
-  if (isCancelledAfterWrite.value) {
+  if (isQuarantineRequired.value) {
     return t("batchFlashAuth.slot.cancelledAfterWriteBadge");
   }
   if (props.portSlot.status === "flashing" && props.portSlot.currentPhase) {
@@ -295,7 +297,7 @@ function showExcelError(): void {
         </button>
       </div>
       <span
-        v-if="portSlot.cancelledAfterWrite"
+        v-if="portSlot.cancelledAfterWrite || portSlot.writeUncertain"
         class="text-xs font-medium"
         :style="{ color: 'var(--ty-danger)' }"
       >
@@ -373,7 +375,11 @@ function showExcelError(): void {
         {{ t("batchFlashAuth.slot.cancel") }}
       </button>
       <button
-        v-if="portSlot.status === 'failed' && !portSlot.cancelledAfterWrite"
+        v-if="
+          portSlot.status === 'failed' &&
+          !portSlot.cancelledAfterWrite &&
+          !portSlot.writeUncertain
+        "
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
         @click="$emit('retry', portSlot.port)"

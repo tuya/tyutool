@@ -238,8 +238,8 @@
         <figcaption>Selecting <code>OTP</code> storage mode shows an explicit warning that the write cannot be undone. Always validate on a single device first.</figcaption>
       </figure>
       <div class="callout danger">
-        <span class="title">Rule two: devices showing the "cancelled-after-write" danger badge must be set aside</span>
-        If a device is cancelled <strong>after the auth write may have already landed</strong>, it shows a <strong>physical-quarantine danger badge</strong> — the auth may already be written and the device's state is uncertain. Such devices <strong>must not be treated as good units</strong> and must not be re-run through the batch directly; <strong>set them aside and verify each one individually</strong> before deciding what to do.
+        <span class="title">Rule two: devices showing the "authorization state uncertain" danger badge must be set aside</span>
+        If cancellation occurs while authorization may be in progress, or an auth command reports an error that a device read cannot resolve, the command may or may not have been sent and its result is unverified. The device shows a <strong>physical-quarantine danger badge</strong>. Such devices <strong>must not be treated as good units</strong> and must not be retried individually or through "Start All"; <strong>set them aside and verify each one individually</strong> before deciding what to do. After replacing it with a new device, use the read-only <strong>Read</strong> action to return the slot to idle, then remove and re-add the port.
       </div>
 
       <nav class="pager">

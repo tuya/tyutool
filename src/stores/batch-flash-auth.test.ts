@@ -409,6 +409,22 @@ describe("canStart / canRetry / canCancel", () => {
     expect(store.canStart).toBe(false);
   });
 
+  it("canStart is false when every slot is quarantined", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "failed";
+    store.slots[0].writeUncertain = true;
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 1,
+      remaining: 0,
+      invalid: 0,
+    };
+    expect(store.canStart).toBe(false);
+  });
+
   it("canRetry is false when no failed slots", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
@@ -1181,6 +1197,48 @@ describe("cancelledAfterWrite (B1 OTP-brick safety)", () => {
   });
 });
 
+describe("writeUncertain (auth command outcome safety)", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("marks a failed auth write as uncertain without claiming user cancellation", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.slots[0].status = "authorizing";
+    store.handleAuthProgress({
+      port: "COM3",
+      step: "write_uncertain",
+      mac: "aabbccddeeff",
+      uuid: "uuid-abc-123",
+      error: "synthetic serial write error",
+    });
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].cancelledAfterWrite).toBeUndefined();
+    expect(store.slots[0].writeUncertain).toBe(true);
+    expect(store.slots[0].error).toBe("synthetic serial write error");
+    expect(store.slots[0].mac).toBe("aabbccddeeff");
+    expect(store.canRetry).toBe(false);
+  });
+
+  it("excludes uncertain slots from bulk and single-port retries", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.slots[0].status = "failed";
+    store.slots[0].writeUncertain = true;
+    store.slots[0].error = "serial send outcome uncertain";
+    store.slots[1].status = "failed";
+    store.slots[1].error = "pre-write timeout";
+
+    await store.retryFailed();
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].writeUncertain).toBe(true);
+    expect(store.slots[1].status).toBe("idle");
+
+    await store.retryPort("COM3");
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].writeUncertain).toBe(true);
+  });
+});
+
 describe("startBatch / cancelAll / cancelPort — web mode no-ops", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
@@ -1772,11 +1830,13 @@ describe("startAuth — flash-only in Tauri mode", () => {
 describe("port-manager integration", () => {
   let authProgressCb:
     ((ev: { payload: { port: string; step: string } }) => void) | null = null;
+  let readProgressCb: ((ev: unknown) => void) | null = null;
 
   beforeEach(() => {
     vi.resetModules();
     setActivePinia(createPinia());
     authProgressCb = null;
+    readProgressCb = null;
   });
 
   /** Build a fresh store in Tauri mode with core+event mocked. Returns the
@@ -1797,6 +1857,8 @@ describe("port-manager integration", () => {
         // Capture the auth-progress callback so tests can drive terminal states.
         if (_ev === "batch-auth-progress") {
           authProgressCb = cb as typeof authProgressCb;
+        } else if (_ev === "batch-auth-read-progress") {
+          readProgressCb = cb as typeof readProgressCb;
         }
         return () => {};
       }),
@@ -1833,14 +1895,143 @@ describe("port-manager integration", () => {
 
   it("startAuth acquires free ports before invoking batch_auth_start", async () => {
     const { store, pm, invoke } = await setupStore();
+    store.chipId = "other";
+    store.baudRate = 921_600;
+    store.authBaudRate = 230_400;
+    store.authConfig.conflictPolicy = "overwrite";
     await store.startBatch();
     expect(pm.currentOwner("COM3")).toBe("batch-auth");
     expect(pm.currentOwner("COM5")).toBe("batch-auth");
-    expect(invoke).toHaveBeenCalledWith(
-      "batch_auth_start",
-      expect.objectContaining({ ports: ["COM3", "COM5"] }),
+    const batchStartCalls = invoke.mock.calls.filter(
+      ([command]) => command === "batch_auth_start",
     );
+    expect(batchStartCalls).toHaveLength(1);
+    expect(batchStartCalls[0][1]).toStrictEqual({
+      ports: ["COM3", "COM5"],
+      config: {
+        chipId: "other",
+        baudRate: 921_600,
+        authBaudRate: 230_400,
+        firmwarePath: undefined,
+        flashStartHex: undefined,
+        flashEndHex: undefined,
+        excelPath: "/auth.xlsx",
+        conflictPolicy: "overwrite",
+        authStorage: "kv",
+        authorizeEnabled: true,
+      },
+    });
   });
+
+  it("does not start or claim any ports when every port is occupied", async () => {
+    const { store, pm, invoke } = await setupStore();
+    for (const port of ["COM3", "COM5"]) {
+      await pm.acquire({
+        id: "serial-debug",
+        port,
+        onReleaseRequest: async () => true,
+        onReleased: async () => {},
+      });
+    }
+
+    await store.startBatch();
+
+    expect(
+      invoke.mock.calls.filter(([command]) => command === "batch_auth_start"),
+    ).toHaveLength(0);
+    expect(pm.currentOwner("COM3")).toBe("serial-debug");
+    expect(pm.currentOwner("COM5")).toBe("serial-debug");
+    expect(store.slots.map((slot) => slot.status)).toEqual([
+      "skipped",
+      "skipped",
+    ]);
+  });
+
+  it("Read All probes only free ports and releases their claims on completion", async () => {
+    const { store, pm, invoke } = await setupStore();
+    await store.ensureListener();
+    await pm.acquire({
+      id: "serial-debug",
+      port: "COM5",
+      onReleaseRequest: async () => true,
+      onReleased: async () => {},
+    });
+
+    await store.readAll();
+
+    const readPortCalls = invoke.mock.calls.filter(
+      ([command]) => command === "batch_auth_read_ports",
+    );
+    expect(readPortCalls).toHaveLength(1);
+    expect(readPortCalls[0][1]).toStrictEqual({
+      config: {
+        chipId: "esp32",
+        baudRate: 115_200,
+        authStorage: "kv",
+      },
+      ports: ["COM3"],
+    });
+    expect(store.slots.map((slot) => slot.status)).toEqual(["reading", "idle"]);
+    expect(pm.currentOwner("COM3")).toBe("batch-auth");
+    expect(pm.currentOwner("COM5")).toBe("serial-debug");
+    expect(readProgressCb).not.toBeNull();
+
+    readProgressCb!({
+      payload: {
+        port: "COM3",
+        step: "done",
+        mac: "aabbccddeeff",
+        uuid: "uuid-abc-123",
+      },
+    });
+
+    expect(store.slots[0].status).toBe("idle");
+    expect(pm.currentOwner("COM3")).toBeNull();
+    expect(pm.currentOwner("COM5")).toBe("serial-debug");
+  });
+
+  it.each(["cancelledAfterWrite", "writeUncertain"] as const)(
+    "startAuth keeps %s slots out of a later batch",
+    async (flag) => {
+      const { store, invoke } = await setupStore();
+      store.slots[0].status = "failed";
+      store.slots[0][flag] = true;
+      store.slots[0].error = "authorization state uncertain";
+
+      await store.startBatch();
+
+      expect(store.slots[0].status).toBe("failed");
+      expect(store.slots[0][flag]).toBe(true);
+      expect(invoke).toHaveBeenCalledWith(
+        "batch_auth_start",
+        expect.objectContaining({ ports: ["COM5"] }),
+      );
+    },
+  );
+
+  it.each(["cancelledAfterWrite", "writeUncertain"] as const)(
+    "a read-only probe does not clear %s or re-enable batch start",
+    async (flag) => {
+      const { store, invoke } = await setupStore();
+      store.slots[0].status = "failed";
+      store.slots[0][flag] = true;
+      await store.readPort("COM3");
+      store.handleReadProgress({
+        port: "COM3",
+        step: "done",
+        mac: "aabbccddeeff",
+        uuid: "uuid-abc-123",
+      });
+      expect(store.slots[0].status).toBe("idle");
+      expect(store.slots[0][flag]).toBe(true);
+
+      await store.startBatch();
+      expect(invoke).toHaveBeenCalledWith(
+        "batch_auth_start",
+        expect.objectContaining({ ports: ["COM5"] }),
+      );
+    },
+  );
 
   it("startAuth skips ports held by another owner and does not preempt them", async () => {
     const { store, pm, invoke } = await setupStore();

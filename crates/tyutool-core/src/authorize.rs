@@ -1202,12 +1202,19 @@ pub enum BatchAuthSlotResult {
     DefaultMac { mac: String },
     /// Operation was cancelled.
     Cancelled,
-    /// `auth_write` was sent to the device but the slot was cancelled
-    /// before verify could confirm. The credential MAY be on the device
-    /// (KV: overwritable; OTP: permanently written). The caller MUST
-    /// `confirm_row` (NOT release) to prevent the same UUID/Key from
-    /// being handed out to another device.
+    /// The write-intent was saved to Excel but the slot was cancelled
+    /// before verify could confirm. The command may or may not have reached
+    /// the device; the credential MAY be present (KV: overwritable; OTP:
+    /// permanently written). The caller must retain the row reservation.
     CancelledAfterWrite { mac: String, uuid: String },
+    /// The write-intent was saved to Excel, but auth_write failed and a
+    /// diagnostic read did not confirm the target credentials. Do not retry
+    /// automatically; the command may have reached the device.
+    WriteUncertain {
+        mac: String,
+        uuid: String,
+        error: String,
+    },
 }
 
 /// 每个授权步骤完成后通知 lib.rs 更新 Excel 行状态。
@@ -1216,7 +1223,9 @@ pub enum BatchAuthSlotResult {
 pub enum BatchAuthRowUpdate {
     /// MAC 读取成功，行已绑定。
     MacRead,
-    /// auth 写命令已发出（OTP 可能已烧，不可 release）。
+    /// Persist a conservative reservation before sending the auth command.
+    AuthWriteStarted,
+    /// Persist that the auth command may be sent or may already have reached the device.
     AuthWritten,
     /// auth-read 验证通过。
     AuthVerified,
@@ -1658,6 +1667,19 @@ pub fn wait_after_firmware_flash(port: &str, baud_rate: u32, chip_id: &str, canc
     sess.wait_natural_boot(WAIT_AFTER_FLASH_MAX, cancel);
 }
 
+fn persist_batch_auth_update<U>(
+    update_row: &U,
+    row_idx: usize,
+    mac: &str,
+    update: BatchAuthRowUpdate,
+) -> Result<(), FlashError>
+where
+    U: Fn(usize, &str, BatchAuthRowUpdate) -> Result<(), String>,
+{
+    update_row(row_idx, mac, update)
+        .map_err(|e| FlashError::Plugin(format!("failed to persist batch auth row: {e}")))
+}
+
 /// Single-device batch authorization slot: open UART, read MAC, read/write auth, verify.
 ///
 /// - `find_by_mac` — look up an existing row by MAC (returns `(row_idx, uuid, authkey)`).
@@ -1680,8 +1702,46 @@ where
     F: Fn(BatchAuthStep),
     B: Fn(&str) -> Option<(usize, String, String)>,
     A: FnOnce() -> Option<(usize, String, String)>,
-    U: Fn(usize, &str, BatchAuthRowUpdate),
+    U: Fn(usize, &str, BatchAuthRowUpdate) -> Result<(), String>,
     Tr: Fn(&str),
+{
+    run_batch_auth_slot_with(
+        port,
+        chip_id,
+        config,
+        find_by_mac,
+        allocate_row,
+        update_row,
+        cancel,
+        progress,
+        trace,
+        AuthSession::open,
+    )
+}
+
+/// `run_batch_auth_slot` with its serial opener injected for deterministic tests.
+// Keep the existing callback-based transaction API intact while accepting the test opener.
+#[allow(clippy::too_many_arguments)]
+fn run_batch_auth_slot_with<T, F, B, A, U, Tr, O>(
+    port: &str,
+    chip_id: &str,
+    config: &BatchAuthSlotConfig,
+    find_by_mac: B,
+    allocate_row: A,
+    update_row: U,
+    cancel: &AtomicBool,
+    progress: F,
+    trace: Tr,
+    open: O,
+) -> Result<BatchAuthSlotResult, FlashError>
+where
+    T: AuthIo,
+    F: Fn(BatchAuthStep),
+    B: Fn(&str) -> Option<(usize, String, String)>,
+    A: FnOnce() -> Option<(usize, String, String)>,
+    U: Fn(usize, &str, BatchAuthRowUpdate) -> Result<(), String>,
+    Tr: Fn(&str),
+    O: FnOnce(&str, AuthTiming, u32) -> Result<AuthSession<T>, FlashError>,
 {
     macro_rules! check_cancel {
         () => {
@@ -1692,7 +1752,7 @@ where
     }
 
     let timing = AuthTiming::for_chip(chip_id);
-    let mut sess = AuthSession::open(port, timing, config.auth_baud_rate)?;
+    let mut sess = open(port, timing, config.auth_baud_rate)?;
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -1750,7 +1810,12 @@ where
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == found_uuid && ex_k == found_key {
                         log::info!("[batch-auth] already-done  port={port} mac={mac}");
-                        update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
+                        persist_batch_auth_update(
+                            &update_row,
+                            found_idx,
+                            &mac,
+                            BatchAuthRowUpdate::Done,
+                        )?;
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
                     }
                 }
@@ -1781,7 +1846,7 @@ where
             log::info!("[batch-auth] allocated  port={port} mac={mac} uuid={uuid}");
 
             // ── 8. Bind MAC to row immediately ───────────────────────────
-            update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
+            persist_batch_auth_update(&update_row, row_idx, &mac, BatchAuthRowUpdate::MacRead)?;
 
             // ── 8b. Validate credential lengths before any device write ──
             // Belt-and-suspenders: allocation already skips malformed rows, but a
@@ -1789,20 +1854,36 @@ where
             // arrive here. Fail before the (irreversible) OTP burn is attempted.
             if let Err(e) = validate_auth_credentials(&uuid, &authkey) {
                 log::warn!("[batch-auth] invalid credentials  port={port} mac={mac}: {e}");
-                update_row(
+                persist_batch_auth_update(
+                    &update_row,
                     row_idx,
                     &mac,
                     BatchAuthRowUpdate::StepFailed {
-                        step: "auth_write",
+                        step: "auth_validate",
                         error: e.to_string(),
                     },
-                );
+                )?;
                 return Err(e);
             }
 
             // ── 9. Write auth ────────────────────────────────────────────
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing  port={port} mac={mac} uuid={uuid}");
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::Cancelled);
+            }
+            persist_batch_auth_update(
+                &update_row,
+                row_idx,
+                &mac,
+                BatchAuthRowUpdate::AuthWriteStarted,
+            )?;
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
             let auth_idle = if config.auth_storage == AuthStorage::Otp {
                 AUTH_WRITE_OTP_IDLE
             } else {
@@ -1812,14 +1893,24 @@ where
                 let mut last_err: Option<FlashError> = None;
                 for attempt in 0..AUTH_WRITE_MAX_ATTEMPTS {
                     if attempt > 0 {
-                        check_cancel!();
+                        if cancel.load(Ordering::Relaxed) {
+                            persist_batch_auth_update(
+                                &update_row,
+                                row_idx,
+                                &mac,
+                                BatchAuthRowUpdate::AuthWritten,
+                            )?;
+                            return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                                mac: mac.clone(),
+                                uuid: uuid.clone(),
+                            });
+                        }
                         sess.drain_boot_output();
                         sess.wake_shell();
                         log::warn!(
                             "[batch-auth] auth-write retry {attempt}  port={port} mac={mac}"
                         );
                     }
-                    check_cancel!();
                     match sess.auth_write(&uuid, &authkey, config.auth_storage, auth_idle) {
                         Ok(()) => {
                             last_err = None;
@@ -1833,6 +1924,18 @@ where
                             last_err = Some(e);
                         }
                     }
+                }
+                if cancel.load(Ordering::Relaxed) {
+                    persist_batch_auth_update(
+                        &update_row,
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::AuthWritten,
+                    )?;
+                    return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                        mac: mac.clone(),
+                        uuid: uuid.clone(),
+                    });
                 }
                 if let Some(e) = last_err {
                     // Diagnostic auth-read: a successful OTP burn whose "…Succeeds."
@@ -1866,18 +1969,28 @@ where
                                 );
                             }
                         }
-                        update_row(
+                        let write_error = e.to_string();
+                        let row_update_error = persist_batch_auth_update(
+                            &update_row,
                             row_idx,
                             &mac,
                             BatchAuthRowUpdate::StepFailed {
                                 step: "auth_write",
-                                error: e.to_string(),
+                                error: write_error.clone(),
                             },
-                        );
-                        return Err(e);
+                        )
+                        .err()
+                        .map(|err| format!("; {err}"))
+                        .unwrap_or_default();
+                        return Ok(BatchAuthSlotResult::WriteUncertain {
+                            mac: mac.clone(),
+                            uuid: uuid.clone(),
+                            error: format!("{write_error}{row_update_error}"),
+                        });
                     }
                 }
             }
+            persist_batch_auth_update(&update_row, row_idx, &mac, BatchAuthRowUpdate::AuthWritten)?;
             if cancel.load(Ordering::Relaxed) {
                 return Ok(BatchAuthSlotResult::CancelledAfterWrite {
                     mac: mac.clone(),
@@ -1885,8 +1998,6 @@ where
                 });
             }
 
-            // ── 10. Persist AuthWritten (OTP 已烧，行不可再 release) ─────
-            update_row(row_idx, &mac, BatchAuthRowUpdate::AuthWritten);
             sess.drain_boot_output();
             sess.wake_shell();
             if cancel.load(Ordering::Relaxed) {
@@ -1924,7 +2035,12 @@ where
                     trace(&format!(
                         "[verify ok] port={port} mac={mac} uuid={uuid} authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
                     ));
-                    update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
+                    persist_batch_auth_update(
+                        &update_row,
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::AuthVerified,
+                    )?;
                 }
                 Some((rb_u, rb_k)) => {
                     // Plaintext comparison goes to the .trace sink (local only,
@@ -1938,14 +2054,15 @@ where
                         mask_secret(&rb_k),
                     );
                     log::warn!("[batch-auth] verify-fail  port={port} mac={mac}");
-                    update_row(
+                    persist_batch_auth_update(
+                        &update_row,
                         row_idx,
                         &mac,
                         BatchAuthRowUpdate::StepFailed {
                             step: "verify",
                             error: msg.clone(),
                         },
-                    );
+                    )?;
                     return Err(FlashError::Plugin(msg));
                 }
                 None => {
@@ -1953,14 +2070,15 @@ where
                     log::warn!(
                         "[batch-auth] verify-fail  port={port} mac={mac} reason=no-response"
                     );
-                    update_row(
+                    persist_batch_auth_update(
+                        &update_row,
                         row_idx,
                         &mac,
                         BatchAuthRowUpdate::StepFailed {
                             step: "verify",
                             error: msg.clone(),
                         },
-                    );
+                    )?;
                     return Err(FlashError::Plugin(msg));
                 }
             }
@@ -1970,7 +2088,7 @@ where
             if let Err(e) = sess.hardware_reset() {
                 log::warn!("[batch-auth] hardware_reset after Done failed  port={port}: {e}");
             }
-            update_row(row_idx, &mac, BatchAuthRowUpdate::Done);
+            persist_batch_auth_update(&update_row, row_idx, &mac, BatchAuthRowUpdate::Done)?;
             Ok(BatchAuthSlotResult::Done { mac })
         }
 
@@ -2020,7 +2138,12 @@ where
                 if let Some((ref ex_u, ref ex_k)) = existing_auth {
                     if ex_u == found_uuid && ex_k == found_key {
                         log::info!("[batch-auth] already-done (old fw)  port={port} mac={mac}");
-                        update_row(found_idx, &mac, BatchAuthRowUpdate::Done);
+                        persist_batch_auth_update(
+                            &update_row,
+                            found_idx,
+                            &mac,
+                            BatchAuthRowUpdate::Done,
+                        )?;
                         return Ok(BatchAuthSlotResult::AlreadyDone { mac });
                     }
                 }
@@ -2053,37 +2176,63 @@ where
             log::info!("[batch-auth] allocated (old fw)  port={port} mac={mac} uuid={uuid}");
 
             // ── 8. Bind MAC to row immediately ───────────────────────────
-            update_row(row_idx, &mac, BatchAuthRowUpdate::MacRead);
+            persist_batch_auth_update(&update_row, row_idx, &mac, BatchAuthRowUpdate::MacRead)?;
 
             // ── 8b. Validate credential lengths before any device write ──
             if let Err(e) = validate_auth_credentials(&uuid, &authkey) {
                 log::warn!("[batch-auth] invalid credentials (old fw)  port={port} mac={mac}: {e}");
-                update_row(
+                persist_batch_auth_update(
+                    &update_row,
                     row_idx,
                     &mac,
                     BatchAuthRowUpdate::StepFailed {
-                        step: "auth_write",
+                        step: "auth_validate",
                         error: e.to_string(),
                     },
-                );
+                )?;
                 return Err(e);
             }
 
             // ── 9. Write auth ────────────────────────────────────────────
             progress(BatchAuthStep::WritingAuth);
             log::info!("[batch-auth] writing (old fw)  port={port} mac={mac} uuid={uuid}");
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::Cancelled);
+            }
+            persist_batch_auth_update(
+                &update_row,
+                row_idx,
+                &mac,
+                BatchAuthRowUpdate::AuthWriteStarted,
+            )?;
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                    mac: mac.clone(),
+                    uuid: uuid.clone(),
+                });
+            }
             {
                 let mut last_err: Option<FlashError> = None;
                 for attempt in 0..AUTH_WRITE_MAX_ATTEMPTS {
                     if attempt > 0 {
-                        check_cancel!();
+                        if cancel.load(Ordering::Relaxed) {
+                            persist_batch_auth_update(
+                                &update_row,
+                                row_idx,
+                                &mac,
+                                BatchAuthRowUpdate::AuthWritten,
+                            )?;
+                            return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                                mac: mac.clone(),
+                                uuid: uuid.clone(),
+                            });
+                        }
                         sess.drain_boot_output();
                         sess.wake_shell();
                         log::warn!(
                             "[batch-auth] auth-write retry {attempt} (old fw)  port={port} mac={mac}"
                         );
                     }
-                    check_cancel!();
                     match sess.auth_write(
                         &uuid,
                         &authkey,
@@ -2102,6 +2251,18 @@ where
                             last_err = Some(e);
                         }
                     }
+                }
+                if cancel.load(Ordering::Relaxed) {
+                    persist_batch_auth_update(
+                        &update_row,
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::AuthWritten,
+                    )?;
+                    return Ok(BatchAuthSlotResult::CancelledAfterWrite {
+                        mac: mac.clone(),
+                        uuid: uuid.clone(),
+                    });
                 }
                 if let Some(e) = last_err {
                     // See the new-firmware path: a lost success line is
@@ -2132,27 +2293,34 @@ where
                                 );
                             }
                         }
-                        update_row(
+                        let write_error = e.to_string();
+                        let row_update_error = persist_batch_auth_update(
+                            &update_row,
                             row_idx,
                             &mac,
                             BatchAuthRowUpdate::StepFailed {
                                 step: "auth_write",
-                                error: e.to_string(),
+                                error: write_error.clone(),
                             },
-                        );
-                        return Err(e);
+                        )
+                        .err()
+                        .map(|err| format!("; {err}"))
+                        .unwrap_or_default();
+                        return Ok(BatchAuthSlotResult::WriteUncertain {
+                            mac: mac.clone(),
+                            uuid: uuid.clone(),
+                            error: format!("{write_error}{row_update_error}"),
+                        });
                     }
                 }
             }
+            persist_batch_auth_update(&update_row, row_idx, &mac, BatchAuthRowUpdate::AuthWritten)?;
             if cancel.load(Ordering::Relaxed) {
                 return Ok(BatchAuthSlotResult::CancelledAfterWrite {
                     mac: mac.clone(),
                     uuid: uuid.clone(),
                 });
             }
-
-            // ── 10. Persist AuthWritten ───────────────────────────────────
-            update_row(row_idx, &mac, BatchAuthRowUpdate::AuthWritten);
 
             // ── 11. Settle wait (old fw may reboot after auth write) ──────
             let settle_wait = sess.timing.write_settle_wait;
@@ -2203,7 +2371,12 @@ where
                     trace(&format!(
                         "[verify ok (old fw)] port={port} mac={mac} uuid={uuid} authkey={authkey} read_uuid={rb_u} read_authkey={rb_k}"
                     ));
-                    update_row(row_idx, &mac, BatchAuthRowUpdate::AuthVerified);
+                    persist_batch_auth_update(
+                        &update_row,
+                        row_idx,
+                        &mac,
+                        BatchAuthRowUpdate::AuthVerified,
+                    )?;
                 }
                 Some((rb_u, rb_k)) => {
                     trace(&format!(
@@ -2215,14 +2388,15 @@ where
                         mask_secret(&rb_k),
                     );
                     log::warn!("[batch-auth] verify-fail (old fw)  port={port} mac={mac}");
-                    update_row(
+                    persist_batch_auth_update(
+                        &update_row,
                         row_idx,
                         &mac,
                         BatchAuthRowUpdate::StepFailed {
                             step: "verify",
                             error: msg.clone(),
                         },
-                    );
+                    )?;
                     return Err(FlashError::Plugin(msg));
                 }
                 None => {
@@ -2230,14 +2404,15 @@ where
                     log::warn!(
                         "[batch-auth] verify-fail (old fw) no-response  port={port} mac={mac}"
                     );
-                    update_row(
+                    persist_batch_auth_update(
+                        &update_row,
                         row_idx,
                         &mac,
                         BatchAuthRowUpdate::StepFailed {
                             step: "verify",
                             error: msg.clone(),
                         },
-                    );
+                    )?;
                     return Err(FlashError::Plugin(msg));
                 }
             }
@@ -2249,7 +2424,7 @@ where
                     "[batch-auth] hardware_reset after Done failed (old fw)  port={port}: {e}"
                 );
             }
-            update_row(row_idx, &mac, BatchAuthRowUpdate::Done);
+            persist_batch_auth_update(&update_row, row_idx, &mac, BatchAuthRowUpdate::Done)?;
             Ok(BatchAuthSlotResult::Done { mac })
         }
     }
@@ -2407,6 +2582,10 @@ mod tests {
         /// serves nothing and consumes no queued response. Simulates a shell
         /// that only comes up some time after reset (first cold boot).
         shell_ready_at: Option<Instant>,
+        /// Set the batch cancellation flag when an auth command reaches the mock device.
+        cancel_after_auth_write: Option<std::sync::Arc<AtomicBool>>,
+        auth_write_seen: Option<std::sync::Arc<AtomicBool>>,
+        fail_auth_write: bool,
     }
 
     impl MockAuthIo {
@@ -2417,6 +2596,9 @@ mod tests {
                 sent: Vec::new(),
                 control_lines: Vec::new(),
                 shell_ready_at: None,
+                cancel_after_auth_write: None,
+                auth_write_seen: None,
+                fail_auth_write: false,
             }
         }
 
@@ -2451,6 +2633,17 @@ mod tests {
         }
         fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
             self.sent.push(data.to_vec());
+            if data.starts_with(b"auth ") {
+                if let Some(seen) = &self.auth_write_seen {
+                    seen.store(true, Ordering::Relaxed);
+                }
+                if let Some(cancel) = &self.cancel_after_auth_write {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                if self.fail_auth_write {
+                    return Err(io::Error::other("synthetic ambiguous auth write failure"));
+                }
+            }
             Ok(())
         }
         fn flush(&mut self) -> io::Result<()> {
@@ -3333,5 +3526,311 @@ mod tests {
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
             ))
         );
+    }
+
+    #[cfg(feature = "excel")]
+    struct FirmwareCancelCase {
+        result: Result<BatchAuthSlotResult, FlashError>,
+        updates: Vec<BatchAuthRowUpdate>,
+        persisted: (usize, String, String, usize, usize),
+        auth_write_seen: bool,
+    }
+
+    #[cfg(feature = "excel")]
+    fn run_firmware_cancel_case(
+        old_firmware: bool,
+        after_auth_write: bool,
+        cancel_during_intent: bool,
+        fail_intent: bool,
+        fail_auth_write: bool,
+    ) -> FirmwareCancelCase {
+        use crate::batch_auth::{ExcelRowAllocator, RowStatus};
+        use calamine::Reader;
+        use std::sync::{Arc, Mutex};
+
+        const UUID: &str = "12345678901234567890";
+        const AUTHKEY: &str = "0123456789abcdef0123456789abcdef";
+        const MAC: &str = "AA:BB:CC:DD:EE:FF";
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("synthetic-auth.xlsx");
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        let worksheet = workbook.add_worksheet();
+        worksheet.write_string(0, 0, "UUID").unwrap();
+        worksheet.write_string(0, 1, "AUTHKEY").unwrap();
+        worksheet.write_string(1, 0, UUID).unwrap();
+        worksheet.write_string(1, 1, AUTHKEY).unwrap();
+        workbook.save(&path).unwrap();
+
+        let allocator = Arc::new(ExcelRowAllocator::load(&path).unwrap());
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_progress = cancel.clone();
+        let auth_write_seen = Arc::new(AtomicBool::new(false));
+        let mut io = MockAuthIo::new();
+        io.auth_write_seen = Some(auth_write_seen.clone());
+        io.fail_auth_write = fail_auth_write;
+        if after_auth_write {
+            io.cancel_after_auth_write = Some(cancel.clone());
+        }
+        if old_firmware {
+            io.add_response("No command\r\ntuya> \r\n"); // firmware probe
+            io.add_response(""); // shell wake
+            io.add_response(&format!("{MAC}\r\n")); // read_mac
+            for _ in 0..8 {
+                io.add_response(""); // old-firmware auth-read precheck retries
+            }
+        } else {
+            io.add_response("OK: log disabled\r\n"); // firmware probe
+            io.add_response(""); // shell wake
+            io.add_response("project.version 1.0.0\r\n"); // version
+            io.add_response(&format!("{MAC}\r\n")); // read_mac
+            io.add_response(""); // auth-read precheck: fresh device
+        }
+        io.add_response("Authorization write succeeds.\r\n"); // auth write
+
+        let config = BatchAuthSlotConfig {
+            auth_baud_rate: 115_200,
+            conflict_policy: ConflictPolicy::Overwrite,
+            auth_storage: if old_firmware {
+                AuthStorage::Kv
+            } else {
+                AuthStorage::Otp
+            },
+        };
+        let allocator_for_find = allocator.clone();
+        let allocator_for_allocate = allocator.clone();
+        let allocator_for_update = allocator.clone();
+        let updates_for_callback = updates.clone();
+        let cancel_for_intent = cancel.clone();
+        let result = run_batch_auth_slot_with(
+            "MOCK",
+            "T5AI",
+            &config,
+            move |mac| allocator_for_find.find_by_mac(mac),
+            move || {
+                allocator_for_allocate
+                    .allocate_row()
+                    .ok()
+                    .map(|row| (row.row_idx, row.uuid, row.authkey))
+            },
+            move |row_idx, mac, update| {
+                let (status, step) = match &update {
+                    BatchAuthRowUpdate::MacRead => (RowStatus::MacRead, "mac_read"),
+                    BatchAuthRowUpdate::AuthWriteStarted => {
+                        if fail_intent {
+                            return Err("synthetic Excel save failure".to_string());
+                        }
+                        (RowStatus::AuthWritten, "auth_write_started")
+                    }
+                    BatchAuthRowUpdate::AuthWritten => (RowStatus::AuthWritten, "auth_written"),
+                    BatchAuthRowUpdate::AuthVerified => (RowStatus::AuthVerified, "auth_verified"),
+                    BatchAuthRowUpdate::Done => (RowStatus::Done, "done"),
+                    BatchAuthRowUpdate::StepFailed {
+                        step: "auth_validate",
+                        ..
+                    } => (RowStatus::MacRead, "auth_validate"),
+                    BatchAuthRowUpdate::StepFailed { .. } => (RowStatus::AuthWritten, "auth_write"),
+                };
+                allocator_for_update
+                    .update_row_state(row_idx, mac, status, Some(step), None)
+                    .unwrap();
+                updates_for_callback.lock().unwrap().push(update);
+                if cancel_during_intent
+                    && matches!(
+                        updates_for_callback.lock().unwrap().last(),
+                        Some(BatchAuthRowUpdate::AuthWriteStarted)
+                    )
+                {
+                    cancel_for_intent.store(true, Ordering::Relaxed);
+                }
+                Ok(())
+            },
+            cancel.as_ref(),
+            move |step| {
+                if !after_auth_write
+                    && !cancel_during_intent
+                    && !fail_intent
+                    && !fail_auth_write
+                    && step == BatchAuthStep::WritingAuth
+                {
+                    cancel_for_progress.store(true, Ordering::Relaxed);
+                }
+            },
+            |_| {},
+            move |_port, timing, _baud_rate| {
+                Ok(AuthSession {
+                    port: io,
+                    timing,
+                    port_name: "MOCK".into(),
+                })
+            },
+        );
+
+        let reloaded = ExcelRowAllocator::load(&path).unwrap();
+        let row = reloaded.find_by_mac(MAC).unwrap();
+        let status = reloaded.stats();
+        let mut saved_workbook = calamine::open_workbook_auto(&path).unwrap();
+        let saved_sheet = saved_workbook.worksheet_range_at(0).unwrap().unwrap();
+        let headers: Vec<String> = saved_sheet
+            .rows()
+            .next()
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let status_col = headers.iter().position(|h| h == "STATUS").unwrap();
+        let mac_col = headers.iter().position(|h| h == "MAC").unwrap();
+        let saved_row = saved_sheet.rows().nth(1).unwrap();
+        assert_eq!(row.0, 0);
+        FirmwareCancelCase {
+            result,
+            updates: Arc::try_unwrap(updates).unwrap().into_inner().unwrap(),
+            persisted: (
+                row.0,
+                saved_row[status_col].to_string(),
+                saved_row[mac_col].to_string(),
+                status.remaining,
+                status.in_progress,
+            ),
+            auth_write_seen: auth_write_seen.load(Ordering::Relaxed),
+        }
+    }
+
+    #[cfg(feature = "excel")]
+    fn assert_after_write_state(case: FirmwareCancelCase) {
+        assert!(matches!(
+            case.result.unwrap(),
+            BatchAuthSlotResult::CancelledAfterWrite { .. }
+        ));
+        assert!(case.auth_write_seen);
+        let update_names: Vec<&str> = case
+            .updates
+            .iter()
+            .map(|update| match update {
+                BatchAuthRowUpdate::MacRead => "MacRead",
+                BatchAuthRowUpdate::AuthWriteStarted => "AuthWriteStarted",
+                BatchAuthRowUpdate::AuthWritten => "AuthWritten",
+                BatchAuthRowUpdate::StepFailed { .. } => "StepFailed",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(
+            (update_names, case.persisted),
+            (
+                vec!["MacRead", "AuthWriteStarted", "AuthWritten"],
+                (0, "AUTHWRITTEN".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+            )
+        );
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_cancel_before_write_keeps_row_mac_read_and_sends_no_auth() {
+        let case = run_firmware_cancel_case(false, false, false, false, false);
+        assert!(matches!(
+            case.result.unwrap(),
+            BatchAuthSlotResult::Cancelled
+        ));
+        assert!(
+            !case.auth_write_seen,
+            "cancel before write must send no auth command"
+        );
+        assert_eq!(case.updates.len(), 1);
+        assert!(matches!(case.updates[0], BatchAuthRowUpdate::MacRead));
+        assert_eq!(
+            case.persisted,
+            (0, "MACREAD".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+        );
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_cancel_after_write_persists_auth_written_before_reporting() {
+        assert_after_write_state(run_firmware_cancel_case(false, true, false, false, false));
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_old_firmware_cancel_before_write_keeps_row_mac_read() {
+        let case = run_firmware_cancel_case(true, false, false, false, false);
+        assert!(matches!(
+            case.result.unwrap(),
+            BatchAuthSlotResult::Cancelled
+        ));
+        assert!(!case.auth_write_seen);
+        assert_eq!(case.updates.len(), 1);
+        assert!(matches!(case.updates[0], BatchAuthRowUpdate::MacRead));
+        assert_eq!(
+            case.persisted,
+            (0, "MACREAD".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+        );
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_old_firmware_cancel_after_write_persists_auth_written_before_reporting() {
+        assert_after_write_state(run_firmware_cancel_case(true, true, false, false, false));
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_intent_persistence_failure_sends_no_auth_command() {
+        let case = run_firmware_cancel_case(false, false, false, true, false);
+        assert!(case.result.is_err());
+        assert!(!case.auth_write_seen);
+        assert_eq!(
+            case.persisted,
+            (0, "MACREAD".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+        );
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_cancel_during_intent_save_is_quarantined_before_send() {
+        let case = run_firmware_cancel_case(false, false, true, false, false);
+        assert!(matches!(
+            case.result.unwrap(),
+            BatchAuthSlotResult::CancelledAfterWrite { .. }
+        ));
+        assert!(!case.auth_write_seen);
+        assert_eq!(
+            case.persisted,
+            (0, "AUTHWRITTEN".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+        );
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_cancel_with_ambiguous_send_error_keeps_auth_written_state() {
+        for old_firmware in [false, true] {
+            let case = run_firmware_cancel_case(old_firmware, true, false, false, true);
+            assert!(matches!(
+                case.result.unwrap(),
+                BatchAuthSlotResult::CancelledAfterWrite { .. }
+            ));
+            assert!(case.auth_write_seen);
+            assert_eq!(
+                case.persisted,
+                (0, "AUTHWRITTEN".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+            );
+        }
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_auth_ambiguous_send_error_keeps_auth_written_state() {
+        for old_firmware in [false, true] {
+            let case = run_firmware_cancel_case(old_firmware, false, false, false, true);
+            assert!(matches!(
+                case.result,
+                Ok(BatchAuthSlotResult::WriteUncertain { .. })
+            ));
+            assert!(case.auth_write_seen);
+            assert_eq!(
+                case.persisted,
+                (0, "AUTHWRITTEN".into(), "AA:BB:CC:DD:EE:FF".into(), 0, 1)
+            );
+        }
     }
 }
