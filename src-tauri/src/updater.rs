@@ -59,6 +59,35 @@ fn assert_allowed_fetch_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+const MAX_FETCH_REDIRECTS: usize = 3;
+
+#[derive(Debug, PartialEq, Eq)]
+enum RedirectDecision {
+    Follow,
+    Stop,
+    Error,
+}
+
+fn fetch_redirect_decision(url: &str, previous_url_count: usize) -> RedirectDecision {
+    if previous_url_count > MAX_FETCH_REDIRECTS {
+        RedirectDecision::Error
+    } else if assert_allowed_fetch_url(url).is_ok() {
+        RedirectDecision::Follow
+    } else {
+        RedirectDecision::Stop
+    }
+}
+
+fn fetch_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        match fetch_redirect_decision(attempt.url().as_str(), attempt.previous().len()) {
+            RedirectDecision::Follow => attempt.follow(),
+            RedirectDecision::Stop => attempt.stop(),
+            RedirectDecision::Error => attempt.error("too many redirects"),
+        }
+    })
+}
+
 /// Fetch a URL and return body as string. Used by the frontend update checker
 /// to bypass WebView CSP restrictions on cross-origin fetch.
 #[tauri::command]
@@ -70,10 +99,9 @@ pub(crate) async fn fetch_url(url: String, timeout_ms: u64) -> Result<String, St
     let capped_timeout = timeout_ms.min(30_000);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(capped_timeout))
-        // Limit redirects so a malicious redirect chain can't be used to reach
-        // a non-allowlisted host via the follow; assert_allowed_fetch_url only
-        // inspects the initial URL.
-        .redirect(reqwest::redirect::Policy::limited(3))
+        // Revalidate every redirect destination; checking only the initial URL
+        // would let an allowlisted host redirect the renderer to an arbitrary host.
+        .redirect(fetch_redirect_policy())
         .build()
         .map_err(|e| {
             log::error!("[Update] fetch_url: failed to build client: {}", e);
@@ -478,7 +506,9 @@ mod auth_firmware_tests {
 
 #[cfg(test)]
 mod fetch_allowlist_tests {
-    use super::assert_allowed_fetch_url;
+    use super::{
+        assert_allowed_fetch_url, fetch_redirect_decision, RedirectDecision, MAX_FETCH_REDIRECTS,
+    };
 
     #[test]
     fn allows_github_gitee_and_tuya_oss() {
@@ -514,6 +544,47 @@ mod fetch_allowlist_tests {
     fn rejects_unlisted_host() {
         let err = assert_allowed_fetch_url("https://evil.example.com/x.json").unwrap_err();
         assert!(err.contains("evil.example.com"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_hosts_that_only_look_like_allowlisted_hosts() {
+        for url in [
+            "https://github.com.evil.example/x.json",
+            "https://evilgithub.com/x.json",
+            "https://sub.github.com/x.json",
+            "https://github.com@evil.example/x.json",
+        ] {
+            assert!(
+                assert_allowed_fetch_url(url).is_err(),
+                "lookalike host must not be allowed: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn redirect_policy_revalidates_each_target_and_limits_hops() {
+        assert_eq!(
+            fetch_redirect_decision("https://gitee.com/next.json", 1),
+            RedirectDecision::Follow
+        );
+        assert_eq!(
+            fetch_redirect_decision("https://github.com.evil.example/x.json", 1),
+            RedirectDecision::Stop
+        );
+        assert_eq!(
+            fetch_redirect_decision("http://github.com/next.json", 1),
+            RedirectDecision::Stop
+        );
+        // `previous` contains the original URL plus completed redirects, so a
+        // count of MAX_FETCH_REDIRECTS still permits the third redirect.
+        assert_eq!(
+            fetch_redirect_decision("https://github.com/next.json", MAX_FETCH_REDIRECTS),
+            RedirectDecision::Follow
+        );
+        assert_eq!(
+            fetch_redirect_decision("https://github.com/next.json", MAX_FETCH_REDIRECTS + 1),
+            RedirectDecision::Error
+        );
     }
 
     #[test]
