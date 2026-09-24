@@ -209,17 +209,21 @@ pub fn run_batch_slot(
     let alloc_update = allocator.clone();
     let port_for_update = port.clone();
     let excel_err_update = excel_err.clone();
+    let write_intent_persisted = Arc::new(AtomicBool::new(false));
+    let write_intent_for_update = write_intent_persisted.clone();
     let update_row = move |row_idx: usize, mac: &str, update: crate::BatchAuthRowUpdate| {
         use crate::batch_auth::RowStatus;
         use crate::BatchAuthRowUpdate as U;
+        let is_write_intent = matches!(&update, U::AuthWriteStarted);
         let (status, step_name, error): (RowStatus, Option<&str>, Option<String>) = match update {
             U::MacRead => (RowStatus::MacRead, Some("mac_read"), None),
+            U::AuthWriteStarted => (RowStatus::AuthWritten, Some("auth_write_started"), None),
             U::AuthWritten => (RowStatus::AuthWritten, Some("auth_written"), None),
             U::AuthVerified => (RowStatus::AuthVerified, Some("auth_verified"), None),
             // Done: keep last step in Excel (STATUS=DONE is sufficient)
             U::Done => (RowStatus::Done, None, None),
             U::StepFailed { step, error } => {
-                let status = if step == "auth_write" {
+                let status = if step == "auth_validate" {
                     RowStatus::MacRead
                 } else {
                     RowStatus::AuthWritten
@@ -236,7 +240,12 @@ pub fn run_batch_slot(
             if let Ok(mut slot) = excel_err_update.lock() {
                 *slot = Some(e);
             }
+            return Err("Excel row state could not be persisted".to_string());
         }
+        if is_write_intent {
+            write_intent_for_update.store(true, Ordering::Release);
+        }
+        Ok(())
     };
 
     let slot_config = crate::BatchAuthSlotConfig {
@@ -317,14 +326,26 @@ pub fn run_batch_slot(
             log::info!("[batch-auth] slot cancelled  port={port}");
             emit(serde_json::json!({ "port": port, "step": "cancelled" }));
         }
-        // CancelledAfterWrite — state already written to Excel by update_row(AuthWritten)
+        // CancelledAfterWrite — AUTHWRITTEN intent was saved before serial send.
         Ok(crate::BatchAuthSlotResult::CancelledAfterWrite { mac, uuid }) => {
             log::warn!(
-                "[batch-auth] slot cancelled AFTER auth_write  port={port} mac={mac} uuid={uuid}"
+                "[batch-auth] slot cancelled while auth write may be in progress  port={port} mac={mac} uuid={uuid}"
             );
             emit_final(
                 serde_json::json!({ "port": port, "step": "cancelled_after_write", "mac": mac, "uuid": uuid }),
             );
+        }
+        Ok(crate::BatchAuthSlotResult::WriteUncertain { mac, uuid, error }) => {
+            log::error!(
+                "[batch-auth] auth write outcome uncertain  port={port} mac={mac} uuid={uuid} error={error}"
+            );
+            emit_final(serde_json::json!({
+                "port": port,
+                "step": "write_uncertain",
+                "mac": mac,
+                "uuid": uuid,
+                "error": error
+            }));
         }
         // DefaultMac — T5/T5AI factory default MAC; no row allocation
         Ok(crate::BatchAuthSlotResult::DefaultMac { mac }) => {
@@ -334,9 +355,15 @@ pub fn run_batch_slot(
         // Err — state already written by update_row(StepFailed) inside authorize.rs
         Err(e) => {
             log::warn!("[batch-auth] slot failed  port={port} error={e}");
-            emit_final(
-                serde_json::json!({ "port": port, "step": "failed", "error": e.to_string() }),
-            );
+            emit_final(serde_json::json!({
+                "port": port,
+                "step": if write_intent_persisted.load(Ordering::Acquire) {
+                    "write_uncertain"
+                } else {
+                    "failed"
+                },
+                "error": e.to_string()
+            }));
         }
     }
 }

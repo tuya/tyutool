@@ -63,6 +63,10 @@ const ACTIVE_STATUSES: BatchSlotStatus[] = [
   "authorizing",
 ];
 
+function isQuarantinedSlot(slot: BatchSlotState): boolean {
+  return slot.cancelledAfterWrite === true || slot.writeUncertain === true;
+}
+
 export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const t = i18n.global.t;
 
@@ -144,7 +148,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   const isBusy = computed(() => currentStats.value.active > 0);
   const canStart = computed(() => {
-    if (isBusy.value || slots.value.length === 0 || !inputsValid.value)
+    if (
+      isBusy.value ||
+      !slots.value.some((slot) => !isQuarantinedSlot(slot)) ||
+      !inputsValid.value
+    )
       return false;
     // Flash-only batch: the Excel sheet is not used, so its checks don't apply.
     if (!authorizeEnabled.value) return true;
@@ -167,7 +175,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const canRetry = computed(() =>
     slots.value.some(
       (s) =>
-        (s.status === "failed" && !s.cancelledAfterWrite) ||
+        (s.status === "failed" &&
+          !s.cancelledAfterWrite &&
+          !s.writeUncertain) ||
         s.status === "no_code",
     ),
   );
@@ -489,12 +499,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     archiveError.value = "";
     lastArchivePath.value = "";
 
-    // A new batch means a new device on the port — clear the previous run's
-    // outcome flags, including the quarantine flag (the quarantined device is
-    // expected to have been physically removed by now). Leaving it set would
-    // mislabel the next device on the port and poison the archive CSV.
+    // Keep quarantined devices out of every automatic batch. Operators must
+    // remove/reassign the slot explicitly before this port can run again.
     for (const slot of slots.value.filter(
-      (s) => !ACTIVE_STATUSES.includes(s.status),
+      (s) => !ACTIVE_STATUSES.includes(s.status) && !isQuarantinedSlot(s),
     )) {
       updateSlot(slot.port, {
         status: "idle",
@@ -503,11 +511,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: undefined,
         excelError: undefined,
         cancelledAfterWrite: undefined,
+        writeUncertain: undefined,
       });
     }
 
     const idlePorts = slots.value
-      .filter((s) => s.status === "idle")
+      .filter((s) => s.status === "idle" && !isQuarantinedSlot(s))
       .map((s) => s.port);
 
     // Acquire ports through the port-manager before opening them in Rust.
@@ -534,6 +543,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         error: undefined,
         excelError: undefined,
         cancelledAfterWrite: undefined,
+        writeUncertain: undefined,
       });
     }
 
@@ -583,7 +593,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     completionBanner.value = null;
     for (const slot of slots.value.filter(
       (s) =>
-        (s.status === "failed" && !s.cancelledAfterWrite) ||
+        (s.status === "failed" &&
+          !s.cancelledAfterWrite &&
+          !s.writeUncertain) ||
         s.status === "no_code",
     )) {
       updateSlot(slot.port, {
@@ -592,6 +604,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         currentPhase: "",
         error: undefined,
         excelError: undefined,
+        cancelledAfterWrite: undefined,
+        writeUncertain: undefined,
       });
     }
     await startBatch();
@@ -602,13 +616,15 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     const slot = findSlot(port);
     if (!slot) return;
     if (slot.status !== "failed" && slot.status !== "no_code") return;
-    if (slot.cancelledAfterWrite) return;
+    if (slot.cancelledAfterWrite || slot.writeUncertain) return;
     updateSlot(port, {
       status: "idle",
       progress: 0,
       currentPhase: "",
       error: undefined,
       excelError: undefined,
+      cancelledAfterWrite: undefined,
+      writeUncertain: undefined,
     });
     batchEndTime.value = null;
     // Acquire the single retry port; if it's now held elsewhere, abort cleanly.
@@ -871,7 +887,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       releasePortIfClaimed(port);
       scheduleSaveStats();
       checkBatchCompletion();
-    } else if (step === "failed") {
+    } else if (step === "failed" || step === "write_uncertain") {
       updateSlot(port, {
         status: "failed",
         error: ev.error ?? "Unknown auth error",
@@ -881,6 +897,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         // a stale uuid would otherwise leak into the archive CSV.
         authUuid: ev.uuid,
         isAuthorized: undefined,
+        cancelledAfterWrite: undefined,
+        writeUncertain: step === "write_uncertain",
       });
       // In a flash-only batch the only failure source is the flash step.
       const failStats = authorizeEnabled.value

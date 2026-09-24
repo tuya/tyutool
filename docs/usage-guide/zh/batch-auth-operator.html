@@ -239,8 +239,8 @@
         <figcaption>选择 <code>OTP</code> 存储模式时界面会明确提示：写入后不可撤销。请务必先单台验证。</figcaption>
       </figure>
       <div class="callout danger">
-        <span class="title">铁律二：带"已写入后取消"危险徽标的设备必须单独放一边</span>
-        如果某台设备在<strong>授权可能已经写入之后</strong>才被取消，它会显示一个<strong>物理隔离危险徽标</strong>——授权可能已写进去，设备状态不确定。这种设备<strong>不能当成好品</strong>，也不要直接重新跑批量，必须<strong>单独拿出来核实</strong>清楚后再决定怎么处理。
+        <span class="title">铁律二：带"授权写入状态不确定"危险徽标的设备必须单独放一边</span>
+        如果某台设备在<strong>授权准备、发送或验证期间被取消，或授权命令发送报错且设备读取未能确认结果</strong>，命令可能尚未发送，也可能已到达设备，结果未经验证。它会显示一个<strong>物理隔离危险徽标</strong>。这种设备<strong>不能当成好品</strong>，也不要通过“全部开始”或单口重试再次授权；必须<strong>单独拿出来核实</strong>清楚后再决定怎么处理。确认更换为新设备后，先使用只读的<strong>读取</strong>将槽位恢复为 idle，再移除并重新添加该端口。
       </div>
 
       <nav class="pager">

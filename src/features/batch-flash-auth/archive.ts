@@ -113,6 +113,7 @@ export function buildBatchArchiveSummary(
       uuid: s.authUuid ?? null,
       isAuthorized: s.isAuthorized ?? null,
       cancelledAfterWrite: s.cancelledAfterWrite ?? false,
+      writeUncertain: s.writeUncertain ?? false,
       error: s.error ?? null,
       excelError: s.excelError ?? null,
       readError: s.readError ?? null,
@@ -137,6 +138,7 @@ export function buildSlotsCsv(
     "mac",
     "uuid",
     "cancelledAfterWrite",
+    "writeUncertain",
     "error",
     "excelError",
   ];
@@ -148,6 +150,7 @@ export function buildSlotsCsv(
       s.mac ?? "",
       s.authUuid ?? "",
       String(s.cancelledAfterWrite ?? false),
+      String(s.writeUncertain ?? false),
       s.error ?? "",
       s.excelError ?? "",
     ]

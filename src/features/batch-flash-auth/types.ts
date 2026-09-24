@@ -55,11 +55,14 @@ export interface BatchSlotState {
   error?: string;
   excelError?: string;
   /**
-   * true ⇒ auth write command was sent to device but cancel arrived before
-   * verify completed. KV storage is overwritable; OTP is permanently written.
+   * true ⇒ the auth-write intent was saved to Excel but cancellation arrived
+   * before verification. The command may or may not have reached the device.
    * Operator must physically isolate this device until manually verified.
    */
   cancelledAfterWrite?: boolean;
+  /** A failure occurred after an auth-write intent was saved; the command may
+   * have reached the device, so its authorization state is unverified. */
+  writeUncertain?: boolean;
 }
 
 export interface CumulativeStats {
@@ -98,6 +101,7 @@ export interface BatchAuthProgressEvent {
     | "no_code"
     | "cancelled"
     | "cancelled_after_write"
+    | "write_uncertain"
     | "default_mac";
   mac?: string;
   uuid?: string;
