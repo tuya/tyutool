@@ -60,7 +60,15 @@ jobs:
           [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
             || { echo "::error::tag must match v<major>.<minor>.<patch>: ${TAG}"; exit 1; }
 
+      - name: Download metadata from this release run
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/download-artifact@v8
+        with:
+          name: release-metadata
+          path: gitee-metadata
+
       - name: Download metadata from the GitHub release
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
