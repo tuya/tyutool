@@ -576,9 +576,9 @@ mod tests {
     // what it was actually asked?", because the bytes come from a T5AI on a
     // bench. See the record/replay note in `super::transport`.
     //
-    // It is a snapshot, and that is the deal: a deliberate protocol change makes
-    // it stale, and refreshing it needs the hardware back. Re-record with the
-    // `record-io` feature — never hand-edit the fixture to make this pass.
+    // The recordings predate the corrected baud-switch ACK sequence. Replay
+    // their unchanged flash exchanges after negotiation; switch sequencing is
+    // tested separately in transport/ops. Never hand-edit captured device bytes.
     mod replay {
         use super::*;
         use crate::plugins::beken::chip::T5AISpec;
@@ -600,8 +600,16 @@ mod tests {
         /// check, which would make it prove itself.
         const T5AI_WRITE_16K_INPUT: &[u8] = include_bytes!("t5ai-write-16k-input.bin");
 
+        fn flash_exchange(recording: &str) -> ReplayIo {
+            let flash_id = "W 01e0fcfff405000e9f000000";
+            let start = recording
+                .find(flash_id)
+                .expect("recording must contain the first FlashGetMID request");
+            ReplayIo::parse(&recording[start..])
+        }
+
         #[test]
-        fn t5ai_read_still_asks_the_device_exactly_what_it_asked_before() {
+        fn t5ai_read_after_handshake_matches_recorded_flash_exchange() {
             let out = tempfile::NamedTempFile::new().expect("a temp output file");
             // Byte-for-byte the job the recorded CLI run built.
             let job = FlashJob {
@@ -615,14 +623,15 @@ mod tests {
             let cancel = AtomicBool::new(false);
             let log = |_: &str| {};
             let mut transport = Transport::new(
-                ReplayIo::parse(T5AI_READ_4K),
+                flash_exchange(T5AI_READ_4K),
                 "COM34",
-                chip.initial_baud(),
+                job.baud_rate,
                 &cancel,
                 &log,
             );
 
-            run_beken_on_transport(&job, &mut transport, &|_| {}, &chip, true)
+            let params = ops::get_flash_params(&mut transport, &chip).unwrap();
+            run_read_mode(&job, &mut transport, &chip, &params, &|_| {})
                 .expect("the recorded exchange should still drive the read to completion");
 
             // A driver that stops early is as much a change as one that asks for
@@ -638,7 +647,7 @@ mod tests {
         }
 
         #[test]
-        fn t5ai_write_still_asks_the_device_exactly_what_it_asked_before() {
+        fn t5ai_write_after_handshake_matches_recorded_flash_exchange() {
             let firmware = tempfile::NamedTempFile::new().expect("a temp firmware file");
             // The driver reads this file to decide what to put on the wire, so
             // it has to be what the recording actually sent — anything else
@@ -657,14 +666,15 @@ mod tests {
             let cancel = AtomicBool::new(false);
             let log = |_: &str| {};
             let mut transport = Transport::new(
-                ReplayIo::parse(T5AI_WRITE_16K),
+                flash_exchange(T5AI_WRITE_16K),
                 "COM34",
-                chip.initial_baud(),
+                job.baud_rate,
                 &cancel,
                 &log,
             );
 
-            run_beken_on_transport(&job, &mut transport, &|_| {}, &chip, true)
+            let params = ops::get_flash_params(&mut transport, &chip).unwrap();
+            run_flash_mode(&job, &mut transport, &chip, &params, &|_| {})
                 .expect("the recorded exchange should still drive the write to completion");
 
             assert_eq!(

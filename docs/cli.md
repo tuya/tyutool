@@ -761,6 +761,8 @@ tyutool usb-port-survey | jq '.[] | select(.wouldListInTyutool == false)'
 
 Values are case-insensitive. Every column matches the GUI's per-chip manifest (`src/features/firmware-flash/chip-manifests.ts`) — `defaultBaudRate`, `defaultLogBaudRate`, and `flashSize` respectively. `-b` overrides either baud.
 
+Beken/T-series operations connect at 115200 before switching to the requested baud. The tool receives and validates the switch acknowledgement at the new baud, falling back to link checks if that acknowledgement is missing or invalid. Passing `-b 115200` keeps the connection at the initial baud and skips this switch.
+
 The flash size is what bounds a sensible `-s`/`-l`; the CLI does not clamp them for you. That file is also where each chip's erase presets live, which is the quickest way to look up where the auth/KV and RF-calibration regions sit on a given part.
 
 ## Output modes
