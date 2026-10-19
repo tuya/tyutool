@@ -24,6 +24,8 @@
 //!
 //! Regenerating them from `icons/tray-source.svg` is documented in `icons/README.md`.
 
+use std::io::Cursor;
+
 /// Black silhouette + alpha, for macOS's template rendering. 44 px so an 18 pt
 /// menu-bar slot still has >2× pixels on a Retina display.
 const MACOS_TEMPLATE_PNG: &[u8] = include_bytes!("../icons/tray-macos.png");
@@ -73,8 +75,11 @@ fn colour() -> anyhow::Result<Glyph> {
 /// type with no auto-expansion. A palette+tRNS, 16-bit or grayscale PNG would
 /// otherwise be read as RGBA8 and render as garbage.
 fn decode(bytes: &[u8], is_template: bool) -> anyhow::Result<Glyph> {
-    let mut reader = png::Decoder::new(bytes).read_info()?;
-    let mut rgba = vec![0u8; reader.output_buffer_size()];
+    let mut reader = png::Decoder::new(Cursor::new(bytes)).read_info()?;
+    let output_buffer_size = reader
+        .output_buffer_size()
+        .ok_or_else(|| anyhow::anyhow!("PNG output buffer size overflow"))?;
+    let mut rgba = vec![0u8; output_buffer_size];
     let info = reader.next_frame(&mut rgba)?;
 
     if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
