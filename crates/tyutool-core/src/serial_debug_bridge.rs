@@ -351,7 +351,14 @@ pub fn serial_debug_spawn_chunk_bridge<S: SerialDebugSink>(
                         active_generation = generation;
                     }
                     pending.push(chunk);
-                    if pending.should_flush_bytes(SERIAL_DEBUG_CHUNK_FLUSH_BYTES) {
+                    // A busy port can keep recv_timeout from ever timing out.
+                    // Check the batch age on arrivals too, or small continuous
+                    // chunks wait until 32 KiB accumulate before reaching the UI.
+                    if pending.should_flush_bytes(SERIAL_DEBUG_CHUNK_FLUSH_BYTES)
+                        || pending.should_flush_elapsed(Duration::from_millis(
+                            SERIAL_DEBUG_CHUNK_FLUSH_MS,
+                        ))
+                    {
                         serial_debug_flush_chunks(&sink, &archive, &filters, pending.take());
                     }
                 }
@@ -570,6 +577,54 @@ mod tests {
 
         assert!(sink.recorded().batches.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn continuous_small_chunks_reach_the_sink_before_the_byte_limit() {
+        use std::sync::atomic::AtomicBool;
+        use std::time::Instant;
+
+        let dir = scratch_dir("continuous-flush");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let sink = TestSink::default();
+        let bridge = serial_debug_spawn_chunk_bridge(
+            sink.clone(),
+            archive,
+            filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        let producer_stop = Arc::clone(&stop);
+        // Keep renewing recv_timeout without approaching the 32 KiB limit.
+        // The sink must see output while the producer is still running.
+        let producer = std::thread::spawn(move || {
+            let mut sent_bytes = 0;
+            while !producer_stop.load(Ordering::Relaxed)
+                && sent_bytes + 2 < SERIAL_DEBUG_CHUNK_FLUSH_BYTES
+            {
+                bridge.send_chunk(rx(b"x\n"));
+                sent_bytes += 2;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            bridge
+        });
+        let deadline = Instant::now() + Duration::from_millis(250);
+        let mut delivered = false;
+        while Instant::now() < deadline {
+            if !sink.recorded().batches.is_empty() {
+                delivered = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        stop.store(true, Ordering::Relaxed);
+        producer.join().unwrap().shutdown().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            delivered,
+            "continuous output waited for idle or the byte limit"
+        );
     }
 
     /// Dropping device output must cut the open archive line before the sentinel,
