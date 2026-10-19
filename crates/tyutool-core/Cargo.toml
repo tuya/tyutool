@@ -95,4 +95,4 @@ ts-rs = { version = "12", optional = true }
 # native-tls so the CLI's musl builds keep working, matching tyutool-cli's own copy.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"], optional = true }
 calamine = { version = "0.26", features = ["dates"], optional = true }
-rust_xlsxwriter = { version = "0.79", optional = true }
+rust_xlsxwriter = { version = "0.99", optional = true }
