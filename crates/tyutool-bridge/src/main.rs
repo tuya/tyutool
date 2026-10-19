@@ -1433,16 +1433,17 @@ impl TrayShell {
         ])
         .map_err(|e| anyhow::anyhow!("build tray menu: {e}"))?;
 
-        let (glyph, is_template) = tray_glyph_icon()?;
-        let icon = tray_icon::TrayIconBuilder::new()
-            .with_menu(Box::new(menu.clone()))
-            .with_icon(glyph)
-            // macOS-only, and the only reason light/dark works there for free: the
-            // system tints a template image to match the menu bar. Passed as the
-            // artwork's own flag rather than a literal `true`, because on Windows
-            // and Linux nothing recolours the icon — they get the colour logo and
-            // this must be `false` to describe it honestly.
-            .with_icon_as_template(is_template)
+        let (glyph, _is_template) = tray_glyph_icon()?;
+        let builder = tray_icon::TrayIconBuilder::new().with_menu(Box::new(menu.clone()));
+        #[cfg(target_os = "macos")]
+        let builder = if _is_template {
+            builder.with_icon_templated(glyph)
+        } else {
+            builder.with_icon(glyph)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_icon(glyph);
+        let icon = builder
             .with_tooltip("Cobuilder Bridge")
             .build()
             .map_err(|e| anyhow::anyhow!("create tray icon: {e}"))?;
