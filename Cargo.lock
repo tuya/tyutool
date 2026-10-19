@@ -300,7 +300,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17918dba7ecf78b9a14507ec9f984e7977d13fad87dc86d61038980a45d128cf"
 dependencies = [
- "dirs",
+ "dirs 6.0.0",
  "os_info",
  "smappservice-rs",
  "thiserror 2.0.20",
@@ -1190,6 +1190,15 @@ name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
 dependencies = [
  "dirs-sys",
 ]
@@ -2603,6 +2612,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags 2.11.0",
+ "serde",
+]
+
+[[package]]
 name = "kuchikiki"
 version = "0.8.8-speedreader"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2940,7 +2959,7 @@ dependencies = [
  "crossbeam-channel",
  "dpi",
  "gtk",
- "keyboard-types",
+ "keyboard-types 0.7.0",
  "libxdo",
  "objc2",
  "objc2-app-kit",
@@ -2949,6 +2968,26 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "serde",
+ "thiserror 2.0.20",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "muda"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "gtk",
+ "keyboard-types 0.8.3",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "png 0.18.1",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]
@@ -5193,7 +5232,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cookie",
- "dirs",
+ "dirs 6.0.0",
  "dunce",
  "embed_plist",
  "getrandom 0.3.4",
@@ -5205,7 +5244,7 @@ dependencies = [
  "libc",
  "log",
  "mime",
- "muda",
+ "muda 0.19.3",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -5227,7 +5266,7 @@ dependencies = [
  "tauri-utils",
  "thiserror 2.0.20",
  "tokio",
- "tray-icon",
+ "tray-icon 0.24.2",
  "url",
  "webkit2gtk",
  "webview2-com",
@@ -5243,7 +5282,7 @@ checksum = "bc9ce40b16101cb6ea63d3e221567affd1c3a9205f95d7bc574941a10636b632"
 dependencies = [
  "anyhow",
  "cargo_toml",
- "dirs",
+ "dirs 6.0.0",
  "glob",
  "heck 0.5.0",
  "json-patch",
@@ -5432,7 +5471,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "806d9dac662c2e4594ff03c647a552f2c9bd544e7d0f683ec58f872f952ce4af"
 dependencies = [
  "base64 0.22.1",
- "dirs",
+ "dirs 6.0.0",
  "flate2",
  "futures-util",
  "http",
@@ -5967,9 +6006,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "045979e3f037cd18ad1cb2a419dfda133c5c29c9f3453370079f2255d46c257e"
 dependencies = [
  "crossbeam-channel",
- "dirs",
+ "dirs 6.0.0",
  "libappindicator",
- "muda",
+ "muda 0.19.3",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
@@ -5978,6 +6017,27 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "serde",
+ "thiserror 2.0.20",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tray-icon"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f5cc5858ecf9574ddd8f0032a2ff7ffd6f7724d2b81e48b9374984b3fd6ddc9"
+dependencies = [
+ "crossbeam-channel",
+ "dirs 7.0.0",
+ "libappindicator",
+ "muda 0.21.2",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "once_cell",
+ "png 0.18.1",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]
@@ -6058,12 +6118,12 @@ dependencies = [
  "auto-launch",
  "base64 0.23.1",
  "chrono",
- "dirs",
+ "dirs 6.0.0",
  "fern",
  "futures-util",
  "getrandom 0.4.2",
  "log",
- "muda",
+ "muda 0.19.3",
  "png 0.17.16",
  "serde",
  "serde_json",
@@ -6072,7 +6132,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml 0.8.2",
- "tray-icon",
+ "tray-icon 0.26.1",
  "tyutool-core",
  "windows-sys 0.61.2",
  "winresource",
@@ -6088,7 +6148,7 @@ dependencies = [
  "clap_complete",
  "console",
  "ctrlc",
- "dirs",
+ "dirs 6.0.0",
  "fern",
  "flate2",
  "hex",
@@ -6114,7 +6174,7 @@ version = "3.2.10"
 dependencies = [
  "calamine",
  "crc32fast",
- "dirs",
+ "dirs 6.0.0",
  "espflash",
  "log",
  "md-5 0.11.0",
@@ -7236,7 +7296,7 @@ dependencies = [
  "block2",
  "cookie",
  "crossbeam-channel",
- "dirs",
+ "dirs 6.0.0",
  "dom_query",
  "dpi",
  "dunce",
