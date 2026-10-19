@@ -216,6 +216,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     DebugLogLine,
     "direction" | "tsMs" | "text"
   > & {
+    seq: number;
     estimatedChars: number;
     /**
      * Archive lines that existed before this line's own archive write; see
@@ -235,6 +236,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // backfilled from the Rust-side session archive by
   // `useSerialAutoSave.backfillFromArchive`, which is the full record.
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
+  let nextAutoSaveSeq = 1;
   // Where the backfilled half of the current auto-save file ends: the archive
   // snapshot the backfill was capped at, or null while it is not known yet.
   // Everything at or after it is the live queue's job, everything before it has
@@ -243,6 +245,10 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // Sys-line archive writes still in flight. The backfill awaits them before
   // discarding, so no queued line can still be missing its position by then.
   const pendingSysArchiveWrites = new Set<Promise<void>>();
+  let beforeClearAutoSave: ((throughSeq: number) => Promise<void>) | null =
+    null;
+  let afterBackendDrainAutoSave:
+    ((throughSeq: number) => Promise<void>) | null = null;
   // The watermark is a position in *one* session file's backfill; a new (or
   // closed) file invalidates it. `flush: 'sync'` so this can never be queued
   // behind — and then clobber — a snapshot the backfill has already published.
@@ -303,6 +309,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   let unsubscribeFilterUpdated: (() => void) | null = null;
   let unsubscribeArchiveCapped: (() => void) | null = null;
   let unsubscribeChunksDropped: (() => void) | null = null;
+  let backendStopPromise: Promise<void> | null = null;
   let resumeAfterFlashRelease = false;
 
   // Full-session scrollback for the "All" tab. Owns its own buffer over the Rust
@@ -486,6 +493,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       direction: line.direction,
       tsMs: line.tsMs,
       text: line.text,
+      seq: nextAutoSaveSeq++,
       estimatedChars: line.text.length + 48,
       archivedBefore,
     };
@@ -659,6 +667,51 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   async function clear(): Promise<void> {
+    if (chunkFlushTimer !== null) {
+      clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = null;
+    }
+    flushQueuedChunks();
+    finalizePendingLine("tx", UNARCHIVED);
+    finalizePendingLine("rx", UNARCHIVED);
+    const autoSaveBoundary = autoSaveQueueHighWaterMark();
+    // Auto-save is a session concern. Let its owner finish writes for the old
+    // archive before clear resets the archive line numbers and live queue.
+    await beforeClearAutoSave?.(autoSaveBoundary);
+    // Chunks can arrive while the old file is being flushed. Capture everything
+    // already delivered at this point before resetting the line assemblers;
+    // these lines belong to the next save interval, beyond autoSaveBoundary.
+    if (chunkFlushTimer !== null) {
+      clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = null;
+    }
+    flushQueuedChunks();
+    finalizePendingLine("tx", UNARCHIVED);
+    finalizePendingLine("rx", UNARCHIVED);
+    dropPendingAutoSaveLinesThrough(autoSaveBoundary);
+    // Archive line numbers may restart as soon as the backend clear begins.
+    // Queue arrivals conservatively until the next backfill establishes its
+    // boundary, even if the backend later rejects the clear.
+    autoSaveBackfilledUntil = null;
+    try {
+      await transport.clearSession();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
+      return;
+    }
+
+    // Chunks may have arrived while the backend clear was in flight. Finish
+    // them before clearing the visible buffer so auto-save still receives them.
+    if (chunkFlushTimer !== null) {
+      clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = null;
+    }
+    flushQueuedChunks();
+    finalizePendingLine("tx", UNARCHIVED);
+    finalizePendingLine("rx", UNARCHIVED);
+    dropPendingAutoSaveLinesThrough(autoSaveBoundary);
+
     lines.value = [];
     // A clear starts a new archive session whose line numbers restart at 1, so
     // every anchor the history window holds points at the wrong lines.
@@ -666,13 +719,6 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     resetPendingBuffer(pending.tx);
     resetPendingBuffer(pending.rx);
     queuedChunks.length = 0;
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
-    }
-    pendingAutoSaveLines.length = 0;
-    // The archive restarts at line 1, so the backfill watermark now points at
-    // nothing; keeping it would discard every line of the new session.
     autoSaveBackfilledUntil = null;
     cancelActiveFilterRefresh();
     filterStatsById.value = Object.fromEntries(
@@ -693,12 +739,59 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     activeFilterLoading.value = false;
     activeFilterFullyLoaded.value = true;
     activeFilterPinned.value = false;
-    try {
-      await transport.clearSession();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
+  }
+
+  function registerBeforeClearAutoSave(
+    callback: ((throughSeq: number) => Promise<void>) | null,
+  ): void {
+    beforeClearAutoSave = callback;
+  }
+
+  function registerAfterBackendDrainAutoSave(
+    callback: ((throughSeq: number) => Promise<void>) | null,
+  ): void {
+    afterBackendDrainAutoSave = callback;
+  }
+
+  function peekPendingAutoSaveLines(
+    maxChars = AUTO_SAVE_FLUSH_MAX_CHARS,
+    throughSeq = Number.POSITIVE_INFINITY,
+  ): Array<Pick<DebugLogLine, "direction" | "tsMs" | "text">> {
+    let count = 0;
+    let totalChars = 0;
+    while (
+      count < pendingAutoSaveLines.length &&
+      pendingAutoSaveLines[count].seq <= throughSeq
+    ) {
+      const next = pendingAutoSaveLines[count];
+      if (
+        count > 0 &&
+        Number.isFinite(maxChars) &&
+        totalChars + next.estimatedChars > maxChars
+      )
+        break;
+      totalChars += next.estimatedChars;
+      count += 1;
     }
+    return pendingAutoSaveLines
+      .slice(0, count)
+      .map(({ direction, tsMs, text }) => ({ direction, tsMs, text }));
+  }
+
+  function commitPendingAutoSaveLines(count: number): void {
+    pendingAutoSaveLines.splice(0, count);
+  }
+
+  function autoSaveQueueHighWaterMark(): number {
+    return nextAutoSaveSeq - 1;
+  }
+
+  function dropPendingAutoSaveLinesThrough(throughSeq: number): void {
+    let kept = 0;
+    for (const entry of pendingAutoSaveLines) {
+      if (entry.seq > throughSeq) pendingAutoSaveLines[kept++] = entry;
+    }
+    pendingAutoSaveLines.length = kept;
   }
 
   /**
@@ -832,36 +925,45 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   async function stopBackendSession(): Promise<void> {
-    unsubscribeChunk?.();
-    unsubscribeDisconnect?.();
-    unsubscribeFilterUpdated?.();
-    unsubscribeArchiveCapped?.();
-    unsubscribeChunksDropped?.();
-    unsubscribeChunk = null;
-    unsubscribeDisconnect = null;
-    unsubscribeFilterUpdated = null;
-    unsubscribeArchiveCapped = null;
-    unsubscribeChunksDropped = null;
-    // Everything still in flight has to become a line before the port goes:
-    // the chunks queued in the last coalescing frame (dropping them would erase
-    // output the archive already has), and then the bytes the device left
-    // unterminated — a `login: ` prompt, a progress bar — which nothing else
-    // ever cuts. The two tail lines go in as UNARCHIVED: the store never learns
-    // the archive position of a line it closed itself, and a line whose position
-    // is unknown must never be discarded by the auto-save handoff.
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-    }
-    flushQueuedChunks();
-    finalizePendingLine("tx", UNARCHIVED);
-    finalizePendingLine("rx", UNARCHIVED);
-    cancelActiveFilterRefresh();
+    if (backendStopPromise) return backendStopPromise;
+    const stopping = (async () => {
+      try {
+        // Keep listeners attached until the transport's close acknowledgement
+        // guarantees its final batch has been delivered.
+        await transport.close();
+      } catch (e) {
+        rLog.warn(
+          `[SerialDebug] close error: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (chunkFlushTimer !== null) clearTimeout(chunkFlushTimer);
+      flushQueuedChunks();
+      finalizePendingLine("tx", UNARCHIVED);
+      finalizePendingLine("rx", UNARCHIVED);
+      try {
+        await afterBackendDrainAutoSave?.(autoSaveQueueHighWaterMark());
+      } catch (e) {
+        rLog.warn(
+          `[SerialDebug] final auto-save flush failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      unsubscribeChunk?.();
+      unsubscribeDisconnect?.();
+      unsubscribeFilterUpdated?.();
+      unsubscribeArchiveCapped?.();
+      unsubscribeChunksDropped?.();
+      unsubscribeChunk = null;
+      unsubscribeDisconnect = null;
+      unsubscribeFilterUpdated = null;
+      unsubscribeArchiveCapped = null;
+      unsubscribeChunksDropped = null;
+      cancelActiveFilterRefresh();
+    })();
+    backendStopPromise = stopping;
     try {
-      await transport.close();
-    } catch (e) {
-      rLog.warn(
-        `[SerialDebug] close error: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      await stopping;
+    } finally {
+      if (backendStopPromise === stopping) backendStopPromise = null;
     }
   }
 
@@ -907,7 +1009,6 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       },
       onReleased: async (reason) => {
         opening.value = true;
-        open.value = false;
         const shouldResume = reason === "requested" && resumeAfterFlashRelease;
         resumeAfterFlashRelease = false;
         if (shouldResume) {
@@ -915,6 +1016,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
           pm.registerResume(port.value, "serial-debug");
         }
         await stopBackendSession().finally(() => {
+          // Keep the auto-save session alive until close acknowledgement and
+          // final batch draining have completed.
+          open.value = false;
           opening.value = false;
         });
         if (reason === "unplugged") {
@@ -1495,6 +1599,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     clear,
     appendChunk,
     drainPendingAutoSaveLines,
+    peekPendingAutoSaveLines,
+    commitPendingAutoSaveLines,
+    autoSaveQueueHighWaterMark,
+    registerBeforeClearAutoSave,
+    registerAfterBackendDrainAutoSave,
     settleAutoSaveMarkers,
     dropBackfilledAutoSaveLines,
     showHexPopup,

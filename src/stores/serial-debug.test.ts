@@ -814,6 +814,33 @@ describe("useSerialDebugStore port-manager integration", () => {
       expect(added.map((l) => l.text)).toEqual(["last-gasp"]);
     });
 
+    it("retains and auto-saves the final batch emitted while the backend closes", async () => {
+      const s = await openedStore();
+      s.sessionAutoSavePath = "/logs/closing.txt";
+      fake.close = async () => {
+        // The backend drains its bridge before acknowledging close. These
+        // bytes therefore arrive during close(), not before the close starts.
+        fake.emitChunkBatch([
+          {
+            direction: "rx",
+            tsMs: 1000,
+            bytes: [...Buffer.from("last-complete\nlast-tail")],
+          },
+        ]);
+      };
+
+      await s.closePort();
+
+      expect(
+        s.lines
+          .filter((line) => line.direction === "rx")
+          .map((line) => line.text),
+      ).toEqual(["last-complete", "last-tail"]);
+      expect(
+        s.drainPendingAutoSaveLines(Infinity).map((line) => line.text),
+      ).toEqual(["last-complete", "last-tail"]);
+    });
+
     it("shows the tail the device never terminated with a newline", async () => {
       const s = await openedStore();
       fake.emitChunk({
@@ -1175,6 +1202,45 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(s.filterPagesById).toEqual({});
     expect(s.activeFilterLoading).toBe(false);
     expect(s.activeFilterFullyLoaded).toBe(true);
+  });
+
+  it("keeps new auto-save lines when archive numbering restarts during clear", async () => {
+    const s = useSerialDebugStore();
+    s.sessionAutoSavePath = "/tmp/serial-debug-autosave.txt";
+    s.dropBackfilledAutoSaveLines(10);
+    let finishClear!: () => void;
+    const clearGate = new Promise<void>((resolve) => {
+      finishClear = resolve;
+    });
+    fake.clearSession = () => clearGate;
+
+    const clearing = s.clear();
+    await Promise.resolve();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2,
+      bytes: [...Buffer.from("new session\n")],
+      archivedBefore: 0,
+    });
+    finishClear();
+    await clearing;
+
+    expect(s.drainPendingAutoSaveLines(Number.POSITIVE_INFINITY)).toEqual([
+      expect.objectContaining({ text: "new session" }),
+    ]);
+  });
+
+  it("preserves displayed logs when the backend refuses to clear", async () => {
+    const s = useSerialDebugStore();
+    s.lines = [{ id: 1, direction: "rx", tsMs: 1, text: "keep me" }];
+    fake.clearSession = async () => {
+      throw new Error("clear refused");
+    };
+
+    await s.clear();
+
+    expect(s.lines.some((line) => line.text === "keep me")).toBe(true);
+    expect(s.lines.some((line) => line.direction === "sys")).toBe(true);
   });
 
   it("gives every archive line in a filter page its own display id", async () => {
