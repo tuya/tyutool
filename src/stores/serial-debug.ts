@@ -197,6 +197,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const showDirBadge = ref(true);
   const filterStatsById = ref<Record<string, SerialDebugFilterStats>>({});
   const filterPagesById = ref<Record<string, SerialDebugFilterLinePage>>({});
+  const archiveSessionRevision = ref(0);
   const activeFilterLoading = ref(false);
   const activeFilterFullyLoaded = ref(false);
   /**
@@ -237,6 +238,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // `useSerialAutoSave.backfillFromArchive`, which is the full record.
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
   let nextAutoSaveSeq = 1;
+  const filterRequestGeneration = ref(0);
   // Where the backfilled half of the current auto-save file ends: the archive
   // snapshot the backfill was capped at, or null while it is not known yet.
   // Everything at or after it is the live queue's job, everything before it has
@@ -667,78 +669,95 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   async function clear(): Promise<void> {
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
-    }
-    flushQueuedChunks();
-    finalizePendingLine("tx", UNARCHIVED);
-    finalizePendingLine("rx", UNARCHIVED);
-    const autoSaveBoundary = autoSaveQueueHighWaterMark();
-    // Auto-save is a session concern. Let its owner finish writes for the old
-    // archive before clear resets the archive line numbers and live queue.
-    await beforeClearAutoSave?.(autoSaveBoundary);
-    // Chunks can arrive while the old file is being flushed. Capture everything
-    // already delivered at this point before resetting the line assemblers;
-    // these lines belong to the next save interval, beyond autoSaveBoundary.
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
-    }
-    flushQueuedChunks();
-    finalizePendingLine("tx", UNARCHIVED);
-    finalizePendingLine("rx", UNARCHIVED);
-    dropPendingAutoSaveLinesThrough(autoSaveBoundary);
-    // Archive line numbers may restart as soon as the backend clear begins.
-    // Queue arrivals conservatively until the next backfill establishes its
-    // boundary, even if the backend later rejects the clear.
-    autoSaveBackfilledUntil = null;
-    try {
-      await transport.clearSession();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
-      return;
-    }
-
-    // Chunks may have arrived while the backend clear was in flight. Finish
-    // them before clearing the visible buffer so auto-save still receives them.
-    if (chunkFlushTimer !== null) {
-      clearTimeout(chunkFlushTimer);
-      chunkFlushTimer = null;
-    }
-    flushQueuedChunks();
-    finalizePendingLine("tx", UNARCHIVED);
-    finalizePendingLine("rx", UNARCHIVED);
-    dropPendingAutoSaveLinesThrough(autoSaveBoundary);
-
-    lines.value = [];
-    // A clear starts a new archive session whose line numbers restart at 1, so
-    // every anchor the history window holds points at the wrong lines.
-    exitHistoryMode();
-    resetPendingBuffer(pending.tx);
-    resetPendingBuffer(pending.rx);
-    queuedChunks.length = 0;
-    autoSaveBackfilledUntil = null;
-    cancelActiveFilterRefresh();
-    filterStatsById.value = Object.fromEntries(
-      Object.entries(filterStatsById.value).map(([id, stats]) => [
-        id,
-        {
-          ...stats,
-          status: "complete",
-          scannedUntilLineNo: 0,
-          totalLinesSnapshot: 0,
-          totalMatches: 0,
-          error: null,
-        },
-      ]),
-    );
-    filterPagesById.value = {};
-    archiveLineIds = new Map();
+    // Invalidate exports and filter reads at the start, even if auto-save or
+    // the backend later refuses the clear.
+    archiveSessionRevision.value += 1;
+    filterRequestGeneration.value += 1;
     activeFilterLoading.value = false;
-    activeFilterFullyLoaded.value = true;
-    activeFilterPinned.value = false;
+    cancelActiveFilterRefresh();
+    try {
+      if (chunkFlushTimer !== null) {
+        clearTimeout(chunkFlushTimer);
+        chunkFlushTimer = null;
+      }
+      flushQueuedChunks();
+      finalizePendingLine("tx", UNARCHIVED);
+      finalizePendingLine("rx", UNARCHIVED);
+      const autoSaveBoundary = autoSaveQueueHighWaterMark();
+      // Auto-save is a session concern. Let its owner finish writes for the old
+      // archive before clear resets the archive line numbers and live queue.
+      await beforeClearAutoSave?.(autoSaveBoundary);
+      // Chunks can arrive while the old file is being flushed. Capture everything
+      // already delivered at this point before resetting the line assemblers;
+      // these lines belong to the next save interval, beyond autoSaveBoundary.
+      if (chunkFlushTimer !== null) {
+        clearTimeout(chunkFlushTimer);
+        chunkFlushTimer = null;
+      }
+      flushQueuedChunks();
+      finalizePendingLine("tx", UNARCHIVED);
+      finalizePendingLine("rx", UNARCHIVED);
+      dropPendingAutoSaveLinesThrough(autoSaveBoundary);
+      // Archive line numbers may restart as soon as the backend clear begins.
+      // Queue arrivals conservatively until the next backfill establishes its
+      // boundary, even if the backend later rejects the clear.
+      autoSaveBackfilledUntil = null;
+      try {
+        await transport.clearSession();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
+        return;
+      }
+
+      // Reads may have started while the backend clear was pending. Invalidate
+      // those too before the local view is reset to the new archive session.
+      filterRequestGeneration.value += 1;
+      activeFilterLoading.value = false;
+      cancelActiveFilterRefresh();
+
+      // Chunks may have arrived while the backend clear was in flight. Finish
+      // them before clearing the visible buffer so auto-save still receives them.
+      if (chunkFlushTimer !== null) {
+        clearTimeout(chunkFlushTimer);
+        chunkFlushTimer = null;
+      }
+      flushQueuedChunks();
+      finalizePendingLine("tx", UNARCHIVED);
+      finalizePendingLine("rx", UNARCHIVED);
+      dropPendingAutoSaveLinesThrough(autoSaveBoundary);
+
+      lines.value = [];
+      // A clear starts a new archive session whose line numbers restart at 1, so
+      // every anchor the history window holds points at the wrong lines.
+      exitHistoryMode();
+      resetPendingBuffer(pending.tx);
+      resetPendingBuffer(pending.rx);
+      queuedChunks.length = 0;
+      autoSaveBackfilledUntil = null;
+      filterStatsById.value = Object.fromEntries(
+        Object.entries(filterStatsById.value).map(([id, stats]) => [
+          id,
+          {
+            ...stats,
+            status: "complete",
+            scannedUntilLineNo: 0,
+            totalLinesSnapshot: 0,
+            totalMatches: 0,
+            error: null,
+          },
+        ]),
+      );
+      filterPagesById.value = {};
+      archiveLineIds = new Map();
+      activeFilterLoading.value = false;
+      activeFilterFullyLoaded.value = true;
+      activeFilterPinned.value = false;
+    } finally {
+      // Also invalidates exports started while the backend clear was pending,
+      // and makes exports opened during an auto-save failure stale as it exits.
+      archiveSessionRevision.value += 1;
+    }
   }
 
   function registerBeforeClearAutoSave(
@@ -1236,6 +1255,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       ...filterStatsById.value,
       [payload.def.id]: payload.stats,
     };
+    filterRequestGeneration.value += 1;
     activeChipId.value = payload.def.id;
     activeFilterFullyLoaded.value = false;
     await loadActiveFilterTail();
@@ -1243,26 +1263,31 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   async function removeChip(id: string): Promise<void> {
+    const wasActive = activeChipId.value === id;
+    if (wasActive) filterRequestGeneration.value += 1;
     const idx = watchChips.value.findIndex((c) => c.id === id);
     if (idx !== -1) {
       watchChips.value.splice(idx, 1);
     }
     delete filterStatsById.value[id];
     delete filterPagesById.value[id];
-    await transport.removeFilter(id);
-    if (activeChipId.value === id) {
+    if (wasActive) {
       activeChipId.value =
         watchChips.value.length > 0
           ? watchChips.value[Math.max(0, idx - 1)].id
           : null;
-      if (activeChipId.value !== null) {
-        await loadActiveFilterTail();
-      }
+      activeFilterLoading.value = false;
+    }
+    await transport.removeFilter(id);
+    if (wasActive && activeChipId.value !== null) {
+      await loadActiveFilterTail();
     }
   }
 
   async function setActiveChip(id: string | null): Promise<void> {
+    filterRequestGeneration.value += 1;
     activeChipId.value = id;
+    activeFilterLoading.value = false;
     if (id !== null) {
       await loadActiveFilterTail();
     }
@@ -1309,6 +1334,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     if (!id) return;
     const stats = filterStatsById.value[id];
     if (!stats) return;
+    const generation = ++filterRequestGeneration.value;
     // This is the one operation that puts the window back on the newest
     // matches, so it is where the pin comes off — every caller (tab switch,
     // chip add/remove, live refresh, scrolled back to the bottom) means it.
@@ -1317,10 +1343,19 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     try {
       const start = Math.max(0, stats.totalMatches - FILTER_PAGE_SIZE);
       const page = await loadFilterPage(id, start, FILTER_PAGE_SIZE);
+      if (
+        generation !== filterRequestGeneration.value ||
+        activeChipId.value !== id
+      )
+        return;
       filterPagesById.value = { ...filterPagesById.value, [id]: page };
       activeFilterFullyLoaded.value = page.start === 0;
     } finally {
-      activeFilterLoading.value = false;
+      if (
+        generation === filterRequestGeneration.value &&
+        activeChipId.value === id
+      )
+        activeFilterLoading.value = false;
     }
   }
 
@@ -1333,10 +1368,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       activeFilterFullyLoaded.value = true;
       return 0;
     }
+    const generation = ++filterRequestGeneration.value;
     activeFilterLoading.value = true;
     try {
       const start = Math.max(0, existing.start - FILTER_PAGE_SIZE);
       const page = await loadFilterPage(id, start, existing.start - start);
+      if (
+        generation !== filterRequestGeneration.value ||
+        activeChipId.value !== id
+      )
+        return 0;
       const items = [...page.items, ...existing.items];
       // Bounded like the live buffer and the history window: without this,
       // holding the button down pulls every match of the whole session into
@@ -1358,7 +1399,11 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       activeFilterPinned.value = true;
       return page.items.length;
     } finally {
-      activeFilterLoading.value = false;
+      if (
+        generation === filterRequestGeneration.value &&
+        activeChipId.value === id
+      )
+        activeFilterLoading.value = false;
     }
   }
 
@@ -1564,6 +1609,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     showDirBadge,
     filterStatsById,
     filterPagesById,
+    archiveSessionRevision,
     activeFilterLoading,
     activeFilterFullyLoaded,
     activeFilterPinned,

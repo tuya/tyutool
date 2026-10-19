@@ -560,6 +560,7 @@
       "disconnected": "端口丢失",
       "disconnectedWith": "端口丢失: {reason}",
       "saveLog": "保存日志",
+      "exportCancelled": "日志会话已更改，导出已停止。已写入文件的数据会保留。",
       "loadingOlderMatches": "加载中…",
       "scrollForOlderMatches": "上滑加载更早的匹配",
       "backToLive": "回到实时",

@@ -1204,6 +1204,50 @@ describe("useSerialDebugStore watch chip management", () => {
     expect(s.activeFilterFullyLoaded).toBe(true);
   });
 
+  it("invalidates filter reads started while clear is waiting for the backend", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("LOG", false);
+    const id = s.watchChips[0].id;
+    s.filterStatsById = {
+      [id]: {
+        filterId: id,
+        status: "complete",
+        scannedUntilLineNo: 20,
+        totalLinesSnapshot: 20,
+        totalMatches: 2,
+        error: null,
+      },
+    };
+    let finishClear!: () => void;
+    const clearGate = new Promise<void>((resolve) => {
+      finishClear = resolve;
+    });
+    fake.clearSession = () => clearGate;
+    let finishPage!: (page: SerialDebugFilterPage) => void;
+    const pageGate = new Promise<SerialDebugFilterPage>((resolve) => {
+      finishPage = resolve;
+    });
+    const readFilter = vi.fn(async () => pageGate);
+    fake.readFilterMatches = readFilter;
+
+    const clearing = s.clear();
+    await Promise.resolve();
+    const loading = s.loadActiveFilterTail();
+    expect(readFilter).toHaveBeenCalledTimes(1);
+    finishClear();
+    await clearing;
+    finishPage({
+      filterId: id,
+      totalMatches: 2,
+      start: 0,
+      items: [{ lineNo: 1, tsMs: 1, direction: "rx", text: "old session" }],
+    });
+    await loading;
+
+    expect(s.filterPagesById).toEqual({});
+    expect(s.activeFilterLoading).toBe(false);
+  });
+
   it("keeps new auto-save lines when archive numbering restarts during clear", async () => {
     const s = useSerialDebugStore();
     s.sessionAutoSavePath = "/tmp/serial-debug-autosave.txt";
@@ -1475,6 +1519,70 @@ describe("useSerialDebugStore watch chip management", () => {
     }
     expect(s.watchChips[0].color).toBe(CHIP_COLORS[0]);
     expect(s.watchChips[CHIP_COLORS.length].color).toBe(CHIP_COLORS[0]);
+  });
+
+  it("ignores a filter page from the session that was cleared while loading", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("old", false);
+    const id = s.activeChipId!;
+    let resolvePage!: (page: SerialDebugFilterPage) => void;
+    fake.readFilterMatches = () =>
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      });
+
+    const loading = s.loadActiveFilterTail();
+    await s.clear();
+    resolvePage({
+      filterId: id,
+      start: 0,
+      totalMatches: 1,
+      items: [{ lineNo: 1, tsMs: 1000, direction: "rx", text: "old-session" }],
+    });
+    await loading;
+
+    expect(s.activeDisplayLines()).toEqual([]);
+    expect(s.filterPagesById[id]).toBeUndefined();
+  });
+
+  it("keeps the active filter load when an inactive chip is removed", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("active", false);
+    const activeId = s.activeChipId!;
+    await s.addChip("inactive", false);
+    const inactiveId = s.activeChipId!;
+    await s.setActiveChip(activeId);
+
+    let resolvePage!: (page: SerialDebugFilterPage) => void;
+    fake.readFilterMatches = () =>
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      });
+    const loading = s.loadActiveFilterTail();
+    await s.removeChip(inactiveId);
+    resolvePage({
+      filterId: activeId,
+      start: 0,
+      totalMatches: 1,
+      items: [{ lineNo: 1, tsMs: 1000, direction: "rx", text: "active" }],
+    });
+    await loading;
+
+    expect(s.filterPagesById[activeId]?.items[0].text).toBe("active");
+    expect(s.activeFilterLoading).toBe(false);
+  });
+
+  it("leaves filter loading settled when removing the active chip fails", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("active", false);
+    const id = s.activeChipId!;
+    fake.removeFilter = async () => {
+      throw new Error("remove failed");
+    };
+
+    await expect(s.removeChip(id)).rejects.toThrow("remove failed");
+    expect(s.activeChipId).toBeNull();
+    expect(s.activeFilterLoading).toBe(false);
   });
 });
 

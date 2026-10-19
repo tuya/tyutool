@@ -51,6 +51,7 @@ const transport = serialDebugTransport();
 const { t } = useI18n();
 const lineRenderer = new SerialDebugLogLineRenderer();
 const hexViewRenderer = new SerialDebugHexViewRenderer();
+const exportNotice = ref("");
 
 const activeChip = computed(() =>
   s.activeChipId
@@ -581,15 +582,22 @@ const searchInputRef = ref<HTMLInputElement | null>(null);
 
 const searchQuery = computed(() => searchText.value.trim().toLowerCase());
 
-// Cache eviction must not hang off either template branch. Two paths fill the
-// renderer's per-line cache — the span building below (ASCII branch only) and
-// the whole-buffer match scan (runs in both branches, since the search bar sits
-// above the pane) — so tying eviction to the ASCII render would leak every line
-// that ages out of the buffer while the hex view is up with a search active.
-// This effect re-runs on every buffer publish regardless of what is mounted,
-// and it replaces (not adds to) the per-render prune the old code did: it no
-// longer re-scans on a pure scroll, when only the visible slice moves.
-watchEffect(() => lineRenderer.retain(displayLines()));
+// Whole-buffer search needs text cached for every line; with search closed,
+// only the mounted ASCII slice benefits from rendered-line caches. A small
+// fixed slack keeps a few scroll windows warm without letting a 20k-line
+// buffer accumulate ANSI spans for lines the user has never viewed.
+const CACHE_SLACK_LINES = 128;
+watchEffect(() => {
+  const all = displayLines();
+  if (searchQuery.value) {
+    lineRenderer.retain(all, Math.ceil(all.length * 1.2));
+    return;
+  }
+  const visible = props.hexView
+    ? []
+    : all.slice(visibleRange.value.start, visibleRange.value.end);
+  lineRenderer.retain(visible, visible.length + CACHE_SLACK_LINES);
+});
 
 // Spans are built for the mounted slice only. `visibleRange` counts hex rows
 // when the hex view is up, which would address the wrong lines — that branch
@@ -727,68 +735,132 @@ function linesAvailableForSession(): boolean {
   return s.lines.length > 0;
 }
 
+function isExportCurrent(revision: number): boolean {
+  return s.archiveSessionRevision === revision;
+}
+
+function showExportCancelled(): void {
+  exportNotice.value = t("serialDebug.log.exportCancelled");
+}
+
 async function streamExportChunks(
+  sourceFilterId: string | null,
+  revision: number,
   onChunk: (chunk: string, isFirstChunk: boolean) => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   let start = 0;
   let wroteAny = false;
-  if (activeChip.value) {
-    while (true) {
-      const page = await transport.readFilterMatches(
-        activeChip.value.id,
-        start,
+  let snapshotTotal: number | null = null;
+  if (sourceFilterId !== null) {
+    while (snapshotTotal === null || start < snapshotTotal) {
+      if (!isExportCurrent(revision)) return false;
+      const limit = Math.min(
         EXPORT_PAGE_SIZE,
+        snapshotTotal === null ? EXPORT_PAGE_SIZE : snapshotTotal - start,
       );
-      if (page.items.length === 0) break;
+      const page = await transport.readFilterMatches(
+        sourceFilterId,
+        start,
+        limit,
+      );
+      if (!isExportCurrent(revision)) return false;
+      snapshotTotal ??= page.totalMatches;
+      const items = page.items.slice(0, snapshotTotal - start);
+      if (items.length === 0) break;
       const chunk =
-        (wroteAny ? "\n" : "") + page.items.map(formatExportLine).join("\n");
+        (wroteAny ? "\n" : "") + items.map(formatExportLine).join("\n");
       await onChunk(chunk, !wroteAny);
+      if (!isExportCurrent(revision)) return false;
       wroteAny = true;
-      start += page.items.length;
-      if (start >= page.totalMatches) break;
+      start += items.length;
     }
-    return;
+    return true;
   }
 
-  while (true) {
-    const page = await transport.readSessionPage(start, EXPORT_PAGE_SIZE);
-    if (page.items.length === 0) break;
+  while (snapshotTotal === null || start < snapshotTotal) {
+    if (!isExportCurrent(revision)) return false;
+    const limit = Math.min(
+      EXPORT_PAGE_SIZE,
+      snapshotTotal === null ? EXPORT_PAGE_SIZE : snapshotTotal - start,
+    );
+    const page = await transport.readSessionPage(start, limit);
+    if (!isExportCurrent(revision)) return false;
+    snapshotTotal ??= page.totalLines;
+    const items = page.items.slice(0, snapshotTotal - start);
+    if (items.length === 0) break;
     const chunk =
-      (wroteAny ? "\n" : "") + page.items.map(formatExportLine).join("\n");
+      (wroteAny ? "\n" : "") + items.map(formatExportLine).join("\n");
     await onChunk(chunk, !wroteAny);
+    if (!isExportCurrent(revision)) return false;
     wroteAny = true;
-    start += page.items.length;
-    if (start >= page.totalLines) break;
+    start += items.length;
   }
+  return true;
 }
 
 async function saveLog(): Promise<void> {
+  // Capture the export source before opening an async save dialog. Reactive tab
+  // changes while the dialog or a page read is pending must not redirect it.
+  const sourceFilterId = activeChip.value?.id ?? null;
+  const revision = s.archiveSessionRevision;
+  exportNotice.value = "";
   const defaultName = `${props.exportTitle}-${makeStamp()}.txt`;
   if (isTauriRuntime()) {
     const { save } = await import("@tauri-apps/plugin-dialog");
+    if (!isExportCurrent(revision)) {
+      showExportCancelled();
+      return;
+    }
     const { invoke } = await import("@tauri-apps/api/core");
+    if (!isExportCurrent(revision)) {
+      showExportCancelled();
+      return;
+    }
     const path = await save({
       defaultPath: defaultName,
       filters: [{ name: "TXT", extensions: ["txt"] }],
     });
+    if (!isExportCurrent(revision)) {
+      showExportCancelled();
+      return;
+    }
     if (!path) return;
     // Authorize this dialog-chosen save path for the chunked writes below.
     await invoke("register_dialog_path", { path });
-    await streamExportChunks(async (chunk, isFirstChunk) => {
-      if (isFirstChunk) {
-        await invoke("write_text_file", { path, content: chunk });
-      } else {
-        await invoke("append_text_file", { path, content: chunk });
-      }
-    });
+    if (!isExportCurrent(revision)) {
+      showExportCancelled();
+      return;
+    }
+    const completed = await streamExportChunks(
+      sourceFilterId,
+      revision,
+      async (chunk, isFirstChunk) => {
+        if (!isExportCurrent(revision)) return;
+        if (isFirstChunk) {
+          await invoke("write_text_file", { path, content: chunk });
+        } else {
+          await invoke("append_text_file", { path, content: chunk });
+        }
+      },
+    );
+    if (!completed || !isExportCurrent(revision)) showExportCancelled();
     return;
   }
 
   const chunks: string[] = [];
-  await streamExportChunks(async (chunk) => {
-    chunks.push(chunk);
-  });
+  const completed = await streamExportChunks(
+    sourceFilterId,
+    revision,
+    async (chunk) => {
+      chunks.push(chunk);
+    },
+  );
+  if (!completed || !isExportCurrent(revision)) {
+    showExportCancelled();
+    return;
+  }
   await writeFile(defaultName, chunks, "txt", "text/plain");
+  if (!isExportCurrent(revision)) showExportCancelled();
 }
 </script>
 
@@ -799,6 +871,13 @@ async function saveLog(): Promise<void> {
     class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ty-border)] bg-[var(--ty-canvas)] outline-none"
     @keydown="onContainerKeydown"
   >
+    <div
+      v-if="exportNotice"
+      class="border-b border-[var(--ty-border)] px-3 py-1 text-xs text-[var(--ty-warning)]"
+      role="alert"
+    >
+      {{ exportNotice }}
+    </div>
     <!-- toolbar -->
     <div
       class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5"
