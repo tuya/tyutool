@@ -2603,6 +2603,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyboard-types"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
+dependencies = [
+ "bitflags 2.11.0",
+ "serde",
+]
+
+[[package]]
 name = "kuchikiki"
 version = "0.8.8-speedreader"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2940,7 +2950,7 @@ dependencies = [
  "crossbeam-channel",
  "dpi",
  "gtk",
- "keyboard-types",
+ "keyboard-types 0.7.0",
  "libxdo",
  "objc2",
  "objc2-app-kit",
@@ -2949,6 +2959,26 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "serde",
+ "thiserror 2.0.20",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "muda"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4340e89c178916e62879c5c36b7f699019369be413e496178a6983ce91b8bc03"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "gtk",
+ "keyboard-types 0.8.3",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "png 0.18.1",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]
@@ -5205,7 +5235,7 @@ dependencies = [
  "libc",
  "log",
  "mime",
- "muda",
+ "muda 0.19.3",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -5969,7 +5999,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "libappindicator",
- "muda",
+ "muda 0.19.3",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
@@ -6063,7 +6093,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.2",
  "log",
- "muda",
+ "muda 0.21.2",
  "png 0.17.16",
  "serde",
  "serde_json",
