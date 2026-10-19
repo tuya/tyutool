@@ -4,12 +4,14 @@ import type { DebugLogLine, HexBytesPerRow } from "./types";
 const textEncoder = new TextEncoder();
 
 function lineChunk(line: DebugLogLine): Uint8Array {
-  // Live lines carry rawBytes (the store splits DebugChunk.bytes itself).
+  // Live lines carry rawBytes (the store splits DebugChunk.bytes itself),
+  // including any LF/CRLF or unterminated binary tail from the input stream.
   // Lines paged back from the Rust session archive do not: the archive stores
   // text only, so a `number[]` of the same bytes does not cost 3x the IPC
-  // payload. Re-encoding text is byte-identical for any valid UTF-8 log, which
-  // is all the archive can round-trip anyway (it decodes lossily on write).
-  const raw = line.rawBytes ?? textEncoder.encode(line.text);
+  // payload. This is a normalized text fallback only: the archive has already
+  // discarded original line endings and arbitrary binary bytes.
+  if (line.rawBytes !== undefined) return line.rawBytes;
+  const raw = textEncoder.encode(line.text);
   const chunk = new Uint8Array(raw.length + 1);
   chunk.set(raw, 0);
   chunk[chunk.length - 1] = 0x0a;
@@ -20,8 +22,10 @@ function lineChunk(line: DebugLogLine): Uint8Array {
  * Windowed renderer for the hex view.
  *
  * The hex view is one continuous dump of the whole visible buffer: every line's
- * bytes plus a trailing 0x0a are concatenated into a single byte stream, and hex
- * row k shows bytes `[k * bytesPerRow, (k + 1) * bytesPerRow)` of it. Rows
+ * byte chunks are concatenated into a single byte stream, and hex row k shows
+ * bytes `[k * bytesPerRow, (k + 1) * bytesPerRow)` of it. Live raw chunks are
+ * exact; archive text lines use an LF fallback because their original bytes
+ * are unavailable. Rows
  * therefore do not line up with log lines — one row can straddle several lines
  * and a long line spans many rows — so the ASCII view's `lineIndex * rowHeight`
  * row model does not carry over. What replaces it is a byte-offset index:

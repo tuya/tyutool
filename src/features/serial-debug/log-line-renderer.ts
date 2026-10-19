@@ -116,9 +116,19 @@ export class SerialDebugLogLineRenderer {
     );
   }
 
-  /** Drop cached data for lines that have left the buffer. */
-  retain(lines: readonly DebugLogLine[]): void {
+  /**
+   * Keep caches for the supplied live lines. `maxEntries` lets callers use a
+   * small visible-slice budget when whole-buffer search is inactive.
+   */
+  retain(
+    lines: readonly DebugLogLine[],
+    maxEntries = lines.length * 1.2,
+  ): void {
     if (this.baseByLineId.size === 0) return;
+    // Skip the Set and Map walk while inside the selected budget. The caller
+    // chooses a whole-window budget for search or a visible-slice budget when
+    // search is off; eviction itself uses membership, not id ordering.
+    if (this.baseByLineId.size <= maxEntries) return;
     const liveIds = new Set(lines.map((line) => line.id));
     for (const existingId of this.baseByLineId.keys()) {
       if (!liveIds.has(existingId)) {
@@ -144,6 +154,10 @@ export class SerialDebugLogLineRenderer {
         ids.push(line.id);
       }
     }
+    // This scan may have just populated cache entries for newly visible lines;
+    // prune after populating so its size is bounded by the current buffer even
+    // when the retain watcher ran earlier in the same Vue update flush.
+    this.retain(lines, lines.length * 1.2);
     return ids;
   }
 

@@ -60,6 +60,48 @@ describe("SerialDebugLogLineRenderer", () => {
     expect(renderer.cacheSize()).toBe(1);
   });
 
+  it("skips cache sweeps inside bounded slack and evicts by membership", () => {
+    const renderer = new SerialDebugLogLineRenderer();
+    const lines = Array.from({ length: 1000 }, (_, i) => line(i + 1, `L${i}`));
+    renderer.matchingLineIds(lines, "never");
+    expect(renderer.cacheSize()).toBe(1000);
+
+    let idReads = 0;
+    const stableWindow = lines.map((source) => ({
+      ...source,
+      get id() {
+        idReads += 1;
+        return source.id;
+      },
+    }));
+    renderer.retain(stableWindow);
+    expect(idReads).toBe(0);
+    expect(renderer.cacheSize()).toBe(1000);
+
+    // Shrinking to another history/tab window forces a sweep. Membership,
+    // rather than numeric id order, decides which entries survive.
+    const retained = [stableWindow[899], stableWindow[0], stableWindow[499]];
+    renderer.retain(retained);
+    expect(renderer.cacheSize()).toBe(3);
+    expect(renderer.matchingLineIds(retained, "l")).toEqual([900, 1, 500]);
+  });
+
+  it("keeps search-off cache bounded while scrolling a small slice of a large window", () => {
+    const renderer = new SerialDebugLogLineRenderer();
+    const all = Array.from({ length: 20_000 }, (_, i) =>
+      line(20_000 - i, `line-${i}`),
+    );
+    const sliceSize = 40;
+    const slack = 128;
+
+    for (let start = 0; start < all.length; start += 53) {
+      const visible = all.slice(start, start + sliceSize);
+      renderer.retain(visible, visible.length + slack);
+      renderer.render(visible, true, "");
+      expect(renderer.cacheSize()).toBeLessThanOrEqual(sliceSize * 2 + slack);
+    }
+  });
+
   it("matches over the whole buffer without building spans", () => {
     const renderer = new SerialDebugLogLineRenderer();
     parseAnsiMock.mockClear();

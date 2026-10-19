@@ -560,6 +560,7 @@
       "disconnected": "Port lost",
       "disconnectedWith": "Port lost: {reason}",
       "saveLog": "Save log",
+      "exportCancelled": "Export stopped because the log session changed. Data already written to the file remains there.",
       "loadingOlderMatches": "Loading…",
       "scrollForOlderMatches": "Scroll up for older matches",
       "backToLive": "Back to live",

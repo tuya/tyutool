@@ -14,8 +14,13 @@ import {
 } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { t } = vi.hoisted(() => ({
+const { t, tauriMode, saveDialog, invokeTauri } = vi.hoisted(() => ({
   t: (key: string): string => key,
+  tauriMode: { value: false },
+  saveDialog: vi.fn(
+    async (..._args: unknown[]) => "/tmp/serial-debug.txt" as string | null,
+  ),
+  invokeTauri: vi.fn(async (..._args: unknown[]) => undefined),
 }));
 
 vi.mock("vue-i18n", () => ({
@@ -26,8 +31,16 @@ vi.mock("vue-i18n", () => ({
 }));
 
 vi.mock("@/runtime", () => ({
-  isTauriRuntime: () => false,
-  getRuntime: () => "web",
+  isTauriRuntime: () => tauriMode.value,
+  getRuntime: () => (tauriMode.value ? "tauri" : "web"),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  save: saveDialog,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeTauri,
 }));
 
 import { __setSerialDebugTransportForTest } from "@/features/serial-debug/transport";
@@ -36,6 +49,7 @@ import { useSerialDebugStore } from "@/stores/serial-debug";
 import { SerialDebugLogLineRenderer } from "@/features/serial-debug/log-line-renderer";
 import { formatHexDumpFromChunks } from "@/features/serial-debug/hex-format";
 import {
+  EXPORT_PAGE_SIZE,
   FILTER_PAGE_SIZE,
   HISTORY_ENTRY_PAGES,
   HISTORY_PAGE_SIZE,
@@ -131,6 +145,11 @@ describe("SerialDebugLogView auto-scroll", () => {
     __setSerialDebugTransportForTest(fakeTransport());
     sessionArchiveTotal = 0;
     filterMatchTotal = 0;
+    tauriMode.value = false;
+    saveDialog.mockReset();
+    saveDialog.mockResolvedValue("/tmp/serial-debug.txt");
+    invokeTauri.mockReset();
+    invokeTauri.mockResolvedValue(undefined);
     hexBytesPerRow.value = 16;
     hexViewProp.value = false;
     keptAliveShown.value = true;
@@ -291,12 +310,10 @@ describe("SerialDebugLogView auto-scroll", () => {
     lines: readonly DebugLogLine[],
     bytesPerRow: HexBytesPerRow = hexBytesPerRow.value,
   ): string[] {
-    const chunks = lines.map((l) =>
-      Uint8Array.from([
-        ...(l.rawBytes ?? new TextEncoder().encode(l.text)),
-        0x0a,
-      ]),
-    );
+    const chunks = lines.map((l) => {
+      if (l.rawBytes !== undefined) return l.rawBytes;
+      return Uint8Array.from([...new TextEncoder().encode(l.text), 0x0a]);
+    });
     const dump = formatHexDumpFromChunks(chunks, bytesPerRow);
     return dump === "" ? [] : dump.split("\n");
   }
@@ -1029,5 +1046,489 @@ describe("SerialDebugLogView auto-scroll", () => {
       filterMatchTotal - FILTER_PAGE_SIZE,
     );
     expect(el.scrollTop).toBe(el.scrollHeight - VIEWPORT_HEIGHT);
+  });
+
+  it("exports only the initially selected filter when the user switches tabs mid-export", async () => {
+    const transport = fakeTransport();
+    let releaseFirstPage!: () => void;
+    const firstPage = new Promise<void>((resolve) => {
+      releaseFirstPage = resolve;
+    });
+    const readMatches = vi.fn(
+      async (filterId: string, start: number, limit: number) => {
+        if (start === 0) await firstPage;
+        return {
+          filterId,
+          totalMatches: 1001,
+          ...archivePage(start, limit, 1001, `${filterId}-`),
+        };
+      },
+    );
+    transport.readFilterMatches = readMatches;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    for (const id of ["A", "B"]) {
+      s.watchChips.push({ id, keyword: id, useRegex: false, color: "#fff" });
+      s.filterStatsById[id] = {
+        filterId: id,
+        status: "complete",
+        scannedUntilLineNo: 1001,
+        totalLinesSnapshot: 1001,
+        totalMatches: 1001,
+      };
+    }
+    s.activeChipId = "A";
+    // Prevent a real download while exercising the actual save button and its
+    // paged export, rather than calling the component's private functions.
+    const createDownload = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:serial-debug-export");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    mountComponent();
+    const save = host!.querySelector<HTMLButtonElement>(
+      'button[aria-label="serialDebug.log.saveLog"]',
+    );
+    expect(save).not.toBeNull();
+    expect(save!.disabled).toBe(false);
+    save!.click();
+    await flush();
+    expect(readMatches).toHaveBeenCalledTimes(1);
+
+    s.activeChipId = "B";
+    releaseFirstPage();
+    await flush();
+    await flush();
+
+    expect(createDownload).toHaveBeenCalledTimes(1);
+    expect(readMatches.mock.calls.map(([id]) => id)).toEqual(["A", "A"]);
+  });
+
+  it("keeps exporting the selected filter if the user switches to All", async () => {
+    const transport = fakeTransport();
+    let releaseFirstPage!: () => void;
+    const firstPage = new Promise<void>((resolve) => {
+      releaseFirstPage = resolve;
+    });
+    const readMatches = vi.fn(
+      async (filterId: string, start: number, limit: number) => {
+        if (start === 0) await firstPage;
+        return {
+          filterId,
+          totalMatches: 1001,
+          ...archivePage(start, limit, 1001, `${filterId}-`),
+        };
+      },
+    );
+    const readSession = vi.fn(async (start: number, limit: number) => ({
+      totalLines: 0,
+      ...archivePage(start, limit, 0, "all-"),
+    }));
+    transport.readFilterMatches = readMatches;
+    transport.readSessionPage = readSession;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.watchChips.push({
+      id: "A",
+      keyword: "A",
+      useRegex: false,
+      color: "#fff",
+    });
+    s.filterStatsById.A = {
+      filterId: "A",
+      status: "complete",
+      scannedUntilLineNo: 1001,
+      totalLinesSnapshot: 1001,
+      totalMatches: 1001,
+    };
+    s.activeChipId = "A";
+    vi.spyOn(URL, "createObjectURL").mockReturnValue(
+      "blob:serial-debug-export",
+    );
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    mountComponent();
+
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await flush();
+    s.activeChipId = null;
+    releaseFirstPage();
+    await flush();
+    await flush();
+
+    expect(readMatches.mock.calls.map(([id]) => id)).toEqual(["A", "A"]);
+    expect(readSession).not.toHaveBeenCalled();
+  });
+
+  it("limits All export to the first page's snapshot while the archive grows", async () => {
+    const transport = fakeTransport();
+    const totals = [1001, 2001, 3001];
+    const readSession = vi.fn(async (start: number, limit: number) => {
+      const totalLines =
+        totals[Math.min(readSession.mock.calls.length - 1, totals.length - 1)];
+      return {
+        totalLines,
+        ...archivePage(start, limit, totalLines, "all-"),
+      };
+    });
+    transport.readSessionPage = readSession;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.lines = [
+      {
+        id: 1,
+        direction: "rx",
+        tsMs: 1,
+        text: "live",
+        rawBytes: new Uint8Array([0x6c]),
+      },
+    ];
+    vi.spyOn(URL, "createObjectURL").mockReturnValue(
+      "blob:serial-debug-export",
+    );
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    mountComponent();
+
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await flush();
+    await flush();
+
+    expect(
+      readSession.mock.calls.map(([start, limit]) => [start, limit]),
+    ).toEqual([
+      [0, EXPORT_PAGE_SIZE],
+      [EXPORT_PAGE_SIZE, 1],
+    ]);
+  });
+
+  it("never exports old and new archive rows together when clear overlaps paging", async () => {
+    const transport = fakeTransport();
+    let cleared = false;
+    let releaseSecondPage!: () => void;
+    let markSecondPageStarted!: () => void;
+    const secondPageStarted = new Promise<void>((resolve) => {
+      markSecondPageStarted = resolve;
+    });
+    const secondPageGate = new Promise<void>((resolve) => {
+      releaseSecondPage = resolve;
+    });
+    transport.clearSession = async () => {
+      cleared = true;
+    };
+    const readSession = vi.fn(async (start: number, limit: number) => {
+      if (start > 0) {
+        markSecondPageStarted();
+        await secondPageGate;
+      }
+      return {
+        totalLines: EXPORT_PAGE_SIZE + 1,
+        ...archivePage(
+          start,
+          limit,
+          EXPORT_PAGE_SIZE + 1,
+          cleared ? "new-session-" : "old-session-",
+        ),
+      };
+    });
+    transport.readSessionPage = readSession;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.lines = [{ id: 1, direction: "rx", tsMs: 1, text: "live" }];
+    const downloads: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      downloads.push(blob as Blob);
+      return "blob:serial-debug-export";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    mountComponent();
+
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await secondPageStarted;
+    expect(readSession).toHaveBeenCalledTimes(2);
+
+    await s.clear();
+    expect(cleared).toBe(true);
+    releaseSecondPage();
+    await flush();
+    await flush();
+
+    const contents = await Promise.all(downloads.map((blob) => blob.text()));
+    expect(
+      contents.some(
+        (content) =>
+          content.includes("old-session-") && content.includes("new-session-"),
+      ),
+    ).toBe(false);
+    expect(downloads).toHaveLength(0);
+    expect(host!.querySelector('[role="alert"]')?.textContent).toContain(
+      "serialDebug.log.exportCancelled",
+    );
+  });
+
+  it("never mixes filter pages from before and after clear", async () => {
+    const transport = fakeTransport();
+    const filterId = "filter-clear-race";
+    let cleared = false;
+    let releaseSecondPage!: () => void;
+    let markSecondPageStarted!: () => void;
+    const secondPageStarted = new Promise<void>((resolve) => {
+      markSecondPageStarted = resolve;
+    });
+    const secondPageGate = new Promise<void>((resolve) => {
+      releaseSecondPage = resolve;
+    });
+    transport.clearSession = async () => {
+      cleared = true;
+    };
+    const readFilter = vi.fn(
+      async (id: string, start: number, limit: number) => {
+        if (start > 0) {
+          markSecondPageStarted();
+          await secondPageGate;
+        }
+        const totalMatches = EXPORT_PAGE_SIZE + 1;
+        return {
+          filterId: id,
+          totalMatches,
+          ...archivePage(
+            start,
+            limit,
+            totalMatches,
+            cleared ? "new-filter-" : "old-filter-",
+          ),
+        };
+      },
+    );
+    transport.readFilterMatches = readFilter;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.watchChips = [
+      { id: filterId, keyword: "LOG", useRegex: false, color: "#fff" },
+    ];
+    s.activeChipId = filterId;
+    s.filterStatsById = {
+      [filterId]: {
+        filterId,
+        status: "complete",
+        scannedUntilLineNo: 0,
+        totalLinesSnapshot: EXPORT_PAGE_SIZE + 1,
+        totalMatches: EXPORT_PAGE_SIZE + 1,
+        error: null,
+      },
+    };
+    s.lines = [{ id: 1, direction: "rx", tsMs: 1, text: "live" }];
+    const downloads: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      downloads.push(blob as Blob);
+      return "blob:filter-export";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    mountComponent();
+
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await secondPageStarted;
+    expect(readFilter).toHaveBeenCalledTimes(2);
+    await s.clear();
+    releaseSecondPage();
+    await flush();
+    await flush();
+
+    const contents = await Promise.all(downloads.map((blob) => blob.text()));
+    expect(
+      contents.some(
+        (content) =>
+          content.includes("old-filter-") && content.includes("new-filter-"),
+      ),
+    ).toBe(false);
+    expect(downloads).toHaveLength(0);
+    expect(host!.querySelector('[role="alert"]')?.textContent).toContain(
+      "serialDebug.log.exportCancelled",
+    );
+  });
+
+  it("stops an export if clear completes while the save dialog is open", async () => {
+    const transport = fakeTransport();
+    const readSession = vi.fn(async (start: number, limit: number) => ({
+      totalLines: 1,
+      ...archivePage(start, limit, 1, "old-session-"),
+    }));
+    transport.readSessionPage = readSession;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.lines = [{ id: 1, direction: "rx", tsMs: 1, text: "live" }];
+    tauriMode.value = true;
+    let releaseDialog!: (path: string | null) => void;
+    let markDialogStarted!: () => void;
+    const dialogStarted = new Promise<void>((resolve) => {
+      markDialogStarted = resolve;
+    });
+    saveDialog.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          releaseDialog = resolve;
+          markDialogStarted();
+        }),
+    );
+    mountComponent();
+
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await dialogStarted;
+    await s.clear();
+    releaseDialog("/tmp/serial-debug.txt");
+    await flush();
+    await flush();
+
+    expect(readSession).not.toHaveBeenCalled();
+    expect(invokeTauri).not.toHaveBeenCalled();
+    expect(host!.querySelector('[role="alert"]')?.textContent).toContain(
+      "serialDebug.log.exportCancelled",
+    );
+  });
+
+  it("cancels an export started during clear when its first page returns", async () => {
+    const transport = fakeTransport();
+    let finishClear!: () => void;
+    let markClearStarted!: () => void;
+    const clearStarted = new Promise<void>((resolve) => {
+      markClearStarted = resolve;
+    });
+    const clearGate = new Promise<void>((resolve) => {
+      finishClear = resolve;
+    });
+    let finishPage!: () => void;
+    let markPageStarted!: () => void;
+    const pageStarted = new Promise<void>((resolve) => {
+      markPageStarted = resolve;
+    });
+    const pageGate = new Promise<void>((resolve) => {
+      finishPage = resolve;
+    });
+    transport.clearSession = async () => {
+      markClearStarted();
+      await clearGate;
+    };
+    const readSession = vi.fn(async (start: number, limit: number) => {
+      markPageStarted();
+      await pageGate;
+      return {
+        totalLines: 1,
+        ...archivePage(start, limit, 1, "old-session-"),
+      };
+    });
+    transport.readSessionPage = readSession;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.lines = [{ id: 1, direction: "rx", tsMs: 1, text: "live" }];
+    const downloads: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      downloads.push(blob as Blob);
+      return "blob:clear-overlap-export";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    mountComponent();
+
+    const clearing = s.clear();
+    await clearStarted;
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await pageStarted;
+    finishClear();
+    await clearing;
+    finishPage();
+    await flush();
+    await flush();
+
+    expect(readSession).toHaveBeenCalledTimes(1);
+    expect(downloads).toHaveLength(0);
+    expect(host!.querySelector('[role="alert"]')?.textContent).toContain(
+      "serialDebug.log.exportCancelled",
+    );
+  });
+
+  it("does not append a new-session page after clear completes during a slow write", async () => {
+    const transport = fakeTransport();
+    let cleared = false;
+    let releaseWrite!: () => void;
+    let markWriteStarted!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    transport.clearSession = async () => {
+      cleared = true;
+    };
+    const readSession = vi.fn(async (start: number, limit: number) => ({
+      totalLines: EXPORT_PAGE_SIZE + 1,
+      ...archivePage(
+        start,
+        limit,
+        EXPORT_PAGE_SIZE + 1,
+        cleared ? "new-session-" : "old-session-",
+      ),
+    }));
+    transport.readSessionPage = readSession;
+    __setSerialDebugTransportForTest(transport);
+    const s = useSerialDebugStore();
+    s.lines = [{ id: 1, direction: "rx", tsMs: 1, text: "live" }];
+    tauriMode.value = true;
+    invokeTauri.mockImplementation(async (...args: unknown[]) => {
+      const command = args[0];
+      if (command === "write_text_file") {
+        markWriteStarted();
+        await writeGate;
+      }
+    });
+    mountComponent();
+
+    host!
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="serialDebug.log.saveLog"]',
+      )!
+      .click();
+    await writeStarted;
+    expect(readSession).toHaveBeenCalledTimes(1);
+    await s.clear();
+    releaseWrite();
+    await flush();
+    await flush();
+
+    expect(readSession).toHaveBeenCalledTimes(1);
+    expect(
+      invokeTauri.mock.calls.some(
+        ([command]) => command === "append_text_file",
+      ),
+    ).toBe(false);
+    expect(host!.querySelector('[role="alert"]')?.textContent).toContain(
+      "serialDebug.log.exportCancelled",
+    );
   });
 });

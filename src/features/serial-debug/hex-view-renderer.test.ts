@@ -14,9 +14,10 @@ function line(id: number, rawBytes?: number[]): DebugLogLine {
   };
 }
 
-/** Bytes a line contributes to the dump stream: its own plus the line feed. */
+/** Archive text gets a display separator; live rawBytes are already exact. */
 function chunkOf(l: DebugLogLine): Uint8Array {
-  const raw = l.rawBytes ?? new TextEncoder().encode(l.text);
+  if (l.rawBytes !== undefined) return l.rawBytes;
+  const raw = new TextEncoder().encode(l.text);
   return Uint8Array.from([...raw, 0x0a]);
 }
 
@@ -31,17 +32,20 @@ function fullDump(
 
 function buffer(count: number, bytesPerLine = 7): DebugLogLine[] {
   return Array.from({ length: count }, (_, i) =>
-    line(
-      i + 1,
-      Array.from({ length: bytesPerLine }, (_, j) => 0x30 + ((i + j) % 0x40)),
-    ),
+    line(i + 1, [
+      ...Array.from(
+        { length: bytesPerLine },
+        (_, j) => 0x30 + ((i + j) % 0x40),
+      ),
+      0x0a,
+    ]),
   );
 }
 
 describe("SerialDebugHexViewRenderer", () => {
   it("counts hex rows from the byte stream, not from the line count", () => {
     const renderer = new SerialDebugHexViewRenderer();
-    // 10 lines x (7 bytes + 1 line feed) = 80 bytes.
+    // Each live line carries 7 content bytes plus its original LF.
     const lines = buffer(10);
 
     expect(renderer.rowCount(lines, 8)).toBe(10);
@@ -173,5 +177,31 @@ describe("SerialDebugHexViewRenderer", () => {
       expect(renderer.cacheSize()).toBeLessThanOrEqual(window * 1.2 + perFlush);
     }
     expect(renderer.cacheSize()).toBeGreaterThanOrEqual(window);
+  });
+
+  it("preserves a live line's existing LF without adding another byte", () => {
+    const renderer = new SerialDebugHexViewRenderer();
+    const bytes = Uint8Array.from([0x41, 0x0a]);
+    const input = { ...line(1), text: "A", rawBytes: bytes };
+
+    expect(renderer.renderRows([input], 16, 0, 1)).toBe(
+      formatHexDumpFromChunks([bytes], 16),
+    );
+    expect(renderer.renderRows([input], 16, 0, 1)).toContain("41 0a");
+  });
+
+  it("preserves CRLF and unterminated binary tails without synthetic separators", () => {
+    const renderer = new SerialDebugHexViewRenderer();
+    const complete = Uint8Array.from([0x41, 0x0d, 0x0a]);
+    const tail = Uint8Array.from([0x00, 0xff]);
+    const input = [
+      { ...line(1), text: "A", rawBytes: complete },
+      { ...line(2), text: "", rawBytes: tail },
+    ];
+
+    expect(renderer.renderRows(input, 16, 0, 1)).toBe(
+      formatHexDumpFromChunks([complete, tail], 16),
+    );
+    expect(renderer.renderRows(input, 16, 0, 1)).toContain("41 0d 0a 00 ff");
   });
 });
