@@ -113,7 +113,7 @@ cargo clippy -p tyutool-bridge --all-targets -- -D warnings                     
 cargo test -p tyutool-core --features ts-rs && git diff --exit-code -- src/bindings/         # ci.yml
 cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download -- -D warnings   # ci.yml
 cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download                                  # ci.yml
-pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
+pnpm run check:tauri-versions && pnpm run lint && pnpm run typecheck:scripts && pnpm run test:coverage && pnpm run build
 ```
 
 Every workspace member is now covered by clippy and tests in CI. `tyutool-serve` was the
@@ -137,6 +137,14 @@ DNS-rebinding rejections, had never run in CI before 2026-08-27.
   drives releases.
 - **`test:coverage`, not `test`** — coverage forces every file named in `vitest.config.ts` to be
   loaded; plain `test` leaves some unchecked.
+- **`check:tauri-versions`, not just `tauri build`** — the Tauri CLI aborts when an
+  `@tauri-apps/*` npm package and its Rust crate are on different major/minor releases, but it
+  only finds out while building, i.e. in every GUI job of a Release run. Dependabot's cargo and
+  npm groups are separate PRs, so before this gate existed each could be green on its own while
+  the pair drifted: on 2026-10-19 the npm group left `@tauri-apps/plugin-dialog` at 2.8.3 and the
+  cargo group left `tauri-plugin-dialog` at 2.7.3, and the release died before compiling
+  anything. `scripts/check-tauri-version-parity.ts` compares the two lockfiles. When it fires,
+  move the Rust side: `cargo update -p <crate> --precise <version>`.
 
 ### Architecture
 

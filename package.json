@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
+    "check:tauri-versions": "pnpm exec tsx scripts/check-tauri-version-parity.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "preview": "vite preview",
