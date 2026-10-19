@@ -144,6 +144,13 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: "22", cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # `tauri build` aborts when an npm Tauri package and its Rust crate are on
+      # different major/minor releases, but it only finds out at build time —
+      # i.e. in every GUI job of a Release run. Dependabot's cargo and npm groups
+      # are separate PRs, each green on its own, so they can drift apart silently:
+      # on 2026-10-19 the npm group left plugin-dialog at 2.8.3 while the cargo
+      # group left the crate at 2.7.3, and the release died before compiling.
+      - run: pnpm run check:tauri-versions
       - run: pnpm run lint
       # `pnpm run build` type-checks src/ only. scripts/ drives releases and was
       # never checked, which is how a 3-arg call to a 2-param function survived
