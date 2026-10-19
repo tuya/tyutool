@@ -91,8 +91,8 @@ pub use serial_debug::{
 };
 pub use serial_debug_bridge::{
     serial_debug_finalize_pending, serial_debug_flush_chunks, serial_debug_ingest_lines,
-    serial_debug_report_drops, serial_debug_spawn_chunk_bridge, ArchivedChunk,
-    SerialDebugChunkBridgeHandle, SerialDebugSink, SERIAL_DEBUG_CHUNK_FLUSH_BYTES,
+    serial_debug_report_drops, serial_debug_shutdown_and_finalize, serial_debug_spawn_chunk_bridge,
+    ArchivedChunk, SerialDebugChunkBridgeHandle, SerialDebugSink, SERIAL_DEBUG_CHUNK_FLUSH_BYTES,
     SERIAL_DEBUG_CHUNK_FLUSH_MS, SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY,
 };
 pub use usb_port_survey::{usb_port_survey, UsbPortSurveyEntry, UsbPortSurveyUsb};

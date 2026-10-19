@@ -240,6 +240,20 @@ impl SerialDebugDropCounter {
         self.last_drop_ms.store(now_ms, Ordering::SeqCst);
     }
 
+    /// Put a drained report back when the chunk that would carry its boundary
+    /// could not be enqueued. The reader is serialized by the bridge send lock.
+    pub fn restore(&self, report: SerialDebugDropReport, now_ms: u64) {
+        if report.chunks == 0 && report.bytes == 0 {
+            return;
+        }
+        self.chunks.fetch_add(report.chunks, Ordering::SeqCst);
+        self.bytes.fetch_add(report.bytes, Ordering::SeqCst);
+        let _ = self
+            .first_drop_ms
+            .compare_exchange(0, now_ms, Ordering::SeqCst, Ordering::SeqCst);
+        self.last_drop_ms.store(now_ms, Ordering::SeqCst);
+    }
+
     /// The pending burst, if it is ready to report: either the loss has stopped
     /// ([`SERIAL_DEBUG_DROP_QUIET_MS`]) or it has been going on long enough that
     /// waiting for it to stop would keep the user in the dark

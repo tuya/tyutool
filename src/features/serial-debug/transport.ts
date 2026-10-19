@@ -155,8 +155,21 @@ class TauriTransport implements SerialDebugTransport {
   }
 
   async close(): Promise<void> {
+    await this.listenersReady;
+    const { listen } = await import("@tauri-apps/api/event");
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("serial_debug_close");
+    let unlisten: (() => void) | null = null;
+    let resolveClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
+    unlisten = await listen("serial-debug-closed", () => resolveClosed());
+    try {
+      await invoke("serial_debug_close");
+      await closed;
+    } finally {
+      unlisten?.();
+    }
   }
 
   async send(bytes: Uint8Array): Promise<void> {
