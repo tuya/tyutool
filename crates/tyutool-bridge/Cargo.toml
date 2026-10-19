@@ -34,7 +34,7 @@ muda = "0.19"
 # decoding a 44×44 image once at startup is both simpler and bundle-proof.
 # Already in the workspace lock at 0.17 (pulled by the Tauri side), so this adds
 # no new version to the tree.
-png = "0.17"
+png = "0.18"
 tao = "0.35"
 tray-icon = "0.24"
 serde = { version = "1", features = ["derive"] }
