@@ -421,35 +421,50 @@ impl<'a, T: IoTransport> Transport<'a, T> {
         result
     }
 
-    /// Switch baud rate: send `SetBaudRate` command, then re-configure
-    /// the serial port to the new rate.
-    pub fn switch_baud_rate(&mut self, new_baud: u32, delay_ms: u8) -> Result<(), ProtocolError> {
+    /// Switch baud rate and validate the acknowledgement at the new rate.
+    /// Returns false if the caller must verify the link instead (missing/invalid ACK).
+    pub fn switch_baud_rate(&mut self, new_baud: u32, delay_ms: u8) -> Result<bool, ProtocolError> {
         use super::command::{build, CMD_SET_BAUD_RATE};
 
+        self.check_cancel()?;
         log::info!("Switching baud rate to {}", new_baud);
 
         let payload = build::set_baud_rate(new_baud, delay_ms);
         let tx = frame::encode_standard(CMD_SET_BAUD_RATE, &payload);
+        self.clear_rx();
         self.send_raw(&tx)?;
+        self.io.flush()?;
 
-        // Wait for device to process the baud-rate change
+        // Match the Python sequence: switch the host halfway through the
+        // device delay, before its ACK arrives at the new baud rate.
         let wait = (delay_ms as u64) / 2;
         std::thread::sleep(Duration::from_millis(wait.max(10)));
-
-        // Read any response at old baud rate (ignore errors)
-        let _ = self.recv_frame(50);
-
-        // Clear buffers and switch
-        self.rx_buf.clear();
-        let _ = self.io.clear_buffers();
+        self.check_cancel()?;
         self.io.set_baud_rate(new_baud)?;
         self.baud_rate = new_baud;
-
-        // Small delay for port to settle
-        std::thread::sleep(Duration::from_millis(10));
-
         self.log(&format!("baud rate switched to {new_baud}"));
-        Ok(())
+
+        // Do not clear RX here: it may already contain the valid switch ACK.
+        match self.recv_frame(u64::from(delay_ms) + 500) {
+            Ok(rx)
+                if !rx.extended
+                    && rx.cmd == CMD_SET_BAUD_RATE
+                    && rx.status == payload[0]
+                    && rx.data == payload[1..] =>
+            {
+                log::info!("Baud switch acknowledged at {new_baud}");
+                Ok(true)
+            }
+            Ok(rx) => {
+                log::warn!("Invalid baud switch ACK at {new_baud}: {rx:?}; checking link");
+                Ok(false)
+            }
+            Err(ProtocolError::Timeout { waited_ms }) => {
+                log::warn!("No baud switch ACK at {new_baud} within {waited_ms} ms; checking link");
+                Ok(false)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Get the port name (needed for SerialIo::reopen).
@@ -924,6 +939,8 @@ pub mod mock {
         responses: VecDeque<Vec<u8>>,
         current: Vec<u8>,
         pub sent: Vec<Vec<u8>>,
+        pub operations: Vec<&'static str>,
+        pub baud_rate: u32,
     }
 
     impl Default for MockIo {
@@ -938,6 +955,8 @@ pub mod mock {
                 responses: VecDeque::new(),
                 current: Vec::new(),
                 sent: Vec::new(),
+                operations: Vec::new(),
+                baud_rate: 115200,
             }
         }
 
@@ -957,6 +976,7 @@ pub mod mock {
 
     impl IoTransport for MockIo {
         fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+            self.operations.push("write");
             self.sent.push(data.to_vec());
             Ok(())
         }
@@ -967,6 +987,7 @@ pub mod mock {
         }
 
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.operations.push("read");
             // If we have remaining bytes from a previous partial read
             if !self.current.is_empty() {
                 let n = self.current.len().min(buf.len());
@@ -994,7 +1015,9 @@ pub mod mock {
             }
         }
 
-        fn set_baud_rate(&mut self, _baud: u32) -> io::Result<()> {
+        fn set_baud_rate(&mut self, baud: u32) -> io::Result<()> {
+            self.operations.push("baud");
+            self.baud_rate = baud;
             Ok(())
         }
         fn set_dtr(&mut self, _level: bool) -> io::Result<()> {
@@ -1004,10 +1027,12 @@ pub mod mock {
             Ok(())
         }
         fn clear_buffers(&mut self) -> io::Result<()> {
+            self.operations.push("clear");
             self.current.clear();
             Ok(())
         }
         fn flush(&mut self) -> io::Result<()> {
+            self.operations.push("flush");
             Ok(())
         }
         fn set_timeout(&mut self, _timeout: Duration) -> io::Result<()> {
@@ -1029,6 +1054,73 @@ mod tests {
         static CANCEL: AtomicBool = AtomicBool::new(false);
         CANCEL.store(false, Ordering::Relaxed);
         Transport::new(mock, "/dev/mock", 115200, &CANCEL, &|_msg| {})
+    }
+
+    fn baud_switch_ack(baud: u32, delay: u8) -> Vec<u8> {
+        let mut ack = vec![0x04, 0x0e, 0x09, 0x01, 0xe0, 0xfc, 0x0f];
+        ack.extend_from_slice(&super::super::command::build::set_baud_rate(baud, delay));
+        ack
+    }
+
+    #[test]
+    fn baud_switch_drains_tx_and_receives_fragmented_ack_at_new_baud() {
+        // 9600 has a nonzero low baud byte: ACK.status is an echoed byte,
+        // not a success/error status. Cover both T3/T5AI and BK delay values.
+        for (baud, delay) in [(921600, 20), (460800, 100), (9600, 20)] {
+            let ack = baud_switch_ack(baud, delay);
+            let mut mock = MockIo::new();
+            mock.add_response(ack[..1].to_vec());
+            mock.add_response(ack[1..].to_vec());
+            let mut transport = make_transport(mock);
+
+            assert!(transport.switch_baud_rate(baud, delay).unwrap());
+            assert_eq!(transport.baud_rate, baud);
+            assert_eq!(transport.io.baud_rate, baud);
+            assert_eq!(
+                transport.io.operations,
+                ["clear", "write", "flush", "baud", "read", "read"],
+                "must drain TX before switching, then receive without clearing the ACK",
+            );
+        }
+    }
+
+    #[test]
+    fn baud_switch_requires_link_check_for_invalid_ack() {
+        let valid = baud_switch_ack(921600, 20);
+        let mut wrong_command = valid.clone();
+        wrong_command[6] = 0x01;
+        let wrong_baud = baud_switch_ack(115200, 20);
+        let wrong_delay = baud_switch_ack(921600, 100);
+        let short = vec![0x04, 0x0e, 0x05, 0x01, 0xe0, 0xfc, 0x0f, 0x00];
+        let extended = vec![
+            0x04, 0x0e, 0xff, 0x01, 0xe0, 0xfc, 0xf4, 0x06, 0x00, 0x0f, 0x00, 0x10, 0x0e, 0x00,
+            0x14,
+        ];
+        for ack in [wrong_command, wrong_baud, wrong_delay, short, extended] {
+            let mut mock = MockIo::new();
+            mock.add_response(ack);
+            let mut transport = make_transport(mock);
+            assert!(!transport.switch_baud_rate(921600, 20).unwrap());
+            assert_eq!(transport.io.baud_rate, 921600);
+        }
+    }
+
+    #[test]
+    fn baud_switch_requires_link_check_for_missing_ack() {
+        let mut transport = make_transport(MockIo::new());
+        assert!(!transport.switch_baud_rate(921600, 20).unwrap());
+        assert_eq!(transport.io.baud_rate, 921600);
+    }
+
+    #[test]
+    fn cancelled_baud_switch_does_not_touch_the_port() {
+        let cancel = AtomicBool::new(true);
+        let mut transport = Transport::new(MockIo::new(), "/dev/mock", 115200, &cancel, &|_| {});
+        assert!(matches!(
+            transport.switch_baud_rate(921600, 20),
+            Err(ProtocolError::Cancelled)
+        ));
+        assert!(transport.io.operations.is_empty());
     }
 
     #[test]

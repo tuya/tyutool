@@ -190,21 +190,25 @@ pub fn shake<T: IoTransport>(
             chip.name(),
             target_baud
         ));
-        transport.switch_baud_rate(target_baud, chip.baud_switch_delay_ms())?;
+        let acknowledged = transport.switch_baud_rate(target_baud, chip.baud_switch_delay_ms())?;
 
-        // Verify link at new baud rate. A failure here is a *different* fault
+        // A valid switch ACK already proves the new baud works. If it was
+        // missing or invalid, verify the link instead. A failure is a different fault
         // from the handshake above — the chip is awake and answered at the
         // bootrom rate — so it must not report itself as one.
-        if let Err(e) = transport.handshake(10, 50) {
-            if matches!(e, ProtocolError::Cancelled) {
-                return Err(e);
+        if !acknowledged {
+            transport.clear_rx();
+            if let Err(e) = transport.handshake(10, 50) {
+                if matches!(e, ProtocolError::Cancelled) {
+                    return Err(e);
+                }
+                log::warn!("Link check failed at {target_baud} baud after switch: {e}");
+                return Err(ProtocolError::BaudSwitchFailed {
+                    chip: chip.name(),
+                    baud: target_baud,
+                    bootrom_baud: chip.initial_baud(),
+                });
             }
-            log::warn!("Link check failed at {target_baud} baud after switch: {e}");
-            return Err(ProtocolError::BaudSwitchFailed {
-                chip: chip.name(),
-                baud: target_baud,
-                bootrom_baud: chip.initial_baud(),
-            });
         }
     }
 
@@ -1298,7 +1302,7 @@ pub fn parse_hex_addr(s: Option<&str>) -> Result<u32, ProtocolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::chip::{Bk7231nSpec, T5AISpec};
+    use super::super::chip::{Bk7231nSpec, T3Spec, T5AISpec};
     use super::super::transport::mock::MockIo;
     use super::super::transport::Transport;
     use super::*;
@@ -1369,6 +1373,52 @@ mod tests {
         let mut data = addr.to_le_bytes().to_vec();
         data.extend_from_slice(sector);
         ext_resp(command::CMD_FLASH_READ_4K, 0x00, &data)
+    }
+
+    #[test]
+    fn t3_and_t5ai_accept_switch_ack_without_an_extra_link_check() {
+        for chip in [&T3Spec as &dyn ChipSpec, &T5AISpec] {
+            let mut mock = MockIo::new();
+            mock.add_response(std_resp(0x01, 0, &[]));
+            mock.add_response(std_resp(0x0f, 0, &[0x10, 0x0e, 0x00, 20]));
+            mock.add_response(std_resp(0x03, 4, &[0, 1, 0x44, 1, 1, 0x36, 0x72]));
+            let mut transport = make_transport(mock);
+
+            shake(&mut transport, 921600, chip, true).unwrap();
+
+            let commands: Vec<u8> = transport.io.sent.iter().map(|tx| tx[4]).collect();
+            assert_eq!(commands, [0x00, 0x0f, 0x03]);
+        }
+    }
+
+    #[test]
+    fn t3_and_t5ai_fall_back_to_link_check_when_switch_ack_is_invalid() {
+        for chip in [&T3Spec as &dyn ChipSpec, &T5AISpec] {
+            let mut mock = MockIo::new();
+            mock.add_response(std_resp(0x01, 0, &[]));
+            mock.add_response(std_resp(0x0f, 0, &[0, 0, 0, 20]));
+            mock.add_response(std_resp(0x01, 0, &[]));
+            mock.add_response(std_resp(0x03, 4, &[0, 1, 0x44, 1, 1, 0x36, 0x72]));
+            let mut transport = make_transport(mock);
+
+            shake(&mut transport, 921600, chip, true).unwrap();
+
+            let commands: Vec<u8> = transport.io.sent.iter().map(|tx| tx[4]).collect();
+            assert_eq!(commands, [0x00, 0x0f, 0x00, 0x03]);
+        }
+    }
+
+    #[test]
+    fn failed_switch_ack_and_link_check_report_baud_switch_failure() {
+        let mut mock = MockIo::new();
+        mock.add_response(std_resp(0x01, 0, &[]));
+        mock.add_response(std_resp(0x0f, 0, &[0, 0, 0, 20]));
+        let mut transport = make_transport(mock);
+
+        assert!(matches!(
+            shake(&mut transport, 921600, &T3Spec, true),
+            Err(ProtocolError::BaudSwitchFailed { baud: 921600, .. })
+        ));
     }
 
     // ───────────────────────── reboot ────────────────────────────────
