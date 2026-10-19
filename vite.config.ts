@@ -52,13 +52,14 @@ export default defineConfig(async () => ({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vue: ['vue', 'vue-router', 'pinia'],
-          i18n: ['vue-i18n'],
-          fontawesome: [
-            '@fortawesome/fontawesome-svg-core',
-            '@fortawesome/vue-fontawesome',
-            '@fortawesome/free-solid-svg-icons',
+        codeSplitting: {
+          groups: [
+            { name: 'vue', test: /node_modules[\\/](vue|vue-router|pinia)[\\/]/ },
+            { name: 'i18n', test: /node_modules[\\/]vue-i18n[\\/]/ },
+            {
+              name: 'fontawesome',
+              test: /node_modules[\\/]@fortawesome[\\/](fontawesome-svg-core|vue-fontawesome|free-solid-svg-icons)[\\/]/,
+            },
           ],
         },
       },
