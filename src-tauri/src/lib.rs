@@ -638,6 +638,7 @@ pub fn run() {
                 filters: Arc::new(StdMutex::new(filters)),
                 chunk_bridge: Arc::new(StdMutex::new(None)),
                 generation: Arc::new(SerialDebugGeneration::default()),
+                lifecycle_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 archive_dir: dir,
             }
         })

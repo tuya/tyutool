@@ -527,12 +527,16 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
                     s.close();
                 }
                 if let Some(bridge) = debug_chunk_bridge.lock().unwrap().take() {
-                    let _ = bridge.shutdown();
+                    let _ = tyutool_core::serial_debug_shutdown_and_finalize(
+                        bridge,
+                        &debug_archive,
+                        &debug_filters,
+                        &ws_sink,
+                    );
+                } else {
+                    let lines = serial_debug_finalize_pending(&debug_archive);
+                    serial_debug_ingest_lines(&ws_sink, &debug_filters, &lines);
                 }
-                // After the bridge's shutdown ack, so everything it was still
-                // holding is archived and the tail is cut behind all of it.
-                let lines = serial_debug_finalize_pending(&debug_archive);
-                serial_debug_ingest_lines(&ws_sink, &debug_filters, &lines);
                 let _ = sink_tx.send(ServerMessage::SerialDebugClosed);
             }
             ClientMessage::SerialDebugDeviceReset { chip_id } => {

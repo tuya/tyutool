@@ -23,6 +23,7 @@ import type { FlashJobPayload } from "@/features/firmware-flash/flash-ipc-types"
 // helpers to drive the connection lifecycle + push server messages.
 // ---------------------------------------------------------------------------
 type Listener = (ev: { data: string }) => void;
+type CloseListener = () => void;
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -41,26 +42,39 @@ class MockWebSocket {
 
   sent: unknown[] = [];
   closed = false;
+  sendFailure: Error | null = null;
   private messageListeners = new Set<Listener>();
+  private closeListeners = new Set<CloseListener>();
+  private errorListeners = new Set<CloseListener>();
 
   constructor(url: string) {
     this.url = url;
     MockWebSocket.instances.push(this);
   }
 
-  addEventListener(type: string, fn: Listener) {
-    if (type === "message") this.messageListeners.add(fn);
+  addEventListener(type: string, fn: Listener | EventListener) {
+    if (type === "message") this.messageListeners.add(fn as Listener);
+    if (type === "close")
+      this.closeListeners.add(fn as unknown as CloseListener);
+    if (type === "error")
+      this.errorListeners.add(fn as unknown as CloseListener);
   }
-  removeEventListener(type: string, fn: Listener) {
-    if (type === "message") this.messageListeners.delete(fn);
+  removeEventListener(type: string, fn: Listener | EventListener) {
+    if (type === "message") this.messageListeners.delete(fn as Listener);
+    if (type === "close")
+      this.closeListeners.delete(fn as unknown as CloseListener);
+    if (type === "error")
+      this.errorListeners.delete(fn as unknown as CloseListener);
   }
 
   send(data: string) {
+    if (this.sendFailure) throw this.sendFailure;
     this.sent.push(JSON.parse(data));
   }
   close() {
     this.closed = true;
     this.readyState = MockWebSocket.CLOSED;
+    for (const fn of [...this.closeListeners]) fn();
   }
 
   // --- test driving helpers ---
@@ -70,9 +84,11 @@ class MockWebSocket {
   }
   error() {
     this.onerror?.();
+    for (const fn of [...this.errorListeners]) fn();
   }
   fireClose() {
     this.onclose?.();
+    for (const fn of [...this.closeListeners]) fn();
   }
   /** Deliver a server frame to all registered message listeners. */
   recv(obj: unknown) {
@@ -88,6 +104,9 @@ class MockWebSocket {
   }
   get listenerCount() {
     return this.messageListeners.size;
+  }
+  get temporaryListenerCount() {
+    return this.closeListeners.size + this.errorListeners.size;
   }
 }
 
@@ -414,6 +433,7 @@ describe("runJob", () => {
       payload: { kind: "percent", value: 50 },
     });
     expect(ws.listenerCount).toBe(0);
+    expect(ws.temporaryListenerCount).toBe(0);
   });
 
   it("buffers a file_content frame and attaches it to the next progress event", async () => {
@@ -724,13 +744,14 @@ describe("serialDebugOpen / send / close", () => {
     });
   });
 
-  it("serialDebugClose detaches the chunk handler and sends close frame", async () => {
+  it("waits for the final batch and close acknowledgement before detaching", async () => {
     const t = new WsTransport();
     const chunks: unknown[] = [];
+    const batches: unknown[] = [];
     const p = t.serialDebugOpen(
       { port: "x" } as never,
       (c) => chunks.push(c),
-      () => {},
+      (items) => batches.push(...items),
       () => {},
       () => {},
       () => {},
@@ -742,13 +763,70 @@ describe("serialDebugOpen / send / close", () => {
     ws.recv({ type: "serial_debug_opened" });
     await p;
 
-    await t.serialDebugClose();
+    const closing = t.serialDebugClose();
     expect(ws.lastSent).toEqual({ type: "serial_debug_close" });
+    let settled = false;
+    void closing.then(() => (settled = true));
+    await flush();
+    expect(settled).toBe(false);
 
-    // After close, chunk frames are no longer routed.
+    ws.recv({
+      type: "serial_debug_chunk_batch",
+      chunks: [{ direction: "rx", bytes: [65] }],
+    });
+    ws.recv({ type: "serial_debug_closed" });
+    await closing;
+    expect(batches).toEqual([{ direction: "rx", bytes: [65] }]);
+
     ws.recv({ type: "serial_debug_chunk", chunk: { direction: "rx" } });
     expect(chunks).toEqual([]);
   });
+
+  it.each(["error", "close", "send"] as const)(
+    "settles a failed close on socket %s and removes temporary listeners",
+    async (failure) => {
+      const t = new WsTransport();
+      const opening = t.serialDebugOpen(
+        { port: "x" } as never,
+        () => {},
+        () => {},
+        () => {},
+        () => {},
+        () => {},
+      );
+      await flush();
+      const ws = latest();
+      ws.open();
+      await flush();
+      ws.recv({ type: "serial_debug_opened" });
+      await opening;
+
+      if (failure === "send") ws.sendFailure = new Error("send failed");
+      const closing = t.serialDebugClose();
+      const closingResult = expect(closing).rejects.toThrow(
+        failure === "send"
+          ? "send failed"
+          : "closed before serial-debug drain acknowledgement",
+      );
+      const repeated = t.serialDebugClose();
+      const repeatedResult = expect(repeated).rejects.toThrow(
+        failure === "send"
+          ? "send failed"
+          : "closed before serial-debug drain acknowledgement",
+      );
+      expect(
+        ws.sent.filter(
+          (frame) => (frame as { type: string }).type === "serial_debug_close",
+        ),
+      ).toHaveLength(failure === "send" ? 0 : 1);
+      if (failure === "error") ws.error();
+      else if (failure === "close") ws.fireClose();
+      await closingResult;
+      await repeatedResult;
+      expect(ws.listenerCount).toBe(0);
+      expect(ws.temporaryListenerCount).toBe(0);
+    },
+  );
 });
 
 describe("serialDebugSessionReadPage", () => {

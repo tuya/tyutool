@@ -40,6 +40,8 @@ export class WsTransport {
   private connectPromise: Promise<WebSocket> | null = null;
   private activeSerialDebugChunkHandler: ((ev: MessageEvent) => void) | null =
     null;
+  private activeSerialDebugCloseResolve: (() => void) | null = null;
+  private serialDebugClosePromise: Promise<void> | null = null;
   private nextSerialDebugRequestId = 1;
 
   private newSerialDebugRequestId(prefix: string): string {
@@ -449,6 +451,8 @@ export class WsTransport {
               droppedBytes: m.dropped_bytes,
               archivedBefore: m.archived_before,
             });
+          else if (m.type === "serial_debug_closed")
+            this.activeSerialDebugCloseResolve?.();
         } catch {
           /* ignore */
         }
@@ -460,16 +464,63 @@ export class WsTransport {
   }
 
   async serialDebugClose(): Promise<void> {
-    if (this.ws && this.activeSerialDebugChunkHandler) {
-      this.ws.removeEventListener(
-        "message",
-        this.activeSerialDebugChunkHandler,
-      );
+    if (this.serialDebugClosePromise) return this.serialDebugClosePromise;
+    const closing = this.performSerialDebugClose();
+    this.serialDebugClosePromise = closing;
+    try {
+      await closing;
+    } finally {
+      if (this.serialDebugClosePromise === closing) {
+        this.serialDebugClosePromise = null;
+      }
+    }
+  }
+
+  private async performSerialDebugClose(): Promise<void> {
+    const ws = this.ws;
+    const handler = this.activeSerialDebugChunkHandler;
+    if (!ws || !handler || ws.readyState !== WebSocket.OPEN) {
+      if (ws && handler) ws.removeEventListener("message", handler);
       this.activeSerialDebugChunkHandler = null;
+      return;
     }
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "serial_debug_close" }));
-    }
+    await new Promise<void>((resolve, reject) => {
+      let done = false;
+      let closeListener: EventListener;
+      let errorListener: EventListener;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        ws.removeEventListener("close", closeListener);
+        ws.removeEventListener("error", errorListener);
+        this.activeSerialDebugCloseResolve = null;
+        ws.removeEventListener("message", handler);
+        this.activeSerialDebugChunkHandler = null;
+      };
+      const finish = () => {
+        cleanup();
+        resolve();
+      };
+      const fail = (reason?: unknown) => {
+        cleanup();
+        reject(
+          reason ??
+            new Error(
+              "WebSocket closed before serial-debug drain acknowledgement",
+            ),
+        );
+      };
+      closeListener = fail as EventListener;
+      errorListener = fail as EventListener;
+      this.activeSerialDebugCloseResolve = finish;
+      ws.addEventListener("close", closeListener, { once: true });
+      ws.addEventListener("error", errorListener, { once: true });
+      try {
+        ws.send(JSON.stringify({ type: "serial_debug_close" }));
+      } catch (e) {
+        fail(e);
+      }
+    });
   }
 
   async serialDebugSend(bytes: Uint8Array): Promise<void> {

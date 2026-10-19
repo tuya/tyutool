@@ -94,6 +94,7 @@ pub trait SerialDebugSink: Send + 'static {
 enum SerialDebugChunkBridgeMessage {
     Chunk {
         generation: u64,
+        gap_before: Option<SerialDebugDropReport>,
         chunk: DebugChunk,
     },
     Reset {
@@ -103,9 +104,7 @@ enum SerialDebugChunkBridgeMessage {
     /// Drain and stop, acknowledged. Hosts that tear the bridge down by dropping
     /// every handle get the same drain via `Disconnected` instead and never send
     /// this.
-    Shutdown {
-        ack: SyncSender<()>,
-    },
+    Shutdown { ack: SyncSender<()> },
 }
 
 #[derive(Clone)]
@@ -131,12 +130,23 @@ impl SerialDebugChunkBridgeHandle {
     pub fn send_chunk(&self, chunk: DebugChunk) {
         let _guard = self.send_lock.lock().unwrap();
         let bytes = chunk.bytes.len();
+        let gap_before = self.drops.take_pending();
         match self.tx.try_send(SerialDebugChunkBridgeMessage::Chunk {
             generation: self.generation.current(),
+            gap_before,
             chunk,
         }) {
             Ok(()) => {}
-            Err(TrySendError::Full(_)) => self.drops.record(bytes, serial_debug_now_ms()),
+            Err(TrySendError::Full(message)) => {
+                if let SerialDebugChunkBridgeMessage::Chunk {
+                    gap_before: Some(report),
+                    ..
+                } = message
+                {
+                    self.drops.restore(report, serial_debug_now_ms());
+                }
+                self.drops.record(bytes, serial_debug_now_ms());
+            }
             // The bridge thread is gone; the session is being torn down.
             Err(TrySendError::Disconnected(_)) => {}
         }
@@ -316,6 +326,21 @@ pub fn serial_debug_finalize_pending(
         .unwrap_or_default()
 }
 
+/// Stop the producer bridge, wait for its queue to drain, then archive and
+/// ingest the final unterminated line. Hosts must not finalize before this
+/// returns: chunks still held by the bridge belong before that tail.
+pub fn serial_debug_shutdown_and_finalize<S: SerialDebugSink>(
+    bridge: SerialDebugChunkBridgeHandle,
+    archive: &Arc<Mutex<SerialDebugArchive>>,
+    filters: &Arc<Mutex<SerialDebugFilterIndex>>,
+    sink: &S,
+) -> Result<(), String> {
+    bridge.shutdown()?;
+    let lines = serial_debug_finalize_pending(archive);
+    serial_debug_ingest_lines(sink, filters, &lines);
+    Ok(())
+}
+
 /// Start the bridge thread and return the handle the reader thread pushes into.
 pub fn serial_debug_spawn_chunk_bridge<S: SerialDebugSink>(
     sink: S,
@@ -332,23 +357,32 @@ pub fn serial_debug_spawn_chunk_bridge<S: SerialDebugSink>(
         tx,
         drops: Arc::clone(&drops),
     };
+    let send_lock = Arc::clone(&handle.send_lock);
     std::thread::spawn(move || {
         let mut pending = SerialDebugChunkBatchBuffer::new();
         let mut active_generation = generation.current();
+        let mut deferred = None;
         loop {
-            // Before every receive, so `recv_timeout`'s own tick is the poll
-            // clock and no `continue` below can skip the check.
-            if let Some(report) = drops.take_report(serial_debug_now_ms()) {
-                serial_debug_report_drops(&sink, &archive, &filters, &mut pending, report);
-            }
-            match rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)) {
-                Ok(SerialDebugChunkBridgeMessage::Chunk { generation, chunk }) => {
+            let message = match deferred.take() {
+                Some(message) => Ok(message),
+                None => rx.recv_timeout(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS)),
+            };
+            match message {
+                Ok(SerialDebugChunkBridgeMessage::Chunk {
+                    generation,
+                    gap_before,
+                    chunk,
+                }) => {
                     if generation != active_generation {
                         if generation < active_generation {
                             continue;
                         }
                         let _ = pending.take();
                         active_generation = generation;
+                    }
+                    if let Some(report) = gap_before {
+                        serial_debug_flush_chunks(&sink, &archive, &filters, pending.take());
+                        serial_debug_report_drops(&sink, &archive, &filters, &mut pending, report);
                     }
                     pending.push(chunk);
                     // A busy port can keep recv_timeout from ever timing out.
@@ -384,6 +418,40 @@ pub fn serial_debug_spawn_chunk_bridge<S: SerialDebugSink>(
                         .should_flush_elapsed(Duration::from_millis(SERIAL_DEBUG_CHUNK_FLUSH_MS))
                     {
                         serial_debug_flush_chunks(&sink, &archive, &filters, pending.take());
+                    }
+                    // Drops without a following accepted chunk still need a
+                    // timely report. Only place their gap after proving the
+                    // queue is empty while the producer/reset path is idle.
+                    let mut idle_report = None;
+                    if let Ok(_producer_guard) = send_lock.try_lock() {
+                        match rx.try_recv() {
+                            Ok(message) => deferred = Some(message),
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                serial_debug_flush_chunks(
+                                    &sink,
+                                    &archive,
+                                    &filters,
+                                    pending.take(),
+                                );
+                                if let Some(report) = drops.take_pending() {
+                                    serial_debug_report_drops(
+                                        &sink,
+                                        &archive,
+                                        &filters,
+                                        &mut pending,
+                                        report,
+                                    );
+                                }
+                                return;
+                            }
+                            Err(mpsc::TryRecvError::Empty) => {
+                                idle_report = drops.take_report(serial_debug_now_ms());
+                            }
+                        }
+                    }
+                    if let Some(report) = idle_report {
+                        serial_debug_flush_chunks(&sink, &archive, &filters, pending.take());
+                        serial_debug_report_drops(&sink, &archive, &filters, &mut pending, report);
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => {
@@ -625,6 +693,334 @@ mod tests {
             delivered,
             "continuous output waited for idle or the byte limit"
         );
+    }
+
+    #[test]
+    fn shutdown_ack_allows_the_final_unterminated_chunk_to_be_archived() {
+        let dir = scratch_dir("shutdown-tail");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let bridge = serial_debug_spawn_chunk_bridge(
+            TestSink::default(),
+            Arc::clone(&archive),
+            filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        bridge.send_chunk(rx(b"complete\nlast-tail"));
+
+        // Hosts must wait for the drain acknowledgement before finalizing the
+        // archive. Dropping a handle alone does not establish this ordering.
+        bridge.shutdown().unwrap();
+        serial_debug_finalize_pending(&archive);
+        let texts: Vec<_> = archive
+            .lock()
+            .unwrap()
+            .read_page(0, 10)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|line| line.text)
+            .collect();
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(texts, vec!["complete", "last-tail"]);
+    }
+
+    #[test]
+    fn a_full_queue_marks_the_gap_before_accepting_post_drop_bytes() {
+        // Pause the consumer after its first batch so filling the bounded
+        // queue and losing exactly one chunk require no timing assumptions.
+        struct PausedSink {
+            inner: TestSink,
+            first: std::sync::Once,
+            entered: SyncSender<()>,
+            resume: mpsc::Receiver<()>,
+        }
+        impl SerialDebugSink for PausedSink {
+            fn chunk_batch(&self, chunks: Vec<ArchivedChunk>) {
+                self.inner.chunk_batch(chunks);
+                self.first.call_once(|| {
+                    self.entered.send(()).unwrap();
+                    self.resume.recv_timeout(Duration::from_secs(5)).unwrap();
+                });
+            }
+            fn chunks_dropped(&self, bytes: u64, before: u64) {
+                self.inner.chunks_dropped(bytes, before);
+            }
+            fn archive_capped(&self, limit: u64, before: u64) {
+                self.inner.archive_capped(limit, before);
+            }
+            fn filter_updated(
+                &self,
+                def: SerialDebugFilterDefinition,
+                stats: SerialDebugFilterStats,
+            ) {
+                self.inner.filter_updated(def, stats);
+            }
+        }
+
+        let dir = scratch_dir("ordered-gap");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(1);
+        let generation = Arc::new(SerialDebugGeneration::default());
+        let bridge = serial_debug_spawn_chunk_bridge(
+            PausedSink {
+                inner: TestSink::default(),
+                first: std::sync::Once::new(),
+                entered: entered_tx,
+                resume: resume_rx,
+            },
+            Arc::clone(&archive),
+            filters,
+            Arc::clone(&generation),
+        );
+        bridge.send_chunk(rx(b"before-gap"));
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        for _ in 0..SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY {
+            bridge.send_chunk(rx(b"x"));
+        }
+        bridge.send_chunk(rx(b"MISSING"));
+        resume_tx.send(()).unwrap();
+        // Wait for a slot for the first accepted post-gap chunk. A try_send
+        // here could accidentally drop that chunk as well, obscuring the bug.
+        bridge
+            .tx
+            .send(SerialDebugChunkBridgeMessage::Chunk {
+                generation: generation.current(),
+                gap_before: bridge.drops.take_pending(),
+                chunk: rx(b"after-gap\n"),
+            })
+            .unwrap();
+        bridge.shutdown().unwrap();
+
+        let texts: Vec<_> = archive
+            .lock()
+            .unwrap()
+            .read_page(0, 10)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|line| line.text)
+            .collect();
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            texts,
+            vec![
+                format!(
+                    "before-gap{}",
+                    "x".repeat(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY)
+                ),
+                serial_debug_chunk_drop_sentinel(7),
+                "after-gap".to_string(),
+            ],
+            "bytes either side of a dropped chunk must never become one line"
+        );
+    }
+
+    #[test]
+    fn two_full_queue_gaps_stay_between_their_adjacent_chunks() {
+        struct PausedSink {
+            inner: TestSink,
+            calls: std::sync::atomic::AtomicUsize,
+            entered: SyncSender<usize>,
+            resume: mpsc::Receiver<()>,
+        }
+        impl SerialDebugSink for PausedSink {
+            fn chunk_batch(&self, chunks: Vec<ArchivedChunk>) {
+                self.inner.chunk_batch(chunks);
+                let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if call <= 3 {
+                    self.entered.send(call).unwrap();
+                    self.resume.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+            }
+            fn chunks_dropped(&self, bytes: u64, before: u64) {
+                self.inner.chunks_dropped(bytes, before);
+            }
+            fn archive_capped(&self, limit: u64, before: u64) {
+                self.inner.archive_capped(limit, before);
+            }
+            fn filter_updated(
+                &self,
+                def: SerialDebugFilterDefinition,
+                stats: SerialDebugFilterStats,
+            ) {
+                self.inner.filter_updated(def, stats);
+            }
+        }
+
+        let dir = scratch_dir("ordered-multiple-gaps");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let (entered_tx, entered_rx) = mpsc::sync_channel(3);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(3);
+        let generation = Arc::new(SerialDebugGeneration::default());
+        let bridge = serial_debug_spawn_chunk_bridge(
+            PausedSink {
+                inner: TestSink::default(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                entered: entered_tx,
+                resume: resume_rx,
+            },
+            Arc::clone(&archive),
+            filters,
+            Arc::clone(&generation),
+        );
+
+        bridge.send_chunk(rx(b"before-gap"));
+        assert_eq!(entered_rx.recv_timeout(Duration::from_secs(5)).unwrap(), 1);
+        for _ in 0..SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY {
+            bridge.send_chunk(rx(b"x"));
+        }
+        bridge.send_chunk(rx(b"MISSING1"));
+        resume_tx.send(()).unwrap();
+        assert_eq!(entered_rx.recv_timeout(Duration::from_secs(5)).unwrap(), 2);
+        bridge
+            .tx
+            .send(SerialDebugChunkBridgeMessage::Chunk {
+                generation: generation.current(),
+                gap_before: bridge.drops.take_pending(),
+                chunk: rx(b"after-gap1\n"),
+            })
+            .unwrap();
+
+        for _ in 0..SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY {
+            bridge.send_chunk(rx(b"y"));
+        }
+        bridge.send_chunk(rx(b"MISSING2"));
+        resume_tx.send(()).unwrap();
+        assert_eq!(entered_rx.recv_timeout(Duration::from_secs(5)).unwrap(), 3);
+        bridge
+            .tx
+            .send(SerialDebugChunkBridgeMessage::Chunk {
+                generation: generation.current(),
+                gap_before: bridge.drops.take_pending(),
+                chunk: rx(b"after-gap2\n"),
+            })
+            .unwrap();
+        resume_tx.send(()).unwrap();
+        bridge.shutdown().unwrap();
+
+        let texts: Vec<_> = archive
+            .lock()
+            .unwrap()
+            .read_page(0, 10)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|line| line.text)
+            .collect();
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            texts,
+            vec![
+                format!(
+                    "before-gap{}",
+                    "x".repeat(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY)
+                ),
+                serial_debug_chunk_drop_sentinel(8),
+                "after-gap1".to_string(),
+                "y".repeat(SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY - 1),
+                serial_debug_chunk_drop_sentinel(9),
+                "after-gap2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn reader_does_not_wait_for_idle_drop_reporting() {
+        struct BlockingSink {
+            inner: TestSink,
+            batch_entered: SyncSender<()>,
+            batch_resume: mpsc::Receiver<()>,
+            drop_entered: SyncSender<()>,
+            drop_resume: mpsc::Receiver<()>,
+            first_batch: std::sync::Once,
+        }
+        impl SerialDebugSink for BlockingSink {
+            fn chunk_batch(&self, chunks: Vec<ArchivedChunk>) {
+                self.inner.chunk_batch(chunks);
+                self.first_batch.call_once(|| {
+                    self.batch_entered.send(()).unwrap();
+                    self.batch_resume
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                });
+            }
+            fn chunks_dropped(&self, bytes: u64, before: u64) {
+                self.inner.chunks_dropped(bytes, before);
+                self.drop_entered.send(()).unwrap();
+                self.drop_resume
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+            }
+            fn archive_capped(&self, limit: u64, before: u64) {
+                self.inner.archive_capped(limit, before);
+            }
+            fn filter_updated(
+                &self,
+                def: SerialDebugFilterDefinition,
+                stats: SerialDebugFilterStats,
+            ) {
+                self.inner.filter_updated(def, stats);
+            }
+        }
+
+        let dir = scratch_dir("idle-drop-does-not-block-reader");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let (batch_entered_tx, batch_entered_rx) = mpsc::sync_channel(1);
+        let (batch_resume_tx, batch_resume_rx) = mpsc::sync_channel(1);
+        let (drop_entered_tx, drop_entered_rx) = mpsc::sync_channel(1);
+        let (drop_resume_tx, drop_resume_rx) = mpsc::sync_channel(1);
+        let bridge = serial_debug_spawn_chunk_bridge(
+            BlockingSink {
+                inner: TestSink::default(),
+                batch_entered: batch_entered_tx,
+                batch_resume: batch_resume_rx,
+                drop_entered: drop_entered_tx,
+                drop_resume: drop_resume_rx,
+                first_batch: std::sync::Once::new(),
+            },
+            Arc::clone(&archive),
+            filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        bridge.send_chunk(rx(b"before-gap"));
+        batch_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        for _ in 0..SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY {
+            bridge.send_chunk(rx(b"x"));
+        }
+        bridge.send_chunk(rx(b"lost"));
+        batch_resume_tx.send(()).unwrap();
+        drop_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+
+        let (returned_tx, returned_rx) = mpsc::sync_channel(1);
+        let reader_bridge = bridge.clone();
+        let reader = std::thread::spawn(move || {
+            reader_bridge.send_chunk(rx(b"after-gap\n"));
+            returned_tx.send(()).unwrap();
+        });
+        returned_rx
+            .recv_timeout(Duration::from_millis(100))
+            .expect("reader send waited for drop-report sink I/O");
+        reader.join().unwrap();
+        drop_resume_tx.send(()).unwrap();
+        bridge.shutdown().unwrap();
+
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Dropping device output must cut the open archive line before the sentinel,

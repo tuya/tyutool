@@ -2,11 +2,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DebugChunk, DebugConfig } from "./types";
 
+const { isTauriRuntimeMock, invokeMock, listenMock } = vi.hoisted(() => ({
+  isTauriRuntimeMock: vi.fn(() => false),
+  invokeMock: vi.fn(async () => undefined),
+  listenMock: vi.fn(),
+}));
+
 // Web mode → serialDebugTransport() builds a WebTransport that delegates to wsTransport.
 vi.mock("@/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/runtime")>();
-  return { ...actual, isTauriRuntime: vi.fn(() => false) };
+  return { ...actual, isTauriRuntime: isTauriRuntimeMock };
 });
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: listenMock }));
 
 // Capture the callbacks WebTransport hands to wsTransport.serialDebugOpen so the
 // test can drive chunk/disconnect events synchronously.
@@ -118,6 +127,75 @@ describe("serialDebugTransport factory", () => {
     const fake = {} as SerialDebugTransport;
     __setSerialDebugTransportForTest(fake);
     expect(serialDebugTransport()).toBe(fake);
+  });
+});
+
+describe("TauriTransport close acknowledgement", () => {
+  const eventHandlers = new Map<
+    string,
+    (event: { payload: unknown }) => void
+  >();
+  const unlisten = vi.fn();
+
+  beforeEach(() => {
+    __setSerialDebugTransportForTest(null);
+    eventHandlers.clear();
+    unlisten.mockClear();
+    isTauriRuntimeMock.mockReturnValue(true);
+    invokeMock.mockReset().mockResolvedValue(undefined);
+    listenMock
+      .mockReset()
+      .mockImplementation(
+        async (
+          eventName: string,
+          cb: (event: { payload: unknown }) => void,
+        ) => {
+          eventHandlers.set(eventName, cb);
+          return unlisten;
+        },
+      );
+  });
+
+  afterEach(() => {
+    isTauriRuntimeMock.mockReturnValue(false);
+    __setSerialDebugTransportForTest(null);
+  });
+
+  it("waits for the final batch and serial-debug-closed event after invoke resolves", async () => {
+    const tr = serialDebugTransport();
+    const received: DebugChunk[][] = [];
+    tr.onChunkBatch((chunks) => received.push(chunks));
+    await tr.open(cfg);
+
+    let closeDone = false;
+    const closing = tr.close().then(() => {
+      closeDone = true;
+    });
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("serial_debug_close"),
+    );
+    expect(closeDone).toBe(false);
+
+    eventHandlers.get("serial-debug-chunk-batch")?.({
+      payload: [{ direction: "rx", tsMs: 7, bytes: [65] }],
+    });
+    expect(received).toEqual([[{ direction: "rx", tsMs: 7, bytes: [65] }]]);
+    eventHandlers.get("serial-debug-closed")?.({ payload: undefined });
+    await closing;
+    expect(closeDone).toBe(true);
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlistens and rejects when the close command fails", async () => {
+    const tr = serialDebugTransport();
+    await tr.open(cfg);
+    invokeMock.mockImplementation(async (command?: string) => {
+      if (command === "serial_debug_close") throw new Error("close failed");
+      return undefined;
+    });
+
+    await expect(tr.close()).rejects.toThrow("close failed");
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 });
 

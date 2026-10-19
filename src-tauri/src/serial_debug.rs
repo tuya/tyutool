@@ -7,6 +7,7 @@
 //! Tauri events those batches and notices become.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,8 @@ pub(crate) struct DebugState {
     pub filters: Arc<StdMutex<SerialDebugFilterIndex>>,
     pub chunk_bridge: Arc<StdMutex<Option<SerialDebugChunkBridgeHandle>>>,
     pub generation: Arc<SerialDebugGeneration>,
+    /// Serializes open/close operations without holding a mutex across awaits.
+    pub lifecycle_busy: Arc<AtomicBool>,
     /// The directory `create_serial_debug_state_resilient` actually used for
     /// `archive`/`filters` — the preferred primary, or its per-process fallback
     /// when primary was unwritable at startup. Anything that re-derives a path
@@ -38,11 +41,94 @@ pub(crate) struct DebugState {
     pub archive_dir: PathBuf,
 }
 
+struct SerialDebugLifecycleReservation(Arc<AtomicBool>);
+
+impl SerialDebugLifecycleReservation {
+    fn acquire(lifecycle_busy: &Arc<AtomicBool>) -> Result<Self, String> {
+        lifecycle_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "serial debug lifecycle operation in progress".to_string())?;
+        Ok(Self(Arc::clone(lifecycle_busy)))
+    }
+}
+
+impl Drop for SerialDebugLifecycleReservation {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 /// Path of a filter's backfill scratch index, alongside the archive it was
 /// built from. Pulled out so the "must be under the actual archive dir, not
 /// the primary" contract is unit-testable without a Tauri app.
 fn historical_idx_path(archive_dir: &Path, filter_id: &str) -> PathBuf {
     archive_dir.join(format!("serial-debug-filter-{filter_id}.historical.idx"))
+}
+
+/// Emit the desktop close acknowledgement only after core finishes its drain.
+fn close_bridge_and_signal<S, F>(
+    bridge: SerialDebugChunkBridgeHandle,
+    archive: &Arc<StdMutex<SerialDebugArchive>>,
+    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
+    sink: &S,
+    on_closed: F,
+) -> Result<(), String>
+where
+    S: SerialDebugSink,
+    F: FnOnce(),
+{
+    tyutool_core::serial_debug_shutdown_and_finalize(bridge, archive, filters, sink)?;
+    on_closed();
+    Ok(())
+}
+
+fn finalize_and_signal<S, F>(
+    archive: &Arc<StdMutex<SerialDebugArchive>>,
+    filters: &Arc<StdMutex<SerialDebugFilterIndex>>,
+    sink: &S,
+    on_closed: F,
+) where
+    S: SerialDebugSink,
+    F: FnOnce(),
+{
+    let lines = serial_debug_finalize_pending(archive);
+    serial_debug_ingest_lines(sink, filters, &lines);
+    on_closed();
+}
+
+/// Clear one session while excluding concurrent open/close operations. The
+/// command emits the returned filter updates after this state transition ends.
+fn clear_session_state(
+    state: &DebugState,
+) -> Result<Vec<(SerialDebugFilterDefinition, SerialDebugFilterStats)>, String> {
+    let _lifecycle = SerialDebugLifecycleReservation::acquire(&state.lifecycle_busy)?;
+    let chunk_bridge = state
+        .chunk_bridge
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?
+        .as_ref()
+        .cloned();
+    if let Some(bridge) = chunk_bridge {
+        bridge.reset()?;
+    } else {
+        state.generation.advance();
+    }
+    {
+        let mut archive = state
+            .archive
+            .lock()
+            .map_err(|_| "debug archive poisoned".to_string())?;
+        archive.clear().map_err(|e| e.to_string())?;
+    }
+    let mut filters = state
+        .filters
+        .lock()
+        .map_err(|_| "debug filters poisoned".to_string())?;
+    Ok(filters
+        .reset_for_new_session()
+        .into_iter()
+        .filter_map(|stats| filters.definition(&stats.filter_id).map(|def| (def, stats)))
+        .collect())
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -145,6 +231,7 @@ pub(crate) async fn serial_debug_open(
     state: State<'_, DebugState>,
     cfg: DebugConfig,
 ) -> Result<(), String> {
+    let _lifecycle = SerialDebugLifecycleReservation::acquire(&state.lifecycle_busy)?;
     log::info!(
         "[serial-debug] open port={} baud={}",
         cfg.port,
@@ -209,6 +296,7 @@ pub(crate) async fn serial_debug_close(
     app: AppHandle,
     state: State<'_, DebugState>,
 ) -> Result<(), String> {
+    let _lifecycle = SerialDebugLifecycleReservation::acquire(&state.lifecycle_busy)?;
     let session = {
         let mut guard = state
             .session
@@ -216,6 +304,11 @@ pub(crate) async fn serial_debug_close(
             .map_err(|_| "debug state poisoned".to_string())?;
         guard.take()
     };
+    let bridge = state
+        .chunk_bridge
+        .lock()
+        .map_err(|_| "debug state poisoned".to_string())?
+        .take();
     if let Some(session) = session {
         log::info!("[serial-debug] close");
         // h.join() blocks; run it off the async runtime thread.
@@ -223,19 +316,28 @@ pub(crate) async fn serial_debug_close(
             .await
             .map_err(|e| e.to_string())?;
     }
-    state
-        .chunk_bridge
-        .lock()
-        .map_err(|_| "debug state poisoned".to_string())?
-        .take();
-    // Cut after the bridge handle is dropped, which is what releases the bridge
-    // thread's final flush, so the chunks it was still holding land in the
-    // archive ahead of the tail. The shared bridge also offers an acked
-    // `shutdown()` — which is what makes `tyutool-serve` exact about that
-    // ordering — but nothing here waits for it, so this remains a race the drop
-    // usually wins.
-    let lines = serial_debug_finalize_pending(&state.archive);
-    serial_debug_ingest_lines(&TauriSink { app: app.clone() }, &state.filters, &lines);
+    if let Some(bridge) = bridge {
+        let archive = Arc::clone(&state.archive);
+        let filters = Arc::clone(&state.filters);
+        let sink = TauriSink { app: app.clone() };
+        let closed_app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            close_bridge_and_signal(bridge, &archive, &filters, &sink, || {
+                let _ = closed_app.emit("serial-debug-closed", ());
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+    } else {
+        finalize_and_signal(
+            &state.archive,
+            &state.filters,
+            &TauriSink { app: app.clone() },
+            || {
+                let _ = app.emit("serial-debug-closed", ());
+            },
+        );
+    }
     Ok(())
 }
 
@@ -308,39 +410,8 @@ pub(crate) fn serial_debug_session_clear(
     app: AppHandle,
     state: State<'_, DebugState>,
 ) -> Result<(), String> {
-    let chunk_bridge = state
-        .chunk_bridge
-        .lock()
-        .map_err(|_| "debug state poisoned".to_string())?
-        .as_ref()
-        .cloned();
-    if let Some(bridge) = chunk_bridge {
-        bridge.reset()?;
-    } else {
-        state.generation.advance();
-    }
-    {
-        let mut archive = state
-            .archive
-            .lock()
-            .map_err(|_| "debug archive poisoned".to_string())?;
-        archive.clear().map_err(|e| e.to_string())?;
-    }
-    let updates = {
-        let mut filters = state
-            .filters
-            .lock()
-            .map_err(|_| "debug filters poisoned".to_string())?;
-        filters.reset_for_new_session()
-    };
-    let filters = state
-        .filters
-        .lock()
-        .map_err(|_| "debug filters poisoned".to_string())?;
-    for stats in updates {
-        if let Some(def) = filters.definition(&stats.filter_id) {
-            emit_filter_update(&app, &def, &stats);
-        }
+    for (def, stats) in clear_session_state(&state)? {
+        emit_filter_update(&app, &def, &stats);
     }
     Ok(())
 }
@@ -611,6 +682,215 @@ pub(crate) fn serial_debug_device_reset_cmd(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
+    use std::time::{Duration, Instant};
+    #[derive(Clone, Default)]
+    struct CloseTestSink(Arc<StdMutex<Vec<&'static str>>>);
+
+    impl SerialDebugSink for CloseTestSink {
+        fn chunk_batch(&self, _chunks: Vec<ArchivedChunk>) {
+            self.0.lock().unwrap().push("batch");
+        }
+
+        fn chunks_dropped(&self, _dropped_bytes: u64, _archived_before: u64) {
+            self.0.lock().unwrap().push("dropped");
+        }
+
+        fn archive_capped(&self, _limit_mib: u64, _archived_before: u64) {
+            self.0.lock().unwrap().push("capped");
+        }
+
+        fn filter_updated(
+            &self,
+            _def: SerialDebugFilterDefinition,
+            _stats: SerialDebugFilterStats,
+        ) {
+            self.0.lock().unwrap().push("filter");
+        }
+    }
+
+    #[test]
+    fn lifecycle_reservation_rejects_overlapping_open_or_close_and_releases_on_drop() {
+        let busy = Arc::new(AtomicBool::new(false));
+        let first = SerialDebugLifecycleReservation::acquire(&busy).unwrap();
+        assert_eq!(
+            SerialDebugLifecycleReservation::acquire(&busy)
+                .err()
+                .as_deref(),
+            Some("serial debug lifecycle operation in progress")
+        );
+        drop(first);
+        assert!(SerialDebugLifecycleReservation::acquire(&busy).is_ok());
+    }
+
+    fn clear_test_state(dir: &Path) -> DebugState {
+        DebugState {
+            session: Arc::new(StdMutex::new(None)),
+            archive: Arc::new(StdMutex::new(SerialDebugArchive::create(dir).unwrap())),
+            filters: Arc::new(StdMutex::new(SerialDebugFilterIndex::create(dir).unwrap())),
+            chunk_bridge: Arc::new(StdMutex::new(None)),
+            generation: Arc::new(SerialDebugGeneration::default()),
+            lifecycle_busy: Arc::new(AtomicBool::new(false)),
+            archive_dir: dir.to_path_buf(),
+        }
+    }
+
+    fn append_test_line(state: &DebugState, text: &[u8]) {
+        state
+            .archive
+            .lock()
+            .unwrap()
+            .append_chunk(&DebugChunk {
+                direction: tyutool_core::Direction::Rx,
+                ts_ms: 1,
+                bytes: text.to_vec(),
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn desktop_clear_rejects_during_close_without_mutating_archive_then_clears_after_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = clear_test_state(dir.path());
+        let events = Arc::new(StdMutex::new(Vec::new()));
+        let bridge = serial_debug_spawn_chunk_bridge(
+            CloseTestSink(Arc::clone(&events)),
+            Arc::clone(&state.archive),
+            Arc::clone(&state.filters),
+            Arc::clone(&state.generation),
+        );
+        bridge.send_chunk(DebugChunk {
+            direction: tyutool_core::Direction::Rx,
+            ts_ms: 1,
+            bytes: b"old-tail".to_vec(),
+        });
+        *state.chunk_bridge.lock().unwrap() = Some(bridge);
+
+        // Follow the close command's order: reserve lifecycle, then take the
+        // bridge out of state before awaiting its drain.
+        let close_reservation =
+            SerialDebugLifecycleReservation::acquire(&state.lifecycle_busy).unwrap();
+        let bridge = state.chunk_bridge.lock().unwrap().take().unwrap();
+
+        assert_eq!(
+            clear_session_state(&state).unwrap_err(),
+            "serial debug lifecycle operation in progress"
+        );
+        assert_eq!(state.archive.lock().unwrap().total_lines(), 0);
+        assert_eq!(state.generation.current(), 0);
+
+        close_bridge_and_signal(
+            bridge,
+            &state.archive,
+            &state.filters,
+            &CloseTestSink(Arc::clone(&events)),
+            || events.lock().unwrap().push("closed"),
+        )
+        .unwrap();
+        assert_eq!(state.archive.lock().unwrap().total_lines(), 1);
+        assert_eq!(
+            state
+                .archive
+                .lock()
+                .unwrap()
+                .read_page(0, 10)
+                .unwrap()
+                .items[0]
+                .text,
+            "old-tail"
+        );
+
+        drop(close_reservation);
+        clear_session_state(&state).unwrap();
+        assert_eq!(state.archive.lock().unwrap().total_lines(), 0);
+    }
+
+    #[test]
+    fn desktop_clear_holds_lifecycle_until_archive_clear_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(clear_test_state(dir.path()));
+        append_test_line(&state, b"old-tail\n");
+        let archive_guard = state.archive.lock().unwrap();
+
+        let clear_state = Arc::clone(&state);
+        let clear = thread::spawn(move || clear_session_state(&clear_state));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !state.lifecycle_busy.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            state.lifecycle_busy.load(Ordering::Acquire),
+            "clear should reserve lifecycle before waiting for the archive lock"
+        );
+
+        // Open, close and clear all call this same reservation acquisition, so
+        // neither lifecycle command can enter while clear is blocked here.
+        assert!(SerialDebugLifecycleReservation::acquire(&state.lifecycle_busy).is_err());
+        assert_eq!(archive_guard.total_lines(), 1);
+        drop(archive_guard);
+
+        clear.join().unwrap().unwrap();
+        assert_eq!(state.archive.lock().unwrap().total_lines(), 0);
+        assert_eq!(state.generation.current(), 1);
+    }
+
+    #[test]
+    fn desktop_close_path_waits_for_bridge_drain_before_finalizing_and_signaling() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = Arc::new(StdMutex::new(
+            SerialDebugArchive::create(dir.path()).unwrap(),
+        ));
+        let filters = Arc::new(StdMutex::new(
+            SerialDebugFilterIndex::create(dir.path()).unwrap(),
+        ));
+        let events = Arc::new(StdMutex::new(Vec::new()));
+        let bridge = serial_debug_spawn_chunk_bridge(
+            CloseTestSink(Arc::clone(&events)),
+            Arc::clone(&archive),
+            Arc::clone(&filters),
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        bridge.send_chunk(DebugChunk {
+            direction: tyutool_core::Direction::Rx,
+            ts_ms: 1,
+            bytes: b"final-tail".to_vec(),
+        });
+
+        close_bridge_and_signal(
+            bridge,
+            &archive,
+            &filters,
+            &CloseTestSink(Arc::clone(&events)),
+            || {
+                events.lock().unwrap().push("closed");
+            },
+        )
+        .unwrap();
+
+        assert_eq!(*events.lock().unwrap(), vec!["batch", "closed"]);
+        let lines = archive.lock().unwrap().read_page(0, 10).unwrap().items;
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "final-tail");
+    }
+
+    #[test]
+    fn desktop_close_signals_completion_when_already_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = Arc::new(StdMutex::new(
+            SerialDebugArchive::create(dir.path()).unwrap(),
+        ));
+        let filters = Arc::new(StdMutex::new(
+            SerialDebugFilterIndex::create(dir.path()).unwrap(),
+        ));
+        let events = Arc::new(StdMutex::new(Vec::new()));
+        finalize_and_signal(
+            &archive,
+            &filters,
+            &CloseTestSink(Arc::clone(&events)),
+            || events.lock().unwrap().push("closed"),
+        );
+        assert_eq!(*events.lock().unwrap(), vec!["closed"]);
+    }
 
     #[test]
     fn serial_debug_device_reset_session_requires_open_session() {
