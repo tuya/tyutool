@@ -1,4 +1,4 @@
-import { onActivated, onDeactivated, watch } from "vue";
+import { onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import type { useSerialDebugStore } from "@/stores/serial-debug";
@@ -25,8 +25,8 @@ type AutoSaveLine = Pick<DebugLogLine, "direction" | "tsMs" | "text">;
  *   - port open               → create file, start a 5 s flush interval
  *   - port close              → final flush, drop the path
  *   - autoSave toggle / dir   → start/stop matching open state
- *   - onActivated (return to page)  → resume flushing; lines that arrived while away get picked up next tick
- *   - onDeactivated (leave page)    → final flush, keep file if port still open
+ *   - page deactivation       → keep flushing while the serial session remains open
+ *   - component unmount       → stop the interval and unregister store callbacks
  *
  * Kept out of the page component so the component template stays focused
  * on layout. Tauri-only (the invoke() call); harmless in web/dev runtime
@@ -37,11 +37,26 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
   const transport = serialDebugTransport();
 
   let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
-  let flushInFlight = false;
   let currentFlushPromise: Promise<void> | null = null;
-  let replayFlushRequested = false;
-  let replayFlushDrainAll = false;
   let backfillPromise: Promise<void> | null = null;
+  let transition = Promise.resolve();
+  let autoSaveWriteError: Error | null = null;
+  let sessionAutoSaveDir: string | null = null;
+
+  if (s.sessionAutoSavePath) {
+    const portPath = `/${sanitizePortName(s.port)}/`;
+    const portPathIndex = s.sessionAutoSavePath.lastIndexOf(portPath);
+    sessionAutoSaveDir =
+      portPathIndex >= 0 ? s.sessionAutoSavePath.slice(0, portPathIndex) : null;
+  }
+
+  function enqueueTransition(task: () => Promise<void>): void {
+    transition = transition.then(task, task).catch((e) => {
+      rLog.warn(
+        `[SerialDebug] auto-save transition failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    });
+  }
 
   function stopInterval(): void {
     if (autoSaveInterval !== null) {
@@ -133,70 +148,80 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     }
   }
 
-  async function flush(drainAll = false): Promise<void> {
-    if (flushInFlight) {
-      replayFlushRequested = true;
-      replayFlushDrainAll ||= drainAll;
-      await currentFlushPromise;
-      return;
+  async function flush(
+    drainAll = false,
+    throughSeq = s.autoSaveQueueHighWaterMark(),
+    propagateFailure = false,
+  ): Promise<void> {
+    if (currentFlushPromise) {
+      try {
+        await currentFlushPromise;
+      } catch (e) {
+        if (propagateFailure) throw e;
+        return;
+      }
+      if (
+        propagateFailure &&
+        autoSaveWriteError &&
+        s.peekPendingAutoSaveLines(1, throughSeq).length > 0
+      ) {
+        throw autoSaveWriteError;
+      }
+      return flush(drainAll, throughSeq, propagateFailure);
     }
 
-    currentFlushPromise = (async () => {
-      flushInFlight = true;
+    const current = (async () => {
       try {
         // Ordering guarantee: nothing live may reach the file before the
         // pre-enable backfill has finished, otherwise the file would read
         // newest-then-oldest around the handoff.
         if (backfillPromise) await backfillPromise;
-        let keepDraining = drainAll;
         let appends = 0;
         while (true) {
           const path = s.sessionAutoSavePath;
           if (!path) break;
-
-          const newLines = s.drainPendingAutoSaveLines(
+          const newLines = s.peekPendingAutoSaveLines(
             AUTO_SAVE_FLUSH_MAX_CHARS,
+            throughSeq,
           );
           if (newLines.length === 0) break;
-
           await invoke("append_text_file", {
             path,
             content: formatAutoSaveBlock(newLines),
           });
+          s.commitPendingAutoSaveLines(newLines.length);
           appends += 1;
-
-          if (replayFlushRequested) {
-            keepDraining ||= replayFlushDrainAll;
-            replayFlushRequested = false;
-            replayFlushDrainAll = false;
-          }
-          // A periodic flush keeps draining too, otherwise one 128 KiB append
-          // per 5 s tick falls permanently behind a fast port; it just yields
-          // once it has done its share of the work.
-          if (keepDraining) continue;
-          if (appends >= AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TICK) break;
+          // A periodic flush yields after its share. A close or boundary flush
+          // drains only its captured sequence range, so later live input cannot
+          // hold the operation open forever.
+          if (!drainAll && appends >= AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TICK)
+            break;
+        }
+        if (
+          Number.isFinite(throughSeq) &&
+          s.peekPendingAutoSaveLines(1, throughSeq).length > 0 &&
+          !s.sessionAutoSavePath
+        ) {
+          throw (
+            autoSaveWriteError ?? new Error("Auto-save session is unavailable")
+          );
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        autoSaveWriteError = e instanceof Error ? e : new Error(msg);
         s.appendSysLine(t("serialDebug.autoSave.errWrite", { msg }));
         stopInterval();
         s.sessionAutoSavePath = null;
-      } finally {
-        flushInFlight = false;
-        currentFlushPromise = null;
-        if (replayFlushRequested && s.sessionAutoSavePath) {
-          const rerunDrainAll = replayFlushDrainAll;
-          replayFlushRequested = false;
-          replayFlushDrainAll = false;
-          await flush(rerunDrainAll);
-        } else {
-          replayFlushRequested = false;
-          replayFlushDrainAll = false;
-        }
+        sessionAutoSaveDir = null;
+        if (propagateFailure) throw e;
       }
     })();
-
-    await currentFlushPromise;
+    currentFlushPromise = current;
+    try {
+      await current;
+    } finally {
+      if (currentFlushPromise === current) currentFlushPromise = null;
+    }
   }
 
   /**
@@ -230,9 +255,11 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     stopInterval();
     const dir = s.autoSaveDir;
     const portDir = sanitizePortName(s.port);
-    const filename = `serial-debug-${makeStamp()}.txt`;
+    const filename = `serial-debug-${makeStamp()}-${crypto.randomUUID()}.txt`;
     // path separator: Tauri on all platforms accepts forward slash
     const path = `${dir}/${portDir}/${filename}`;
+    autoSaveWriteError = null;
+    sessionAutoSaveDir = dir;
     s.sessionAutoSavePath = path;
     // The dialog-path grant that authorizes writes under the auto-save dir
     // expires 10 min after the last authorized write, so a session started
@@ -259,66 +286,51 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     }, 5000);
   }
 
-  async function finalFlushAndStop(keepSession = false): Promise<void> {
+  async function finalFlushAndStop(): Promise<void> {
     stopInterval();
     await flush(true);
-    if (!keepSession) {
-      s.sessionAutoSavePath = null;
-    }
+    s.sessionAutoSavePath = null;
+    sessionAutoSaveDir = null;
   }
 
-  onActivated(() => {
-    if (s.open && s.sessionAutoSavePath) {
-      stopInterval();
-      // Leaving the page stops the flush interval but keeps the session file
-      // while the port stays open, so nothing writes while the user is away and
-      // the dialog-path grant can expire before they come back. Renew it before
-      // the resumed interval appends anything: `flush` awaits `backfillPromise`
-      // first, so parking the renewal there reuses the ordering channel that
-      // already exists. When a start-time backfill is still in flight we skip
-      // the renewal instead of chaining onto it — that chain renewed the grant
-      // itself and is still writing, so the grant cannot have expired, and
-      // replacing the promise would drop the backfill's own ordering guarantee.
-      const dir = s.autoSaveDir;
-      if (dir && !backfillPromise) {
-        backfillPromise = registerAutoSaveDir(dir).finally(() => {
-          backfillPromise = null;
-        });
-      }
-      autoSaveInterval = setInterval(() => {
-        void flush();
-      }, 5000);
-    } else if (s.open) {
-      startAutoSave();
-    }
+  s.registerBeforeClearAutoSave((throughSeq) => {
+    if (!s.sessionAutoSavePath && !autoSaveWriteError) return Promise.resolve();
+    return flush(true, throughSeq, true);
   });
-
-  onDeactivated(() => {
-    // keepSession=true: port stays open across navigation, preserve the auto-save file path.
-    void finalFlushAndStop(s.open);
+  s.registerAfterBackendDrainAutoSave((throughSeq) => flush(true, throughSeq));
+  onUnmounted(() => {
+    s.registerBeforeClearAutoSave(null);
+    s.registerAfterBackendDrainAutoSave(null);
+    stopInterval();
   });
 
   // Start/stop when port opens or closes
   watch(
     () => s.open,
-    async (isOpen) => {
-      if (isOpen) {
-        startAutoSave();
-      } else {
-        await finalFlushAndStop();
-      }
+    (isOpen) => {
+      enqueueTransition(async () => {
+        if (isOpen) {
+          if (s.autoSave && s.autoSaveDir && !s.sessionAutoSavePath)
+            startAutoSave();
+        } else if (s.sessionAutoSavePath) {
+          await finalFlushAndStop();
+        }
+      });
     },
   );
 
   // Start/stop when user toggles autoSave or changes directory mid-session
-  watch(
-    [() => s.autoSave, () => s.autoSaveDir],
-    async ([newAutoSave, newDir]) => {
-      if (!newAutoSave || !newDir) {
-        if (s.sessionAutoSavePath) await finalFlushAndStop();
-      } else if (s.open && !s.sessionAutoSavePath) {
+  watch([() => s.autoSave, () => s.autoSaveDir], ([newAutoSave, newDir]) => {
+    enqueueTransition(async () => {
+      const path = s.sessionAutoSavePath;
+      if (path && (!newAutoSave || !newDir || sessionAutoSaveDir !== newDir)) {
+        await flush(true, s.autoSaveQueueHighWaterMark(), true);
+        s.sessionAutoSavePath = null;
+        sessionAutoSaveDir = null;
+      }
+      if (newAutoSave && newDir && s.open && !s.sessionAutoSavePath) {
         startAutoSave();
       }
-    },
-  );
+    });
+  });
 }

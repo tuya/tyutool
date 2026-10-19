@@ -1006,12 +1006,18 @@ describe("flash store", () => {
       await Promise.resolve();
       await nextTick();
 
-      expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
-      expect(debugStore.open).toBe(false);
-      expect(debugStore.opening).toBe(true);
-      expect(wsTransport.runJob).not.toHaveBeenCalled();
+      try {
+        expect(pm.currentOwner("/dev/ttyUSB0")).toBe("serial-debug");
+        // Keep the session open until close acknowledgement and the last batch
+        // have drained, so auto-save still owns the final bytes.
+        expect(debugStore.open).toBe(true);
+        expect(debugStore.opening).toBe(true);
+        expect(wsTransport.runJob).not.toHaveBeenCalled();
+      } finally {
+        // Never strand the close gate if one of the ordering assertions fails.
+        serialTransport.finishClose();
+      }
 
-      serialTransport.finishClose();
       await Promise.resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
       await nextTick();

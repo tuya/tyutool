@@ -11,7 +11,11 @@ import {
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { useSerialAutoSave } from "./useSerialAutoSave";
 import { formatTs } from "./utils";
-import type { SerialDebugLine, SerialDebugSessionPage } from "./types";
+import type {
+  DebugChunk,
+  SerialDebugLine,
+  SerialDebugSessionPage,
+} from "./types";
 
 const invokeSpy = vi.hoisted(() => vi.fn());
 
@@ -50,6 +54,9 @@ let sysLineArchivePosition: number | null = null;
 
 /** Holds the sys-line archive write open, to model a slow round trip. */
 let sysLineGate: Promise<void> | null = null;
+let clearSessionCalls = 0;
+let chunkBatchListener: ((chunks: DebugChunk[]) => void) | null = null;
+let closingChunkBatch: DebugChunk[] | null = null;
 
 /** Serve `lines` as an archive; `growBy` fakes a session that keeps growing. */
 function archivePages(
@@ -71,9 +78,13 @@ function archivePages(
 function fakeTransport(): SerialDebugTransport {
   return {
     async open() {},
-    async close() {},
+    async close() {
+      if (closingChunkBatch) chunkBatchListener?.(closingChunkBatch);
+    },
     async send() {},
-    async clearSession() {},
+    async clearSession() {
+      clearSessionCalls += 1;
+    },
     async appendSysLine() {
       if (sysLineGate) await sysLineGate;
       return sysLineArchivePosition;
@@ -92,7 +103,8 @@ function fakeTransport(): SerialDebugTransport {
     onChunk() {
       return () => {};
     },
-    onChunkBatch() {
+    onChunkBatch(listener) {
+      chunkBatchListener = listener;
       return () => {};
     },
     onDisconnect() {
@@ -152,6 +164,9 @@ describe("useSerialAutoSave", () => {
     sessionPageHandler = noArchive;
     sysLineArchivePosition = null;
     sysLineGate = null;
+    clearSessionCalls = 0;
+    chunkBatchListener = null;
+    closingChunkBatch = null;
     setActivePinia(createPinia());
     __setSerialDebugTransportForTest(fakeTransport());
   });
@@ -294,6 +309,7 @@ describe("useSerialAutoSave", () => {
 
     (releaseFirstWrite as (() => void) | null)?.();
     await flushMicrotasks();
+    await vi.waitFor(() => expect(s.sessionAutoSavePath).toBeNull());
 
     expect(appendCalls()).toHaveLength(2);
     expect(s.sessionAutoSavePath).toBeNull();
@@ -1038,14 +1054,7 @@ describe("useSerialAutoSave", () => {
     ).toBe(false);
   });
 
-  /**
-   * Navigating away keeps the session file (the port is still open) but stops
-   * the flush interval, so nothing renews the grant while the user is gone —
-   * ten minutes on another page is enough for it to lapse. Coming back resumes
-   * the interval on the same path, so the renewal has to land before the first
-   * append or every later write is refused.
-   */
-  it("renews the write authorization when the page is reactivated with the port open", async () => {
+  it("keeps the session interval running across page deactivation", async () => {
     const s = useSerialDebugStore();
     const page = mountKeptAlive(s);
     invokeSpy.mockResolvedValue(undefined);
@@ -1066,21 +1075,6 @@ describe("useSerialAutoSave", () => {
     // The port is still open, so the session file survives the navigation.
     expect(s.sessionAutoSavePath).toBe(sessionPath);
 
-    // Hold the renewal open, to prove nothing is appended before it lands.
-    let releaseRenewal: (() => void) | null = null;
-    invokeSpy.mockImplementation(async (cmd: string) => {
-      if (cmd === "register_dialog_path") {
-        await new Promise<void>((resolve) => {
-          releaseRenewal = resolve;
-        });
-      }
-    });
-
-    await page.activate();
-    await settle();
-
-    expect(registerCalls()).toHaveLength(2);
-
     s.appendChunk({
       direction: "rx",
       tsMs: 3000,
@@ -1089,12 +1083,576 @@ describe("useSerialAutoSave", () => {
     await vi.advanceTimersByTimeAsync(5000);
     await settle();
 
-    // The resumed interval ticked while the renewal was still pending.
-    expect(appendCalls()).toHaveLength(0);
-
-    (releaseRenewal as (() => void) | null)?.();
+    await page.activate();
     await settle();
 
     expect(writtenContents()).toEqual([`[${formatTs(3000)}] [RX ] back\n`]);
+  });
+
+  it("continues saving and drains the live queue while the page is deactivated", async () => {
+    const s = useSerialDebugStore();
+    const page = mountKeptAlive(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+    const path = s.sessionAutoSavePath;
+
+    await page.deactivate();
+    await settle();
+    // More than the visible window: retaining only what is on screen would
+    // hide both the missing writes and the growing auto-save backlog.
+    feedBacklog(s, 10_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+
+    expect(s.sessionAutoSavePath).toBe(path);
+    const savedLines = writtenContents().flatMap((content) =>
+      content.trimEnd().split("\n"),
+    );
+    expect(savedLines).toHaveLength(10_000);
+    expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+  });
+
+  it("saves pending live lines before clearing the display and archive", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("before-clear\n")],
+    });
+    // Clear inside the five-second save interval, while the line is only
+    // queued. The archive is reset too, so there is no later backfill source.
+    await s.clear();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("after-clear\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    expect(writtenContents().join("")).toBe(
+      `[${formatTs(1000)}] [RX ] before-clear\n` +
+        `[${formatTs(2000)}] [RX ] after-clear\n`,
+    );
+  });
+
+  it("keeps clear from deleting lines queued after its save boundary", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    let releaseWrite!: () => void;
+    let holdFirstWrite = true;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file" && holdFirstWrite) {
+        holdFirstWrite = false;
+        await new Promise<void>((resolve) => (releaseWrite = resolve));
+      }
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("before\n")],
+    });
+    const clearing = s.clear();
+    await settle();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("during\n")],
+    });
+    releaseWrite();
+    await clearing;
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    expect(writtenContents().join("")).toContain("before\n");
+    expect(writtenContents().join("")).toContain("during\n");
+    expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+  });
+
+  it("captures real queued chunks and the pending tail that arrive during clear's slow write", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    await s.openPort();
+    await nextTick();
+    await settle();
+
+    let releaseWrite!: () => void;
+    let holdFirstWrite = true;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file" && holdFirstWrite) {
+        holdFirstWrite = false;
+        await new Promise<void>((resolve) => (releaseWrite = resolve));
+      }
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("before\n")],
+    });
+    const clearing = s.clear();
+    await settle();
+
+    chunkBatchListener?.([
+      {
+        direction: "rx",
+        tsMs: 2000,
+        bytes: [...Buffer.from("late-complete\nlate-tail")],
+      },
+    ]);
+    releaseWrite();
+    await clearing;
+    expect(s.lines).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    const saved = writtenContents().join("");
+    expect(saved).toContain("before\n");
+    expect(saved).toContain("late-complete\n");
+    expect(saved).toContain("late-tail\n");
+    expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+  });
+
+  it("auto-saves the final close batch when another feature takes the port", async () => {
+    const { usePortManagerStore } = await import("@/stores/port-manager");
+    const pm = usePortManagerStore();
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.autoRelease = true;
+    await s.openPort();
+    await nextTick();
+    await settle();
+    expect(s.sessionAutoSavePath).not.toBeNull();
+
+    closingChunkBatch = [
+      {
+        direction: "rx",
+        tsMs: 3000,
+        bytes: [...Buffer.from("flash-final\nflash-tail")],
+      },
+    ];
+    await pm.acquire({
+      id: "flash",
+      port: "/dev/ttyUSB0",
+      onReleaseRequest: async () => false,
+      onReleased: () => {},
+    });
+    await settle();
+
+    expect(writtenContents().join("")).toContain("flash-final\n");
+    expect(writtenContents().join("")).toContain("flash-tail\n");
+    expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+  });
+
+  it("aborts clear and preserves queued lines when the pre-clear write fails", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("keep-me\n")],
+    });
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file") throw new Error("disk full");
+    });
+
+    await expect(s.clear()).rejects.toThrow("disk full");
+    expect(s.lines.map((line) => line.text)).toContain("keep-me");
+    const queued = s
+      .drainPendingAutoSaveLines(Infinity)
+      .map((line) => line.text);
+    expect(queued[0]).toBe("keep-me");
+    expect(queued[1]).toContain("serialDebug.autoSave.errWrite");
+  });
+
+  it("keeps an in-flight periodic append bounded to the clear-time watermark", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    let releaseWrite!: () => void;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file") {
+        await new Promise<void>((resolve) => (releaseWrite = resolve));
+      }
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("before\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    expect(appendCalls()).toHaveLength(1);
+    const clearing = s.clear();
+    await settle();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("after-boundary\n")],
+    });
+    releaseWrite();
+    await clearing;
+
+    expect(clearSessionCalls).toBe(1);
+    expect(writtenContents().join("")).toContain("before\n");
+    expect((appendCalls()[0][1] as { content: string }).content).not.toContain(
+      "after-boundary",
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    expect(writtenContents().join("")).toContain("after-boundary\n");
+  });
+
+  it("rejects clear when an in-flight periodic append fails", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    let rejectWrite!: (error: Error) => void;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file") {
+        await new Promise<void>((_resolve, reject) => (rejectWrite = reject));
+      }
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("preserve\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    expect(appendCalls()).toHaveLength(1);
+    const clearing = s.clear();
+    await settle();
+    rejectWrite(new Error("disk full"));
+    await expect(clearing).rejects.toThrow("disk full");
+
+    expect(clearSessionCalls).toBe(0);
+    expect(s.lines.map((line) => line.text)).toContain("preserve");
+    const queued = s
+      .drainPendingAutoSaveLines(Infinity)
+      .map((line) => line.text);
+    expect(queued[0]).toBe("preserve");
+    expect(queued[1]).toContain("serialDebug.autoSave.errWrite");
+  });
+
+  it("writes subsequent lines to the newly selected auto-save directory", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/old";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    s.autoSaveDir = "/new";
+    await nextTick();
+    await settle();
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("new-directory\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    const writes = appendCalls().map(
+      (call) => call[1] as { path: string; content: string },
+    );
+    const write = writes.find((entry) =>
+      entry.content.includes("new-directory"),
+    );
+    expect(write).toBeDefined();
+    expect(write?.path).toMatch(/^\/new\//);
+  });
+
+  it("finishes old queued writes in the old directory before switching", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/old";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    let releaseOldWrite!: () => void;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file") {
+        await new Promise<void>((resolve) => (releaseOldWrite = resolve));
+      }
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("old-pending\n")],
+    });
+    s.autoSaveDir = "/new";
+    await nextTick();
+    await settle();
+    expect(appendCalls()).toHaveLength(1);
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("during-switch\n")],
+    });
+    releaseOldWrite();
+    await settle(30);
+
+    const writes = appendCalls().map(
+      (call) => call[1] as { path: string; content: string },
+    );
+    expect(writes[0].path).toMatch(/^\/old\//);
+    expect(writes[0].content).toContain("old-pending");
+    expect(s.sessionAutoSavePath).toMatch(/^\/new\//);
+
+    invokeSpy.mockResolvedValue(undefined);
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 3000,
+      bytes: [...Buffer.from("new-directory\n")],
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    const newFileWrites = appendCalls()
+      .map((call) => call[1] as { path: string; content: string })
+      .filter((entry) => entry.path.startsWith("/new/"));
+    expect(
+      newFileWrites.some((entry) => entry.content.includes("during-switch")),
+    ).toBe(true);
+    expect(
+      newFileWrites.some((entry) => entry.content.includes("new-directory")),
+    ).toBe(true);
+  });
+
+  it("switches from a child auto-save directory to its parent", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs/child";
+    s.open = true;
+    await nextTick();
+    await settle();
+    const oldPath = s.sessionAutoSavePath;
+
+    s.autoSaveDir = "/logs";
+    await nextTick();
+    await settle();
+
+    expect(s.sessionAutoSavePath).not.toBe(oldPath);
+    expect(s.sessionAutoSavePath).toMatch(/^\/logs\/dev_ttyUSB0\//);
+  });
+
+  it("switches between sibling auto-save directories", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs/one";
+    s.open = true;
+    await nextTick();
+    await settle();
+    const oldPath = s.sessionAutoSavePath;
+
+    s.autoSaveDir = "/logs/two";
+    await nextTick();
+    await settle();
+
+    expect(s.sessionAutoSavePath).not.toBe(oldPath);
+    expect(s.sessionAutoSavePath).toMatch(/^\/logs\/two\/dev_ttyUSB0\//);
+  });
+
+  it("uses the latest directory after consecutive changes during an old-file write", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs/first";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    let releaseOldWrite!: () => void;
+    let holdFirstWrite = true;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file" && holdFirstWrite) {
+        holdFirstWrite = false;
+        await new Promise<void>((resolve) => (releaseOldWrite = resolve));
+      }
+    });
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("first-directory\n")],
+    });
+    s.autoSaveDir = "/logs/second";
+    await nextTick();
+    await settle();
+    expect(appendCalls()).toHaveLength(1);
+
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 2000,
+      bytes: [...Buffer.from("during-switch\n")],
+    });
+    s.autoSaveDir = "/logs/final";
+    await nextTick();
+    releaseOldWrite();
+    await settle(30);
+
+    expect(s.sessionAutoSavePath).toMatch(/^\/logs\/final\/dev_ttyUSB0\//);
+    invokeSpy.mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+
+    const writes = appendCalls().map(
+      (call) => call[1] as { path: string; content: string },
+    );
+    expect(writes[0].path).toMatch(/^\/logs\/first\//);
+    expect(writes[0].content).toContain("first-directory");
+    expect(
+      writes.some(
+        (write) =>
+          write.path.startsWith("/logs/final/") &&
+          write.content.includes("during-switch"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not append archive history twice when auto-save restarts in the same second", async () => {
+    vi.setSystemTime(new Date(2026, 9, 19, 12, 0, 0));
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    sessionPageHandler = archivePages([
+      { lineNo: 1, tsMs: 1000, direction: "rx", text: "archived-once" },
+    ]);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+    const firstPath = s.sessionAutoSavePath;
+
+    s.autoSave = false;
+    await nextTick();
+    await settle();
+    s.autoSave = true;
+    await nextTick();
+    await settle();
+
+    const writes = appendCalls().map(
+      (call) => call[1] as { path: string; content: string },
+    );
+    expect(
+      writes.filter(
+        (write) =>
+          write.path === firstPath && write.content.includes("archived-once"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("creates a distinct file when the port closes and reopens in the same second", async () => {
+    vi.setSystemTime(new Date(2026, 9, 19, 12, 0, 0));
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    sessionPageHandler = archivePages([
+      { lineNo: 1, tsMs: 1000, direction: "rx", text: "first-session" },
+    ]);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+    const firstPath = s.sessionAutoSavePath;
+
+    s.open = false;
+    await nextTick();
+    await settle();
+    await vi.waitFor(() => expect(s.sessionAutoSavePath).toBeNull());
+
+    sessionPageHandler = archivePages([
+      { lineNo: 1, tsMs: 2000, direction: "rx", text: "second-session" },
+    ]);
+    s.open = true;
+    await nextTick();
+    await settle();
+    const secondPath = s.sessionAutoSavePath;
+
+    expect(secondPath).not.toBe(firstPath);
+    const writes = appendCalls().map(
+      (call) => call[1] as { path: string; content: string },
+    );
+    expect(
+      writes.some(
+        (write) =>
+          write.path === firstPath && write.content.includes("first-session"),
+      ),
+    ).toBe(true);
+    expect(
+      writes.some(
+        (write) =>
+          write.path === secondPath && write.content.includes("second-session"),
+      ),
+    ).toBe(true);
   });
 });
