@@ -276,7 +276,7 @@ mod tests {
     /// The computed flag must actually reach the platform call.
     ///
     /// Closes the other gap the mutation pass found: replacing
-    /// `.with_icon_as_template(is_template)` with a hardcoded `true` in `main.rs`
+    /// `.with_icon_templated(glyph)` with a hardcoded template choice in `main.rs`
     /// left **all 131 tests green**, because the unit tests only ever inspect
     /// `Glyph.is_template` in isolation. A correct value that nothing consumes is
     /// this project's most repeated defect shape, and here its consequence is a
@@ -287,15 +287,16 @@ mod tests {
     #[test]
     fn the_template_flag_is_threaded_through_to_the_platform_not_hardcoded() {
         let main_src = include_str!("main.rs");
-        let call = main_src
-            .lines()
-            .find(|line| line.contains(".with_icon_as_template("))
-            .expect("main.rs must configure template rendering");
+        let tray_builder = main_src
+            .split("let builder = tray_icon::TrayIconBuilder::new()")
+            .nth(1)
+            .expect("main.rs must configure the tray icon builder");
 
         assert!(
-            call.contains(".with_icon_as_template(is_template)"),
-            "the flag must come from the artwork, not be spelled out: {}",
-            call.trim()
+            tray_builder.contains("#[cfg(target_os = \"macos\")]\n        let builder = if _is_template")
+                && tray_builder.contains(".with_icon_templated(glyph)")
+                && tray_builder.contains("#[cfg(not(target_os = \"macos\"))]\n        let builder = builder.with_icon(glyph)"),
+            "the artwork flag must select template rendering on macOS"
         );
     }
 }
