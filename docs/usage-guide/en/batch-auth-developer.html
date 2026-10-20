@@ -78,7 +78,7 @@
             <td>New firmware: <code>OK: log disabled</code>; old firmware: <code>No command</code> or just returns to the <code>tuya&gt;</code> prompt</td>
           </tr>
           <tr>
-            <td><code>sys_version</code></td>
+            <td><code>version</code></td>
             <td>Read firmware version</td>
             <td>A line like <code>project.version x.y.z</code></td>
           </tr>
@@ -149,7 +149,7 @@
       <ol class="steps">
         <li>☐ After power-on the device shows a <code>tuya&gt;</code> prompt (sending two bare <code>\r\n</code> wakes the shell).</li>
         <li>☐ Send <code>sys_log_enable off</code> → receive <code>OK: log disabled</code> (or, on old firmware, <code>No command</code> / return to the prompt).</li>
-        <li>☐ Send <code>sys_version</code> → receive a line <code>project.version x.y.z</code>.</li>
+        <li>☐ Send <code>version</code> → receive a line <code>project.version x.y.z</code>.</li>
         <li>☐ Send <code>read_mac</code> → receive a valid <code>XX:XX:XX:XX:XX:FF</code>.</li>
         <li>☐ Send <code>auth-read</code> on an <strong>unauthorized</strong> device → receive <code>Authorization read failure.</code></li>
         <li>☐ Send <code>auth &lt;a valid uuid + authkey&gt;</code> (UUID 16 or 20 chars, AuthKey 32 chars) → immediately receive <code>Authorization write succeeds.</code> (KV mode) or <code>Authorization write to OTP Succeeds.</code> (OTP mode).</li>

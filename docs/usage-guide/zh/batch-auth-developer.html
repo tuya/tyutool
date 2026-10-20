@@ -78,7 +78,7 @@
             <td>新固件：<code>OK: log disabled</code>；旧固件：<code>No command</code> 或直接回到 <code>tuya&gt;</code> 提示符</td>
           </tr>
           <tr>
-            <td><code>sys_version</code></td>
+            <td><code>version</code></td>
             <td>读取固件版本</td>
             <td>一行形如 <code>project.version x.y.z</code></td>
           </tr>
@@ -149,7 +149,7 @@
       <ol class="steps">
         <li>☐ 设备上电后出现 <code>tuya&gt;</code> 提示符（连发两个空 <code>\r\n</code> 能唤醒 shell）。</li>
         <li>☐ 发送 <code>sys_log_enable off</code>，收到 <code>OK: log disabled</code>（或旧固件的 <code>No command</code> / 回到提示符）。</li>
-        <li>☐ 发送 <code>sys_version</code>，收到一行 <code>project.version x.y.z</code>。</li>
+        <li>☐ 发送 <code>version</code>，收到一行 <code>project.version x.y.z</code>。</li>
         <li>☐ 发送 <code>read_mac</code>，收到有效的 <code>XX:XX:XX:XX:XX:FF</code>。</li>
         <li>☐ 发送 <code>auth-read</code>，在<strong>未授权</strong>设备上收到 <code>Authorization read failure.</code>。</li>
         <li>☐ 发送 <code>auth &lt;一组合法 uuid+authkey&gt;</code>（UUID 16 或 20 字符、AuthKey 32 字符），写入后立即收到 <code>Authorization write succeeds.</code>（KV 模式）或 <code>Authorization write to OTP Succeeds.</code>（OTP 模式）。</li>
