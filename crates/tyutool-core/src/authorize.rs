@@ -262,7 +262,7 @@ impl Default for AuthTiming {
 // ── Firmware version detection ────────────────────────────────────────────
 
 /// Parsed firmware version, from the `project.version` line of the
-/// `sys_version` command response.
+/// `version` command response.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CliVersion(u32, u32, u32);
 
@@ -1068,7 +1068,7 @@ impl<T: AuthIo> AuthSession<T> {
                     return Err(FlashError::Cancelled);
                 }
                 if is_new {
-                    let _ = self.send_cmd("sys_version");
+                    let _ = self.send_cmd("version");
                     let vlines = self.read_response();
                     let version = vlines.iter().find_map(|l| parse_cli_version(l));
                     log::info!(
@@ -1163,7 +1163,7 @@ fn parse_mac_from_str(s: &str) -> Option<String> {
     })
 }
 
-/// Parse the firmware `project.version` line printed by `sys_version`, e.g.
+/// Parse the firmware `project.version` line printed by `version`, e.g.
 /// `"project.version   1.2.3"` → `CliVersion(1, 2, 3)`. Tolerates a leading
 /// `v` and a non-numeric suffix on the patch segment (`1.2.3-rc1`).
 fn parse_cli_version(line: &str) -> Option<CliVersion> {
@@ -2835,7 +2835,7 @@ mod tests {
         let mut io = MockAuthIo::new();
         io.add_response("OK: log disabled\r\n"); // detect_firmware: sys_log_enable off
         io.add_response(""); // wake_shell clear_input
-        io.add_response("project.version   1.0.0\r\n"); // sys_version
+        io.add_response("project.version   1.0.0\r\n"); // version
         io.add_response("auth-read\r\nï¿½bad\r\nï¿½key\r\n"); // precheck auth-read
         io.add_response(""); // precheck retry: still no valid auth
         io.add_response("Authorization write succeeds.\r\n"); // auth_write
@@ -3118,7 +3118,7 @@ mod tests {
         io.add_response("OK: log disabled\r\n");
         // Response 1: wake_shell clear_input → empty
         io.add_response("");
-        // Response 2: sys_version command
+        // Response 2: version command
         io.add_response("project.version   1.0.0\r\n");
         let mut sess = AuthSession {
             port: io,
@@ -3129,7 +3129,9 @@ mod tests {
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::New(CliVersion(1, 0, 0)));
         assert!(sess.port.sent_str().contains("sys_log_enable off\r\n"));
-        assert!(sess.port.sent_str().contains("sys_version\r\n"));
+        let sent = sess.port.sent_str();
+        assert!(sent.lines().any(|line| line == "version"));
+        assert!(!sent.lines().any(|line| line == "sys_version"));
     }
 
     #[test]
@@ -3147,8 +3149,10 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
         assert_eq!(result, FirmwareKind::Old);
-        // sys_version command must NOT be sent for old firmware
-        assert!(!sess.port.sent_str().contains("sys_version\r\n"));
+        // version command must NOT be sent for old firmware
+        let sent = sess.port.sent_str();
+        assert!(!sent.lines().any(|line| line == "version"));
+        assert!(!sent.lines().any(|line| line == "sys_version"));
     }
 
     /// Timing shaped like a real chip row but two orders of magnitude faster, so
@@ -3292,7 +3296,7 @@ mod tests {
         io.add_response("OK: log disabled\r\n");
         // wake_shell clear_input → empty
         io.add_response("");
-        // sys_version command
+        // version command
         io.add_response("project.version   1.0.0\r\n");
         let mut sess = AuthSession {
             port: io,
@@ -3369,7 +3373,7 @@ mod tests {
         // detect_firmware: sys_log_enable off → OK, wake_shell, version
         io.add_response("OK: log disabled\r\n"); // sys_log_enable off
         io.add_response(""); // wake_shell clear_input
-        io.add_response("project.version   1.0.0\r\n"); // sys_version
+        io.add_response("project.version   1.0.0\r\n"); // version
                                                         // auth_read (check existing) → None (device fresh)
         io.add_response("");
         // auth_write response
