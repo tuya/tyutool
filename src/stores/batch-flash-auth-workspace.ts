@@ -5,6 +5,7 @@ import type {
   BatchFirmwareSource,
   BatchAuthConfigData,
 } from "@/features/batch-flash-auth/types";
+import { resolveCommandPrefix } from "@/features/batch-flash-auth/types";
 import { BATCH_AUTH_TOOL_CHIP_OPTIONS } from "@/features/batch-flash-auth/types";
 import { BAUD_RATE_OPTIONS } from "@/features/firmware-flash/constants";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
@@ -21,6 +22,32 @@ export interface BatchSharedConfig {
   authBaudRate: number;
   flashFirmware?: boolean;
   authorizeEnabled?: boolean;
+}
+
+export function parseBatchAuthConfig(rec: unknown): BatchAuthConfigData {
+  const r =
+    rec && typeof rec === "object" ? (rec as Record<string, unknown>) : {};
+  const customCommandPrefix =
+    typeof r.customCommandPrefix === "string" ? r.customCommandPrefix : "";
+  const requestedMode =
+    r.commandPrefixMode === "ap_cmd" || r.commandPrefixMode === "custom"
+      ? r.commandPrefixMode
+      : "none";
+  const commandPrefixMode =
+    requestedMode === "custom" &&
+    resolveCommandPrefix({
+      commandPrefixMode: "custom",
+      customCommandPrefix,
+    }) === null
+      ? "none"
+      : requestedMode;
+  return {
+    excelPath: typeof r.excelPath === "string" ? r.excelPath : "",
+    conflictPolicy: r.conflictPolicy === "overwrite" ? "overwrite" : "skip",
+    authStorage: r.authStorage === "otp" ? "otp" : "kv",
+    commandPrefixMode,
+    customCommandPrefix,
+  };
 }
 
 const FIRMWARE_KEY = "batch-flash-auth-firmware";
@@ -130,8 +157,10 @@ export async function loadBatchFlashAuthWorkspace(): Promise<{
     const firmware =
       (await store.get<BatchFirmwareConfig>(FIRMWARE_KEY)) ?? null;
 
-    const authConfig =
-      (await store.get<BatchAuthConfigData>(AUTH_CONFIG_KEY)) ?? null;
+    const savedAuthConfig = await store.get<unknown>(AUTH_CONFIG_KEY);
+    const authConfig = savedAuthConfig
+      ? parseBatchAuthConfig(savedAuthConfig)
+      : null;
 
     const sharedConfig = parseBatchSharedConfig(
       await store.get<BatchSharedConfig>(SHARED_CONFIG_KEY),

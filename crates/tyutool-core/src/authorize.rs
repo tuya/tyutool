@@ -491,6 +491,19 @@ struct AuthSession<T: AuthIo> {
     port: T,
     timing: AuthTiming,
     port_name: String,
+    command_prefix: String,
+}
+
+/// Validate and normalize the optional prefix used for authorization CLI commands.
+/// Control characters are checked before trimming so leading/trailing newlines
+/// cannot be hidden by normalization.
+pub fn normalize_auth_command_prefix(value: &str) -> Result<String, FlashError> {
+    if value.chars().any(char::is_control) {
+        return Err(FlashError::Plugin(
+            "commandPrefix must not contain control characters".into(),
+        ));
+    }
+    Ok(value.trim().to_string())
 }
 
 impl AuthSession<SerialAuthIo> {
@@ -506,6 +519,7 @@ impl AuthSession<SerialAuthIo> {
             port: SerialAuthIo { port },
             timing,
             port_name: port_name.to_string(),
+            command_prefix: String::new(),
         })
     }
 }
@@ -670,9 +684,20 @@ impl<T: AuthIo> AuthSession<T> {
 
     /// Clear RX buffer then write `cmd\r\n`.
     fn send_cmd(&mut self, cmd: &str) -> Result<(), FlashError> {
-        log::debug!("[serial] port={} >> {}", self.port_name, cmd);
+        let command = if cmd.is_empty() || self.command_prefix.is_empty() {
+            cmd.to_string()
+        } else {
+            format!("{} {cmd}", self.command_prefix)
+        };
+        // Commands can contain plaintext UUID/AuthKey credentials. Log metadata
+        // only; never write the command (or its echo) to the diagnostic log.
+        log::debug!(
+            "[serial] port={} >> command_bytes={}",
+            self.port_name,
+            command.len()
+        );
         let _ = self.port.clear_input();
-        let data = format!("{}\r\n", cmd);
+        let data = format!("{}\r\n", command);
         self.port
             .write_all(data.as_bytes())
             .map_err(FlashError::Io)?;
@@ -795,9 +820,10 @@ impl<T: AuthIo> AuthSession<T> {
             }
         }
         log::debug!(
-            "[serial] port={} << {:?} ({}ms)",
+            "[serial] port={} << lines={} bytes={} ({}ms)",
             self.port_name,
-            lines,
+            lines.len(),
+            total_bytes,
             fn_start.elapsed().as_millis()
         );
         (lines, total_bytes)
@@ -828,7 +854,11 @@ impl<T: AuthIo> AuthSession<T> {
             .iter()
             .filter(|l| {
                 let lower = l.to_lowercase();
-                !lower.contains("auth-read") && !is_device_log(l) && !is_shell_prompt(l)
+                let marker_stripped = l.strip_prefix('$').unwrap_or(l).trim_start();
+                !lower.contains("auth-read")
+                    && !(!self.command_prefix.is_empty() && l.trim() == "$")
+                    && !is_device_log(marker_stripped)
+                    && !is_shell_prompt(l)
             })
             .map(String::as_str)
             .collect();
@@ -845,7 +875,18 @@ impl<T: AuthIo> AuthSession<T> {
                 .any(|l| l.to_lowercase().contains("authorization read failure"))
         );
         for pair in relevant.windows(2) {
-            let uuid = pair[0].trim();
+            let uuid_line = pair[0].trim();
+            // Some shells echo `$` as a marker directly before the UUID.
+            // Strip exactly that marker only when the remainder is a UUID;
+            // a legitimate AuthKey beginning with `$` remains untouched.
+            let uuid = if !self.command_prefix.is_empty() {
+                uuid_line
+                    .strip_prefix('$')
+                    .unwrap_or(uuid_line)
+                    .trim_start()
+            } else {
+                uuid_line
+            };
             let authkey = pair[1].trim();
             if is_plausible_uuid_token(uuid) && is_plausible_authkey_token(authkey) {
                 return Ok(Some((uuid.to_string(), authkey.to_string())));
@@ -947,7 +988,7 @@ impl<T: AuthIo> AuthSession<T> {
             return Err(FlashError::Plugin(format!("auth_write send failed: {e}")));
         }
         let lines = self.read_response_timed(AUTH_WRITE_TIMEOUT, idle);
-        log::debug!("[serial] auth-write response={:?}", lines);
+        log::debug!("[serial] auth-write response_lines={}", lines.len());
 
         // The firmware echoes an argument-validation error and performs no write
         // when the UUID/AuthKey length is wrong (or the storage/mac argument is
@@ -1167,7 +1208,9 @@ fn parse_mac_from_str(s: &str) -> Option<String> {
 /// `"project.version   1.2.3"` → `CliVersion(1, 2, 3)`. Tolerates a leading
 /// `v` and a non-numeric suffix on the patch segment (`1.2.3-rc1`).
 fn parse_cli_version(line: &str) -> Option<CliVersion> {
-    let lower = strip_ansi(line).to_lowercase();
+    let line = strip_ansi(line);
+    let line = line.strip_prefix('$').unwrap_or(&line);
+    let lower = line.to_lowercase();
     let rest = lower.strip_prefix("project.version")?.trim();
     let rest = rest.strip_prefix('v').unwrap_or(rest);
     let mut nums = rest.split('.');
@@ -1236,11 +1279,12 @@ pub enum BatchAuthRowUpdate {
 }
 
 /// Per-batch configuration that is identical for every slot in one run.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BatchAuthSlotConfig {
     pub auth_baud_rate: u32,
     pub conflict_policy: ConflictPolicy,
     pub auth_storage: AuthStorage,
+    pub command_prefix: String,
 }
 
 /// What to do when device already has conflicting auth.
@@ -1338,6 +1382,8 @@ where
     // where callers pick it (`tyutool-cli authorize`, the bridge's
     // `default_auth_baud_rate`), which is a caller's decision to make.
     let mut sess = open(&job.port, timing, job.baud_rate)?;
+    // Single-device authorization remains unprefixed by default.
+    sess.command_prefix.clear();
 
     if cancel.load(Ordering::Relaxed) {
         return Err(FlashError::Cancelled);
@@ -1753,6 +1799,7 @@ where
 
     let timing = AuthTiming::for_chip(chip_id);
     let mut sess = open(port, timing, config.auth_baud_rate)?;
+    sess.command_prefix = normalize_auth_command_prefix(&config.command_prefix)?;
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -2454,6 +2501,19 @@ pub fn read_auth_probe(
     storage: AuthStorage,
     cancel: &AtomicBool,
 ) -> Result<ReadAuthProbeResult, FlashError> {
+    read_auth_probe_with_prefix(port, chip_id, baud_rate, storage, "", cancel)
+}
+
+/// Read-only probe with the same optional command prefix used by batch auth.
+pub fn read_auth_probe_with_prefix(
+    port: &str,
+    chip_id: &str,
+    baud_rate: u32,
+    storage: AuthStorage,
+    command_prefix: &str,
+    cancel: &AtomicBool,
+) -> Result<ReadAuthProbeResult, FlashError> {
+    let command_prefix = normalize_auth_command_prefix(command_prefix)?;
     macro_rules! check_cancel {
         () => {
             if cancel.load(Ordering::Relaxed) {
@@ -2465,6 +2525,7 @@ pub fn read_auth_probe(
     log::info!("[batch-auth] read-probe start  port={port} chip={chip_id}");
     let timing = AuthTiming::for_chip(chip_id);
     let mut sess = AuthSession::open(port, timing, baud_rate)?;
+    sess.command_prefix = command_prefix;
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -2576,6 +2637,8 @@ mod tests {
         buf: Vec<u8>,
         /// Every byte slice written (for assertion).
         sent: Vec<Vec<u8>>,
+        sent_sink: Option<std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>>,
+        read_chunk_limit: Option<usize>,
         /// Control-line transitions in order: ('D', level) for DTR, ('R', level) for RTS.
         control_lines: Vec<(char, bool)>,
         /// When set, the device stays mute until this instant: `clear_input`
@@ -2594,6 +2657,8 @@ mod tests {
                 responses: VecDeque::new(),
                 buf: Vec::new(),
                 sent: Vec::new(),
+                sent_sink: None,
+                read_chunk_limit: None,
                 control_lines: Vec::new(),
                 shell_ready_at: None,
                 cancel_after_auth_write: None,
@@ -2626,14 +2691,24 @@ mod tests {
             Ok(self.buf.len() as u32)
         }
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let n = self.buf.len().min(buf.len());
+            let n = self
+                .buf
+                .len()
+                .min(buf.len())
+                .min(self.read_chunk_limit.unwrap_or(usize::MAX));
             buf[..n].copy_from_slice(&self.buf[..n]);
             self.buf.drain(..n);
             Ok(n)
         }
         fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
             self.sent.push(data.to_vec());
-            if data.starts_with(b"auth ") {
+            if let Some(sink) = &self.sent_sink {
+                sink.lock().unwrap().push(data.to_vec());
+            }
+            if data
+                .split(|byte| byte.is_ascii_whitespace())
+                .any(|part| part == b"auth")
+            {
                 if let Some(seen) = &self.auth_write_seen {
                     seen.store(true, Ordering::Relaxed);
                 }
@@ -2676,6 +2751,7 @@ mod tests {
             port: mock,
             timing: AuthTiming::default(),
             port_name: String::new(),
+            command_prefix: String::new(),
         }
     }
 
@@ -2695,6 +2771,63 @@ mod tests {
                 "keyabcdefghijklmnopqrstuvwxyz012".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn prefixed_auth_read_ignores_shell_markers_and_keeps_dollar_authkey() {
+        let uuid = "12345678901234567890";
+        let authkey = "$1234567890123456789012345678901";
+        assert_eq!(authkey.len(), 32);
+        let mut mock = MockAuthIo::new();
+        mock.add_response(&format!(
+            "ap_cmd auth-read\r\n$[10-20 12:00:00] [INFO] device log\r\n${uuid}\r\n$\r\n{authkey}\r\n$tuya>\r\n"
+        ));
+        let mut sess = session(mock);
+        sess.command_prefix = "ap_cmd".into();
+
+        let got = sess.auth_read(AuthStorage::Kv).unwrap();
+
+        assert_eq!(got, Some((uuid.into(), authkey.into())));
+        assert_eq!(sess.port.sent_str(), "ap_cmd auth-read\r\n");
+    }
+
+    #[test]
+    fn standalone_dollar_read_chunk_does_not_truncate_later_credentials() {
+        let uuid = "12345678901234567890";
+        let authkey = "0123456789abcdef0123456789abcdef";
+        let mut mock = MockAuthIo::new();
+        mock.add_response(&format!("$\r\n{uuid}\r\n{authkey}\r\n"));
+        mock.read_chunk_limit = Some(3); // first serial read contains only "$\\r\\n"
+        let mut sess = session(mock);
+        sess.command_prefix = "ap_cmd".into();
+
+        assert_eq!(
+            sess.auth_read(AuthStorage::Kv).unwrap(),
+            Some((uuid.into(), authkey.into()))
+        );
+    }
+
+    #[test]
+    fn empty_command_does_not_get_a_prefix() {
+        let mut sess = session(MockAuthIo::new());
+        sess.command_prefix = "ap_cmd".into();
+        sess.send_cmd("").unwrap();
+        assert_eq!(sess.port.sent_str(), "\r\n");
+    }
+
+    #[test]
+    fn command_prefix_validation_checks_raw_input_then_trims_spaces() {
+        assert_eq!(
+            normalize_auth_command_prefix("  ap_cmd mode  ").unwrap(),
+            "ap_cmd mode"
+        );
+        assert_eq!(normalize_auth_command_prefix("   ").unwrap(), "");
+        for invalid in ["\ncmd", "cmd\r", "cmd\tmore", "a\u{7f}b"] {
+            assert!(
+                normalize_auth_command_prefix(invalid).is_err(),
+                "{invalid:?}"
+            );
+        }
     }
 
     #[test]
@@ -2846,6 +2979,7 @@ mod tests {
             port: io,
             timing: AuthTiming::default(),
             port_name: String::new(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let firmware = sess.detect_firmware(&cancel).unwrap();
@@ -3124,6 +3258,7 @@ mod tests {
             port: io,
             timing: AuthTiming::default(),
             port_name: String::new(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
@@ -3145,6 +3280,7 @@ mod tests {
             port: io,
             timing: AuthTiming::default(),
             port_name: String::new(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let result = sess.detect_firmware(&cancel).unwrap();
@@ -3182,6 +3318,7 @@ mod tests {
             port: MockAuthIo::new(),
             timing: fast_boot_timing(),
             port_name: "/dev/mock".to_string(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let err = sess
@@ -3202,6 +3339,7 @@ mod tests {
             port: MockAuthIo::new(),
             timing: fast_boot_timing(),
             port_name: "/dev/mock".to_string(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let message = sess.detect_firmware(&cancel).unwrap_err().to_string();
@@ -3239,6 +3377,7 @@ mod tests {
             port: MockAuthIo::new(),
             timing: fast_boot_timing(),
             port_name: "/dev/mock".to_string(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let message = sess.detect_firmware(&cancel).unwrap_err().to_string();
@@ -3274,6 +3413,7 @@ mod tests {
             port: io,
             timing: fast_boot_timing(),
             port_name: "/dev/mock".to_string(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         assert_eq!(sess.detect_firmware(&cancel).unwrap(), FirmwareKind::Old);
@@ -3302,6 +3442,7 @@ mod tests {
             port: io,
             timing: AuthTiming::for_chip("T5AI"),
             port_name: String::new(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         assert_eq!(
@@ -3388,6 +3529,7 @@ mod tests {
             port: io,
             timing: AuthTiming::default(),
             port_name: String::new(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let job = FlashJob {
@@ -3459,6 +3601,7 @@ mod tests {
             port: io,
             timing: AuthTiming::default(),
             port_name: String::new(),
+            command_prefix: String::new(),
         };
         let cancel = AtomicBool::new(false);
         let firmware = sess.detect_firmware(&cancel).unwrap();
@@ -3538,6 +3681,7 @@ mod tests {
         updates: Vec<BatchAuthRowUpdate>,
         persisted: (usize, String, String, usize, usize),
         auth_write_seen: bool,
+        sent: String,
     }
 
     #[cfg(feature = "excel")]
@@ -3547,6 +3691,8 @@ mod tests {
         cancel_during_intent: bool,
         fail_intent: bool,
         fail_auth_write: bool,
+        auth_storage: AuthStorage,
+        command_prefix: &str,
     ) -> FirmwareCancelCase {
         use crate::batch_auth::{ExcelRowAllocator, RowStatus};
         use calamine::Reader;
@@ -3571,7 +3717,9 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_progress = cancel.clone();
         let auth_write_seen = Arc::new(AtomicBool::new(false));
+        let sent_sink = Arc::new(Mutex::new(Vec::new()));
         let mut io = MockAuthIo::new();
+        io.sent_sink = Some(sent_sink.clone());
         io.auth_write_seen = Some(auth_write_seen.clone());
         io.fail_auth_write = fail_auth_write;
         if after_auth_write {
@@ -3596,11 +3744,8 @@ mod tests {
         let config = BatchAuthSlotConfig {
             auth_baud_rate: 115_200,
             conflict_policy: ConflictPolicy::Overwrite,
-            auth_storage: if old_firmware {
-                AuthStorage::Kv
-            } else {
-                AuthStorage::Otp
-            },
+            auth_storage,
+            command_prefix: command_prefix.into(),
         };
         let allocator_for_find = allocator.clone();
         let allocator_for_allocate = allocator.clone();
@@ -3667,6 +3812,7 @@ mod tests {
                     port: io,
                     timing,
                     port_name: "MOCK".into(),
+                    command_prefix: String::new(),
                 })
             },
         );
@@ -3686,6 +3832,7 @@ mod tests {
         let status_col = headers.iter().position(|h| h == "STATUS").unwrap();
         let mac_col = headers.iter().position(|h| h == "MAC").unwrap();
         let saved_row = saved_sheet.rows().nth(1).unwrap();
+        let sent = String::from_utf8_lossy(&sent_sink.lock().unwrap().concat()).into_owned();
         assert_eq!(row.0, 0);
         FirmwareCancelCase {
             result,
@@ -3698,6 +3845,47 @@ mod tests {
                 status.in_progress,
             ),
             auth_write_seen: auth_write_seen.load(Ordering::Relaxed),
+            sent,
+        }
+    }
+
+    #[cfg(feature = "excel")]
+    #[test]
+    fn batch_prefix_is_applied_through_new_and_old_kv_and_otp_sessions() {
+        for (old_firmware, storage) in [
+            (false, AuthStorage::Kv),
+            (false, AuthStorage::Otp),
+            (true, AuthStorage::Kv),
+            (true, AuthStorage::Otp),
+        ] {
+            let case = run_firmware_cancel_case(
+                old_firmware,
+                true,
+                false,
+                false,
+                false,
+                storage,
+                "ap_cmd",
+            );
+            assert!(case.auth_write_seen, "{old_firmware:?} {storage:?}");
+            let commands: Vec<_> = case.sent.lines().filter(|line| !line.is_empty()).collect();
+            assert!(!commands.is_empty());
+            assert!(commands.iter().all(|line| line.starts_with("ap_cmd ")));
+            assert!(case.sent.contains("ap_cmd sys_log_enable off\r\n"));
+            if !old_firmware {
+                assert!(case.sent.contains("ap_cmd version\r\n"));
+            }
+            assert!(case.sent.contains("ap_cmd read_mac\r\n"));
+            assert!(case.sent.contains(if storage == AuthStorage::Kv {
+                "ap_cmd auth-read\r\n"
+            } else {
+                "ap_cmd auth-read 1\r\n"
+            }));
+            assert!(case.sent.contains(if storage == AuthStorage::Kv {
+                "ap_cmd auth 12345678901234567890 0123456789abcdef0123456789abcdef\r\n"
+            } else {
+                "ap_cmd auth 12345678901234567890 0123456789abcdef0123456789abcdef 1\r\n"
+            }));
         }
     }
 
@@ -3731,7 +3919,8 @@ mod tests {
     #[cfg(feature = "excel")]
     #[test]
     fn batch_auth_cancel_before_write_keeps_row_mac_read_and_sends_no_auth() {
-        let case = run_firmware_cancel_case(false, false, false, false, false);
+        let case =
+            run_firmware_cancel_case(false, false, false, false, false, AuthStorage::Otp, "");
         assert!(matches!(
             case.result.unwrap(),
             BatchAuthSlotResult::Cancelled
@@ -3751,13 +3940,21 @@ mod tests {
     #[cfg(feature = "excel")]
     #[test]
     fn batch_auth_cancel_after_write_persists_auth_written_before_reporting() {
-        assert_after_write_state(run_firmware_cancel_case(false, true, false, false, false));
+        assert_after_write_state(run_firmware_cancel_case(
+            false,
+            true,
+            false,
+            false,
+            false,
+            AuthStorage::Otp,
+            "",
+        ));
     }
 
     #[cfg(feature = "excel")]
     #[test]
     fn batch_auth_old_firmware_cancel_before_write_keeps_row_mac_read() {
-        let case = run_firmware_cancel_case(true, false, false, false, false);
+        let case = run_firmware_cancel_case(true, false, false, false, false, AuthStorage::Kv, "");
         assert!(matches!(
             case.result.unwrap(),
             BatchAuthSlotResult::Cancelled
@@ -3774,13 +3971,21 @@ mod tests {
     #[cfg(feature = "excel")]
     #[test]
     fn batch_auth_old_firmware_cancel_after_write_persists_auth_written_before_reporting() {
-        assert_after_write_state(run_firmware_cancel_case(true, true, false, false, false));
+        assert_after_write_state(run_firmware_cancel_case(
+            true,
+            true,
+            false,
+            false,
+            false,
+            AuthStorage::Kv,
+            "",
+        ));
     }
 
     #[cfg(feature = "excel")]
     #[test]
     fn batch_auth_intent_persistence_failure_sends_no_auth_command() {
-        let case = run_firmware_cancel_case(false, false, false, true, false);
+        let case = run_firmware_cancel_case(false, false, false, true, false, AuthStorage::Otp, "");
         assert!(case.result.is_err());
         assert!(!case.auth_write_seen);
         assert_eq!(
@@ -3792,7 +3997,7 @@ mod tests {
     #[cfg(feature = "excel")]
     #[test]
     fn batch_auth_cancel_during_intent_save_is_quarantined_before_send() {
-        let case = run_firmware_cancel_case(false, false, true, false, false);
+        let case = run_firmware_cancel_case(false, false, true, false, false, AuthStorage::Otp, "");
         assert!(matches!(
             case.result.unwrap(),
             BatchAuthSlotResult::CancelledAfterWrite { .. }
@@ -3808,7 +4013,19 @@ mod tests {
     #[test]
     fn batch_auth_cancel_with_ambiguous_send_error_keeps_auth_written_state() {
         for old_firmware in [false, true] {
-            let case = run_firmware_cancel_case(old_firmware, true, false, false, true);
+            let case = run_firmware_cancel_case(
+                old_firmware,
+                true,
+                false,
+                false,
+                true,
+                if old_firmware {
+                    AuthStorage::Kv
+                } else {
+                    AuthStorage::Otp
+                },
+                "",
+            );
             assert!(matches!(
                 case.result.unwrap(),
                 BatchAuthSlotResult::CancelledAfterWrite { .. }
@@ -3825,7 +4042,19 @@ mod tests {
     #[test]
     fn batch_auth_ambiguous_send_error_keeps_auth_written_state() {
         for old_firmware in [false, true] {
-            let case = run_firmware_cancel_case(old_firmware, false, false, false, true);
+            let case = run_firmware_cancel_case(
+                old_firmware,
+                false,
+                false,
+                false,
+                true,
+                if old_firmware {
+                    AuthStorage::Kv
+                } else {
+                    AuthStorage::Otp
+                },
+                "",
+            );
             assert!(matches!(
                 case.result,
                 Ok(BatchAuthSlotResult::WriteUncertain { .. })

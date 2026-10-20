@@ -35,6 +35,8 @@
 
       <h2 id="protocol-overview">1. The protocol</h2>
       <p>tyutool's authorization protocol is the <strong>TuyaOpen interactive shell text-command exchange</strong> — plain ASCII, each command terminated with <code>\r\n</code>, no frame headers / checksums / opcodes. It is <strong>completely independent</strong> from the Beken BootROM binary protocol used for flashing firmware. The authorization phase talks to <strong>the CLI shell running on the booted device</strong>.</p>
+      <p>Batch authorization and read-only probes optionally accept <code>commandPrefix</code> (Rust field <code>command_prefix</code>). When omitted or empty, commands are sent as-is. Otherwise the value is trimmed at both ends and followed by one space before each non-empty authorization CLI command, for example <code>ap_cmd auth-read</code>. Multi-word prefixes are allowed, but control characters are rejected in the raw input, including leading or trailing newlines. Hardware reset, bare <code>\r\n</code> wakeups, and firmware flashing do not use the prefix. Single-device authorization remains unprefixed by default.</p>
+      <p>In prefixed mode, a device may emit <code>$</code> on its own line or attach it to an echo/UUID as a shell marker. Prompt lines and device logs beginning with <code>$</code> are recognized; a valid AuthKey that begins with <code>$</code> is preserved.</p>
       <ul>
         <li><strong>Baud</strong>: <code>115200</code> 8N1 by default (overridable per-batch via the "auth baud" config).</li>
         <li><strong>Interaction</strong>: after boot the device presents a <code>tuya&gt;</code> prompt; tyutool sends commands one by one and reads the echo to judge the result.</li>

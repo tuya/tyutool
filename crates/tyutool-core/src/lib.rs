@@ -46,7 +46,8 @@ mod tuya_dev_usb;
 mod usb_port_survey;
 
 pub use authorize::{
-    is_device_no_response, read_auth_probe, run_batch_auth_slot, validate_auth_credentials,
+    is_device_no_response, normalize_auth_command_prefix, read_auth_probe,
+    read_auth_probe_with_prefix, run_batch_auth_slot, validate_auth_credentials,
     wait_after_firmware_flash, AuthStorage, BatchAuthRowUpdate, BatchAuthSlotConfig,
     BatchAuthSlotResult, BatchAuthStep, ConflictPolicy, ReadAuthProbeResult,
     DEVICE_NO_RESPONSE_PREFIX,

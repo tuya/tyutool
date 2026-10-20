@@ -55,6 +55,8 @@ pub struct BatchAuthStartConfig {
     pub excel_path: String,
     pub conflict_policy: String,
     pub auth_storage: Option<String>,
+    #[serde(default)]
+    pub command_prefix: String,
     /// false ⇒ flash-only batch: skip the Excel session and the auth step.
     #[serde(default = "default_authorize_enabled")]
     pub authorize_enabled: bool,
@@ -87,6 +89,19 @@ pub fn run_batch_slot(
     // panics) has to decrement the session count. Flash-only batches
     // never incremented it, so they get no guard.
     let _session_guard = allocator.is_some().then(|| SlotSessionGuard(session));
+    let command_prefix = if config.authorize_enabled {
+        match crate::normalize_auth_command_prefix(&config.command_prefix) {
+            Ok(prefix) => prefix,
+            Err(error) => {
+                emit(
+                    serde_json::json!({"port": port, "step": "failed", "error": error.to_string()}),
+                );
+                return;
+            }
+        }
+    } else {
+        String::new()
+    };
     // Last Excel write failure for this slot; attached to the final
     // progress emit so the operator sees the sheet was NOT updated.
     let excel_err: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
@@ -252,6 +267,7 @@ pub fn run_batch_slot(
         auth_baud_rate: config.auth_baud_rate,
         conflict_policy,
         auth_storage,
+        command_prefix,
     };
     let result = crate::run_batch_auth_slot(
         &port,
@@ -392,6 +408,7 @@ mod tests {
                 excel_path: String::new(),
                 conflict_policy: "skip".into(),
                 auth_storage: None,
+                command_prefix: String::new(),
                 authorize_enabled: false,
             },
             Arc::new(AtomicBool::new(false)),
@@ -420,6 +437,7 @@ mod tests {
         )
         .unwrap();
         assert!(cfg.authorize_enabled);
+        assert!(cfg.command_prefix.is_empty());
 
         let cfg: BatchAuthStartConfig = serde_json::from_str(
             r#"{"chipId":"esp32","baudRate":921600,"authBaudRate":115200,

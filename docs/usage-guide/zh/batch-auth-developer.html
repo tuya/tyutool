@@ -35,6 +35,8 @@
 
       <h2 id="protocol-overview">1. 协议本质</h2>
       <p>tyutool 的授权协议是<strong>TuyaOpen 交互式 shell 的文本命令</strong>——纯 ASCII、每条命令以 <code>\r\n</code> 结尾、没有帧头/校验和/操作码。这和烧录固件用的 Beken BootROM 二进制协议是<strong>两套完全独立</strong>的东西。授权阶段对话的对象是<strong>设备启动后运行的那个 CLI shell</strong>。</p>
+      <p>批量授权和只读探测可选设置 <code>commandPrefix</code>（Rust 字段 <code>command_prefix</code>）：空值或省略时直接发送命令；非空时先 trim 首尾空格，并在每条非空授权 CLI 命令前加上该前缀和一个空格，例如 <code>ap_cmd auth-read</code>。前缀可由多个单词组成，但原始输入不得含控制字符（包括位于首尾的换行）；硬件复位、唤醒用的裸 <code>\r\n</code> 和固件烧录不带前缀。单设备授权默认不使用此前缀。</p>
+      <p>设备可在带前缀模式下用独立的 <code>$</code> 行或将它贴在回显/UUID 前作为 shell marker；提示符和以 <code>$</code> 开头的设备日志会被识别。有效 AuthKey 即使以 <code>$</code> 开头也会原样保留。</p>
       <ul>
         <li><strong>波特率</strong>：默认 <code>115200</code> 8N1（可被批量配置的“授权波特率”覆盖）。</li>
         <li><strong>交互方式</strong>：设备上电后呈现 <code>tuya&gt;</code> 提示符；tyutool 逐条发送命令，读取回显判定结果。</li>

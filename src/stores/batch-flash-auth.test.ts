@@ -351,6 +351,26 @@ describe("canStart / canRetry / canCancel", () => {
     expect(store.canStart).toBe(true);
   });
 
+  it("blocks authorization with an invalid custom prefix but allows flash-only batches", () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.authConfig.commandPrefixMode = "custom";
+    store.authConfig.customCommandPrefix = " \n";
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+    expect(store.commandPrefixValid).toBe(false);
+    expect(store.canStart).toBe(false);
+    store.firmwarePath = "/fw.bin";
+    store.authorizeEnabled = false;
+    expect(store.canStart).toBe(true);
+  });
+
   it("canStart is false when excel path is set but stats are unknown (validation pending)", () => {
     const store = useBatchFlashAuthStore();
     store.addPorts(["COM3"]);
@@ -1652,6 +1672,8 @@ describe("loadPersistedData — legacy lockOtpAfterAuth key does not leak in", (
     await store.loadPersistedData();
     expect(store.authConfig.excelPath).toBe("/persisted/path.xlsx");
     expect(store.authConfig.authStorage).toBe("otp");
+    expect(store.authConfig.commandPrefixMode).toBe("none");
+    expect(store.authConfig.customCommandPrefix).toBe("");
     expect(
       (store.authConfig as Record<string, unknown>).lockOtpAfterAuth,
     ).toBeUndefined();
@@ -1918,9 +1940,44 @@ describe("port-manager integration", () => {
         excelPath: "/auth.xlsx",
         conflictPolicy: "overwrite",
         authStorage: "kv",
+        commandPrefix: "",
         authorizeEnabled: true,
       },
     });
+  });
+
+  it("passes a trimmed multiword custom prefix to batch start", async () => {
+    const { store, invoke } = await setupStore();
+    store.authConfig.commandPrefixMode = "custom";
+    store.authConfig.customCommandPrefix = "  vendor auth  ";
+    await store.startBatch();
+    expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
+      ports: ["COM3", "COM5"],
+      config: expect.objectContaining({ commandPrefix: "vendor auth" }),
+    });
+  });
+
+  it("passes the resolved prefix when retrying one port", async () => {
+    const { store, invoke } = await setupStore();
+    store.authConfig.commandPrefixMode = "ap_cmd";
+    store.slots[0].status = "failed";
+    store.slots[0].error = "previous failure";
+    await store.retryPort("COM3");
+    expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
+      ports: ["COM3"],
+      config: expect.objectContaining({ commandPrefix: "ap_cmd" }),
+    });
+  });
+
+  it("does not start a batch after a custom prefix becomes invalid", async () => {
+    const { store, invoke } = await setupStore();
+    store.authConfig.commandPrefixMode = "custom";
+    store.authConfig.customCommandPrefix = "\r\n";
+    await store.startBatch();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "batch_auth_start",
+      expect.anything(),
+    );
   });
 
   it("does not start or claim any ports when every port is occupied", async () => {
@@ -1949,6 +2006,7 @@ describe("port-manager integration", () => {
 
   it("Read All probes only free ports and releases their claims on completion", async () => {
     const { store, pm, invoke } = await setupStore();
+    store.authConfig.commandPrefixMode = "ap_cmd";
     await store.ensureListener();
     await pm.acquire({
       id: "serial-debug",
@@ -1968,6 +2026,7 @@ describe("port-manager integration", () => {
         chipId: "esp32",
         baudRate: 115_200,
         authStorage: "kv",
+        commandPrefix: "ap_cmd",
       },
       ports: ["COM3"],
     });
@@ -1988,6 +2047,35 @@ describe("port-manager integration", () => {
     expect(store.slots[0].status).toBe("idle");
     expect(pm.currentOwner("COM3")).toBeNull();
     expect(pm.currentOwner("COM5")).toBe("serial-debug");
+  });
+
+  it("includes a custom prefix in read IPC and does not require an Excel sheet", async () => {
+    const { store, invoke } = await setupStore();
+    store.authConfig.excelPath = "";
+    store.authConfig.commandPrefixMode = "custom";
+    store.authConfig.customCommandPrefix = " vendor read ";
+    await store.readPort("COM3");
+    expect(invoke).toHaveBeenCalledWith("batch_auth_read_ports", {
+      config: {
+        chipId: "esp32",
+        baudRate: 115_200,
+        authStorage: "kv",
+        commandPrefix: "vendor read",
+      },
+      ports: ["COM3"],
+    });
+  });
+
+  it("blocks single-port and batch reads with an invalid custom prefix", async () => {
+    const { store, invoke } = await setupStore();
+    store.authConfig.commandPrefixMode = "custom";
+    store.authConfig.customCommandPrefix = "\n";
+    await store.readPort("COM3");
+    await store.readAll();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "batch_auth_read_ports",
+      expect.anything(),
+    );
   });
 
   it.each(["cancelledAfterWrite", "writeUncertain"] as const)(

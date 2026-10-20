@@ -5,7 +5,11 @@ import { useI18n } from "vue-i18n";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import type { BatchSlotState } from "../types";
 
-const props = defineProps<{ portSlot: BatchSlotState; rowIndex?: number }>();
+const props = defineProps<{
+  portSlot: BatchSlotState;
+  rowIndex?: number;
+  canRead?: boolean;
+}>();
 const emit = defineEmits<{
   cancel: [port: string];
   retry: [port: string];
@@ -361,7 +365,12 @@ function showExcelError(): void {
         v-if="canRead"
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
-        :title="t('batchFlashAuth.slot.readHint')"
+        :disabled="props.canRead === false"
+        :title="
+          props.canRead === false
+            ? t('batchFlashAuth.config.invalidCommandPrefix')
+            : t('batchFlashAuth.slot.readHint')
+        "
         @click="$emit('read', portSlot.port)"
       >
         {{ t("batchFlashAuth.slot.read") }}

@@ -20,6 +20,7 @@ import {
   type BatchAuthProgressEvent,
   type BatchAuthReadProgressEvent,
   type BatchAuthStartConfig,
+  resolveCommandPrefix,
   type AuthFirmwareEntry,
   type BatchFirmwareSource,
   type ExcelStats,
@@ -97,6 +98,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     excelPath: "",
     conflictPolicy: "skip",
     authStorage: "kv",
+    commandPrefixMode: "none",
+    customCommandPrefix: "",
   });
   const batchStartTime = ref<number | null>(null);
   const batchEndTime = ref<number | null>(null);
@@ -147,6 +150,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   );
 
   const isBusy = computed(() => currentStats.value.active > 0);
+  const commandPrefix = computed(() => resolveCommandPrefix(authConfig.value));
+  const commandPrefixValid = computed(() => commandPrefix.value !== null);
   const canStart = computed(() => {
     if (
       isBusy.value ||
@@ -156,6 +161,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       return false;
     // Flash-only batch: the Excel sheet is not used, so its checks don't apply.
     if (!authorizeEnabled.value) return true;
+    if (!commandPrefixValid.value) return false;
     return (
       !excelError.value &&
       excelStats.value !== null &&
@@ -181,7 +187,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         s.status === "no_code",
     ),
   );
-  const canReadAll = computed(() => !isBusy.value && slots.value.length > 0);
+  const canReadAll = computed(
+    () => !isBusy.value && slots.value.length > 0 && commandPrefixValid.value,
+  );
   /** Archiving needs a finished batch (results to record) and — when
    *  authorization ran — the Excel path (the sheet copy is the core of the
    *  archive). A flash-only batch has no sheet to copy. */
@@ -491,6 +499,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function startAuth() {
     if (!canStart.value) return;
+    const resolvedPrefix = authorizeEnabled.value ? commandPrefix.value : "";
+    if (resolvedPrefix === null) return;
     if (!isTauriRuntime()) return;
     batchStartTime.value = Date.now();
     batchEndTime.value = null;
@@ -575,6 +585,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
+      commandPrefix: resolvedPrefix,
       authorizeEnabled: authorizeEnabled.value,
     };
     try {
@@ -590,6 +601,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function retryFailed() {
     if (!canRetry.value) return;
+    if (authorizeEnabled.value && !commandPrefixValid.value) return;
     completionBanner.value = null;
     for (const slot of slots.value.filter(
       (s) =>
@@ -613,6 +625,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function retryPort(port: string) {
     if (!isTauriRuntime()) return;
+    const resolvedPrefix = authorizeEnabled.value ? commandPrefix.value : "";
+    if (resolvedPrefix === null) return;
     const slot = findSlot(port);
     if (!slot) return;
     if (slot.status !== "failed" && slot.status !== "no_code") return;
@@ -665,6 +679,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       excelPath: authConfig.value.excelPath,
       conflictPolicy: authConfig.value.conflictPolicy,
       authStorage: authConfig.value.authStorage,
+      commandPrefix: resolvedPrefix,
       authorizeEnabled: authorizeEnabled.value,
     };
     try {
@@ -688,6 +703,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function readPort(port: string) {
     if (!isTauriRuntime()) return;
+    const resolvedPrefix = commandPrefix.value;
+    if (resolvedPrefix === null) return;
     const slot = findSlot(port);
     if (!slot || ACTIVE_STATUSES.includes(slot.status)) return;
     // read_auth_probe opens the serial port in Rust, so it must go through the
@@ -701,6 +718,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         chipId: chipId.value,
         baudRate: authBaudRate.value,
         authStorage: authConfig.value.authStorage,
+        commandPrefix: resolvedPrefix,
       },
       ports: [port],
     });
@@ -708,6 +726,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function readAll() {
     if (!isTauriRuntime()) return;
+    const resolvedPrefix = commandPrefix.value;
+    if (resolvedPrefix === null) return;
     const readable = slots.value.filter(
       (s) => !ACTIVE_STATUSES.includes(s.status),
     );
@@ -725,6 +745,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         chipId: chipId.value,
         baudRate: authBaudRate.value,
         authStorage: authConfig.value.authStorage,
+        commandPrefix: resolvedPrefix,
       },
       ports: acquired,
     });
@@ -1160,6 +1181,8 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         excelPath: savedAuthConfig.excelPath ?? "",
         conflictPolicy: savedAuthConfig.conflictPolicy ?? "skip",
         authStorage: (savedAuthConfig.authStorage as "kv" | "otp") ?? "kv",
+        commandPrefixMode: savedAuthConfig.commandPrefixMode ?? "none",
+        customCommandPrefix: savedAuthConfig.customCommandPrefix ?? "",
       };
     }
     if (sharedConfig) {
@@ -1350,6 +1373,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     canCancel,
     canRetry,
     canReadAll,
+    commandPrefixValid,
     canArchive,
     filterActive,
     batchStartTime,

@@ -48,6 +48,8 @@ pub(crate) struct BatchAuthReadConfig {
     chip_id: String,
     baud_rate: u32,
     auth_storage: Option<String>,
+    #[serde(default)]
+    command_prefix: String,
 }
 
 #[tauri::command]
@@ -218,6 +220,12 @@ pub(crate) fn batch_auth_start(
     config: BatchAuthStartConfig,
     ports: Vec<String>,
 ) -> Result<(), String> {
+    let command_prefix = if config.authorize_enabled {
+        tyutool_core::normalize_auth_command_prefix(&config.command_prefix)
+            .map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
     let conflict_policy = match config.conflict_policy.as_str() {
         "overwrite" => tyutool_core::ConflictPolicy::Overwrite,
         _ => tyutool_core::ConflictPolicy::Skip,
@@ -336,7 +344,8 @@ pub(crate) fn batch_auth_start(
         let cancel_clone = cancel.clone();
         let app_clone = app.clone();
         let port_clone = port.clone();
-        let config_clone = config.clone();
+        let mut config_clone = config.clone();
+        config_clone.command_prefix = command_prefix.clone();
         let alloc_clone = allocator.clone();
         let session_clone = state.session.clone();
         let trace_clone = trace_writer.clone();
@@ -404,6 +413,8 @@ pub(crate) fn batch_auth_read_ports(
     config: BatchAuthReadConfig,
     ports: Vec<String>,
 ) -> Result<(), String> {
+    let command_prefix = tyutool_core::normalize_auth_command_prefix(&config.command_prefix)
+        .map_err(|e| e.to_string())?;
     let auth_storage = match config.auth_storage.as_deref() {
         Some("otp") => tyutool_core::AuthStorage::Otp,
         _ => tyutool_core::AuthStorage::Kv,
@@ -444,15 +455,17 @@ pub(crate) fn batch_auth_read_ports(
         let cancel_clone = cancel.clone();
         let app_clone = app.clone();
         let port_clone = port.clone();
-        let config_clone = config.clone();
+        let mut config_clone = config.clone();
+        config_clone.command_prefix = command_prefix.clone();
 
         let handle = std::thread::spawn(move || {
             log::info!("[batch-auth-read] slot begin port={}", port_clone);
-            let result = tyutool_core::read_auth_probe(
+            let result = tyutool_core::read_auth_probe_with_prefix(
                 &port_clone,
                 &config_clone.chip_id,
                 config_clone.baud_rate,
                 auth_storage,
+                &config_clone.command_prefix,
                 &cancel_clone,
             );
             match result {
