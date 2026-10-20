@@ -1,8 +1,43 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseBatchAuthConfig,
   parseBatchSharedConfig,
   type BatchSharedConfig,
 } from "./batch-flash-auth-workspace";
+
+describe("parseBatchAuthConfig", () => {
+  it("defaults legacy and damaged prefix fields to no prefix", () => {
+    expect(parseBatchAuthConfig({ excelPath: "/auth.xlsx" })).toMatchObject({
+      commandPrefixMode: "none",
+      customCommandPrefix: "",
+    });
+    expect(parseBatchAuthConfig(null).commandPrefixMode).toBe("none");
+    expect(
+      parseBatchAuthConfig({ commandPrefixMode: "unknown" }).commandPrefixMode,
+    ).toBe("none");
+    expect(
+      parseBatchAuthConfig({
+        commandPrefixMode: "custom",
+        customCommandPrefix: "\r\n",
+      }).commandPrefixMode,
+    ).toBe("none");
+  });
+
+  it("preserves a supported mode and custom value", () => {
+    expect(
+      parseBatchAuthConfig({
+        commandPrefixMode: "custom",
+        customCommandPrefix: " vendor command ",
+      }),
+    ).toMatchObject({
+      commandPrefixMode: "custom",
+      customCommandPrefix: " vendor command ",
+    });
+    expect(
+      parseBatchAuthConfig({ commandPrefixMode: "ap_cmd" }).commandPrefixMode,
+    ).toBe("ap_cmd");
+  });
+});
 
 /** A minimal valid shared-config record; callers spread a patch over it. */
 function base(): BatchSharedConfig {

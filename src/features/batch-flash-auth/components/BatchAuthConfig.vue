@@ -5,9 +5,15 @@ import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 import TySwitch from "@/components/TySwitch.vue";
+import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
 
 const { t, te } = useI18n();
 const store = useBatchFlashAuthStore();
+const commandPrefixOptions = computed<TySelectOption[]>(() => [
+  { value: "none", label: t("batchFlashAuth.config.commandPrefixNone") },
+  { value: "ap_cmd", label: t("batchFlashAuth.config.commandPrefixApCmd") },
+  { value: "custom", label: t("batchFlashAuth.config.commandPrefixCustom") },
+]);
 
 // Turning authorization OFF requires firmware flashing to be on (otherwise
 // the batch would do nothing); turning it back ON is always allowed.
@@ -189,6 +195,54 @@ async function browseExcel() {
             {{ t("batchFlashAuth.config.excelExhausted") }}
           </span>
         </div>
+      </div>
+
+      <div class="grid gap-1.5 sm:grid-cols-2 sm:items-start">
+        <div class="flex min-w-0 flex-col gap-1">
+          <label
+            for="batch-auth-command-prefix-mode"
+            class="text-xs text-[var(--ty-text-muted)]"
+            >{{ t("batchFlashAuth.config.commandPrefix") }}</label
+          >
+          <TySelect
+            id="batch-auth-command-prefix-mode"
+            v-model="store.authConfig.commandPrefixMode"
+            :options="commandPrefixOptions"
+            :disabled="store.isBusy"
+          />
+        </div>
+        <div
+          v-if="store.authConfig.commandPrefixMode === 'custom'"
+          class="flex min-w-0 flex-col gap-1"
+        >
+          <label
+            for="batch-auth-custom-command-prefix"
+            class="text-xs text-[var(--ty-text-muted)]"
+            >{{ t("batchFlashAuth.config.customCommandPrefix") }}</label
+          >
+          <input
+            id="batch-auth-custom-command-prefix"
+            v-model="store.authConfig.customCommandPrefix"
+            type="text"
+            :disabled="store.isBusy"
+            :aria-invalid="!store.commandPrefixValid"
+            :aria-describedby="
+              !store.commandPrefixValid
+                ? 'batch-auth-command-prefix-error'
+                : undefined
+            "
+            class="h-[2.125rem] min-w-0 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 text-xs text-[var(--ty-text)]"
+          />
+        </div>
+        <p
+          v-if="!store.commandPrefixValid"
+          id="batch-auth-command-prefix-error"
+          class="text-xs sm:col-span-2"
+          :style="{ color: 'var(--ty-danger)' }"
+          role="alert"
+        >
+          {{ t("batchFlashAuth.config.invalidCommandPrefix") }}
+        </p>
       </div>
 
       <!-- Conflict policy + Storage mode (T5AI): same row when space allows, wraps otherwise -->

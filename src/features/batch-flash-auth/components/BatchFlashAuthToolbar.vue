@@ -19,6 +19,8 @@ const startDisabledHint = computed(() => {
       return t("batchFlashAuth.toolbar.selectFirmwareFirst");
     return t("batchFlashAuth.toolbar.noIdlePorts");
   }
+  if (!store.commandPrefixValid)
+    return t("batchFlashAuth.toolbar.invalidCommandPrefix");
   if (!store.authConfig.excelPath)
     return t("batchFlashAuth.toolbar.selectExcelFirst");
   if (store.excelError) return t("batchFlashAuth.toolbar.excelInvalid");
@@ -112,7 +114,9 @@ async function handleAutoAssign() {
         :title="
           store.isBusy
             ? t('batchFlashAuth.toolbar.readAllBusy')
-            : t('batchFlashAuth.toolbar.readAllHint')
+            : !store.commandPrefixValid
+              ? t('batchFlashAuth.config.invalidCommandPrefix')
+              : t('batchFlashAuth.toolbar.readAllHint')
         "
         @click="store.readAll()"
       >

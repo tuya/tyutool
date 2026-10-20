@@ -45,6 +45,7 @@ async function onRead(port: string) {
         :key="s.port"
         :portSlot="s"
         :rowIndex="index"
+        :canRead="store.commandPrefixValid"
         class="border-b border-[var(--ty-border)] last:border-b-0"
         @cancel="onCancel"
         @retry="onRetry"

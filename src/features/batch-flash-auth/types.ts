@@ -78,6 +78,24 @@ export interface BatchAuthConfigData {
   excelPath: string;
   conflictPolicy: "skip" | "overwrite";
   authStorage: "kv" | "otp";
+  commandPrefixMode: "none" | "ap_cmd" | "custom";
+  customCommandPrefix: string;
+}
+
+/** Returns the normalized IPC prefix, or null when custom input is invalid. */
+export function resolveCommandPrefix(
+  config: Pick<
+    BatchAuthConfigData,
+    "commandPrefixMode" | "customCommandPrefix"
+  >,
+): string | null {
+  if (config.commandPrefixMode === "none") return "";
+  if (config.commandPrefixMode === "ap_cmd") return "ap_cmd";
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(config.customCommandPrefix)) {
+    return null;
+  }
+  const prefix = config.customCommandPrefix.trim();
+  return prefix || null;
 }
 
 /** `batch-flash-progress` event payload from Rust. */
@@ -134,6 +152,7 @@ export interface BatchAuthStartConfig {
   conflictPolicy: "skip" | "overwrite";
   /** Auth storage destination. Only T5AI supports "otp"; defaults to "kv". */
   authStorage?: "kv" | "otp";
+  commandPrefix: string;
   /** false ⇒ flash-only batch: Rust skips the Excel session and the auth step. */
   authorizeEnabled: boolean;
 }
