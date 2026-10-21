@@ -69,6 +69,12 @@ const AUTH_WRITE_MAX_ATTEMPTS: u8 = 3;
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Idle window for `auth-read` with OTP storage.
 const AUTH_READ_OTP_IDLE: Duration = Duration::from_secs(30);
+/// Per-attempt deadline for reading the firmware `version` response.
+const VERSION_READ_TIMEOUT: Duration = Duration::from_millis(500);
+/// First attempt plus up to three retries for the firmware `version` command.
+const VERSION_MAX_ATTEMPTS: u8 = 4;
+/// Delay between firmware `version` attempts.
+const VERSION_RETRY_DELAY: Duration = Duration::from_millis(200);
 /// Drain: give up after this long regardless.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
 /// Maximum time to wait for natural device boot after firmware flash.
@@ -318,6 +324,14 @@ fn is_device_log(s: &str) -> bool {
 fn is_shell_prompt(s: &str) -> bool {
     let t = s.trim();
     t == "tuya>" || t.starts_with("tuya> ")
+}
+
+fn is_cmd_not_found_response(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    lower.contains("cmd not found")
+        || lower.contains("command not found")
+        || lower.contains("unknown command")
+        || lower.contains("command not exist")
 }
 
 fn is_plausible_uuid_token(s: &str) -> bool {
@@ -692,8 +706,9 @@ impl<T: AuthIo> AuthSession<T> {
         // Commands can contain plaintext UUID/AuthKey credentials. Log metadata
         // only; never write the command (or its echo) to the diagnostic log.
         log::debug!(
-            "[serial] port={} >> command_bytes={}",
+            "[serial] port={} >> command_name={} command_bytes={}",
             self.port_name,
+            cmd.split_whitespace().next().unwrap_or("wake/empty"),
             command.len()
         );
         let _ = self.port.clear_input();
@@ -1073,6 +1088,14 @@ impl<T: AuthIo> AuthSession<T> {
         // Every byte the device sent during the whole window, recognizable or not.
         // Zero of them is the one case where neither firmware kind can be claimed.
         let mut bytes_seen = 0usize;
+        let mut probe_count = 0u32;
+        let mut log_disabled_count = 0u32;
+        let mut no_command_count = 0u32;
+        let mut cmd_not_found_count = 0u32;
+        let mut tuya_prompt_count = 0u32;
+        let mut dollar_prompt_count = 0u32;
+        let mut non_ascii_line_count = 0u32;
+        let mut previous_class: Option<&str> = None;
 
         loop {
             if cancel.load(Ordering::Relaxed) {
@@ -1085,11 +1108,67 @@ impl<T: AuthIo> AuthSession<T> {
             // but stops as soon as the line has been idle for one probe_interval.
             let (lines, probe_bytes) = self
                 .read_response_counted(boot_probe_interval.saturating_mul(2), boot_probe_interval);
+            probe_count += 1;
             bytes_seen += probe_bytes;
 
             let is_new = lines
                 .iter()
                 .any(|l| l.to_lowercase().contains("ok: log disabled"));
+            let no_command = lines
+                .iter()
+                .any(|line| line.to_lowercase().contains("no command"));
+            let cmd_not_found = lines.iter().any(|line| is_cmd_not_found_response(line));
+            let tuya_prompt = lines.iter().any(|line| is_shell_prompt(line));
+            let dollar_prompt = lines.iter().any(|line| {
+                let line = line.trim();
+                line.strip_prefix('$').is_some()
+            });
+            let non_ascii_lines = lines.iter().filter(|line| !line.is_ascii()).count() as u32;
+            log_disabled_count += is_new as u32;
+            no_command_count += no_command as u32;
+            cmd_not_found_count += cmd_not_found as u32;
+            tuya_prompt_count += tuya_prompt as u32;
+            dollar_prompt_count += dollar_prompt as u32;
+            non_ascii_line_count += non_ascii_lines;
+
+            let response_class = if is_new {
+                "log_disabled"
+            } else if no_command {
+                "no_command"
+            } else if cmd_not_found {
+                "cmd_not_found"
+            } else if tuya_prompt {
+                "tuya_prompt"
+            } else if dollar_prompt {
+                "dollar_prompt"
+            } else if non_ascii_lines > 0 {
+                "non_ascii_lines"
+            } else if probe_bytes == 0 {
+                "empty"
+            } else {
+                "unrecognized"
+            };
+            if probe_count <= 3
+                || probe_count.is_multiple_of(20)
+                || previous_class != Some(response_class)
+            {
+                log::debug!(
+                    "[batch-auth] firmware probe port={} probe={} class={} bytes={} lines={} log_disabled={} no_command={} cmd_not_found={} tuya_prompt={} dollar_prompt={} non_ascii_lines={}",
+                    self.port_name,
+                    probe_count,
+                    response_class,
+                    probe_bytes,
+                    lines.len(),
+                    is_new,
+                    no_command,
+                    cmd_not_found,
+                    tuya_prompt,
+                    dollar_prompt,
+                    non_ascii_lines
+                );
+            }
+            previous_class = Some(response_class);
+
             let is_old = !is_new
                 && lines.iter().any(|l| {
                     let lower = l.to_lowercase();
@@ -1099,27 +1178,42 @@ impl<T: AuthIo> AuthSession<T> {
             if is_new || is_old {
                 let elapsed_ms = reset_time.elapsed().as_millis();
                 log::info!(
-                    "flash.log.auth.shellReady: port={} new_firmware={}, elapsed={}ms",
+                    "flash.log.auth.shellReady: port={} new_firmware={} elapsed={}ms probes={} bytes={} log_disabled={} no_command={} cmd_not_found={} tuya_prompt={} dollar_prompt={} non_ascii_lines={}",
                     self.port_name,
                     is_new,
-                    elapsed_ms
+                    elapsed_ms,
+                    probe_count,
+                    bytes_seen,
+                    log_disabled_count,
+                    no_command_count,
+                    cmd_not_found_count,
+                    tuya_prompt_count,
+                    dollar_prompt_count,
+                    non_ascii_line_count
                 );
                 self.drain_and_wake(cancel)?;
                 if cancel.load(Ordering::Relaxed) {
                     return Err(FlashError::Cancelled);
                 }
                 if is_new {
-                    let _ = self.send_cmd("version");
-                    let vlines = self.read_response();
-                    let version = vlines.iter().find_map(|l| parse_cli_version(l));
-                    log::info!(
-                        "flash.log.auth.cliVersion: port={} version={:?}",
-                        self.port_name,
-                        version
-                    );
+                    let version = self.read_firmware_version(cancel)?;
                     let kind = match version {
                         Some(v) if v >= NEW_FIRMWARE_MIN => FirmwareKind::New(v),
-                        _ => FirmwareKind::New(NEW_FIRMWARE_MIN),
+                        Some(v) => {
+                            log::info!(
+                                "flash.log.auth.cliVersion: port={} result=below_minimum version={:?} fallback=1.0.0",
+                                self.port_name,
+                                v
+                            );
+                            FirmwareKind::New(NEW_FIRMWARE_MIN)
+                        }
+                        None => {
+                            log::info!(
+                                "flash.log.auth.cliVersion: port={} result=all_attempts_failed fallback=1.0.0",
+                                self.port_name
+                            );
+                            FirmwareKind::New(NEW_FIRMWARE_MIN)
+                        }
                     };
                     return Ok(kind);
                 }
@@ -1134,17 +1228,31 @@ impl<T: AuthIo> AuthSession<T> {
                 // is at least consistent with old firmware printing something else.
                 if bytes_seen == 0 {
                     log::warn!(
-                        "flash.log.auth.shellReady: port={} timed_out elapsed={}ms bytes=0, device never answered",
+                "flash.log.auth.shellReady: port={} timed_out elapsed={}ms probes={} bytes=0 log_disabled={} no_command={} cmd_not_found={} tuya_prompt={} dollar_prompt={} non_ascii_lines={} device never answered",
                         self.port_name,
-                        elapsed.as_millis()
+                        elapsed.as_millis(),
+                        probe_count,
+                        log_disabled_count,
+                        no_command_count,
+                        cmd_not_found_count,
+                        tuya_prompt_count,
+                        dollar_prompt_count,
+                        non_ascii_line_count
                     );
                     return Err(device_no_response_error(elapsed));
                 }
                 log::info!(
-                    "flash.log.auth.shellReady: port={} timed_out elapsed={}ms bytes={}, fallback=Old",
+                    "flash.log.auth.shellReady: port={} timed_out elapsed={}ms probes={} bytes={} log_disabled={} no_command={} cmd_not_found={} tuya_prompt={} dollar_prompt={} non_ascii_lines={} fallback=Old",
                     self.port_name,
                     elapsed.as_millis(),
-                    bytes_seen
+                    probe_count,
+                    bytes_seen,
+                    log_disabled_count,
+                    no_command_count,
+                    cmd_not_found_count,
+                    tuya_prompt_count,
+                    dollar_prompt_count,
+                    non_ascii_line_count
                 );
                 self.drain_and_wake(cancel)?;
                 return Ok(FirmwareKind::Old);
@@ -1159,6 +1267,88 @@ impl<T: AuthIo> AuthSession<T> {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
+    }
+
+    /// Query the firmware version, retrying transient send/read/parse failures.
+    fn read_firmware_version(
+        &mut self,
+        cancel: &AtomicBool,
+    ) -> Result<Option<CliVersion>, FlashError> {
+        for attempt in 1..=VERSION_MAX_ATTEMPTS {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+
+            let (status, version, command_not_found, version_line_present) =
+                match self.send_cmd("version") {
+                    Err(_) => ("send_failure", None, false, false),
+                    Ok(()) => {
+                        let lines =
+                            self.read_response_timed(VERSION_READ_TIMEOUT, VERSION_READ_TIMEOUT);
+                        let version = lines.iter().find_map(|line| parse_cli_version(line));
+                        let command_not_found = lines.iter().any(|line| {
+                            line.to_lowercase().contains("no command")
+                                || is_cmd_not_found_response(line)
+                        });
+                        let version_line_present = lines
+                            .iter()
+                            .any(|line| line.to_lowercase().contains("project.version"));
+                        let status = if version.is_some() {
+                            "parsed"
+                        } else if lines.is_empty() {
+                            "empty"
+                        } else if command_not_found {
+                            "unsupported_command"
+                        } else if version_line_present {
+                            "invalid_version_format"
+                        } else {
+                            "unrecognized"
+                        };
+                        (status, version, command_not_found, version_line_present)
+                    }
+                };
+
+            if cancel.load(Ordering::Relaxed) {
+                return Err(FlashError::Cancelled);
+            }
+            if let Some(version) = version {
+                log::info!(
+                            "flash.log.auth.cliVersion: port={} command=version attempt={}/{} timeout_ms={} result=parsed version={:?}",
+                    self.port_name,
+                    attempt,
+                    VERSION_MAX_ATTEMPTS,
+                            VERSION_READ_TIMEOUT.as_millis(),
+                    version
+                );
+                return Ok(Some(version));
+            }
+
+            log::warn!(
+                "flash.log.auth.cliVersion: port={} command=version attempt={}/{} timeout_ms={} result={} command_not_found={} version_line_present={}",
+                self.port_name,
+                attempt,
+                VERSION_MAX_ATTEMPTS,
+                VERSION_READ_TIMEOUT.as_millis(),
+                status,
+                command_not_found,
+                version_line_present
+            );
+            if attempt == VERSION_MAX_ATTEMPTS {
+                break;
+            }
+
+            let retry_deadline = Instant::now() + VERSION_RETRY_DELAY;
+            while Instant::now() < retry_deadline {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(FlashError::Cancelled);
+                }
+                std::thread::sleep(
+                    Duration::from_millis(10)
+                        .min(retry_deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+        }
+        Ok(None)
     }
 
     /// Drain stale boot output, check for cancellation, then wake the shell.
@@ -1800,6 +1990,14 @@ where
     let timing = AuthTiming::for_chip(chip_id);
     let mut sess = open(port, timing, config.auth_baud_rate)?;
     sess.command_prefix = normalize_auth_command_prefix(&config.command_prefix)?;
+    log::info!(
+        "[batch-auth] session start port={} chip={} auth_baud={} command_prefix={:?} storage={:?}",
+        port,
+        chip_id,
+        config.auth_baud_rate,
+        sess.command_prefix,
+        config.auth_storage
+    );
     check_cancel!();
     sess.drain_boot_output();
     check_cancel!();
@@ -2522,7 +2720,14 @@ pub fn read_auth_probe_with_prefix(
         };
     }
 
-    log::info!("[batch-auth] read-probe start  port={port} chip={chip_id}");
+    log::info!(
+        "[batch-auth] read-probe start port={} chip={} auth_baud={} command_prefix={:?} storage={:?}",
+        port,
+        chip_id,
+        baud_rate,
+        command_prefix,
+        storage
+    );
     let timing = AuthTiming::for_chip(chip_id);
     let mut sess = AuthSession::open(port, timing, baud_rate)?;
     sess.command_prefix = command_prefix;
@@ -2649,6 +2854,10 @@ mod tests {
         cancel_after_auth_write: Option<std::sync::Arc<AtomicBool>>,
         auth_write_seen: Option<std::sync::Arc<AtomicBool>>,
         fail_auth_write: bool,
+        fail_version_sends: u8,
+        cancel_after_version: Option<std::sync::Arc<AtomicBool>>,
+        delay_version_response_by: Option<Duration>,
+        delayed_bytes: Option<(Instant, Vec<u8>)>,
     }
 
     impl MockAuthIo {
@@ -2664,6 +2873,10 @@ mod tests {
                 cancel_after_auth_write: None,
                 auth_write_seen: None,
                 fail_auth_write: false,
+                fail_version_sends: 0,
+                cancel_after_version: None,
+                delay_version_response_by: None,
+                delayed_bytes: None,
             }
         }
 
@@ -2688,9 +2901,21 @@ mod tests {
 
     impl AuthIo for MockAuthIo {
         fn bytes_to_read(&self) -> io::Result<u32> {
-            Ok(self.buf.len() as u32)
+            let delayed_len = self
+                .delayed_bytes
+                .as_ref()
+                .filter(|(at, _)| Instant::now() >= *at)
+                .map_or(0, |(_, bytes)| bytes.len());
+            Ok((self.buf.len() + delayed_len) as u32)
         }
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if let Some((at, _)) = &self.delayed_bytes {
+                if Instant::now() >= *at {
+                    if let Some((_, bytes)) = self.delayed_bytes.take() {
+                        self.buf.extend(bytes);
+                    }
+                }
+            }
             let n = self
                 .buf
                 .len()
@@ -2704,6 +2929,26 @@ mod tests {
             self.sent.push(data.to_vec());
             if let Some(sink) = &self.sent_sink {
                 sink.lock().unwrap().push(data.to_vec());
+            }
+            if data
+                .split(|byte| byte.is_ascii_whitespace())
+                .any(|part| part == b"version")
+            {
+                if let Some(delay) = self.delay_version_response_by.take() {
+                    if let Some(echo_end) = self.buf.iter().position(|byte| *byte == b'\n') {
+                        let suffix = self.buf.split_off(echo_end + 1);
+                        if !suffix.is_empty() {
+                            self.delayed_bytes = Some((Instant::now() + delay, suffix));
+                        }
+                    }
+                }
+                if let Some(cancel) = &self.cancel_after_version {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                if self.fail_version_sends > 0 {
+                    self.fail_version_sends -= 1;
+                    return Err(io::Error::other("synthetic version send failure"));
+                }
             }
             if data
                 .split(|byte| byte.is_ascii_whitespace())
@@ -3267,6 +3512,105 @@ mod tests {
         let sent = sess.port.sent_str();
         assert!(sent.lines().any(|line| line == "version"));
         assert!(!sent.lines().any(|line| line == "sys_version"));
+    }
+
+    #[test]
+    fn detect_firmware_retries_version_failure_and_keeps_command_prefix() {
+        let mut io = MockAuthIo::new();
+        io.add_response("OK: log disabled\r\n");
+        io.add_response(""); // wake_shell clear_input
+        io.add_response(""); // first version attempt fails while sending
+        io.add_response("project.version   0.9.0\r\n"); // second attempt
+        io.fail_version_sends = 1;
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+            port_name: String::new(),
+            command_prefix: "ap_cmd".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+
+        let result = sess.detect_firmware(&cancel).unwrap();
+
+        // A valid parsed version ends retries even when below the minimum;
+        // the existing caller fallback still selects 1.0.0.
+        assert_eq!(result, FirmwareKind::New(NEW_FIRMWARE_MIN));
+        let sent = sess.port.sent_str();
+        assert_eq!(sent.matches("ap_cmd version\r\n").count(), 2);
+        assert!(sent.contains("ap_cmd sys_log_enable off\r\n"));
+    }
+
+    #[test]
+    fn detect_firmware_retries_empty_and_unrecognized_version_responses() {
+        for first_response in [
+            "",
+            "version returned an unfamiliar response\r\n",
+            "cmd NOT found: version\r\n",
+            "project.version 1.x\r\n",
+        ] {
+            let mut io = MockAuthIo::new();
+            io.add_response("OK: log disabled\r\n");
+            io.add_response(""); // wake_shell clear_input
+            io.add_response(first_response);
+            io.add_response("project.version   1.2.3\r\n");
+            let mut sess = session(io);
+            let cancel = AtomicBool::new(false);
+
+            let result = sess.detect_firmware(&cancel).unwrap();
+
+            assert_eq!(result, FirmwareKind::New(CliVersion(1, 2, 3)));
+            assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 2);
+        }
+    }
+
+    #[test]
+    fn detect_firmware_accepts_version_arriving_after_command_echo() {
+        let mut io = MockAuthIo::new();
+        io.add_response("OK: log disabled\r\n");
+        io.add_response(""); // wake_shell clear_input
+        io.add_response("version\r\nproject.version   1.2.3\r\n");
+        io.delay_version_response_by = Some(Duration::from_millis(275));
+        let mut sess = session(io);
+        let cancel = AtomicBool::new(false);
+
+        let result = sess.detect_firmware(&cancel).unwrap();
+
+        assert_eq!(result, FirmwareKind::New(CliVersion(1, 2, 3)));
+        assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 1);
+    }
+
+    #[test]
+    fn detect_firmware_uses_minimum_version_after_all_version_attempts_fail() {
+        let mut io = MockAuthIo::new();
+        io.add_response("OK: log disabled\r\n");
+        io.add_response(""); // wake_shell clear_input
+        for _ in 0..VERSION_MAX_ATTEMPTS {
+            io.add_response("");
+        }
+        io.fail_version_sends = VERSION_MAX_ATTEMPTS;
+        let mut sess = session(io);
+        let cancel = AtomicBool::new(false);
+
+        let result = sess.detect_firmware(&cancel).unwrap();
+
+        assert_eq!(result, FirmwareKind::New(NEW_FIRMWARE_MIN));
+        assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 4);
+    }
+
+    #[test]
+    fn detect_firmware_cancellation_stops_version_retries() {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let mut io = MockAuthIo::new();
+        io.add_response("OK: log disabled\r\n");
+        io.add_response(""); // wake_shell clear_input
+        io.add_response(""); // first version attempt
+        io.cancel_after_version = Some(cancel.clone());
+        let mut sess = session(io);
+
+        let result = sess.detect_firmware(&cancel);
+
+        assert!(matches!(result, Err(FlashError::Cancelled)));
+        assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 1);
     }
 
     #[test]
