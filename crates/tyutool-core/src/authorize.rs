@@ -71,8 +71,8 @@ const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const AUTH_READ_OTP_IDLE: Duration = Duration::from_secs(30);
 /// Per-attempt deadline for reading the firmware `version` response.
 const VERSION_READ_TIMEOUT: Duration = Duration::from_millis(500);
-/// First attempt plus up to three retries for the firmware `version` command.
-const VERSION_MAX_ATTEMPTS: u8 = 4;
+/// First attempt plus up to two retries for the firmware `version` command.
+const VERSION_MAX_ATTEMPTS: u8 = 3;
 /// Delay between firmware `version` attempts.
 const VERSION_RETRY_DELAY: Duration = Duration::from_millis(200);
 /// Drain: give up after this long regardless.
@@ -267,8 +267,8 @@ impl Default for AuthTiming {
 
 // ── Firmware version detection ────────────────────────────────────────────
 
-/// Parsed firmware version, from the `project.version` line of the
-/// `version` command response.
+/// Parsed firmware version, from a `CLI version:` line in the `version`
+/// command response.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CliVersion(u32, u32, u32);
 
@@ -1290,9 +1290,8 @@ impl<T: AuthIo> AuthSession<T> {
                             line.to_lowercase().contains("no command")
                                 || is_cmd_not_found_response(line)
                         });
-                        let version_line_present = lines
-                            .iter()
-                            .any(|line| line.to_lowercase().contains("project.version"));
+                        let version_line_present =
+                            lines.iter().any(|line| cli_version_payload(line).is_some());
                         let status = if version.is_some() {
                             "parsed"
                         } else if lines.is_empty() {
@@ -1394,14 +1393,23 @@ fn parse_mac_from_str(s: &str) -> Option<String> {
     })
 }
 
-/// Parse the firmware `project.version` line printed by `version`, e.g.
-/// `"project.version   1.2.3"` → `CliVersion(1, 2, 3)`. Tolerates a leading
-/// `v` and a non-numeric suffix on the patch segment (`1.2.3-rc1`).
-fn parse_cli_version(line: &str) -> Option<CliVersion> {
+/// Return the payload after a supported firmware-version label, allowing a
+/// shell prompt to be attached to or separated from the label.
+fn cli_version_payload(line: &str) -> Option<String> {
     let line = strip_ansi(line);
-    let line = line.strip_prefix('$').unwrap_or(&line);
+    let line = line.trim_start();
+    let line = line.strip_prefix('$').unwrap_or(line).trim_start();
     let lower = line.to_lowercase();
-    let rest = lower.strip_prefix("project.version")?.trim();
+    lower
+        .strip_prefix("cli version:")
+        .map(|payload| payload.trim().to_owned())
+}
+
+/// Parse a `CLI version:` line, tolerating a leading `v` and a non-numeric
+/// suffix on the patch segment (`1.2.3-rc1`).
+fn parse_cli_version(line: &str) -> Option<CliVersion> {
+    let payload = cli_version_payload(line)?;
+    let rest = payload.trim();
     let rest = rest.strip_prefix('v').unwrap_or(rest);
     let mut nums = rest.split('.');
     let major = nums.next()?.trim().parse().ok()?;
@@ -3213,7 +3221,7 @@ mod tests {
         let mut io = MockAuthIo::new();
         io.add_response("OK: log disabled\r\n"); // detect_firmware: sys_log_enable off
         io.add_response(""); // wake_shell clear_input
-        io.add_response("project.version   1.0.0\r\n"); // version
+        io.add_response("CLI version:   1.0.0\r\n"); // version
         io.add_response("auth-read\r\nï¿½bad\r\nï¿½key\r\n"); // precheck auth-read
         io.add_response(""); // precheck retry: still no valid auth
         io.add_response("Authorization write succeeds.\r\n"); // auth_write
@@ -3498,7 +3506,7 @@ mod tests {
         // Response 1: wake_shell clear_input → empty
         io.add_response("");
         // Response 2: version command
-        io.add_response("project.version   1.0.0\r\n");
+        io.add_response("CLI version:   1.0.0\r\n");
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::default(),
@@ -3520,7 +3528,7 @@ mod tests {
         io.add_response("OK: log disabled\r\n");
         io.add_response(""); // wake_shell clear_input
         io.add_response(""); // first version attempt fails while sending
-        io.add_response("project.version   0.9.0\r\n"); // second attempt
+        io.add_response("CLI version:   0.9.0\r\n"); // second attempt
         io.fail_version_sends = 1;
         let mut sess = AuthSession {
             port: io,
@@ -3546,13 +3554,13 @@ mod tests {
             "",
             "version returned an unfamiliar response\r\n",
             "cmd NOT found: version\r\n",
-            "project.version 1.x\r\n",
+            "CLI version: 1.x\r\n",
         ] {
             let mut io = MockAuthIo::new();
             io.add_response("OK: log disabled\r\n");
             io.add_response(""); // wake_shell clear_input
             io.add_response(first_response);
-            io.add_response("project.version   1.2.3\r\n");
+            io.add_response("CLI version:   1.2.3\r\n");
             let mut sess = session(io);
             let cancel = AtomicBool::new(false);
 
@@ -3568,7 +3576,7 @@ mod tests {
         let mut io = MockAuthIo::new();
         io.add_response("OK: log disabled\r\n");
         io.add_response(""); // wake_shell clear_input
-        io.add_response("version\r\nproject.version   1.2.3\r\n");
+        io.add_response("version\r\nCLI version:   1.2.3\r\n");
         io.delay_version_response_by = Some(Duration::from_millis(275));
         let mut sess = session(io);
         let cancel = AtomicBool::new(false);
@@ -3577,6 +3585,30 @@ mod tests {
 
         assert_eq!(result, FirmwareKind::New(CliVersion(1, 2, 3)));
         assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 1);
+    }
+
+    #[test]
+    fn detect_firmware_parses_cli_version_with_echo_and_split_prompt() {
+        let mut io = MockAuthIo::new();
+        io.add_response("OK: log disabled\r\n");
+        io.add_response(""); // wake_shell clear_input
+        io.add_response("ap_cmd version\r\n$CLI version: 1.2.3\r\n$");
+        io.read_chunk_limit = Some(1);
+        let mut sess = AuthSession {
+            port: io,
+            timing: AuthTiming::default(),
+            port_name: String::new(),
+            command_prefix: "ap_cmd".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+
+        let result = sess.detect_firmware(&cancel).unwrap();
+
+        assert_eq!(result, FirmwareKind::New(CliVersion(1, 2, 3)));
+        assert_eq!(
+            sess.port.sent_str().matches("ap_cmd version\r\n").count(),
+            1
+        );
     }
 
     #[test]
@@ -3594,7 +3626,7 @@ mod tests {
         let result = sess.detect_firmware(&cancel).unwrap();
 
         assert_eq!(result, FirmwareKind::New(NEW_FIRMWARE_MIN));
-        assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 4);
+        assert_eq!(sess.port.sent_str().matches("version\r\n").count(), 3);
     }
 
     #[test]
@@ -3781,7 +3813,7 @@ mod tests {
         // wake_shell clear_input → empty
         io.add_response("");
         // version command
-        io.add_response("project.version   1.0.0\r\n");
+        io.add_response("CLI version:   1.0.0\r\n");
         let mut sess = AuthSession {
             port: io,
             timing: AuthTiming::for_chip("T5AI"),
@@ -3834,20 +3866,43 @@ mod tests {
     #[test]
     fn parse_cli_version_parses_correctly() {
         assert_eq!(
-            parse_cli_version("project.version   1.0.0"),
+            parse_cli_version("CLI version:   1.0.0"),
             Some(CliVersion(1, 0, 0))
         );
         assert_eq!(
-            parse_cli_version("\x1b[32mproject.version   2.3.4\x1b[0m"),
+            parse_cli_version("\x1b[32mCLI version:   2.3.4\x1b[0m"),
             Some(CliVersion(2, 3, 4))
         );
         // Tolerates a leading 'v' and a non-numeric patch suffix.
         assert_eq!(
-            parse_cli_version("project.version   v1.2.3-rc1"),
+            parse_cli_version("CLI version:   v1.2.3-rc1"),
             Some(CliVersion(1, 2, 3))
         );
         assert_eq!(parse_cli_version("unknown"), None);
-        assert_eq!(parse_cli_version("CLI version: 1.0.0"), None);
+        assert_eq!(
+            parse_cli_version("CLI version: 1.0.0"),
+            Some(CliVersion(1, 0, 0))
+        );
+        assert_eq!(parse_cli_version("project.version 1.0.0"), None);
+        assert_eq!(
+            parse_cli_version("$CLI version: 1.0.0"),
+            Some(CliVersion(1, 0, 0))
+        );
+        assert_eq!(
+            parse_cli_version("$ CLI version: v2.4.6-rc1"),
+            Some(CliVersion(2, 4, 6))
+        );
+        assert_eq!(
+            parse_cli_version("\x1b[32m$CLI version: 2.4.6\x1b[0m"),
+            Some(CliVersion(2, 4, 6))
+        );
+        assert!(cli_version_payload("CLI version: 1.x").is_some());
+        assert!(cli_version_payload("$ CLI version: 1.x").is_some());
+        assert_eq!(parse_cli_version("CLI version: 1.x"), None);
+        assert_eq!(parse_cli_version("$CLI version: 1.x"), None);
+        assert_eq!(parse_cli_version("echo ap_cmd version"), None);
+        assert_eq!(parse_cli_version("cmd NOT found: versionap_cmd"), None);
+        assert_eq!(parse_cli_version("cmd NOT found: version"), None);
     }
 
     /// 新固件 — 写授权，无冲突，写入并验证成功
@@ -3858,8 +3913,8 @@ mod tests {
         // detect_firmware: sys_log_enable off → OK, wake_shell, version
         io.add_response("OK: log disabled\r\n"); // sys_log_enable off
         io.add_response(""); // wake_shell clear_input
-        io.add_response("project.version   1.0.0\r\n"); // version
-                                                        // auth_read (check existing) → None (device fresh)
+        io.add_response("CLI version:   1.0.0\r\n"); // version
+                                                     // auth_read (check existing) → None (device fresh)
         io.add_response("");
         // auth_write response
         io.add_response("Authorization write succeeds.\r\n");
@@ -3937,7 +3992,7 @@ mod tests {
         let mut io = MockAuthIo::new();
         io.add_response("OK: log disabled\r\n");
         io.add_response("");
-        io.add_response("project.version   1.0.0\r\n");
+        io.add_response("CLI version:   1.0.0\r\n");
         // auth_read → existing different credentials
         io.add_response("existinguuid1234567\r\nexistingkey12345678901234567890\r\n");
 
@@ -4079,7 +4134,7 @@ mod tests {
         } else {
             io.add_response("OK: log disabled\r\n"); // firmware probe
             io.add_response(""); // shell wake
-            io.add_response("project.version 1.0.0\r\n"); // version
+            io.add_response("CLI version: 1.0.0\r\n"); // version
             io.add_response(&format!("{MAC}\r\n")); // read_mac
             io.add_response(""); // auth-read precheck: fresh device
         }
