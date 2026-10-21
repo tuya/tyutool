@@ -101,6 +101,7 @@
           </tr>
         </tbody>
       </table>
+      <p>After new firmware is detected, tyutool queries <code>version</code> up to 4 times (the initial attempt plus 3 retries). Each attempt waits up to 500 ms and may finish earlier when the <code>tuya&gt;</code> prompt arrives; a standalone <code>$</code> line does not end the read early. Failed attempts are separated by 200 ms. A parsed version of <code>1.0.0</code> or newer stops retries and is retained. A parsed version below <code>1.0.0</code> stops retries but uses the existing <code>1.0.0</code> fallback. If all 4 attempts fail to send, return a response, or parse a version, authorization also continues with that fallback. The old-firmware path does not query the version, and a configured command prefix is also applied to <code>version</code>.</p>
       <div class="callout note">
         <span class="title">Echo convention</span>
         The firmware should <strong>echo each received command line</strong> — tyutool filters out the echo of its own command and only inspects the real output that follows. Log lines (shaped like <code>[MM-DD HH:MM:SS ...]</code>) and ANSI escapes are stripped automatically; no special handling is needed for them.

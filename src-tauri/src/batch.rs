@@ -241,11 +241,13 @@ pub(crate) fn batch_auth_start(
     }
 
     log::info!(
-        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} storage={:?} conflict={} authorize={}",
+        "[batch-auth] batch-start: chip={} excel={} firmware={} slots={} auth_baud={} command_prefix={:?} storage={:?} conflict={} authorize={}",
         config.chip_id,
         config.excel_path,
         config.firmware_path.as_deref().unwrap_or("(none)"),
         ports.len(),
+        config.auth_baud_rate,
+        command_prefix,
         auth_storage,
         config.conflict_policy,
         config.authorize_enabled,
@@ -459,7 +461,14 @@ pub(crate) fn batch_auth_read_ports(
         config_clone.command_prefix = command_prefix.clone();
 
         let handle = std::thread::spawn(move || {
-            log::info!("[batch-auth-read] slot begin port={}", port_clone);
+            log::info!(
+                "[batch-auth-read] slot begin port={} chip={} auth_baud={} command_prefix={:?} storage={:?}",
+                port_clone,
+                config_clone.chip_id,
+                config_clone.baud_rate,
+                config_clone.command_prefix,
+                auth_storage
+            );
             let result = tyutool_core::read_auth_probe_with_prefix(
                 &port_clone,
                 &config_clone.chip_id,
