@@ -82,7 +82,7 @@
           <tr>
             <td><code>version</code></td>
             <td>Read firmware version</td>
-            <td>A line like <code>project.version x.y.z</code></td>
+            <td>A line like <code>CLI version: x.y.z</code> (an optional <code>$</code> shell prompt may precede it)</td>
           </tr>
           <tr>
             <td><code>read_mac</code></td>
@@ -101,7 +101,7 @@
           </tr>
         </tbody>
       </table>
-      <p>After new firmware is detected, tyutool queries <code>version</code> up to 4 times (the initial attempt plus 3 retries). Each attempt waits up to 500 ms and may finish earlier when the <code>tuya&gt;</code> prompt arrives; a standalone <code>$</code> line does not end the read early. Failed attempts are separated by 200 ms. A parsed version of <code>1.0.0</code> or newer stops retries and is retained. A parsed version below <code>1.0.0</code> stops retries but uses the existing <code>1.0.0</code> fallback. If all 4 attempts fail to send, return a response, or parse a version, authorization also continues with that fallback. The old-firmware path does not query the version, and a configured command prefix is also applied to <code>version</code>.</p>
+      <p>After new firmware is detected, tyutool queries <code>version</code> up to 3 times (the initial attempt plus 2 retries). Each attempt waits up to 500 ms and may finish earlier when the <code>tuya&gt;</code> prompt arrives; a standalone <code>$</code> line does not end the read early. Failed attempts are separated by 200 ms. A parsed version of <code>1.0.0</code> or newer stops retries and is retained. A parsed version below <code>1.0.0</code> stops retries but uses the existing <code>1.0.0</code> fallback. If all 3 attempts fail to send, return a response, or parse a version, authorization also continues with that fallback. The old-firmware path does not query the version, and a configured command prefix is also applied to <code>version</code>.</p>
       <div class="callout note">
         <span class="title">Echo convention</span>
         The firmware should <strong>echo each received command line</strong> — tyutool filters out the echo of its own command and only inspects the real output that follows. Log lines (shaped like <code>[MM-DD HH:MM:SS ...]</code>) and ANSI escapes are stripped automatically; no special handling is needed for them.
@@ -152,7 +152,7 @@
       <ol class="steps">
         <li>☐ After power-on the device shows a <code>tuya&gt;</code> prompt (sending two bare <code>\r\n</code> wakes the shell).</li>
         <li>☐ Send <code>sys_log_enable off</code> → receive <code>OK: log disabled</code> (or, on old firmware, <code>No command</code> / return to the prompt).</li>
-        <li>☐ Send <code>version</code> → receive a line <code>project.version x.y.z</code>.</li>
+        <li>☐ Send <code>version</code> → receive a line <code>CLI version: x.y.z</code>.</li>
         <li>☐ Send <code>read_mac</code> → receive a valid <code>XX:XX:XX:XX:XX:FF</code>.</li>
         <li>☐ Send <code>auth-read</code> on an <strong>unauthorized</strong> device → receive <code>Authorization read failure.</code></li>
         <li>☐ Send <code>auth &lt;a valid uuid + authkey&gt;</code> (UUID 16 or 20 chars, AuthKey 32 chars) → immediately receive <code>Authorization write succeeds.</code> (KV mode) or <code>Authorization write to OTP Succeeds.</code> (OTP mode).</li>

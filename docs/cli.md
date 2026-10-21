@@ -518,7 +518,7 @@ tyutool auth      [-p <PORT>] [-d <DEVICE>] [--uuid <UUID>] [--authkey <AUTHKEY>
 
 Drives the TuyaOpen UART shell to read or write the device's authorization pair.
 
-After the shell identifies new firmware, `authorize` automatically queries `version` up to 4 times (the initial attempt plus 3 retries), with a 500 ms read limit per attempt and 200 ms between failed attempts. A parsed version of `1.0.0` or newer ends retries and is retained. A lower parsed version also ends retries but uses the existing `1.0.0` fallback; if all attempts fail, authorization continues with that fallback. This adds no CLI flag.
+After the shell identifies new firmware, `authorize` automatically queries `version` up to 3 times (the initial attempt plus 2 retries), with a 500 ms read limit per attempt and 200 ms between failed attempts; it accepts `CLI version: x.y.z` responses. A parsed version of `1.0.0` or newer ends retries and is retained. A lower parsed version also ends retries but uses the existing `1.0.0` fallback; if all attempts fail, authorization continues with that fallback. This adds no CLI flag.
 
 - **Both or neither.** Pass `--uuid` *and* `--authkey` to write; pass neither to read the current state. Exactly one of the two is rejected up front with `authorize: provide both --uuid and --authkey to write, or neither to read`, because a half-specified write would silently degrade into a read.
 - **KV storage only.** This command never burns OTP/eFuse; OTP is exclusively a GUI batch-flow feature.

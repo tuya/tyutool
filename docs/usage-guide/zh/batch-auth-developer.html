@@ -82,7 +82,7 @@
           <tr>
             <td><code>version</code></td>
             <td>读取固件版本</td>
-            <td>一行形如 <code>project.version x.y.z</code></td>
+            <td>一行形如 <code>CLI version: x.y.z</code>（前面可带可选的 <code>$</code> shell 提示符）</td>
           </tr>
           <tr>
             <td><code>read_mac</code></td>
@@ -101,7 +101,7 @@
           </tr>
         </tbody>
       </table>
-      <p>确认是新固件后，tyutool 最多查询 <code>version</code> 4 次（首次加 3 次重试）；每次最多等待 500 ms，收到 <code>tuya&gt;</code> 提示符时可提前结束，独立的 <code>$</code> 行不会触发提前结束，失败后间隔 200 ms 重试。解析到不低于 <code>1.0.0</code> 的版本时停止重试并保留该版本；解析到低于 <code>1.0.0</code> 的版本时也停止重试，但沿用 <code>1.0.0</code> fallback。4 次均发送失败、无响应或无法解析时，同样沿用该 fallback，不会阻断授权。旧固件路径不查询版本；设置的命令前缀同样用于 <code>version</code>。</p>
+      <p>确认是新固件后，tyutool 最多查询 <code>version</code> 3 次（首次加 2 次重试）；每次最多等待 500 ms，收到 <code>tuya&gt;</code> 提示符时可提前结束，独立的 <code>$</code> 行不会触发提前结束，失败后间隔 200 ms 重试。解析到不低于 <code>1.0.0</code> 的版本时停止重试并保留该版本；解析到低于 <code>1.0.0</code> 的版本时也停止重试，但沿用 <code>1.0.0</code> fallback。3 次均发送失败、无响应或无法解析时，同样沿用该 fallback，不会阻断授权。旧固件路径不查询版本；设置的命令前缀同样用于 <code>version</code>。</p>
       <div class="callout note">
         <span class="title">关于回显约定</span>
         固件应<strong>回显（echo）每条收到的命令行</strong>——tyutool 会过滤掉自身发出的命令回声，只看后续的真实输出。日志行（形如 <code>[MM-DD HH:MM:SS ...]</code>）和 ANSI 转义会被自动剔除，不必为它们特殊处理。
@@ -152,7 +152,7 @@
       <ol class="steps">
         <li>☐ 设备上电后出现 <code>tuya&gt;</code> 提示符（连发两个空 <code>\r\n</code> 能唤醒 shell）。</li>
         <li>☐ 发送 <code>sys_log_enable off</code>，收到 <code>OK: log disabled</code>（或旧固件的 <code>No command</code> / 回到提示符）。</li>
-        <li>☐ 发送 <code>version</code>，收到一行 <code>project.version x.y.z</code>。</li>
+        <li>☐ 发送 <code>version</code>，收到一行 <code>CLI version: x.y.z</code>。</li>
         <li>☐ 发送 <code>read_mac</code>，收到有效的 <code>XX:XX:XX:XX:XX:FF</code>。</li>
         <li>☐ 发送 <code>auth-read</code>，在<strong>未授权</strong>设备上收到 <code>Authorization read failure.</code>。</li>
         <li>☐ 发送 <code>auth &lt;一组合法 uuid+authkey&gt;</code>（UUID 16 或 20 字符、AuthKey 32 字符），写入后立即收到 <code>Authorization write succeeds.</code>（KV 模式）或 <code>Authorization write to OTP Succeeds.</code>（OTP 模式）。</li>
