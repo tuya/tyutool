@@ -25,6 +25,7 @@ export interface ValidateOperationInput {
   readStartAddr: string;
   readEndAddr: string;
   isTauri: boolean;
+  selectedChipId?: string;
 }
 
 export interface ValidationFailure {
@@ -79,7 +80,8 @@ export function validateOperation(
       return { message: msg, logLine: t("flash.err.withMsg", { msg }) };
     }
   }
-  if (!input.selectedSerialPort) {
+  const isPortFreeChip = input.selectedChipId === "jieli";
+  if (!isPortFreeChip && !input.selectedSerialPort) {
     return {
       message: t("flash.err.deviceDisconnected"),
       logLine: t("flash.err.deviceDisconnectedLog"),

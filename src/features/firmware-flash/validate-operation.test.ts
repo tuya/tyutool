@@ -88,6 +88,16 @@ describe("validateOperation", () => {
     ).not.toBeNull();
   });
 
+  it("allows jieli op without a serial port", () => {
+    expect(
+      validateOperation("flash", {
+        ...base,
+        selectedChipId: "jieli",
+        selectedSerialPort: "",
+      }),
+    ).toBeNull();
+  });
+
   it("rejects an invalid erase address range", () => {
     expect(
       validateOperation("erase", {
