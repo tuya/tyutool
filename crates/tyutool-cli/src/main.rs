@@ -257,7 +257,7 @@ fn default_baud(device: &str) -> u32 {
         // The RAM loader is told this rate and follows the host to it; 2 Mbaud is what
         // the vendor tool uses.
         "gd32vw553" => 2000000,
-        "jieli" => 0,
+        "jieli" => 921600,
         _ => 921600,
     }
 }
@@ -937,15 +937,8 @@ mod tests {
 
     #[test]
     fn cli_jieli_write_does_not_require_port_flag() {
-        let cli = Cli::try_parse_from([
-            "tyutool",
-            "write",
-            "--device",
-            "jieli",
-            "--file",
-            "x.bin",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["tyutool", "write", "--device", "jieli", "--file", "x.bin"])
+            .unwrap();
         match cli.command {
             Commands::Write { device, port, .. } => {
                 assert_eq!(device, "jieli");
@@ -1035,7 +1028,7 @@ mod tests {
         assert_eq!(default_baud("esp32s3"), 460800);
         assert_eq!(default_baud("bk7231n"), 921600);
         assert_eq!(default_baud("t5ai"), 921600);
-        assert_eq!(default_baud("jieli"), 0);
+        assert_eq!(default_baud("jieli"), 921600);
     }
 
     #[test]

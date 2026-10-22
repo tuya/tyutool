@@ -141,7 +141,11 @@ fn run_via_python_flasher(
 
     log::info!("Invoking JieLi Python flasher at {:?}", flasher_script);
 
-    let python_bin = if std::process::Command::new("python3").arg("--version").output().is_ok() {
+    let python_bin = if std::process::Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
         "python3"
     } else {
         "python"
@@ -153,13 +157,14 @@ fn run_via_python_flasher(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| {
-        FlashError::Plugin(format!("failed to spawn JieLi python flasher: {}", e))
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| FlashError::Plugin(format!("failed to spawn JieLi python flasher: {}", e)))?;
 
-    let stdout = child.stdout.take().ok_or_else(|| {
-        FlashError::Plugin("failed to capture JieLi flasher stdout".into())
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| FlashError::Plugin("failed to capture JieLi flasher stdout".into()))?;
 
     use std::io::{BufRead, BufReader};
     let reader = BufReader::new(stdout);
@@ -180,16 +185,33 @@ fn run_via_python_flasher(
         if line.starts_with("[phase]") {
             let phase_str = line.trim_start_matches("[phase]").trim();
             match phase_str {
-                "Connect" => progress(FlashEvent::Phase { phase: FlashPhase::Connect }),
-                "Read Flash ID" => progress(FlashEvent::Phase { phase: FlashPhase::ReadFlashId }),
-                "Erase Flash" => progress(FlashEvent::Phase { phase: FlashPhase::Erase }),
-                "Write Flash" => progress(FlashEvent::Phase { phase: FlashPhase::Write }),
-                "Verify Flash" => progress(FlashEvent::Phase { phase: FlashPhase::Verify }),
-                "Reset Device" => progress(FlashEvent::Phase { phase: FlashPhase::Reboot }),
-                other => progress(FlashEvent::Phase { phase: FlashPhase::Other(other.to_string()) }),
+                "Connect" => progress(FlashEvent::Phase {
+                    phase: FlashPhase::Connect,
+                }),
+                "Read Flash ID" => progress(FlashEvent::Phase {
+                    phase: FlashPhase::ReadFlashId,
+                }),
+                "Erase Flash" => progress(FlashEvent::Phase {
+                    phase: FlashPhase::Erase,
+                }),
+                "Write Flash" => progress(FlashEvent::Phase {
+                    phase: FlashPhase::Write,
+                }),
+                "Verify Flash" => progress(FlashEvent::Phase {
+                    phase: FlashPhase::Verify,
+                }),
+                "Reset Device" => progress(FlashEvent::Phase {
+                    phase: FlashPhase::Reboot,
+                }),
+                other => progress(FlashEvent::Phase {
+                    phase: FlashPhase::Other(other.to_string()),
+                }),
             }
         } else if line.starts_with("[progress]") {
-            let pct_str = line.trim_start_matches("[progress]").trim().trim_end_matches('%');
+            let pct_str = line
+                .trim_start_matches("[progress]")
+                .trim()
+                .trim_end_matches('%');
             if let Ok(pct) = pct_str.parse::<u8>() {
                 progress(FlashEvent::Percent { value: pct });
             }
@@ -220,9 +242,10 @@ fn run_flash(
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let firmware_path = job.firmware_path.as_deref().ok_or_else(|| {
-        FlashError::Plugin("JieLi flash requires firmware_path (-f)".into())
-    })?;
+    let firmware_path = job
+        .firmware_path
+        .as_deref()
+        .ok_or_else(|| FlashError::Plugin("JieLi flash requires firmware_path (-f)".into()))?;
 
     let start_addr = parse_hex_u32(job.flash_start_hex.as_deref(), 0x00000000)?;
     let mut args = vec![
@@ -273,9 +296,10 @@ fn run_read(
     cancel: &AtomicBool,
     progress: &dyn Fn(FlashEvent),
 ) -> Result<(), FlashError> {
-    let read_path = job.read_file_path.as_deref().ok_or_else(|| {
-        FlashError::Plugin("JieLi read requires output file (-f)".into())
-    })?;
+    let read_path = job
+        .read_file_path
+        .as_deref()
+        .ok_or_else(|| FlashError::Plugin("JieLi read requires output file (-f)".into()))?;
 
     let start_addr = parse_hex_u32(job.read_start_hex.as_deref(), 0x00000000)?;
     let end_addr = parse_hex_u32(job.read_end_hex.as_deref(), start_addr + 0x00200000)?;
