@@ -108,12 +108,21 @@ fn locate_python_flasher() -> Option<PathBuf> {
     // 2. Check TuyaOpen platform paths relative to current directory
     let search_roots = [
         ".",
+        "platform/JIELI",
+        "platform/jieli",
+        "../platform/JIELI",
+        "../platform/jieli",
+        "../../platform/JIELI",
+        "../../platform/jieli",
         "platforms/JIELI",
         "platforms/jieli",
         "../platforms/JIELI",
         "../platforms/jieli",
+        "../../platforms/JIELI",
+        "../../platforms/jieli",
         "TuyaOpen-JieLi",
         "../TuyaOpen-JieLi",
+        "../../TuyaOpen-JieLi",
         "/home/share/samba/ePanda/TuyaOpen-JieLi",
     ];
 
