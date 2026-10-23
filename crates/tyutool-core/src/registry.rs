@@ -7,7 +7,7 @@ use crate::job::{FlashJob, FlashMode};
 use crate::plugin::FlashPlugin;
 use crate::plugins::{
     Bk7231nPlugin, Esp32Plugin, Esp32c3Plugin, Esp32c6Plugin, Esp32p4Plugin, Esp32s3Plugin,
-    Gd32vw553Plugin, Ln882hPlugin, T1Plugin, T2Plugin, T3Plugin, T5AIPlugin, T9Plugin,
+    Gd32vw553Plugin, JieliPlugin, Ln882hPlugin, T1Plugin, T2Plugin, T3Plugin, T5AIPlugin, T9Plugin,
 };
 
 /// Canonicalize a user-supplied chip id: trim, upper-case, and rewrite legacy
@@ -18,6 +18,7 @@ pub fn normalize_chip_id(raw: &str) -> String {
     let key = raw.trim().to_ascii_uppercase();
     match key.as_str() {
         "T5" => "T5AI".to_string(),
+        "WL82" | "WL83" | "AC791N" | "AC792N" => "JIELI".to_string(),
         _ => key,
     }
 }
@@ -65,6 +66,8 @@ impl FlashPluginRegistry {
         log::debug!("Registered flash plugin: LN882H");
         plugins.insert("GD32VW553".to_string(), Arc::new(Gd32vw553Plugin));
         log::debug!("Registered flash plugin: GD32VW553");
+        plugins.insert("JIELI".to_string(), Arc::new(JieliPlugin));
+        log::debug!("Registered flash plugin: JIELI");
 
         // A fake device in the default registry, so `run_job` — and therefore
         // every frontend, unchanged — can drive a job that behaves like
@@ -227,6 +230,10 @@ mod tests {
         assert_eq!(normalize_chip_id("T5"), "T5AI");
         assert_eq!(normalize_chip_id("t5"), "T5AI");
         assert_eq!(normalize_chip_id("  T5  "), "T5AI");
+        assert_eq!(normalize_chip_id("wl82"), "JIELI");
+        assert_eq!(normalize_chip_id("WL83"), "JIELI");
+        assert_eq!(normalize_chip_id("ac791n"), "JIELI");
+        assert_eq!(normalize_chip_id("AC792N"), "JIELI");
     }
 
     #[test]
@@ -276,6 +283,10 @@ mod tests {
         assert!(r.get("ESP32S3").is_ok());
         assert!(r.get("ln882h").is_ok());
         assert!(r.get("LN882H").is_ok());
+        assert!(r.get("jieli").is_ok());
+        assert!(r.get("JIELI").is_ok());
+        assert!(r.get("wl82").is_ok());
+        assert!(r.get("WL83").is_ok());
         assert!(r.get("unknown").is_err());
     }
 
@@ -283,9 +294,9 @@ mod tests {
     fn list_chip_ids_only_real_plugins() {
         let r = FlashPluginRegistry::new();
         let ids = r.list_chip_ids();
-        // The 13 real chips, plus the fake device when `mock-chip` is on. Any
+        // The 14 real chips, plus the fake device when `mock-chip` is on. Any
         // other entry means something got registered that should not have been.
-        let expected = if cfg!(feature = "mock-chip") { 14 } else { 13 };
+        let expected = if cfg!(feature = "mock-chip") { 15 } else { 14 };
         assert_eq!(ids.len(), expected, "unexpected registry contents: {ids:?}");
         assert!(ids.contains(&"BK7231N".to_string()));
         assert!(ids.contains(&"T2".to_string()));
@@ -300,6 +311,7 @@ mod tests {
         assert!(ids.contains(&"ESP32S3".to_string()));
         assert!(ids.contains(&"LN882H".to_string()));
         assert!(ids.contains(&"GD32VW553".to_string()));
+        assert!(ids.contains(&"JIELI".to_string()));
     }
 
     #[test]

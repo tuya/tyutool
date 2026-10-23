@@ -175,6 +175,17 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
       fullChip: { start: "0x00000000", end: "0x00400000" },
     },
   },
+  jieli: {
+    rustPluginId: "JIELI",
+    defaultBaudRate: 921600,
+    defaultAuthBaudRate: 115200,
+    defaultLogBaudRate: 115200,
+    flashSize: "0x00800000", // 8 MiB
+    eraseRequires4KAlignment: true,
+    erasePresets: {
+      fullChip: { start: "0x00000000", end: "0x007FFFFF" },
+    },
+  },
   ln882h: {
     rustPluginId: "LN882H",
     defaultBaudRate: 115200,

@@ -24,6 +24,14 @@ ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ENV{ID_MM_DEVIC
 ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
 ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
 
+# JieLi Technology (AC791 / AC792 / WL80 / WL82 / WL83)
+ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="3654", ENV{ID_MM_DEVICE_IGNORE}="1", MODE="0666"
+ACTION=="add|change", SUBSYSTEM=="usb", ATTRS{idVendor}=="3654", MODE="0666", GROUP="plugdev"
+ACTION=="add|change", SUBSYSTEM=="usb", ATTRS{idVendor}=="4c4a", MODE="0666", GROUP="plugdev"
+ACTION=="add|change", SUBSYSTEM=="scsi_generic", ATTRS{idVendor}=="4c4a", MODE="0666", GROUP="plugdev"
+ACTION=="add|change", SUBSYSTEM=="scsi_generic", ATTRS{idVendor}=="3654", MODE="0666", GROUP="plugdev"
+ACTION=="add|change", SUBSYSTEM=="block", ATTRS{idVendor}=="4c4a", ENV{UDISKS_IGNORE}="1", ENV{ID_STORAGE_IGNORE}="1"
+
 # brltty（盲文终端服务）在 Ubuntu 22.04+ 会误认 CH340 为盲文显示器并抢占设备。
 # ⚠ 下面这条**未在真机验证过**（二次 CR 指出）：brltty 自带的 85-brltty.rules 在匹配后会
 # `GOTO` 到自己的标签并触发 SYSTEMD_WANTS，那些副作用是否发生在 99- 规则执行之前，

@@ -222,17 +222,19 @@ const SUPPORTED_DEVICES: &[&str] = &[
     "esp32c6",
     "esp32p4",
     "esp32s3",
+    "jieli",
 ];
 
 fn chip_value_parser() -> impl TypedValueParser<Value = String> {
     // Lowercase first so --device T5AI / T5 / t5AI etc. all work.
     // Legacy `t5` (any case) maps to `t5ai` for backwards compatibility.
+    // JieLi aliases (`wl82`, `wl83`, `ac791n`, `ac792n`) map to `jieli`.
     StringValueParser::new().try_map(|s| {
         let lower = s.to_ascii_lowercase();
-        let canonical = if lower == "t5" {
-            "t5ai".to_string()
-        } else {
-            lower
+        let canonical = match lower.as_str() {
+            "t5" => "t5ai".to_string(),
+            "wl82" | "wl83" | "ac791n" | "ac792n" => "jieli".to_string(),
+            _ => lower,
         };
         if SUPPORTED_DEVICES.contains(&canonical.as_str()) {
             Ok(canonical)
@@ -255,8 +257,13 @@ fn default_baud(device: &str) -> u32 {
         // The RAM loader is told this rate and follows the host to it; 2 Mbaud is what
         // the vendor tool uses.
         "gd32vw553" => 2000000,
+        "jieli" => 921600,
         _ => 921600,
     }
+}
+
+fn is_port_optional_chip(device: &str) -> bool {
+    normalize_chip_id(device) == "JIELI"
 }
 
 // Must stay in sync with `defaultLogBaudRate` in
@@ -786,6 +793,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
+                None if is_port_optional_chip(&device) => "auto".to_string(),
                 None => choose_port()?,
             };
             let end = match end {
@@ -821,6 +829,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
+                None if is_port_optional_chip(&device) => "auto".to_string(),
                 None => choose_port()?,
             };
             let start_val = parse_hex_addr(&start)?;
@@ -854,6 +863,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = start.unwrap_or_else(|| default_start(&device));
             let port = match port {
                 Some(p) => p,
+                None if is_port_optional_chip(&device) => "auto".to_string(),
                 None => choose_port()?,
             };
             let start_val = parse_hex_addr(&start)?;
@@ -926,6 +936,19 @@ mod tests {
     }
 
     #[test]
+    fn cli_jieli_write_does_not_require_port_flag() {
+        let cli = Cli::try_parse_from(["tyutool", "write", "--device", "jieli", "--file", "x.bin"])
+            .unwrap();
+        match cli.command {
+            Commands::Write { device, port, .. } => {
+                assert_eq!(device, "jieli");
+                assert_eq!(port, None);
+            }
+            _ => panic!("expected Commands::Write"),
+        }
+    }
+
+    #[test]
     fn cli_accepts_legacy_t5_device_and_resolves_to_t5ai() {
         // Input is lowercased before matching, so all case variants are accepted.
         // Legacy `t5` (any case) resolves to the canonical `t5ai`.
@@ -967,6 +990,11 @@ mod tests {
             ("ESP32C6", "esp32c6"),
             ("ESP32P4", "esp32p4"),
             ("ESP32S3", "esp32s3"),
+            ("JIELI", "jieli"),
+            ("JieLi", "jieli"),
+            ("WL82", "jieli"),
+            ("wl83", "jieli"),
+            ("AC791N", "jieli"),
         ];
         for (input, canonical) in cases {
             let cli = Cli::try_parse_from([
@@ -1000,6 +1028,7 @@ mod tests {
         assert_eq!(default_baud("esp32s3"), 460800);
         assert_eq!(default_baud("bk7231n"), 921600);
         assert_eq!(default_baud("t5ai"), 921600);
+        assert_eq!(default_baud("jieli"), 921600);
     }
 
     #[test]

@@ -476,10 +476,13 @@ export const useFlashStore = defineStore("flash", () => {
 
   function buildFlashJob(kind: OpKind): FlashJobPayload {
     const chipId = rustPluginIdForChip(selectedChipId.value);
+    const port = selectedChipId.value === "jieli"
+      ? (selectedSerialPort.value || "auto")
+      : selectedSerialPort.value;
     return {
       mode: kind,
       chipId,
-      port: selectedSerialPort.value,
+      port,
       baudRate:
         kind === "authorize"
           ? selectedAuthBaudRate.value
@@ -614,6 +617,7 @@ export const useFlashStore = defineStore("flash", () => {
       readStartAddr: readStartAddr.value,
       readEndAddr: readEndAddr.value,
       isTauri: isTauriRuntime(),
+      selectedChipId: selectedChipId.value,
     });
     if (vErr) {
       flashMessage.value = vErr.message;

@@ -42,6 +42,11 @@ const baudSelectVal = computed({
 });
 
 const serialPortOptions = computed<TySelectOption[]>(() => {
+  if (ctx.selectedChipId === "jieli") {
+    return [
+      { value: "auto", label: "USB Mass Storage (Auto)" },
+    ];
+  }
   if (ctx.SERIAL_PORT_OPTIONS.length === 0) {
     return [
       { value: "", label: t("flash.noPortsPlaceholder"), disabled: true },
@@ -78,7 +83,7 @@ const chipOptions = computed<TySelectOption[]>(() =>
 );
 
 const serialPortValue = computed({
-  get: () => ctx.selectedSerialPort,
+  get: () => ctx.selectedChipId === "jieli" ? "auto" : ctx.selectedSerialPort,
   set: (val: string) => {
     ctx.selectedSerialPort = val;
   },

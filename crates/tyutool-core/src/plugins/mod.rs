@@ -7,6 +7,7 @@ pub mod esp32c6;
 pub mod esp32p4;
 pub mod esp32s3;
 pub mod gd32;
+pub mod jieli;
 pub mod ln882h;
 #[cfg(feature = "mock-chip")]
 pub mod mock;
@@ -23,6 +24,7 @@ pub use esp32c6::Esp32c6Plugin;
 pub use esp32p4::Esp32p4Plugin;
 pub use esp32s3::Esp32s3Plugin;
 pub use gd32::Gd32vw553Plugin;
+pub use jieli::JieliPlugin;
 pub use ln882h::Ln882hPlugin;
 #[cfg(feature = "mock-chip")]
 pub use mock::MockPlugin;
