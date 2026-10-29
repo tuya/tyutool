@@ -20,6 +20,8 @@ __pycache__/
 
 # ── Vitest coverage ───────────────────────────────────────────────────────────
 coverage/
+test-results/
+playwright-report/
 
 # ── TypeScript ────────────────────────────────────────────────────────────────
 *.tsbuildinfo
