@@ -6,10 +6,8 @@ const textEncoder = new TextEncoder();
 function lineChunk(line: DebugLogLine): Uint8Array {
   // Live lines carry rawBytes (the store splits DebugChunk.bytes itself),
   // including any LF/CRLF or unterminated binary tail from the input stream.
-  // Lines paged back from the Rust session archive do not: the archive stores
-  // text only, so a `number[]` of the same bytes does not cost 3x the IPC
-  // payload. This is a normalized text fallback only: the archive has already
-  // discarded original line endings and arbitrary binary bytes.
+  // New archive lines carry exact bytes too. Older text-only archives have no
+  // rawBytes, so retain their historical normalized LF fallback.
   if (line.rawBytes !== undefined) return line.rawBytes;
   const raw = textEncoder.encode(line.text);
   const chunk = new Uint8Array(raw.length + 1);

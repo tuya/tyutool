@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DebugLogLine, HexBytesPerRow } from "./types";
 import { formatHexDumpFromChunks } from "./hex-format";
 import { SerialDebugHexViewRenderer } from "./hex-view-renderer";
+import { archiveLineToLogLine } from "./utils";
 
 function line(id: number, rawBytes?: number[]): DebugLogLine {
   return {
@@ -117,19 +118,28 @@ describe("SerialDebugHexViewRenderer", () => {
     );
   });
 
-  it("re-encodes text for archive lines that carry no rawBytes", () => {
+  it("renders mapped exact archive bytes and keeps the legacy text fallback", () => {
     const renderer = new SerialDebugHexViewRenderer();
-    // Lines paged back from the Rust session archive have no rawBytes: the
-    // archive stores text only. The dump must show the text bytes, not blanks.
-    // Non-ASCII text (a translated sys line, e.g. the archive-cap notice)
-    // contributes its UTF-8 bytes.
-    const lines = [
-      { ...line(1), text: "AB" },
-      { ...line(2), text: "±" },
-    ];
+    const exact = archiveLineToLogLine(
+      {
+        lineNo: 1,
+        tsMs: 1,
+        direction: "rx",
+        text: "�",
+        rawBytes: [0, 255, 13, 10],
+      },
+      1,
+    );
+    const legacy = archiveLineToLogLine(
+      { lineNo: 2, tsMs: 2, direction: "rx", text: "±" },
+      2,
+    );
+    const lines = [exact, legacy];
 
     expect(renderer.renderRows(lines, 16, 0, 1)).toBe(fullDump(lines, 16)[0]);
-    expect(renderer.renderRows(lines, 16, 0, 1)).toContain("41 42 0a c2 b1 0a");
+    expect(renderer.renderRows(lines, 16, 0, 1)).toContain(
+      "00 ff 0d 0a c2 b1 0a",
+    );
   });
 
   it("maps a line index to the hex row its first byte lands on", () => {

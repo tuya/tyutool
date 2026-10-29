@@ -421,8 +421,12 @@ Logs exist partly so users can file good bug reports. Preserve these guarantees:
   `export_logs_zip` / `prune_log_files` all ignore it — structurally the same
   arrangement as `batch-auth-*.trace`. It is a paging store for the UI, not a
   diagnostic log, and it never lands in an export or archive zip. Do not move it
-  into the log dir. Archived lines carry text only (no `rawBytes`); consumers
-  that need bytes re-encode the text.
+  into the log dir. New archived TX/RX lines carry optional `rawBytes` containing
+  the exact source bytes (including original line endings and binary bytes, but
+  excluding any synthetic LF); Sys lines have none. JSON byte-array overhead
+  counts toward the archive cap. Older text-only archives remain readable and
+  use the renderer's normalized text fallback; their original bytes cannot be
+  recovered.
 - **Credential isolation (two-channel model):** batch-auth plaintext interaction data
   (verify comparison UUID/AuthKey values) is written to `batch-auth-<ts>.trace` via
   `tyutool_core::BatchAuthTraceWriter`, **never** into `tyutool-*.log`. The writer sits
