@@ -625,6 +625,25 @@ export class WsTransport {
     const ws = await this.connect();
     const requestId = this.newSerialDebugRequestId("serial-debug-filter-page");
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        ws.removeEventListener("message", handler);
+        ws.removeEventListener("close", onClose);
+        ws.removeEventListener("error", onError);
+      };
+      const onClose = () => {
+        cleanup();
+        reject(
+          new Error(
+            "WebSocket closed before serial-debug filter page response",
+          ),
+        );
+      };
+      const onError = () => {
+        cleanup();
+        reject(
+          new Error("WebSocket error before serial-debug filter page response"),
+        );
+      };
       const handler = (ev: MessageEvent) => {
         let msg: {
           type: string;
@@ -641,25 +660,32 @@ export class WsTransport {
           return;
         }
         if (msg.type === "error") {
-          ws.removeEventListener("message", handler);
+          cleanup();
           reject(new Error(msg.message ?? "ws error"));
           return;
         }
         if (msg.type === "serial_debug_filter_page" && msg.page) {
-          ws.removeEventListener("message", handler);
+          cleanup();
           resolve(msg.page);
         }
       };
       ws.addEventListener("message", handler);
-      ws.send(
-        JSON.stringify({
-          type: "serial_debug_filter_read_matches",
-          filter_id: filterId,
-          start,
-          limit,
-          request_id: requestId,
-        }),
-      );
+      ws.addEventListener("close", onClose, { once: true });
+      ws.addEventListener("error", onError, { once: true });
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "serial_debug_filter_read_matches",
+            filter_id: filterId,
+            start,
+            limit,
+            request_id: requestId,
+          }),
+        );
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     });
   }
 
@@ -670,6 +696,27 @@ export class WsTransport {
     const ws = await this.connect();
     const requestId = this.newSerialDebugRequestId("serial-debug-session-page");
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        ws.removeEventListener("message", handler);
+        ws.removeEventListener("close", onClose);
+        ws.removeEventListener("error", onError);
+      };
+      const onClose = () => {
+        cleanup();
+        reject(
+          new Error(
+            "WebSocket closed before serial-debug session page response",
+          ),
+        );
+      };
+      const onError = () => {
+        cleanup();
+        reject(
+          new Error(
+            "WebSocket error before serial-debug session page response",
+          ),
+        );
+      };
       const handler = (ev: MessageEvent) => {
         let msg: {
           type: string;
@@ -686,24 +733,31 @@ export class WsTransport {
           return;
         }
         if (msg.type === "error") {
-          ws.removeEventListener("message", handler);
+          cleanup();
           reject(new Error(msg.message ?? "ws error"));
           return;
         }
         if (msg.type === "serial_debug_session_page" && msg.page) {
-          ws.removeEventListener("message", handler);
+          cleanup();
           resolve(msg.page);
         }
       };
       ws.addEventListener("message", handler);
-      ws.send(
-        JSON.stringify({
-          type: "serial_debug_session_read_page",
-          start,
-          limit,
-          request_id: requestId,
-        }),
-      );
+      ws.addEventListener("close", onClose, { once: true });
+      ws.addEventListener("error", onError, { once: true });
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "serial_debug_session_read_page",
+            start,
+            limit,
+            request_id: requestId,
+          }),
+        );
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     });
   }
 }

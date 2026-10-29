@@ -144,8 +144,10 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
 
   /** Loads the last `HISTORY_ENTRY_PAGES` pages of the archive into the window. */
   async function loadTailWindow(): Promise<boolean> {
+    const gen = generation;
     // One cheap read just to learn `totalLines`; the range read follows.
     const probe = await deps.readSessionPage(0, 1);
+    if (gen !== generation) return false;
     const total = probe.totalLines;
     historyTotalLines.value = total;
     if (total === 0) return false;
@@ -155,6 +157,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
       budget(),
     );
     const { items, totalLines } = await readRange(total - want, want);
+    if (gen !== generation) return false;
     if (items.length === 0) return false;
     // Deliberately `true` even if the archive grew during the reads: the window
     // ends where the archive ended when the user asked for it, and "scroll back
@@ -188,10 +191,10 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
       historyMode.value = true;
       return true;
     } catch (e) {
-      fail(e);
+      if (gen === generation) fail(e);
       return false;
     } finally {
-      historyLoading.value = false;
+      if (gen === generation) historyLoading.value = false;
     }
   }
 
@@ -248,10 +251,10 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
       historyAtSessionStart.value = items[0].lineNo === 1;
       return { prepended: items.length, reanchored: false };
     } catch (e) {
-      fail(e);
+      if (gen === generation) fail(e);
       return none;
     } finally {
-      historyLoading.value = false;
+      if (gen === generation) historyLoading.value = false;
     }
   }
 
@@ -307,10 +310,10 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
         items[items.length - 1].lineNo >= historyTotalLines.value;
       return dropped;
     } catch (e) {
-      fail(e);
+      if (gen === generation) fail(e);
       return 0;
     } finally {
-      historyLoading.value = false;
+      if (gen === generation) historyLoading.value = false;
     }
   }
 
@@ -337,16 +340,17 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
       );
       return true;
     } catch (e) {
-      fail(e);
+      if (gen === generation) fail(e);
       return false;
     } finally {
-      historyLoading.value = false;
+      if (gen === generation) historyLoading.value = false;
     }
   }
 
   function exitHistoryMode(): void {
     generation += 1;
     historyMode.value = false;
+    historyLoading.value = false;
     historyLines.value = [];
     historyStartLineNo.value = 0;
     historyTotalLines.value = 0;

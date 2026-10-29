@@ -4,7 +4,7 @@ import type { DebugChunk, DebugConfig } from "./types";
 
 const { isTauriRuntimeMock, invokeMock, listenMock } = vi.hoisted(() => ({
   isTauriRuntimeMock: vi.fn(() => false),
-  invokeMock: vi.fn(async () => undefined),
+  invokeMock: vi.fn<() => Promise<unknown>>(async () => undefined),
   listenMock: vi.fn(),
 }));
 
@@ -197,6 +197,105 @@ describe("TauriTransport close acknowledgement", () => {
     await expect(tr.close()).rejects.toThrow("close failed");
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
+
+  it("routes archive cap and dropped chunk payloads to active subscribers", async () => {
+    const tr = serialDebugTransport();
+    const capped = vi.fn();
+    const dropped = vi.fn();
+    const stopCapped = tr.onArchiveCapped(capped);
+    const stopDropped = tr.onChunksDropped!(dropped);
+    await tr.open(cfg);
+
+    eventHandlers.get("serial-debug-archive-capped")?.({
+      payload: { limitMib: 64 },
+    });
+    eventHandlers.get("serial-debug-chunks-dropped")?.({
+      payload: { droppedBytes: 128 },
+    });
+    expect(capped).toHaveBeenCalledWith({ limitMib: 64 });
+    expect(dropped).toHaveBeenCalledWith({ droppedBytes: 128 });
+
+    stopCapped();
+    stopDropped();
+    eventHandlers.get("serial-debug-archive-capped")?.({
+      payload: { limitMib: 32 },
+    });
+    eventHandlers.get("serial-debug-chunks-dropped")?.({
+      payload: { droppedBytes: 1 },
+    });
+    expect(capped).toHaveBeenCalledTimes(1);
+    expect(dropped).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes disconnect and filter update payloads without reshaping them", async () => {
+    const tr = serialDebugTransport();
+    const disconnected = vi.fn();
+    const updated = vi.fn();
+    tr.onDisconnect(disconnected);
+    tr.onFilterUpdated(updated);
+    await tr.open(cfg);
+    const disconnectPayload = { reason: "device removed" };
+    const filterPayload = {
+      def: { id: "f-7", keyword: "ERR", useRegex: true, color: "#abc" },
+      stats: {
+        filterId: "f-7",
+        status: "scanning",
+        scannedUntilLineNo: 21,
+        totalLinesSnapshot: 30,
+        totalMatches: 2,
+        error: null,
+      },
+    };
+    eventHandlers.get("serial-debug-disconnected")?.({
+      payload: disconnectPayload,
+    });
+    eventHandlers.get("serial-debug-filter-updated")?.({
+      payload: filterPayload,
+    });
+    expect(disconnected).toHaveBeenCalledWith(disconnectPayload);
+    expect(updated).toHaveBeenCalledWith(filterPayload);
+  });
+
+  it("maps serial debug commands and arguments to their Tauri IPC names", async () => {
+    const tr = serialDebugTransport();
+    await tr.send(Uint8Array.from([0, 10, 255]));
+    await tr.clearSession();
+    await tr.appendSysLine(1234, "connected");
+    await tr.addFilter("ERR", true, "#f00");
+    await tr.removeFilter("filter-3");
+    await tr.readFilterMatches("filter-3", 40, 25);
+    await tr.readSessionPage(100, 75);
+    await tr.setArchiveLimit(64 * 1024 * 1024);
+
+    expect(invokeMock.mock.calls).toEqual([
+      ["serial_debug_send", { bytes: [0, 10, 255] }],
+      ["serial_debug_session_clear"],
+      ["serial_debug_append_sys_line", { tsMs: 1234, text: "connected" }],
+      [
+        "serial_debug_filter_add",
+        { args: { keyword: "ERR", useRegex: true, color: "#f00" } },
+      ],
+      ["serial_debug_filter_remove", { filterId: "filter-3" }],
+      [
+        "serial_debug_filter_read_matches",
+        { filterId: "filter-3", start: 40, limit: 25 },
+      ],
+      ["serial_debug_session_read_page", { start: 100, limit: 75 }],
+      ["serial_debug_set_archive_limit", { maxBytes: 64 * 1024 * 1024 }],
+    ]);
+  });
+
+  it("returns null when Tauri reports no archive position for a system line", async () => {
+    const tr = serialDebugTransport();
+    invokeMock.mockResolvedValueOnce(null);
+    await expect(tr.appendSysLine(10, "not archived")).resolves.toBeNull();
+  });
+
+  it("returns the archive position reported for a system line", async () => {
+    const tr = serialDebugTransport();
+    invokeMock.mockResolvedValueOnce(42);
+    await expect(tr.appendSysLine(10, "archived")).resolves.toBe(42);
+  });
 });
 
 describe("WebTransport (web mode delegates to wsTransport)", () => {
@@ -283,6 +382,48 @@ describe("WebTransport (web mode delegates to wsTransport)", () => {
     unsub();
     wsState.onDisconnect?.("again");
     expect(reasons.length).toBe(1);
+  });
+
+  it("unsubscribes filter update listeners independently", async () => {
+    const tr = serialDebugTransport();
+    const first = vi.fn();
+    const second = vi.fn();
+    const stopFirst = tr.onFilterUpdated(first);
+    tr.onFilterUpdated(second);
+    await tr.open(cfg);
+    const payload = {
+      def: { id: "f", keyword: "x", useRegex: false, color: "red" },
+      stats: {
+        filterId: "f",
+        status: "complete",
+        scannedUntilLineNo: 1,
+        totalLinesSnapshot: 1,
+        totalMatches: 1,
+        error: null,
+      },
+    };
+    stopFirst();
+    wsState.onFilterUpdated?.(payload);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(payload);
+  });
+
+  it("routes archive cap and dropped byte events to web subscribers", async () => {
+    const tr = serialDebugTransport();
+    const capped = vi.fn();
+    const dropped = vi.fn();
+    tr.onArchiveCapped(capped);
+    tr.onChunksDropped!(dropped);
+    await tr.open(cfg);
+    const capPayload = { limitMib: 128 };
+    const dropPayload = { droppedBytes: 4096 };
+    // The websocket mock captures these callbacks through serialDebugOpen.
+    const openMock = vi.mocked(wsTransport.serialDebugOpen);
+    const callbacks = openMock.mock.calls[openMock.mock.calls.length - 1];
+    callbacks?.[5]?.(capPayload);
+    callbacks?.[6]?.(dropPayload);
+    expect(capped).toHaveBeenCalledWith(capPayload);
+    expect(dropped).toHaveBeenCalledWith(dropPayload);
   });
 
   it("send forwards bytes to wsTransport.serialDebugSend", async () => {
