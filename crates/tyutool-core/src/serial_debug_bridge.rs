@@ -1147,4 +1147,156 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn bridge_preserves_chunk_order_and_direction_within_a_batch() {
+        let dir = scratch_dir("order-directions");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let sink = TestSink::default();
+        serial_debug_flush_chunks(
+            &sink,
+            &archive,
+            &filters,
+            vec![
+                rx(b"first\n"),
+                DebugChunk {
+                    direction: Direction::Tx,
+                    ts_ms: 2,
+                    bytes: b"sent\n".to_vec(),
+                },
+                rx(b"third\n"),
+            ],
+        );
+        let lines = archive.lock().unwrap().read_page(0, 8).unwrap().items;
+        assert_eq!(
+            lines
+                .iter()
+                .map(|l| (l.direction, l.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (LogDirection::Rx, "first"),
+                (LogDirection::Tx, "sent"),
+                (LogDirection::Rx, "third")
+            ]
+        );
+        let recorded = sink.recorded();
+        let batch = &recorded.batches[0];
+        assert_eq!(
+            batch
+                .iter()
+                .map(|c| (
+                    c.chunk.direction,
+                    c.chunk.bytes.as_slice(),
+                    c.archived_before
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (Direction::Rx, b"first\n".as_slice(), 0),
+                (Direction::Tx, b"sent\n".as_slice(), 1),
+                (Direction::Rx, b"third\n".as_slice(), 2)
+            ]
+        );
+        drop(recorded);
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reset_discards_pre_reset_chunks_before_accepting_new_generation() {
+        let dir = scratch_dir("reset-generation");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let bridge = serial_debug_spawn_chunk_bridge(
+            TestSink::default(),
+            Arc::clone(&archive),
+            filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        bridge.send_chunk(rx(b"old\n"));
+        bridge.reset().unwrap();
+        // Reset is a generation barrier; clearing persisted history is a
+        // separate host action performed after the barrier acknowledges.
+        archive.lock().unwrap().clear().unwrap();
+        bridge.send_chunk(rx(b"new\n"));
+        bridge.shutdown().unwrap();
+        let texts: Vec<_> = archive
+            .lock()
+            .unwrap()
+            .read_page(0, 8)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(texts, vec!["new"]);
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn send_after_consumer_shutdown_is_safely_ignored() {
+        let dir = scratch_dir("send-disconnected");
+        let archive = Arc::new(Mutex::new(SerialDebugArchive::create(&dir).unwrap()));
+        let filters = Arc::new(Mutex::new(SerialDebugFilterIndex::create(&dir).unwrap()));
+        let bridge = serial_debug_spawn_chunk_bridge(
+            TestSink::default(),
+            Arc::clone(&archive),
+            filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        let late_sender = bridge.clone();
+        bridge.shutdown().unwrap();
+        late_sender.send_chunk(rx(b"after shutdown"));
+        assert_eq!(archive.lock().unwrap().total_lines(), 0);
+        drop(archive);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn separate_bridge_archives_do_not_share_lines_or_positions() {
+        let first_dir = scratch_dir("session-isolation-a");
+        let second_dir = scratch_dir("session-isolation-b");
+        let first_archive = Arc::new(Mutex::new(SerialDebugArchive::create(&first_dir).unwrap()));
+        let second_archive = Arc::new(Mutex::new(SerialDebugArchive::create(&second_dir).unwrap()));
+        let first_filters = Arc::new(Mutex::new(
+            SerialDebugFilterIndex::create(&first_dir).unwrap(),
+        ));
+        let second_filters = Arc::new(Mutex::new(
+            SerialDebugFilterIndex::create(&second_dir).unwrap(),
+        ));
+        let first = serial_debug_spawn_chunk_bridge(
+            TestSink::default(),
+            Arc::clone(&first_archive),
+            first_filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        let second = serial_debug_spawn_chunk_bridge(
+            TestSink::default(),
+            Arc::clone(&second_archive),
+            second_filters,
+            Arc::new(SerialDebugGeneration::default()),
+        );
+        first.send_chunk(rx(b"alpha\n"));
+        second.send_chunk(rx(b"beta\n"));
+        first.shutdown().unwrap();
+        second.shutdown().unwrap();
+        assert_eq!(
+            first_archive.lock().unwrap().read_page(0, 2).unwrap().items[0].text,
+            "alpha"
+        );
+        assert_eq!(
+            second_archive
+                .lock()
+                .unwrap()
+                .read_page(0, 2)
+                .unwrap()
+                .items[0]
+                .text,
+            "beta"
+        );
+        drop((first_archive, second_archive));
+        let _ = std::fs::remove_dir_all(first_dir);
+        let _ = std::fs::remove_dir_all(second_dir);
+    }
 }

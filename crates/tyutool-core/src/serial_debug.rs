@@ -633,17 +633,12 @@ impl SerialDebugArchive {
                 .unwrap_or(0);
             let text = String::from_utf8_lossy(&raw_bytes[..text_end]).into_owned();
             let direction = log_direction(chunk.direction);
-            // `raw_bytes` is deliberately dropped here: `text` above is already
-            // derived from it, and carrying it into the archive JSON costs
-            // ~268 B of `number[]` per 407 B line. Consumers that need bytes
-            // (the hex view on a filter tab) re-encode `text`; the live view
-            // never goes through the archive at all.
             decoded.push(SerialDebugLine {
                 line_no: 0,
                 ts_ms: chunk.ts_ms,
                 direction,
                 text,
-                raw_bytes: None,
+                raw_bytes: Some(raw_bytes),
             });
         }
 
@@ -746,7 +741,7 @@ impl SerialDebugArchive {
             ts_ms,
             direction: log_direction(direction),
             text: String::from_utf8_lossy(&partial[..text_end]).into_owned(),
-            raw_bytes: None,
+            raw_bytes: Some(partial),
         })
     }
 
@@ -2372,6 +2367,56 @@ mod tests {
     }
 
     #[test]
+    fn archive_pages_and_filter_matches_preserve_binary_bytes_for_both_directions() {
+        let dir = temp_serial_debug_dir("binary-page-filter");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let mut filters = SerialDebugFilterIndex::create(&dir).unwrap();
+        let filter = filters
+            .add_filter("ERR".into(), false, "#f00".into(), 0)
+            .unwrap();
+        let rx = vec![b'E', b'R', b'R', 0, 0xff, b'\r', b'\n'];
+        let tx = vec![b'E', b'R', b'R', 0xc3, 0xa9, b'\n'];
+        let rx_lines = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: rx.clone(),
+            })
+            .unwrap();
+        let tx_lines = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Tx,
+                ts_ms: 2,
+                bytes: tx.clone(),
+            })
+            .unwrap();
+        filters.ingest_completed_lines(&rx_lines).unwrap();
+        filters.ingest_completed_lines(&tx_lines).unwrap();
+        let page = archive.read_page(0, 2).unwrap();
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|line| line.raw_bytes.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            vec![rx.as_slice(), tx.as_slice()]
+        );
+        let matches = filters.read_match_page(&filter.id, 0, 2, &archive).unwrap();
+        assert_eq!(
+            matches
+                .items
+                .iter()
+                .map(|line| line.raw_bytes.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            vec![rx.as_slice(), tx.as_slice()]
+        );
+        assert!(matches
+            .items
+            .iter()
+            .all(|line| line.direction != LogDirection::Sys));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn filter_tracks_new_lines_beyond_its_history_snapshot() {
         let dir = temp_serial_debug_dir("live-after-create");
         let mut archive = SerialDebugArchive::create(&dir).unwrap();
@@ -3144,25 +3189,50 @@ mod tests {
     }
 
     #[test]
-    fn archive_lines_do_not_carry_raw_bytes_into_the_session_file() {
-        let dir = temp_serial_debug_dir("no-raw-bytes");
+    fn archive_lines_preserve_raw_bytes_and_read_legacy_text_only_lines() {
+        let dir = temp_serial_debug_dir("raw-bytes-roundtrip");
         let mut archive = SerialDebugArchive::create(&dir).unwrap();
         let completed = archive
             .append_chunk(&DebugChunk {
                 direction: Direction::Rx,
                 ts_ms: 1,
-                bytes: b"hello\n".to_vec(),
+                bytes: vec![b'h', 0, 0xff, b'\r', b'\n'],
             })
             .unwrap();
-        assert_eq!(completed[0].text, "hello");
-        assert!(completed[0].raw_bytes.is_none());
-
-        let raw = std::fs::read_to_string(&archive.log_path).unwrap();
-        assert!(
-            !raw.contains("rawBytes"),
-            "archive JSON must stay lean: {raw}"
+        assert_eq!(
+            completed[0].raw_bytes.as_deref(),
+            Some(&[b'h', 0, 0xff, b'\r', b'\n'][..])
+        );
+        assert_eq!(
+            archive.read_page(0, 1).unwrap().items[0].raw_bytes,
+            completed[0].raw_bytes
         );
 
+        let raw = std::fs::read_to_string(&archive.log_path).unwrap();
+        assert!(raw.contains("\"rawBytes\":[104,0,255,13,10]"), "{raw}");
+        let legacy: SerialDebugLine =
+            serde_json::from_str(r#"{"lineNo":1,"tsMs":0,"direction":"rx","text":"legacy"}"#)
+                .unwrap();
+        assert_eq!(legacy.text, "legacy");
+        assert_eq!(legacy.raw_bytes, None);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pending_lines_preserve_tail_bytes_without_synthetic_newline() {
+        let dir = temp_serial_debug_dir("raw-pending-tail");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Tx,
+                ts_ms: 1,
+                bytes: vec![0, 0xff, b'\r'],
+            })
+            .unwrap();
+        let closed = archive.append_gap(Direction::Tx, 2, 1).unwrap();
+        assert_eq!(closed[0].raw_bytes.as_deref(), Some(&[0, 0xff, b'\r'][..]));
+        assert_eq!(closed[1].raw_bytes, None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -3239,6 +3309,32 @@ mod tests {
             .unwrap();
         assert_eq!(completed_tail.len(), 1);
         assert_eq!(completed_tail[0].text.len(), 8);
+
+        let exact = (0..MAX_PENDING_SERIAL_DEBUG_LINE_BYTES + 13)
+            .map(|n| [0, 0xff, b'\r', b'X'][n % 4])
+            .collect::<Vec<_>>();
+        let mut reconstructed = Vec::new();
+        for chunk in exact.chunks(701) {
+            reconstructed.extend(
+                archive
+                    .append_chunk(&DebugChunk {
+                        direction: Direction::Tx,
+                        ts_ms: 3,
+                        bytes: chunk.to_vec(),
+                    })
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(|line| line.raw_bytes.unwrap()),
+            );
+        }
+        reconstructed.extend(
+            archive
+                .finalize_pending_lines(4)
+                .unwrap()
+                .into_iter()
+                .flat_map(|line| line.raw_bytes.unwrap()),
+        );
+        assert_eq!(reconstructed, exact);
 
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -3469,5 +3565,226 @@ mod tests {
         }
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn utf8_codepoint_split_across_chunks_is_decoded_after_line_completion() {
+        let dir = temp_serial_debug_dir("utf8-split");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let bytes = "温度".as_bytes();
+        assert!(archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: bytes[..2].to_vec()
+            })
+            .unwrap()
+            .is_empty());
+        let completed = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 2,
+                bytes: bytes[2..]
+                    .iter()
+                    .copied()
+                    .chain(b"\n".iter().copied())
+                    .collect(),
+            })
+            .unwrap();
+        assert_eq!(
+            completed
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["温度"]
+        );
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 3,
+                bytes: b"next\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(
+            archive
+                .read_page(0, 2)
+                .unwrap()
+                .items
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["温度", "next"]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn crlf_is_removed_and_cr_only_is_preserved_inside_text() {
+        let dir = temp_serial_debug_dir("crlf");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let lines = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"one\r\ntwo\rX\n\r\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(
+            lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            vec!["one", "two\rX", ""]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn non_utf8_gbk_bytes_are_lossy_in_text_but_archive_does_not_claim_decoding() {
+        let dir = temp_serial_debug_dir("gbk-bytes");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        let lines = archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: vec![0xd6, 0xd0, b'\n'],
+            })
+            .unwrap();
+        assert_eq!(lines[0].text, "��");
+        assert_eq!(
+            lines[0].raw_bytes.as_deref(),
+            Some(&[0xd6, 0xd0, b'\n'][..])
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn interleaved_lines_keep_direction_and_repeated_finalize_is_idempotent() {
+        let dir = temp_serial_debug_dir("interleaved-finalize");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"rx-one\n".to_vec(),
+            })
+            .unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Tx,
+                ts_ms: 2,
+                bytes: b"tx-tail".to_vec(),
+            })
+            .unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 3,
+                bytes: b"rx-two\n".to_vec(),
+            })
+            .unwrap();
+        let finalized = archive.finalize_pending_lines(4).unwrap();
+        assert_eq!(
+            finalized
+                .iter()
+                .map(|l| (l.direction, l.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(LogDirection::Tx, "tx-tail")]
+        );
+        assert!(archive.finalize_pending_lines(5).unwrap().is_empty());
+        assert_eq!(
+            archive
+                .read_page(0, 4)
+                .unwrap()
+                .items
+                .iter()
+                .map(|l| (l.direction, l.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (LogDirection::Rx, "rx-one"),
+                (LogDirection::Rx, "rx-two"),
+                (LogDirection::Tx, "tx-tail")
+            ]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn clear_discards_unterminated_pending_bytes() {
+        let dir = temp_serial_debug_dir("clear-pending");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"stale".to_vec(),
+            })
+            .unwrap();
+        archive.clear().unwrap();
+        assert!(archive.finalize_pending_lines(2).unwrap().is_empty());
+        assert_eq!(archive.total_lines(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn zero_archive_cap_allows_writes_and_zero_limit_page_is_empty() {
+        let dir = temp_serial_debug_dir("zero-limit");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive.set_max_bytes(0);
+        assert_eq!(
+            archive
+                .append_chunk(&DebugChunk {
+                    direction: Direction::Rx,
+                    ts_ms: 1,
+                    bytes: b"ok\n".to_vec()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(archive.read_page(0, 0).unwrap().items.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn read_page_clamps_start_and_saturating_limit_at_archive_end() {
+        let dir = temp_serial_debug_dir("page-clamps");
+        let mut archive = SerialDebugArchive::create(&dir).unwrap();
+        archive
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"a\nb\n".to_vec(),
+            })
+            .unwrap();
+        let page = archive.read_page(u64::MAX, u64::MAX).unwrap();
+        assert_eq!(page.total_lines, 2);
+        assert_eq!(page.start, 2);
+        assert!(page.items.is_empty());
+        assert!(archive.read_line_range(0, 4).unwrap().is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn concurrently_open_archives_keep_independent_session_lines() {
+        let first_dir = temp_serial_debug_dir("parallel-session-a");
+        let second_dir = temp_serial_debug_dir("parallel-session-b");
+        let mut first = SerialDebugArchive::create(&first_dir).unwrap();
+        let mut second = SerialDebugArchive::create(&second_dir).unwrap();
+        first
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 1,
+                bytes: b"first\n".to_vec(),
+            })
+            .unwrap();
+        second
+            .append_chunk(&DebugChunk {
+                direction: Direction::Rx,
+                ts_ms: 2,
+                bytes: b"second\n".to_vec(),
+            })
+            .unwrap();
+        assert_eq!(first.read_page(0, 2).unwrap().items[0].text, "first");
+        assert_eq!(second.read_page(0, 2).unwrap().items[0].text, "second");
+        std::fs::remove_dir_all(first_dir).unwrap();
+        std::fs::remove_dir_all(second_dir).unwrap();
     }
 }
