@@ -358,6 +358,31 @@ describe("SerialDebugLogView auto-scroll", () => {
     await flush();
   }
 
+  it("renders appendChunk previews in ASCII and Hex, then completes them once", async () => {
+    const s = useSerialDebugStore();
+    mountComponent();
+    s.appendChunk({ direction: "rx", tsMs: 7, bytes: [0x3e] });
+    await flush();
+    expect(
+      renderedRows()
+        .map((row) => row.textContent)
+        .join(" "),
+    ).toContain(">");
+
+    hexViewProp.value = true;
+    await flush();
+    expect(mountedDump()).toContain("3e");
+    expect(s.activeDisplayLines()[0].rawBytes).toEqual(Uint8Array.from([0x3e]));
+
+    s.appendChunk({ direction: "rx", tsMs: 8, bytes: [0x41, 0x0a] });
+    await flush();
+    expect(s.lines.filter((line) => line.text === ">A")).toHaveLength(1);
+    expect(
+      s.activeDisplayLines().filter((line) => line.text === ">A"),
+    ).toHaveLength(1);
+    expect(s.lines[0].rawBytes).toEqual(Uint8Array.from([0x3e, 0x41, 0x0a]));
+  });
+
   it("follows new lines while the visible buffer is still growing", async () => {
     const s = useSerialDebugStore();
     mountComponent();

@@ -581,6 +581,7 @@
       "active": "Auto-saving",
       "off": "Auto-save",
       "errWrite": "Auto-save failed: {msg}",
+      "queueOverflow": "Auto-save stopped because its pending queue reached the limit. This file may be incomplete; live logging continues.",
       "timestamp": "Include timestamp per line",
       "timestampFmtOn": "[12:00:00.000] [RX] [data]",
       "timestampFmtOff": "[RX] [data]"

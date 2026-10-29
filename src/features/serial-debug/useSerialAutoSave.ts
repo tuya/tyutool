@@ -5,7 +5,7 @@ import type { useSerialDebugStore } from "@/stores/serial-debug";
 import { rLog } from "@/utils/log";
 import {
   AUTO_SAVE_BACKFILL_PAGE_SIZE,
-  AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TICK,
+  AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TASK,
   AUTO_SAVE_FLUSH_MAX_CHARS,
 } from "./constants";
 import { serialDebugTransport } from "./transport";
@@ -37,11 +37,16 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
   const transport = serialDebugTransport();
 
   let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
+  let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+  let readyFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let queueFlushRequested = false;
+  let queueBoundaryFlush = false;
   let currentFlushPromise: Promise<void> | null = null;
   let backfillPromise: Promise<void> | null = null;
   let transition = Promise.resolve();
   let autoSaveWriteError: Error | null = null;
   let sessionAutoSaveDir: string | null = null;
+  let sessionGeneration = 0;
 
   if (s.sessionAutoSavePath) {
     const portPath = `/${sanitizePortName(s.port)}/`;
@@ -63,6 +68,43 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
       clearInterval(autoSaveInterval);
       autoSaveInterval = null;
     }
+    if (continuationTimer !== null) {
+      clearTimeout(continuationTimer);
+      continuationTimer = null;
+    }
+    if (readyFlushTimer !== null) {
+      clearTimeout(readyFlushTimer);
+      readyFlushTimer = null;
+    }
+  }
+
+  function scheduleReadyFlush(force = false): void {
+    if (
+      queueBoundaryFlush ||
+      readyFlushTimer !== null ||
+      !s.sessionAutoSavePath
+    )
+      return;
+    const { queueCount, estimatedChars } = s.pendingAutoSaveStats();
+    if (
+      !force &&
+      estimatedChars < AUTO_SAVE_FLUSH_MAX_CHARS &&
+      queueCount < 256
+    )
+      return;
+    if (currentFlushPromise) {
+      queueFlushRequested = true;
+      return;
+    }
+    readyFlushTimer = setTimeout(() => {
+      readyFlushTimer = null;
+      queueFlushRequested = false;
+      void flush().catch((e) => {
+        rLog.warn(
+          `[SerialDebug] auto-save queue flush failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+    }, 0);
   }
 
   /**
@@ -152,7 +194,22 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     drainAll = false,
     throughSeq = s.autoSaveQueueHighWaterMark(),
     propagateFailure = false,
+    expectedPath = s.sessionAutoSavePath,
+    expectedGeneration = sessionGeneration,
   ): Promise<void> {
+    if (
+      propagateFailure &&
+      autoSaveWriteError &&
+      s.peekPendingAutoSaveLines(1, throughSeq).length > 0
+    ) {
+      throw autoSaveWriteError;
+    }
+    if (
+      !expectedPath ||
+      s.sessionAutoSavePath !== expectedPath ||
+      sessionGeneration !== expectedGeneration
+    )
+      return;
     if (currentFlushPromise) {
       try {
         await currentFlushPromise;
@@ -167,7 +224,13 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
       ) {
         throw autoSaveWriteError;
       }
-      return flush(drainAll, throughSeq, propagateFailure);
+      return flush(
+        drainAll,
+        throughSeq,
+        propagateFailure,
+        expectedPath,
+        expectedGeneration,
+      );
     }
 
     const current = (async () => {
@@ -176,26 +239,68 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
         // pre-enable backfill has finished, otherwise the file would read
         // newest-then-oldest around the handoff.
         if (backfillPromise) await backfillPromise;
+        if (
+          s.sessionAutoSavePath !== expectedPath ||
+          sessionGeneration !== expectedGeneration
+        )
+          return;
         let appends = 0;
         while (true) {
-          const path = s.sessionAutoSavePath;
-          if (!path) break;
+          if (
+            s.sessionAutoSavePath !== expectedPath ||
+            sessionGeneration !== expectedGeneration
+          )
+            break;
           const newLines = s.peekPendingAutoSaveLines(
             AUTO_SAVE_FLUSH_MAX_CHARS,
             throughSeq,
           );
           if (newLines.length === 0) break;
           await invoke("append_text_file", {
-            path,
+            path: expectedPath,
             content: formatAutoSaveBlock(newLines),
           });
+          if (
+            s.sessionAutoSavePath !== expectedPath ||
+            sessionGeneration !== expectedGeneration
+          )
+            break;
           s.commitPendingAutoSaveLines(newLines.length);
           appends += 1;
           // A periodic flush yields after its share. A close or boundary flush
           // drains only its captured sequence range, so later live input cannot
           // hold the operation open forever.
-          if (!drainAll && appends >= AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TICK)
+          if (!drainAll && appends >= AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TASK)
             break;
+        }
+        if (
+          !drainAll &&
+          s.sessionAutoSavePath === expectedPath &&
+          sessionGeneration === expectedGeneration &&
+          s.peekPendingAutoSaveLines(1, throughSeq).length > 0 &&
+          continuationTimer === null
+        ) {
+          const continuationPath = s.sessionAutoSavePath;
+          const continuationGeneration = sessionGeneration;
+          continuationTimer = setTimeout(() => {
+            continuationTimer = null;
+            if (
+              s.sessionAutoSavePath === continuationPath &&
+              sessionGeneration === continuationGeneration
+            ) {
+              void flush(
+                false,
+                throughSeq,
+                false,
+                continuationPath,
+                continuationGeneration,
+              ).catch((e) => {
+                rLog.warn(
+                  `[SerialDebug] auto-save continuation failed: ${e instanceof Error ? e.message : String(e)}`,
+                );
+              });
+            }
+          }, 0);
         }
         if (
           Number.isFinite(throughSeq) &&
@@ -221,6 +326,10 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
       await current;
     } finally {
       if (currentFlushPromise === current) currentFlushPromise = null;
+      if (queueFlushRequested) {
+        queueFlushRequested = false;
+        scheduleReadyFlush(true);
+      }
     }
   }
 
@@ -258,6 +367,7 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     const filename = `serial-debug-${makeStamp()}-${crypto.randomUUID()}.txt`;
     // path separator: Tauri on all platforms accepts forward slash
     const path = `${dir}/${portDir}/${filename}`;
+    sessionGeneration += 1;
     autoSaveWriteError = null;
     sessionAutoSaveDir = dir;
     s.sessionAutoSavePath = path;
@@ -288,20 +398,52 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
 
   async function finalFlushAndStop(): Promise<void> {
     stopInterval();
+    if (continuationTimer !== null) {
+      clearTimeout(continuationTimer);
+      continuationTimer = null;
+    }
     await flush(true);
+    sessionGeneration += 1;
     s.sessionAutoSavePath = null;
     sessionAutoSaveDir = null;
   }
 
   s.registerBeforeClearAutoSave((throughSeq) => {
     if (!s.sessionAutoSavePath && !autoSaveWriteError) return Promise.resolve();
-    return flush(true, throughSeq, true);
+    queueBoundaryFlush = true;
+    if (continuationTimer !== null) {
+      clearTimeout(continuationTimer);
+      continuationTimer = null;
+    }
+    if (readyFlushTimer !== null) {
+      clearTimeout(readyFlushTimer);
+      readyFlushTimer = null;
+    }
+    queueFlushRequested = false;
+    return flush(true, throughSeq, true).finally(() => {
+      queueBoundaryFlush = false;
+    });
   });
   s.registerAfterBackendDrainAutoSave((throughSeq) => flush(true, throughSeq));
+  s.registerAutoSaveQueueReady(({ queueCount, estimatedChars }) => {
+    if (estimatedChars >= AUTO_SAVE_FLUSH_MAX_CHARS || queueCount >= 256)
+      scheduleReadyFlush();
+  });
+  s.registerAutoSaveOverflowHandler(() => {
+    void s.appendSysLine(t("serialDebug.autoSave.queueOverflow")).catch((e) => {
+      rLog.warn(
+        `[SerialDebug] auto-save overflow notice failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    });
+  });
   onUnmounted(() => {
     s.registerBeforeClearAutoSave(null);
     s.registerAfterBackendDrainAutoSave(null);
+    s.registerAutoSaveQueueReady(null);
+    s.registerAutoSaveOverflowHandler(null);
     stopInterval();
+    queueFlushRequested = false;
+    if (continuationTimer !== null) clearTimeout(continuationTimer);
   });
 
   // Start/stop when port opens or closes
@@ -324,7 +466,9 @@ export function useSerialAutoSave(s: SerialDebugStore): void {
     enqueueTransition(async () => {
       const path = s.sessionAutoSavePath;
       if (path && (!newAutoSave || !newDir || sessionAutoSaveDir !== newDir)) {
+        stopInterval();
         await flush(true, s.autoSaveQueueHighWaterMark(), true);
+        sessionGeneration += 1;
         s.sessionAutoSavePath = null;
         sessionAutoSaveDir = null;
       }

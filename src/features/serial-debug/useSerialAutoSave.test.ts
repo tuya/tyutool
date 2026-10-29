@@ -7,6 +7,7 @@ import { __setSerialDebugTransportForTest } from "./transport";
 import {
   AUTO_SAVE_BACKFILL_PAGE_SIZE,
   AUTO_SAVE_FLUSH_MAX_CHARS,
+  AUTO_SAVE_QUEUE_MAX_LINES,
 } from "./constants";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { useSerialAutoSave } from "./useSerialAutoSave";
@@ -469,7 +470,7 @@ describe("useSerialAutoSave", () => {
     expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
   });
 
-  it("stops after the per-tick append cap and resumes on the next tick", async () => {
+  it("continues beyond the per-turn append cap on zero-delay turns", async () => {
     const s = useSerialDebugStore();
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -489,21 +490,181 @@ describe("useSerialAutoSave", () => {
     s.open = true;
     await nextTick();
 
-    invokeSpy.mockResolvedValue(undefined);
+    const taskEvents: string[] = [];
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file") taskEvents.push("write");
+    });
     feedBacklog(s, BACKLOG_LINES_PER_APPEND * 20);
+    setTimeout(() => taskEvents.push("marker"), 0);
 
-    await vi.advanceTimersByTimeAsync(5000);
-    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1);
+    await settle(20);
 
-    // 20 batches of backlog, capped at 16 appends for this tick.
-    const firstTickAppends = appendCalls().length;
-    expect(firstTickAppends).toBe(16);
-
-    await vi.advanceTimersByTimeAsync(5000);
-    await flushMicrotasks();
-
-    expect(appendCalls().length).toBeGreaterThan(firstTickAppends);
+    const markerIndex = taskEvents.indexOf("marker");
+    expect(
+      taskEvents.slice(0, markerIndex).filter((event) => event === "write"),
+    ).toHaveLength(16);
+    expect(
+      taskEvents.slice(markerIndex + 1).filter((event) => event === "write"),
+    ).toHaveLength(4);
+    expect(appendCalls()).toHaveLength(20);
     expect(s.drainPendingAutoSaveLines(Infinity)).toEqual([]);
+  });
+
+  it("coalesces a high-rate short-line burst into batched writes without a 5 s wait", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    for (let round = 0; round < 50; round += 1) {
+      for (let i = 0; i < 1000; i += 1) {
+        s.appendChunk({
+          direction: "rx",
+          tsMs: round * 1000 + i,
+          bytes: [0x78, 0x0a],
+        });
+      }
+      await vi.advanceTimersByTimeAsync(20);
+      await settle(4);
+    }
+    await vi.advanceTimersByTimeAsync(1);
+    await settle(30);
+
+    expect(s.autoSave).toBe(true);
+    expect(appendCalls().length).toBeLessThan(100);
+    expect(
+      writtenContents()
+        .join("")
+        .match(/\[RX \] x\n/g),
+    ).toHaveLength(50000);
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 0,
+      estimatedChars: 0,
+    });
+  });
+
+  it("bounds a stalled writer, warns once, and drains accepted lines to the old file", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    let releaseWrite!: () => void;
+    let heldFirstWrite = false;
+    invokeSpy.mockImplementation(async (cmd: string) => {
+      if (cmd === "append_text_file" && !heldFirstWrite) {
+        heldFirstWrite = true;
+        await new Promise<void>((resolve) => (releaseWrite = resolve));
+      }
+    });
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/old";
+    s.open = true;
+    await nextTick();
+    await settle();
+    const oldPath = s.sessionAutoSavePath;
+
+    for (let i = 0; i < 256; i += 1) {
+      s.appendChunk({ direction: "rx", tsMs: i, bytes: [0x78, 0x0a] });
+    }
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(appendCalls()).toHaveLength(1);
+
+    for (let i = 256; i < AUTO_SAVE_QUEUE_MAX_LINES + 1; i += 1) {
+      s.appendChunk({ direction: "rx", tsMs: i, bytes: [0x78, 0x0a] });
+    }
+    expect(s.pendingAutoSaveStats().queueCount).toBeLessThanOrEqual(
+      AUTO_SAVE_QUEUE_MAX_LINES,
+    );
+    expect(s.autoSave).toBe(false);
+    expect(
+      s.lines.filter(
+        (line) => line.text === "serialDebug.autoSave.queueOverflow",
+      ),
+    ).toHaveLength(1);
+    expect(s.lines.some((line) => line.text === "x")).toBe(true);
+
+    releaseWrite();
+    await settle(100);
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 0,
+      estimatedChars: 0,
+    });
+    const writes = appendCalls().map(
+      (call) => call[1] as { path: string; content: string },
+    );
+    expect(writes.every((write) => write.path === oldPath)).toBe(true);
+    expect(
+      writes
+        .map((write) => write.content)
+        .join("")
+        .match(/\[RX \] x\n/g),
+    ).toHaveLength(AUTO_SAVE_QUEUE_MAX_LINES);
+  });
+
+  it("cancels a queued continuation at clear and preserves its fixed sequence boundary", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    feedBacklog(s, BACKLOG_LINES_PER_APPEND * 18);
+    let clearing: Promise<void> | null = null;
+    setTimeout(() => {
+      expect(appendCalls()).toHaveLength(16);
+      clearing = s.clear();
+      s.appendChunk({
+        direction: "rx",
+        tsMs: 2000,
+        bytes: [...Buffer.from("after-clear\n")],
+      });
+    }, 0);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle(20);
+    expect(clearing).not.toBeNull();
+    await clearing;
+
+    const writes = writtenContents();
+    expect(writes.join("")).not.toContain("after-clear");
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    expect(writtenContents().join("")).toContain("after-clear");
+  });
+
+  it("cancels a queued ready task before clear and leaves later seq for the next interval", async () => {
+    const s = useSerialDebugStore();
+    mountAutoSave(s);
+    invokeSpy.mockResolvedValue(undefined);
+    s.port = "/dev/ttyUSB0";
+    s.autoSave = true;
+    s.autoSaveDir = "/logs";
+    s.open = true;
+    await nextTick();
+    await settle();
+
+    for (let i = 0; i < 256; i += 1) {
+      s.appendChunk({ direction: "rx", tsMs: i, bytes: [0x78, 0x0a] });
+    }
+    // The threshold has scheduled a ready task, but it has not run yet.
+    expect(appendCalls()).toHaveLength(0);
+    const clearing = s.clear();
+    s.appendChunk({ direction: "rx", tsMs: 1000, bytes: [0x79, 0x0a] });
+    await clearing;
+
+    expect(writtenContents().join("")).not.toContain("[RX ] y\n");
+    await vi.advanceTimersByTimeAsync(5000);
+    await settle();
+    expect(writtenContents().join("")).toContain("[RX ] y\n");
   });
 
   it("backfills the session archive when auto-save is enabled mid-session", async () => {
@@ -1292,6 +1453,8 @@ describe("useSerialAutoSave", () => {
       if (cmd === "append_text_file") throw new Error("disk full");
     });
 
+    await expect(s.clear()).rejects.toThrow("disk full");
+    expect(s.lines.map((line) => line.text)).toContain("keep-me");
     await expect(s.clear()).rejects.toThrow("disk full");
     expect(s.lines.map((line) => line.text)).toContain("keep-me");
     const queued = s

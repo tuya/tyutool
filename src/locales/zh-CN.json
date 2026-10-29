@@ -581,6 +581,7 @@
       "active": "自动保存中",
       "off": "自动保存",
       "errWrite": "自动保存失败: {msg}",
+      "queueOverflow": "自动保存待写队列已达上限，已停止自动保存；当前文件可能不完整，实时日志仍会继续。",
       "timestamp": "每行包含时间戳",
       "timestampFmtOn": "[12:00:00.000] [RX] [数据]",
       "timestampFmtOff": "[RX] [数据]"
