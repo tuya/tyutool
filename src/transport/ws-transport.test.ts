@@ -989,6 +989,220 @@ describe("serialDebugFilterAdd", () => {
   });
 });
 
+describe("serial-debug request edge cases", () => {
+  const filterPage = {
+    filterId: "f",
+    totalMatches: 1,
+    start: 0,
+    items: [{ lineNo: 1, tsMs: 100, direction: "rx" as const, text: "line" }],
+  };
+  const debugConfig = {
+    port: "loopback",
+    baudRate: 115200,
+    dataBits: "eight" as const,
+    parity: "none" as const,
+    stopBits: "one" as const,
+  };
+
+  it("correlates concurrent filter pages by request_id", async () => {
+    const t = new WsTransport();
+    const first = t.serialDebugFilterReadMatches("f", 0, 10);
+    const second = t.serialDebugFilterReadMatches("f", 10, 10);
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    const requests = ws.sent.slice(-2) as Array<{ request_id: string }>;
+    expect(requests[0].request_id).not.toBe(requests[1].request_id);
+
+    ws.recv({
+      type: "serial_debug_filter_page",
+      request_id: requests[1].request_id,
+      page: {
+        ...filterPage,
+        start: 10,
+        items: [{ ...filterPage.items[0], lineNo: 2, text: "second" }],
+      },
+    });
+    ws.recv({
+      type: "serial_debug_filter_page",
+      request_id: requests[0].request_id,
+      page: filterPage,
+    });
+    await expect(first).resolves.toEqual(filterPage);
+    await expect(second).resolves.toEqual({
+      ...filterPage,
+      start: 10,
+      items: [{ ...filterPage.items[0], lineNo: 2, text: "second" }],
+    });
+  });
+
+  it.each(["filter", "session"] as const)(
+    "propagates a request-scoped server error from %s paging",
+    async (kind) => {
+      const t = new WsTransport();
+      const pending =
+        kind === "filter"
+          ? t.serialDebugFilterReadMatches("f", 0, 1)
+          : t.serialDebugSessionReadPage(0, 1);
+      const rejected = expect(pending).rejects.toThrow("page failed");
+      await flush();
+      const ws = latest();
+      ws.open();
+      await flush();
+      const request = ws.lastSent as { request_id: string };
+      ws.recv({
+        type: "error",
+        request_id: request.request_id,
+        message: "page failed",
+      });
+      await rejected;
+    },
+  );
+
+  it.each([
+    ["filter", "close"],
+    ["filter", "error"],
+    ["filter", "send"],
+    ["session", "close"],
+    ["session", "error"],
+    ["session", "send"],
+  ] as const)(
+    "rejects and cleans up a %s page request after socket %s",
+    async (kind, failure) => {
+      const t = new WsTransport();
+      const pending =
+        kind === "filter"
+          ? t.serialDebugFilterReadMatches("f", 0, 1)
+          : t.serialDebugSessionReadPage(0, 1);
+      const rejected = expect(pending).rejects.toThrow(
+        failure === "close"
+          ? /WebSocket closed/
+          : failure === "error"
+            ? /WebSocket error/
+            : "send failed",
+      );
+      await flush();
+      const ws = latest();
+      if (failure === "send") ws.sendFailure = new Error("send failed");
+      ws.open();
+      await flush();
+      if (failure === "close") ws.fireClose();
+      else if (failure === "error") ws.error();
+      await rejected;
+      expect(ws.listenerCount).toBe(0);
+      expect(ws.temporaryListenerCount).toBe(0);
+    },
+  );
+
+  it("rejects a pending session page immediately on close", async () => {
+    const t = new WsTransport();
+    const pending = t.serialDebugSessionReadPage(0, 1);
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    let settled = false;
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    ws.fireClose();
+    await flush();
+    expect(settled).toBe(true);
+    await expect(pending).rejects.toThrow(/WebSocket closed/);
+  });
+
+  it("maps dropped-byte notifications and archived_before", async () => {
+    const t = new WsTransport();
+    const dropped: unknown[] = [];
+    const opening = t.serialDebugOpen(
+      debugConfig,
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      (p) => dropped.push(p),
+    );
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    ws.recv({ type: "serial_debug_opened" });
+    await opening;
+    ws.recv({
+      type: "serial_debug_chunks_dropped",
+      dropped_bytes: 42,
+      archived_before: 19,
+    });
+    expect(dropped).toEqual([{ droppedBytes: 42, archivedBefore: 19 }]);
+  });
+
+  it("maps archived_before on archive-cap notifications", async () => {
+    const t = new WsTransport();
+    const capped: unknown[] = [];
+    const opening = t.serialDebugOpen(
+      debugConfig,
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      (p) => capped.push(p),
+    );
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    ws.recv({ type: "serial_debug_opened" });
+    await opening;
+    ws.recv({
+      type: "serial_debug_archive_capped",
+      limit_mib: 32,
+      archived_before: 7,
+    });
+    expect(capped).toEqual([{ limitMib: 32, archivedBefore: 7 }]);
+  });
+
+  it("does not retain the previous chunk subscriber after close and reopen", async () => {
+    const t = new WsTransport();
+    const oldChunks: unknown[] = [];
+    const newChunks: unknown[] = [];
+    const open = (sink: unknown[]) =>
+      t.serialDebugOpen(
+        debugConfig,
+        (c) => sink.push(c),
+        () => {},
+        () => {},
+        () => {},
+        () => {},
+      );
+    const first = open(oldChunks);
+    await flush();
+    const ws = latest();
+    ws.open();
+    await flush();
+    ws.recv({ type: "serial_debug_opened" });
+    await first;
+    const closing = t.serialDebugClose();
+    ws.recv({ type: "serial_debug_closed" });
+    await closing;
+
+    const second = open(newChunks);
+    await flush();
+    ws.recv({ type: "serial_debug_opened" });
+    await second;
+    const chunk = { direction: "rx", tsMs: 1, bytes: [1] };
+    ws.recv({ type: "serial_debug_chunk", chunk });
+    expect(oldChunks).toEqual([]);
+    expect(newChunks).toEqual([chunk]);
+  });
+});
+
 describe("singleton export", () => {
   it("exports a ready-to-use wsTransport instance", () => {
     expect(wsTransport).toBeInstanceOf(WsTransport);
