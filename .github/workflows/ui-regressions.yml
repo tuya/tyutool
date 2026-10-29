@@ -1,0 +1,33 @@
+name: UI regression baseline
+
+# Known defects deliberately fail these assertions until the product is fixed.
+# Run on demand while collecting the red baseline; enable PR gating once the
+# confirmed-defect suite is green. See docs/testing/ui-ux-regressions.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: 10 }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22", cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run typecheck:ui
+      - run: pnpm run test:ui:confirmed
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ui-regression-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
