@@ -15,6 +15,8 @@ import {
   MAX_VISIBLE_LOG_WINDOW_LINES,
   DEFAULT_VISIBLE_LOG_WINDOW_LINES,
   DEFAULT_ARCHIVE_LIMIT_MIB,
+  AUTO_SAVE_QUEUE_MAX_CHARS,
+  AUTO_SAVE_QUEUE_MAX_LINES,
 } from "@/features/serial-debug/constants";
 import { useSerialDebugHistory } from "@/features/serial-debug/useSerialDebugHistory";
 import {
@@ -184,6 +186,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // at 20000). DebugLogLine objects are never mutated after creation, so deep
   // reactivity buys nothing. In-place writers must call triggerRef(lines).
   const lines = shallowRef<DebugLogLine[]>([]);
+  const pendingPreview = shallowRef<DebugLogLine[]>([]);
   const hexView = ref(false);
   const hexBytesPerRow = ref<HexBytesPerRow>(DEFAULT_HEX_BYTES_PER_ROW);
   const ansiEnabled = ref(true);
@@ -237,6 +240,12 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // backfilled from the Rust-side session archive by
   // `useSerialAutoSave.backfillFromArchive`, which is the full record.
   const pendingAutoSaveLines: PendingAutoSaveLine[] = [];
+  let pendingAutoSaveEstimatedChars = 0;
+  let autoSaveQueueOverflowed = false;
+  let autoSaveQueueReady:
+    ((stats: { queueCount: number; estimatedChars: number }) => void) | null =
+    null;
+  let autoSaveQueueOverflow: (() => void) | null = null;
   let nextAutoSaveSeq = 1;
   const filterRequestGeneration = ref(0);
   // Where the backfilled half of the current auto-save file ends: the archive
@@ -258,6 +267,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     sessionAutoSavePath,
     () => {
       autoSaveBackfilledUntil = null;
+      if (sessionAutoSavePath.value !== null) autoSaveQueueOverflowed = false;
     },
     { flush: "sync" },
   );
@@ -279,6 +289,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     tx: createPendingBuffer(),
     rx: createPendingBuffer(),
   };
+  const pendingPreviewTsMs: Record<"tx" | "rx", number> = { tx: 0, rx: 0 };
   const queuedChunks: DebugChunk[] = [];
   let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let activeFilterRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -480,7 +491,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     line: DebugLogLine,
     archivedBefore: number,
   ): PendingAutoSaveLine | null {
-    if (sessionAutoSavePath.value === null) return null;
+    if (sessionAutoSavePath.value === null || autoSaveQueueOverflowed)
+      return null;
     // The backfill's own discard pass only sees what is queued when it runs; a
     // line archived before the snapshot can still be delivered after it (the
     // event and the snapshot read are separate round trips), so the same
@@ -491,15 +503,27 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     ) {
       return null;
     }
+    const estimatedChars = line.text.length + 48;
+    if (
+      pendingAutoSaveLines.length >= AUTO_SAVE_QUEUE_MAX_LINES ||
+      pendingAutoSaveEstimatedChars + estimatedChars > AUTO_SAVE_QUEUE_MAX_CHARS
+    ) {
+      autoSaveQueueOverflowed = true;
+      autoSave.value = false;
+      autoSaveQueueOverflow?.();
+      return null;
+    }
     const entry: PendingAutoSaveLine = {
       direction: line.direction,
       tsMs: line.tsMs,
       text: line.text,
       seq: nextAutoSaveSeq++,
-      estimatedChars: line.text.length + 48,
+      estimatedChars,
       archivedBefore,
     };
     pendingAutoSaveLines.push(entry);
+    pendingAutoSaveEstimatedChars += estimatedChars;
+    autoSaveQueueReady?.(pendingAutoSaveStats());
     return entry;
   }
 
@@ -608,9 +632,38 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     return completedLines;
   }
 
+  function refreshPendingPreview(): void {
+    pendingPreview.value = (["tx", "rx"] as const)
+      .flatMap((direction) => {
+        const buffer = pending[direction];
+        if (buffer.totalBytes === 0) return [];
+        const bytes = new Uint8Array(buffer.totalBytes);
+        let offset = 0;
+        for (let i = buffer.headChunkIndex; i < buffer.chunks.length; i += 1) {
+          const chunk = buffer.chunks[i];
+          const start = i === buffer.headChunkIndex ? buffer.headOffset : 0;
+          bytes.set(chunk.subarray(start), offset);
+          offset += chunk.length - start;
+        }
+        return [
+          {
+            id: nextLineId++,
+            direction,
+            tsMs: pendingPreviewTsMs[direction],
+            text: decodeLossy(bytes),
+            rawBytes: bytes,
+          },
+        ];
+      })
+      .sort((a, b) => a.tsMs - b.tsMs);
+  }
+
   function appendChunk(chunk: DebugChunk): void {
+    if (chunk.bytes.length === 0) return;
+    pendingPreviewTsMs[chunk.direction as "tx" | "rx"] = chunk.tsMs;
     const completedLines = prepareLinesFromChunks([chunk]);
     pushPreparedLines(completedLines);
+    refreshPendingPreview();
   }
 
   /**
@@ -625,6 +678,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     const p = pending[dir];
     if (p.totalBytes === 0) return;
     const lineBytes = takePendingBytes(p, p.totalBytes);
+    pendingPreview.value = pendingPreview.value.filter(
+      (line) => line.direction !== dir,
+    );
     pushPreparedLines([
       {
         line: {
@@ -728,6 +784,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       dropPendingAutoSaveLinesThrough(autoSaveBoundary);
 
       lines.value = [];
+      pendingPreview.value = [];
       // A clear starts a new archive session whose line numbers restart at 1, so
       // every anchor the history window holds points at the wrong lines.
       exitHistoryMode();
@@ -766,6 +823,36 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     beforeClearAutoSave = callback;
   }
 
+  function registerAutoSaveQueueReady(
+    callback:
+      ((stats: { queueCount: number; estimatedChars: number }) => void) | null,
+  ): void {
+    autoSaveQueueReady = callback;
+  }
+
+  function registerAutoSaveOverflowHandler(
+    callback: (() => void) | null,
+  ): void {
+    autoSaveQueueOverflow = callback;
+  }
+
+  function pendingAutoSaveStats(): {
+    queueCount: number;
+    estimatedChars: number;
+  } {
+    return {
+      queueCount: pendingAutoSaveLines.length,
+      estimatedChars: pendingAutoSaveEstimatedChars,
+    };
+  }
+
+  function removePendingAutoSavePrefix(count: number): PendingAutoSaveLine[] {
+    const removed = pendingAutoSaveLines.splice(0, count);
+    for (const entry of removed)
+      pendingAutoSaveEstimatedChars -= entry.estimatedChars;
+    return removed;
+  }
+
   function registerAfterBackendDrainAutoSave(
     callback: ((throughSeq: number) => Promise<void>) | null,
   ): void {
@@ -798,7 +885,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   }
 
   function commitPendingAutoSaveLines(count: number): void {
-    pendingAutoSaveLines.splice(0, count);
+    removePendingAutoSavePrefix(count);
   }
 
   function autoSaveQueueHighWaterMark(): number {
@@ -807,10 +894,15 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
 
   function dropPendingAutoSaveLinesThrough(throughSeq: number): void {
     let kept = 0;
+    let keptChars = 0;
     for (const entry of pendingAutoSaveLines) {
-      if (entry.seq > throughSeq) pendingAutoSaveLines[kept++] = entry;
+      if (entry.seq > throughSeq) {
+        pendingAutoSaveLines[kept++] = entry;
+        keptChars += entry.estimatedChars;
+      }
     }
     pendingAutoSaveLines.length = kept;
+    pendingAutoSaveEstimatedChars = keptChars;
   }
 
   /**
@@ -841,13 +933,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     // Compacted in place: the queue can hold a whole backfill's worth of live
     // output, and a copy would be a second allocation of it.
     let kept = 0;
+    let keptChars = 0;
     for (const entry of pendingAutoSaveLines) {
       if (entry.archivedBefore >= untilLineNo) {
         pendingAutoSaveLines[kept] = entry;
         kept += 1;
+        keptChars += entry.estimatedChars;
       }
     }
     pendingAutoSaveLines.length = kept;
+    pendingAutoSaveEstimatedChars = keptChars;
   }
 
   function drainPendingAutoSaveLines(
@@ -857,10 +952,10 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       return [];
     }
     if (maxChars <= 0) {
-      return pendingAutoSaveLines.splice(0, 1);
+      return removePendingAutoSavePrefix(1);
     }
     if (!Number.isFinite(maxChars)) {
-      return pendingAutoSaveLines.splice(0, pendingAutoSaveLines.length);
+      return removePendingAutoSavePrefix(pendingAutoSaveLines.length);
     }
 
     let count = 0;
@@ -873,7 +968,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       totalChars += next.estimatedChars;
       count += 1;
     }
-    return pendingAutoSaveLines.splice(0, count);
+    return removePendingAutoSavePrefix(count);
   }
 
   // A plain getter, not a computed: on the "All" tab this returns `lines.value`
@@ -888,13 +983,24 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     // History mode swaps the buffer rather than concatenating: live lines keep
     // flowing into `lines` (and into the auto-save queue) the whole time, they
     // are just not what is on screen.
-    return historyMode.value ? historyLines.value : lines.value;
+    if (historyMode.value) return historyLines.value;
+    if (!pendingPreview.value.length) return lines.value;
+    return [...lines.value, ...pendingPreview.value].slice(
+      -logWindowLines.value,
+    );
   }
 
   function flushQueuedChunks(): void {
     chunkFlushTimer = null;
-    const chunks = queuedChunks.splice(0, queuedChunks.length);
+    const chunks = queuedChunks
+      .splice(0, queuedChunks.length)
+      .filter((chunk) => chunk.bytes.length > 0);
     pushPreparedLines(prepareLinesFromChunks(chunks));
+    if (chunks.length > 0) {
+      for (const chunk of chunks)
+        pendingPreviewTsMs[chunk.direction as "tx" | "rx"] = chunk.tsMs;
+      refreshPendingPreview();
+    }
   }
 
   function queueChunk(chunk: DebugChunk): void {
@@ -1646,10 +1752,13 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     appendChunk,
     drainPendingAutoSaveLines,
     peekPendingAutoSaveLines,
+    pendingAutoSaveStats,
     commitPendingAutoSaveLines,
     autoSaveQueueHighWaterMark,
     registerBeforeClearAutoSave,
     registerAfterBackendDrainAutoSave,
+    registerAutoSaveQueueReady,
+    registerAutoSaveOverflowHandler,
     settleAutoSaveMarkers,
     dropBackfilledAutoSaveLines,
     showHexPopup,

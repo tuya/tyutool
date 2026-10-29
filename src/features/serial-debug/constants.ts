@@ -46,12 +46,12 @@ export const EXPORT_PAGE_SIZE = 1000;
 export const FILTER_LIVE_REFRESH_MS = 120;
 export const MAX_PENDING_LINE_BYTES = 4096;
 export const AUTO_SAVE_FLUSH_MAX_CHARS = 128 * 1024;
-// Max appends one periodic (non-drainAll) auto-save flush issues before it
-// gives the tick back. 16 x AUTO_SAVE_FLUSH_MAX_CHARS = 2 MiB per 5 s tick,
-// ~3x what a 921600-baud port can produce in that window, so a backlog still
-// converges to empty while one tick can never occupy the IPC channel
-// indefinitely.
-export const AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TICK = 16;
+export const AUTO_SAVE_QUEUE_MAX_CHARS = 8 * 1024 * 1024;
+export const AUTO_SAVE_QUEUE_MAX_LINES = 32768;
+// Max appends one non-draining auto-save task issues before yielding to the UI.
+// Remaining accepted lines continue in a separate zero-delay task, keeping one
+// writer active while avoiding a long uninterrupted IPC loop.
+export const AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TASK = 16;
 // Archive lines per page when backfilling a mid-session auto-save enable.
 // Same order of magnitude as EXPORT_PAGE_SIZE: one page is read, formatted and
 // appended before the next is requested, so peak memory is one page.

@@ -13,6 +13,7 @@ import type {
   SerialDebugSessionPage,
 } from "@/features/serial-debug/types";
 import { useSerialDebugStore } from "./serial-debug";
+import { SerialDebugLogLineRenderer } from "@/features/serial-debug/log-line-renderer";
 import { useFlashStore } from "./flash";
 import { nextTick, watchEffect } from "vue";
 import {
@@ -595,6 +596,157 @@ describe("useSerialDebugStore port-manager integration", () => {
       "hello",
       "world",
     ]);
+  });
+
+  it("shows an unfinished chunk as a live preview without duplicating completed bytes", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1000,
+      bytes: [...Buffer.from("hello")],
+    });
+    await waitForChunkFrame();
+    expect(s.activeDisplayLines().map((line) => line.text)).toContain("hello");
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1001,
+      bytes: [...Buffer.from(" world\n")],
+    });
+    await waitForChunkFrame();
+    expect(s.activeDisplayLines().map((line) => line.text)).toContain(
+      "hello world",
+    );
+    expect(
+      s.activeDisplayLines().filter((line) => line.text.startsWith("hello"))
+        .length,
+    ).toBe(1);
+  });
+
+  it("corrects split UTF-8 previews and preserves exact bytes for Hex", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+    const bytes = [...new TextEncoder().encode("中")];
+    fake.emitChunk({ direction: "rx", tsMs: 1234, bytes: bytes.slice(0, 2) });
+    await waitForChunkFrame();
+    const first = s.activeDisplayLines()[s.activeDisplayLines().length - 1];
+    expect(first.text).toBe("�");
+    fake.emitChunk({ direction: "rx", tsMs: 1235, bytes: bytes.slice(2) });
+    await waitForChunkFrame();
+    const corrected = s.activeDisplayLines()[s.activeDisplayLines().length - 1];
+    expect(corrected.text).toBe("中");
+    expect(corrected.rawBytes).toEqual(Uint8Array.from(bytes));
+    expect(corrected.id).not.toBe(first.id);
+    expect(corrected.tsMs).toBe(1235);
+  });
+
+  it("keeps TX and RX previews independent and refreshes direct appendChunk previews only on input", () => {
+    const s = useSerialDebugStore();
+    s.appendChunk({ direction: "rx", tsMs: 11, bytes: [0x41] });
+    const rx = s.activeDisplayLines()[0];
+    s.appendChunk({ direction: "tx", tsMs: 22, bytes: [0x42] });
+    expect(s.activeDisplayLines().map((line) => line.text)).toEqual(["A", "B"]);
+    expect(s.activeDisplayLines()[0].id).not.toBe(rx.id);
+    const ids = s.activeDisplayLines().map((line) => line.id);
+    s.appendChunk({ direction: "rx", tsMs: 11, bytes: [] });
+    expect(s.activeDisplayLines().map((line) => line.id)).toEqual(ids);
+  });
+
+  it("ignores empty queued chunks without changing preview identity or timestamp", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+    fake.emitChunk({ direction: "rx", tsMs: 7, bytes: [0x41] });
+    await waitForChunkFrame();
+    const initial = s.activeDisplayLines()[s.activeDisplayLines().length - 1];
+    expect(initial.tsMs).toBe(7);
+    fake.emitChunk({ direction: "rx", tsMs: 99, bytes: [] });
+    await waitForChunkFrame();
+    const after = s.activeDisplayLines()[s.activeDisplayLines().length - 1];
+    expect(after.id).toBe(initial.id);
+    expect(after.tsMs).toBe(7);
+  });
+
+  it("refreshes the renderer cache when preview content changes", () => {
+    const s = useSerialDebugStore();
+    s.appendChunk({ direction: "rx", tsMs: 10, bytes: [0x41] });
+    const renderer = new SerialDebugLogLineRenderer();
+    const beforeId = s.activeDisplayLines()[0].id;
+    s.appendChunk({ direction: "rx", tsMs: 11, bytes: [0x42] });
+    const after = renderer.render(s.activeDisplayLines(), true, "")[0];
+    expect(s.activeDisplayLines()[0].id).not.toBe(beforeId);
+    expect(after.line.text).toBe("AB");
+  });
+
+  it("does not archive or auto-save preview bytes and completes the line once", () => {
+    const s = useSerialDebugStore();
+    s.sessionAutoSavePath = "/logs/COM1/a.txt";
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 10,
+      bytes: [...Buffer.from("part")],
+    });
+    expect(s.lines).toEqual([]);
+    expect(s.drainPendingAutoSaveLines()).toEqual([]);
+    s.appendChunk({
+      direction: "rx",
+      tsMs: 11,
+      bytes: [...Buffer.from("ial\n")],
+    });
+    expect(s.lines.filter((line) => line.text === "partial")).toHaveLength(1);
+    expect(s.drainPendingAutoSaveLines()).toHaveLength(1);
+  });
+
+  it("bounds completed lines plus previews by the live window budget", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 500;
+    for (let i = 0; i < 510; i++)
+      s.appendChunk({
+        direction: "rx",
+        tsMs: i,
+        bytes: [...Buffer.from(`L${i}\n`)],
+      });
+    s.appendChunk({ direction: "rx", tsMs: 999, bytes: [0x58] });
+    expect(s.activeDisplayLines().length).toBeLessThanOrEqual(s.logWindowLines);
+  });
+
+  it("clears a queued preview at drop and close boundaries", async () => {
+    const s = useSerialDebugStore();
+    s.port = "/dev/ttyUSB0";
+    s.baudRate = 115200;
+    await s.openPort();
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 1,
+      bytes: [...Buffer.from("tail")],
+    });
+    await waitForChunkFrame();
+    fake.emitChunksDropped(4);
+    fake.emitChunk({
+      direction: "rx",
+      tsMs: 2,
+      bytes: [...Buffer.from("new")],
+    });
+    await waitForChunkFrame();
+    expect(s.lines.filter((line) => line.text === "tail")).toHaveLength(1);
+    const preview = s.activeDisplayLines()[s.activeDisplayLines().length - 1];
+    expect(preview.text).toBe("new");
+    expect(preview.rawBytes).toEqual(Uint8Array.from(Buffer.from("new")));
+    expect(s.activeDisplayLines().some((line) => line.text === "tailnew")).toBe(
+      false,
+    );
+    await s.closePort();
+    expect(
+      s.activeDisplayLines().filter((line) => line.text === "new"),
+    ).toHaveLength(1);
+    expect(
+      s.activeDisplayLines().filter((line) => line.text === "tail"),
+    ).toHaveLength(1);
   });
 
   it("queues transport chunk batches with one frame flush", async () => {
@@ -1285,6 +1437,9 @@ describe("useSerialDebugStore watch chip management", () => {
 
     expect(s.lines.some((line) => line.text === "keep me")).toBe(true);
     expect(s.lines.some((line) => line.direction === "sys")).toBe(true);
+    expect(
+      s.activeDisplayLines().filter((line) => line.text === "keep me"),
+    ).toHaveLength(1);
   });
 
   it("gives every archive line in a filter page its own display id", async () => {
@@ -1315,6 +1470,70 @@ describe("useSerialDebugStore watch chip management", () => {
     // single filtered line shown repeatedly).
     expect(new Set(items.map((line) => line.id)).size).toBe(3);
     expect(items.every((line) => Number.isInteger(line.id))).toBe(true);
+  });
+
+  it("bounds accepted auto-save lines and reports overflow only once", () => {
+    const s = useSerialDebugStore();
+    const overflow = vi.fn();
+    s.sessionAutoSavePath = "/logs/COM1/session.txt";
+    s.autoSave = true;
+    s.registerAutoSaveOverflowHandler(overflow);
+    for (let i = 0; i < 32769; i += 1) {
+      s.appendChunk({ direction: "rx", tsMs: i, bytes: [0x78, 0x0a] });
+    }
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 32768,
+      estimatedChars: 32768 * 49,
+    });
+    expect(overflow).toHaveBeenCalledTimes(1);
+    expect(s.autoSave).toBe(false);
+    expect(s.lines.length).toBeLessThanOrEqual(5000);
+    expect(s.lines[s.lines.length - 1].text).toBe("x");
+  });
+
+  it("accounts character limits and releases capacity across queue removal paths", () => {
+    const s = useSerialDebugStore();
+    const overflow = vi.fn();
+    s.registerAutoSaveOverflowHandler(overflow);
+    s.sessionAutoSavePath = "/logs/COM1/first.txt";
+    const line = "x".repeat(4000);
+    for (let i = 0; i < 2100; i += 1) {
+      s.appendChunk({
+        direction: "rx",
+        tsMs: i,
+        bytes: [...Buffer.from(`${line}\n`)],
+        archivedBefore: 0,
+      });
+    }
+    expect(s.pendingAutoSaveStats().estimatedChars).toBeLessThanOrEqual(
+      8 * 1024 * 1024,
+    );
+    expect(overflow).toHaveBeenCalledTimes(1);
+
+    s.commitPendingAutoSaveLines(100);
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 1972,
+      estimatedChars: 1972 * (4000 + 48),
+    });
+    expect(s.drainPendingAutoSaveLines(100)).toHaveLength(1);
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 1971,
+      estimatedChars: 1971 * (4000 + 48),
+    });
+    s.dropBackfilledAutoSaveLines(1);
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 0,
+      estimatedChars: 0,
+    });
+
+    s.sessionAutoSavePath = null;
+    s.sessionAutoSavePath = "/logs/COM1/second.txt";
+    s.autoSave = true;
+    s.appendChunk({ direction: "rx", tsMs: 3000, bytes: [0x79, 0x0a] });
+    expect(s.pendingAutoSaveStats()).toEqual({
+      queueCount: 1,
+      estimatedChars: 49,
+    });
   });
 
   // A filter tab renders straight out of the archive, so it is the one live-view
