@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from "vue";
+import { ref, watch, computed, nextTick, useId } from "vue";
+import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
 import { exportLogsAndReport } from "./report-issue";
@@ -11,6 +12,15 @@ import {
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
+const dialogRef = ref<HTMLElement | null>(null);
+const openerDialogRef = ref<HTMLElement | null>(null);
+const titleId = `log-viewer-${useId()}`;
+const openerTitleId = `log-opener-${useId()}`;
+useModalFocus(
+  dialogRef,
+  () => props.open,
+  () => emit("close"),
+);
 
 const { t } = useI18n();
 
@@ -206,6 +216,13 @@ async function copy(): Promise<void> {
 // ── Open with ─────────────────────────────────────────────────────────────────
 
 const openerDialogOpen = ref(false);
+useModalFocus(
+  openerDialogRef,
+  () => props.open && openerDialogOpen.value,
+  () => {
+    openerDialogOpen.value = false;
+  },
+);
 const openersLoading = ref(false);
 const openers = ref<LogFileOpener[]>([]);
 const openersError = ref("");
@@ -285,11 +302,18 @@ watch(
     @click.self="emit('close')"
   >
     <div
+      ref="dialogRef"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
       class="ty-card flex max-h-[85vh] w-full max-w-3xl flex-col gap-3 rounded-xl p-4 sm:p-5"
     >
       <!-- ── Header ── -->
       <div class="flex items-center justify-between">
-        <h2 class="ty-section-title">{{ t("settings.logViewer.title") }}</h2>
+        <h2 :id="titleId" class="ty-section-title">
+          {{ t("settings.logViewer.title") }}
+        </h2>
         <button
           type="button"
           class="ty-btn-sm ty-btn-secondary"
@@ -542,10 +566,15 @@ watch(
     @click.self="openerDialogOpen = false"
   >
     <div
+      ref="openerDialogRef"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="openerTitleId"
+      tabindex="-1"
       class="ty-card flex w-full max-w-md flex-col gap-3 rounded-xl p-4 sm:p-5"
     >
       <div class="flex items-center justify-between gap-3">
-        <h3 class="ty-section-title text-base">
+        <h3 :id="openerTitleId" class="ty-section-title text-base">
           {{ t("settings.logViewer.openWithTitle") }}
         </h3>
         <button

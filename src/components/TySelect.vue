@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+  useId,
+} from "vue";
 
 /** Fixed-position hint near hovered option (avoids list overflow + paint-order clipping). */
 type FloatingOptionTip = { text: string; top: number; left: number };
@@ -19,22 +27,26 @@ const props = withDefaults(
     disabled?: boolean;
     placeholder?: string;
     id?: string;
+    ariaLabel?: string;
+    ariaLabelledby?: string;
+    ariaDescribedby?: string;
   }>(),
   {
     disabled: false,
-    placeholder: '—',
-  }
+    placeholder: "—",
+  },
 );
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void;
-  (e: 'open'): void;
+  (e: "update:modelValue", value: string): void;
+  (e: "open"): void;
 }>();
 
 const open = ref(false);
 const triggerRef = ref<HTMLButtonElement | null>(null);
 const listRef = ref<HTMLUListElement | null>(null);
 const activeIndex = ref(-1);
+const listId = `ty-select-${useId()}`;
 
 const floatingOptionTip = ref<FloatingOptionTip | null>(null);
 let floatingTipHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,7 +79,10 @@ function showFloatingOptionTip(e: MouseEvent, text: string) {
   const maxTipWidth = Math.min(18 * 16, vw - margin * 2);
   // Place beside the row, vertically centered with the hovered option.
   const top = Math.max(margin, Math.min(r.top + r.height / 2, vh - margin));
-  const left = Math.max(margin, Math.min(r.right + margin, vw - margin - maxTipWidth));
+  const left = Math.max(
+    margin,
+    Math.min(r.right + margin, vw - margin - maxTipWidth),
+  );
   floatingOptionTip.value = {
     text,
     left,
@@ -105,7 +120,7 @@ function onListScroll() {
 }
 
 // 下拉列表的定位（fixed，避免影响父布局）
-const listStyle = ref({ top: '0px', left: '0px', minWidth: '0px' });
+const listStyle = ref({ top: "0px", left: "0px", minWidth: "0px" });
 
 function updateListPosition() {
   const rect = triggerRef.value?.getBoundingClientRect();
@@ -118,22 +133,22 @@ function updateListPosition() {
 }
 
 const selectedLabel = computed(() => {
-  const opt = props.options.find(o => o.value === props.modelValue);
-  return opt ? opt.label : (props.placeholder ?? '—');
+  const opt = props.options.find((o) => o.value === props.modelValue);
+  return opt ? opt.label : (props.placeholder ?? "—");
 });
 
 function toggle() {
   if (props.disabled) return;
   if (!open.value) {
     updateListPosition();
-    emit('open');
+    emit("open");
   }
   open.value = !open.value;
 }
 
 function select(opt: TySelectOption) {
   if (opt.disabled) return;
-  emit('update:modelValue', opt.value);
+  emit("update:modelValue", opt.value);
   open.value = false;
   clearFloatingTipHideTimer();
   floatingOptionTip.value = null;
@@ -148,69 +163,80 @@ function close() {
 
 // 点击外部关闭
 function onClickOutside(e: MouseEvent) {
-  const root = triggerRef.value?.closest('.ty-select-root');
+  const root = triggerRef.value?.closest(".ty-select-root");
   const list = listRef.value;
-  if (root && !root.contains(e.target as Node) && list && !list.contains(e.target as Node)) {
+  if (
+    root &&
+    !root.contains(e.target as Node) &&
+    list &&
+    !list.contains(e.target as Node)
+  ) {
     close();
   }
 }
 
 // 键盘操作
 function onKeydown(e: KeyboardEvent) {
+  if (props.disabled) return;
   if (!open.value) {
-    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
       e.preventDefault();
-      updateListPosition();
-      open.value = true;
-      activeIndex.value = props.options.findIndex(o => o.value === props.modelValue);
-      if (activeIndex.value < 0) activeIndex.value = 0;
+      toggle();
     }
     return;
   }
 
-  if (e.key === 'Escape') {
+  if (e.key === "Escape") {
     e.preventDefault();
     close();
     triggerRef.value?.focus();
-  } else if (e.key === 'ArrowDown') {
+  } else if (e.key === "ArrowDown") {
     e.preventDefault();
     let next = activeIndex.value + 1;
     while (next < props.options.length && props.options[next].disabled) next++;
     if (next < props.options.length) activeIndex.value = next;
-  } else if (e.key === 'ArrowUp') {
+  } else if (e.key === "ArrowUp") {
     e.preventDefault();
     let prev = activeIndex.value - 1;
     while (prev >= 0 && props.options[prev].disabled) prev--;
     if (prev >= 0) activeIndex.value = prev;
-  } else if (e.key === 'Enter' || e.key === ' ') {
+  } else if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
     if (activeIndex.value >= 0 && activeIndex.value < props.options.length) {
       select(props.options[activeIndex.value]);
     }
-  } else if (e.key === 'Tab') {
+  } else if (e.key === "Tab") {
     close();
   }
 }
 
 // 打开时滚动选中项到可见区域
-watch(open, async val => {
+watch(open, async (val) => {
   if (!val) {
     clearFloatingTipHideTimer();
     floatingOptionTip.value = null;
   }
   if (val) {
-    activeIndex.value = props.options.findIndex(o => o.value === props.modelValue);
-    if (activeIndex.value < 0) activeIndex.value = 0;
+    activeIndex.value = props.options.findIndex(
+      (o) => o.value === props.modelValue,
+    );
+    if (activeIndex.value < 0 || props.options[activeIndex.value].disabled)
+      activeIndex.value = props.options.findIndex((o) => !o.disabled);
     await nextTick();
-    const li = listRef.value?.querySelector<HTMLElement>('[aria-selected="true"]');
-    li?.scrollIntoView({ block: 'nearest' });
+    const li = listRef.value?.querySelector<HTMLElement>(
+      '[aria-selected="true"]',
+    );
+    li?.scrollIntoView({ block: "nearest" });
   }
 });
 
 watch(activeIndex, async () => {
   await nextTick();
-  const li = listRef.value?.querySelectorAll<HTMLElement>('[role="option"]')[activeIndex.value];
-  li?.scrollIntoView({ block: 'nearest' });
+  const li =
+    listRef.value?.querySelectorAll<HTMLElement>('[role="option"]')[
+      activeIndex.value
+    ];
+  li?.scrollIntoView({ block: "nearest" });
 });
 
 // 滚动/resize 时更新位置（并关闭悬浮提示，避免坐标错位）
@@ -221,28 +247,39 @@ function onScrollOrResize() {
 }
 
 onMounted(() => {
-  document.addEventListener('mousedown', onClickOutside);
-  window.addEventListener('scroll', onScrollOrResize, true);
-  window.addEventListener('resize', onScrollOrResize);
+  document.addEventListener("mousedown", onClickOutside);
+  window.addEventListener("scroll", onScrollOrResize, true);
+  window.addEventListener("resize", onScrollOrResize);
 });
 onBeforeUnmount(() => {
-  document.removeEventListener('mousedown', onClickOutside);
-  window.removeEventListener('scroll', onScrollOrResize, true);
-  window.removeEventListener('resize', onScrollOrResize);
+  document.removeEventListener("mousedown", onClickOutside);
+  window.removeEventListener("scroll", onScrollOrResize, true);
+  window.removeEventListener("resize", onScrollOrResize);
   clearFloatingTipHideTimer();
 });
 </script>
 
 <template>
-  <div class="ty-select-root" :class="{ 'ty-select-open': open, 'ty-select-disabled': disabled }">
+  <div
+    class="ty-select-root"
+    :class="{ 'ty-select-open': open, 'ty-select-disabled': disabled }"
+  >
     <button
       :id="id"
       ref="triggerRef"
       type="button"
+      role="combobox"
       class="ty-select-trigger"
       :disabled="disabled"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
+      :aria-controls="open ? listId : undefined"
+      :aria-activedescendant="
+        open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
+      "
+      :aria-label="ariaLabel"
+      :aria-labelledby="ariaLabelledby"
+      :aria-describedby="ariaDescribedby"
       @click="toggle"
       @keydown="onKeydown"
     >
@@ -266,6 +303,9 @@ onBeforeUnmount(() => {
           v-if="open"
           ref="listRef"
           role="listbox"
+          :id="listId"
+          :aria-label="ariaLabel"
+          :aria-labelledby="ariaLabelledby || id"
           class="ty-select-list"
           :style="listStyle"
           @keydown="onKeydown"
@@ -274,6 +314,7 @@ onBeforeUnmount(() => {
           <li
             v-for="(opt, idx) in options"
             :key="opt.value"
+            :id="`${listId}-${idx}`"
             role="option"
             class="ty-select-option"
             :class="{
@@ -422,7 +463,11 @@ onBeforeUnmount(() => {
 }
 
 .ty-select-option--active {
-  background-color: color-mix(in srgb, var(--ty-primary) 10%, var(--ty-surface-muted));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-primary) 10%,
+    var(--ty-surface-muted)
+  );
 }
 
 .ty-select-option--selected {
@@ -431,7 +476,11 @@ onBeforeUnmount(() => {
 }
 
 .ty-select-option--selected.ty-select-option--active {
-  background-color: color-mix(in srgb, var(--ty-primary) 12%, var(--ty-surface-muted));
+  background-color: color-mix(
+    in srgb,
+    var(--ty-primary) 12%,
+    var(--ty-surface-muted)
+  );
 }
 
 .ty-select-option--disabled {

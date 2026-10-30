@@ -17,6 +17,7 @@ const props = defineProps<{
   placeholder?: string;
   disabled?: boolean;
   ariaDescribedby?: string;
+  ariaInvalid?: boolean;
   noCopy?: boolean;
 }>();
 
@@ -58,6 +59,7 @@ async function copyValue() {
       :placeholder="placeholder"
       :disabled="disabled"
       :aria-describedby="ariaDescribedby"
+      :aria-invalid="ariaInvalid"
       :class="noCopy ? 'pr-2' : 'pr-9'"
       class="ops-text-input min-w-0 flex-1 font-mono py-1.5"
       spellcheck="false"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { APP_VERSION } from "@/config/app";
 import { isTauriRuntime } from "@/runtime";
@@ -22,6 +23,8 @@ import { splitNotes, type SplitLocale } from "./split-notes";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
+const dialogRef = ref<HTMLElement | null>(null);
+useModalFocus(dialogRef, () => props.open, handleClose);
 
 const { t, locale } = useI18n();
 
@@ -472,9 +475,10 @@ async function openManualReleaseDownload(
         class="ty-dialog-backdrop"
         role="presentation"
         @click.self="handleClose"
-        @keydown.esc.window="handleClose"
       >
         <div
+          ref="dialogRef"
+          tabindex="-1"
           class="ty-dialog-container"
           role="dialog"
           aria-modal="true"

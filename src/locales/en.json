@@ -272,6 +272,9 @@
     "btnAuth": "Start authorization",
     "btnAuthing": "Authorizing…",
     "btnReadAuth": "Read auth",
+    "selectPortFirst": "Select a serial port first.",
+    "operationInProgress": "An operation is in progress. Wait for it to finish or cancel it.",
+    "authorizationOnlyChip": "This chip option supports authorization only.",
     "asideAria": "Status & log",
     "clearResult": "Clear result",
     "progress": "Progress",
@@ -522,6 +525,9 @@
       "rebootTargetConfirm": "Confirm"
     },
     "send": {
+      "inputLabel": "Data to send",
+      "invalidHex": "Enter at least one complete Hex byte.",
+      "failed": "Send failed: {msg}. Your input was kept. Try sending again.",
       "placeholder": "Type to send…",
       "sendBtn": "Send",
       "hexParseIgnored": "{n} incomplete byte(s) ignored",
@@ -689,6 +695,11 @@
       "firmwareNetworkHint": "(Switch to \"Local File\" to use an offline firmware)"
     },
     "toolbar": {
+      "currentMode": "This batch: {mode}",
+      "modeFlashOnly": "Flash only",
+      "modeAuthOnly": "Authorize only",
+      "modeFlashThenAuth": "Flash, then authorize",
+      "excelValidationPending": "Waiting for the authorization table to be validated.",
       "autoAssign": "Auto Assign",
       "filter": "Port Filter",
       "start": "Start All",
