@@ -1,0 +1,776 @@
+{
+  "kind": "Design prototype validation; not application regression or hardware acceptance",
+  "observations": [
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 271
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 281
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "light",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 271
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "light",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 281
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "light",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "light",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "zh",
+      "theme": "light",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "dark",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 271
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "dark",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 281
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "dark",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "dark",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "dark",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "light",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 271
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "light",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 281
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "light",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "light",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "locale": "en",
+      "theme": "light",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 184,
+        "right": 1280,
+        "bottom": 774
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 181
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 195
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "dark",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "light",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 181
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "light",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 195
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "light",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "light",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "zh",
+      "theme": "light",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "dark",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 181
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "dark",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 195
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "dark",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "dark",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "dark",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "light",
+      "route": "flash",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 181
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "light",
+      "route": "serial",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": 195
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "light",
+      "route": "batch",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "light",
+      "route": "toolbox",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    },
+    {
+      "width": 1024,
+      "height": 680,
+      "locale": "en",
+      "theme": "light",
+      "route": "settings",
+      "documentOverflow": 0,
+      "mainOverflow": 0,
+      "mainRect": {
+        "left": 160,
+        "right": 1024,
+        "bottom": 654
+      },
+      "controlsOutside": 0,
+      "consoleHeight": null
+    }
+  ],
+  "errors": [],
+  "interactions": {
+    "filled": "55 AA 00 01 00 00 00",
+    "hexSelected": "true",
+    "crlfRestored": true,
+    "historySearchRetained": true,
+    "tabToConfirm": true,
+    "tabWrapped": true,
+    "shiftTabWrapped": true,
+    "sendRendered": true,
+    "focusedCancel": true,
+    "escaped": true,
+    "focusRestored": true,
+    "completed": "100%",
+    "hashNavigation": "工作空间 / 设置",
+    "reduced": "0s"
+  },
+  "contrast": [
+    {
+      "name": "dark text",
+      "fg": "#edf2f2",
+      "bg": "#1a2024",
+      "threshold": 4.5,
+      "ratio": 14.56
+    },
+    {
+      "name": "dark muted",
+      "fg": "#a0adb3",
+      "bg": "#1a2024",
+      "threshold": 4.5,
+      "ratio": 7.15
+    },
+    {
+      "name": "dark subtle",
+      "fg": "#839298",
+      "bg": "#13191c",
+      "threshold": 4.5,
+      "ratio": 5.52
+    },
+    {
+      "name": "dark action",
+      "fg": "#112824",
+      "bg": "#74ddc9",
+      "threshold": 4.5,
+      "ratio": 9.56
+    },
+    {
+      "name": "dark warning",
+      "fg": "#f0c780",
+      "bg": "#1a2024",
+      "threshold": 4.5,
+      "ratio": 10.33
+    },
+    {
+      "name": "light text",
+      "fg": "#202b28",
+      "bg": "#ffffff",
+      "threshold": 4.5,
+      "ratio": 14.61
+    },
+    {
+      "name": "light muted",
+      "fg": "#56665f",
+      "bg": "#ffffff",
+      "threshold": 4.5,
+      "ratio": 6.07
+    },
+    {
+      "name": "light subtle",
+      "fg": "#64716a",
+      "bg": "#f8faf7",
+      "threshold": 4.5,
+      "ratio": 4.87
+    },
+    {
+      "name": "light action",
+      "fg": "#ffffff",
+      "bg": "#006b5e",
+      "threshold": 4.5,
+      "ratio": 6.43
+    },
+    {
+      "name": "light warning",
+      "fg": "#895709",
+      "bg": "#ffffff",
+      "threshold": 4.5,
+      "ratio": 6.12
+    },
+    {
+      "name": "dark selection",
+      "fg": "#74ddc9",
+      "bg": "#223d39",
+      "threshold": 4.5,
+      "ratio": 7.2
+    },
+    {
+      "name": "light selection",
+      "fg": "#006b5e",
+      "bg": "#e4f2ed",
+      "threshold": 4.5,
+      "ratio": 5.58
+    },
+    {
+      "name": "dark danger",
+      "fg": "#301413",
+      "bg": "#ff9b98",
+      "threshold": 4.5,
+      "ratio": 8.42
+    },
+    {
+      "name": "light danger",
+      "fg": "#ffffff",
+      "bg": "#b03436",
+      "threshold": 4.5,
+      "ratio": 6.19
+    },
+    {
+      "name": "dark field border",
+      "fg": "#607077",
+      "bg": "#151b1f",
+      "threshold": 3,
+      "ratio": 3.38
+    },
+    {
+      "name": "light field border",
+      "fg": "#7a8780",
+      "bg": "#f8f9f6",
+      "threshold": 3,
+      "ratio": 3.55
+    }
+  ]
+}
