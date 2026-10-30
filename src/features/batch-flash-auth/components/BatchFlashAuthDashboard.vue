@@ -1,12 +1,31 @@
 <!-- src/features/batch-flash/components/BatchFlashDashboard.vue -->
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from "vue";
+import { showConfirmDialog } from "@/composables/confirmDialog";
 import { useI18n } from "vue-i18n";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 import BatchFlashAuthDonutChart from "./BatchFlashAuthDonutChart.vue";
 
 const { t } = useI18n();
 const store = useBatchFlashAuthStore();
+async function resetStats(group: "flash" | "auth"): Promise<void> {
+  const name = t(
+    group === "flash"
+      ? "batchFlashAuth.dashboard.flashStats"
+      : "batchFlashAuth.dashboard.authStats",
+  );
+  const confirmed = await showConfirmDialog({
+    title: t("batchFlashAuth.dashboard.resetGroup", { group: name }),
+    message: t("batchFlashAuth.dashboard.resetConfirm", { group: name }),
+    kind: "warning",
+    okLabel: t("batchFlashAuth.dashboard.reset"),
+    cancelLabel: t("common.cancel"),
+  });
+  if (confirmed) {
+    if (group === "flash") store.resetFlashStats();
+    else store.resetAuthStats();
+  }
+}
 
 // Elapsed time ticker
 const elapsedDisplay = ref("--:--:--");
@@ -74,6 +93,25 @@ const bannerText = computed(() => {
       :style="{ backgroundColor: bannerBg, color: bannerTextColor }"
     >
       <span class="min-w-0 flex-1">{{ bannerText }}</span>
+      <button
+        type="button"
+        class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded opacity-60 transition-opacity hover:opacity-100"
+        :aria-label="t('common.closeDialog')"
+        @click="store.dismissBanner()"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'xmark']"
+          class="size-3.5"
+          aria-hidden="true"
+        />
+      </button>
+    </div>
+
+    <div
+      v-if="store.canArchive || store.archiveStatus !== 'idle'"
+      class="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-2 text-[var(--ty-text)]"
+      aria-live="polite"
+    >
       <span
         v-if="store.archiveStatus === 'done'"
         class="max-w-[40%] truncate text-xs font-normal opacity-80"
@@ -105,20 +143,7 @@ const bannerText = computed(() => {
             : t("batchFlashAuth.archive.button")
         }}
       </button>
-      <button
-        type="button"
-        class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded opacity-60 transition-opacity hover:opacity-100"
-        :aria-label="t('common.closeDialog')"
-        @click="store.dismissBanner()"
-      >
-        <FontAwesomeIcon
-          :icon="['fas', 'xmark']"
-          class="size-3.5"
-          aria-hidden="true"
-        />
-      </button>
     </div>
-
     <!-- Stats row -->
     <div class="flex flex-wrap gap-3">
       <!-- Flash cumulative stats -->
@@ -138,7 +163,12 @@ const bannerText = computed(() => {
             <button
               type="button"
               class="cursor-pointer text-xs text-[var(--ty-danger)] hover:underline"
-              @click="store.resetFlashStats()"
+              :aria-label="
+                t('batchFlashAuth.dashboard.resetGroup', {
+                  group: t('batchFlashAuth.dashboard.flashStats'),
+                })
+              "
+              @click="resetStats('flash')"
             >
               {{ t("batchFlashAuth.dashboard.reset") }}
             </button>
@@ -183,7 +213,12 @@ const bannerText = computed(() => {
             <button
               type="button"
               class="cursor-pointer text-xs text-[var(--ty-danger)] hover:underline"
-              @click="store.resetAuthStats()"
+              :aria-label="
+                t('batchFlashAuth.dashboard.resetGroup', {
+                  group: t('batchFlashAuth.dashboard.authStats'),
+                })
+              "
+              @click="resetStats('auth')"
             >
               {{ t("batchFlashAuth.dashboard.reset") }}
             </button>

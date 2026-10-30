@@ -43,7 +43,7 @@ function addPort() {
         aria-modal="true"
         :aria-labelledby="titleId"
         tabindex="-1"
-        class="w-full max-w-md rounded-2xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-5 shadow-xl"
+        class="flex flex-col max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-5 shadow-xl"
       >
         <div class="mb-4 flex items-center justify-between">
           <h2
@@ -75,7 +75,14 @@ function addPort() {
             :aria-label="t('batchFlashAuth.slot.port')"
             :placeholder="t('batchFlashAuth.filter.placeholder')"
             class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 py-1.5 text-sm text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
-            @keydown.enter="addPort"
+            @keydown.enter="
+              (e) => {
+                if (!e.isComposing) {
+                  e.preventDefault();
+                  addPort();
+                }
+              }
+            "
           />
           <button
             type="button"
@@ -89,20 +96,22 @@ function addPort() {
         <!-- Blocked ports list -->
         <div
           v-if="store.filterConfig.blockedPorts.length > 0"
-          class="flex flex-col gap-1"
+          class="min-h-0 overflow-y-auto flex flex-col gap-1"
         >
           <div
             v-for="port in store.filterConfig.blockedPorts"
             :key="port"
             class="flex items-center justify-between rounded-lg bg-[var(--ty-surface-muted)] px-3 py-1.5"
           >
-            <span class="font-mono text-xs text-[var(--ty-text)]">{{
-              port
-            }}</span>
+            <span
+              class="min-w-0 break-all font-mono text-xs text-[var(--ty-text)]"
+              :title="port"
+              >{{ port }}</span
+            >
             <button
               type="button"
-              class="cursor-pointer text-sm text-[var(--ty-text-muted)] hover:text-[var(--ty-danger)]"
-              :aria-label="t('batchFlashAuth.filter.remove')"
+              class="flex size-7 shrink-0 items-center justify-center cursor-pointer text-sm text-[var(--ty-text-muted)] hover:text-[var(--ty-danger)]"
+              :aria-label="`${t('batchFlashAuth.filter.remove')}: ${port}`"
               @click="store.removeBlockedPort(port)"
             >
               ×

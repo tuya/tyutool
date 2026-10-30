@@ -206,6 +206,7 @@ function toggleFlashFirmware() {
               id="batch-firmware-path"
               type="text"
               :value="store.firmwarePath"
+              :title="store.firmwarePath"
               readonly
               :disabled="firmwareControlsDisabled"
               :placeholder="t('batchFlashAuth.config.noFile')"

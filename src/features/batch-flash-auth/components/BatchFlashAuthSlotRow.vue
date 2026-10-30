@@ -1,14 +1,17 @@
 <!-- src/features/batch-flash/components/BatchFlashSlotRow.vue -->
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, nextTick, watch } from "vue";
+import { useFloatingPanel } from "@/composables/useFloatingPanel";
 import { useI18n } from "vue-i18n";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import type { BatchSlotState } from "../types";
 
+defineOptions({ inheritAttrs: false });
 const props = defineProps<{
   portSlot: BatchSlotState;
   rowIndex?: number;
   canRead?: boolean;
+  retryDisabledReason?: string | null;
 }>();
 const emit = defineEmits<{
   cancel: [port: string];
@@ -19,14 +22,45 @@ const emit = defineEmits<{
 }>();
 
 const contextMenu = ref<{ x: number; y: number } | null>(null);
-
+const rowRef = ref<HTMLElement | null>(null);
+const menuRef = ref<HTMLElement | null>(null);
+const { style: menuStyle } = useFloatingPanel(
+  menuRef,
+  () => contextMenu.value !== null,
+  () =>
+    contextMenu.value
+      ? {
+          left: contextMenu.value.x,
+          right: contextMenu.value.x,
+          top: contextMenu.value.y,
+          bottom: contextMenu.value.y,
+        }
+      : null,
+);
+watch(contextMenu, async (menu) => {
+  if (menu) {
+    await nextTick();
+    if (contextMenu.value)
+      menuRef.value?.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+});
+function closeMenu(restore = false) {
+  contextMenu.value = null;
+  if (restore) rowRef.value?.focus();
+}
 function onContextMenu(e: MouseEvent) {
   e.preventDefault();
   contextMenu.value = { x: e.clientX, y: e.clientY };
 }
-
+function onRowKey(e: KeyboardEvent) {
+  if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+    e.preventDefault();
+    const rect = rowRef.value!.getBoundingClientRect();
+    contextMenu.value = { x: rect.left + 12, y: rect.bottom };
+  }
+}
 function onBlock() {
-  contextMenu.value = null;
+  closeMenu(true);
   emit("block", props.portSlot.port);
 }
 
@@ -143,7 +177,7 @@ function showErrorDetail(): void {
     showCancel: false,
     okLabel: t("common.closeDialog"),
     extraActionLabel: t("common.copy"),
-    onExtraAction: () => navigator.clipboard?.writeText(error),
+    onExtraAction: () => navigator.clipboard.writeText(error),
   });
 }
 
@@ -157,7 +191,7 @@ function showExcelError(): void {
     showCancel: false,
     okLabel: t("common.closeDialog"),
     extraActionLabel: t("common.copy"),
-    onExtraAction: () => navigator.clipboard?.writeText(error),
+    onExtraAction: () => navigator.clipboard.writeText(error),
   });
 }
 </script>
@@ -168,18 +202,29 @@ function showExcelError(): void {
     <div
       v-if="contextMenu"
       class="fixed inset-0 z-40"
-      @click="contextMenu = null"
-      @contextmenu.prevent="contextMenu = null"
+      @click="closeMenu()"
+      @contextmenu.prevent="closeMenu()"
     />
     <div
       v-if="contextMenu"
-      class="fixed z-50 min-w-[10rem] overflow-hidden rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1 shadow-lg"
-      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      ref="menuRef"
+      role="menu"
+      :aria-label="`${t('batchFlashAuth.slot.action')}: ${portSlot.port}`"
+      @keydown.esc.prevent.stop="closeMenu(true)"
+      @focusout="
+        (e) => {
+          if (e.relatedTarget && !menuRef?.contains(e.relatedTarget as Node))
+            closeMenu();
+        }
+      "
+      class="fixed z-50 min-w-[10rem] overflow-y-auto rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1 shadow-lg"
+      :style="menuStyle"
       @click.stop
     >
       <button
         type="button"
         class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--ty-text)] hover:bg-[var(--ty-surface-muted)]"
+        role="menuitem"
         @click="onBlock"
       >
         <FontAwesomeIcon
@@ -193,10 +238,17 @@ function showExcelError(): void {
   </Teleport>
 
   <div
-    class="relative flex h-10 min-w-0 items-center gap-3 px-3 text-sm transition-colors"
-    :class="isQuarantineRequired ? 'border-l-[4px]' : 'border-l-[3px]'"
+    ref="rowRef"
+    :data-port="portSlot.port"
+    tabindex="0"
+    class="relative flex min-h-10 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm transition-colors"
+    :class="[
+      $attrs.class,
+      isQuarantineRequired ? 'border-l-[4px]' : 'border-l-[3px]',
+    ]"
     :style="{ borderLeftColor: borderColor, backgroundColor: rowBg }"
     @contextmenu="onContextMenu"
+    @keydown="onRowKey"
   >
     <span
       v-if="isQuarantineRequired"
@@ -211,9 +263,11 @@ function showExcelError(): void {
       />
     </span>
     <!-- Port name -->
-    <span class="w-20 shrink-0 font-mono text-xs text-[var(--ty-text)]">{{
-      portSlot.port
-    }}</span>
+    <span
+      class="w-20 shrink-0 truncate font-mono text-xs text-[var(--ty-text)]"
+      :title="portSlot.port"
+      >{{ portSlot.port }}</span
+    >
 
     <!-- Status label -->
     <span
@@ -288,9 +342,9 @@ function showExcelError(): void {
         }}</span>
         <button
           type="button"
-          class="ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
+          class="ml-1 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
           :title="t('batchFlashAuth.slot.viewError')"
-          :aria-label="t('batchFlashAuth.slot.viewError')"
+          :aria-label="`${t('batchFlashAuth.slot.viewError')}: ${portSlot.port}`"
           @click="showErrorDetail"
         >
           <FontAwesomeIcon
@@ -300,13 +354,6 @@ function showExcelError(): void {
           />
         </button>
       </div>
-      <span
-        v-if="portSlot.cancelledAfterWrite || portSlot.writeUncertain"
-        class="text-xs font-medium"
-        :style="{ color: 'var(--ty-danger)' }"
-      >
-        {{ t("batchFlashAuth.slot.cancelledAfterWriteLabel") }}
-      </span>
     </div>
 
     <!-- Unified result: done / skipped / idle-with-probe -->
@@ -326,7 +373,7 @@ function showExcelError(): void {
       >
       <span
         v-if="portSlot.authUuid"
-        class="min-w-0 truncate font-mono text-[10px] text-[var(--ty-text-muted)] opacity-50"
+        class="min-w-0 truncate font-mono text-xs text-[var(--ty-text-muted)]"
         :title="portSlot.authUuid"
         >{{ portSlot.authUuid }}</span
       >
@@ -338,9 +385,9 @@ function showExcelError(): void {
       <button
         v-if="portSlot.excelError"
         type="button"
-        class="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-warning)] transition-colors hover:bg-[var(--ty-surface-muted)]"
+        class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--ty-warning)] transition-colors hover:bg-[var(--ty-surface-muted)]"
         :title="t('batchFlashAuth.slot.excelErrorTitle')"
-        :aria-label="t('batchFlashAuth.slot.excelErrorTitle')"
+        :aria-label="`${t('batchFlashAuth.slot.excelErrorTitle')}: ${portSlot.port}`"
         @click="showExcelError"
       >
         <FontAwesomeIcon
@@ -360,7 +407,7 @@ function showExcelError(): void {
     <div v-else class="flex-1" />
 
     <!-- Action buttons -->
-    <div class="flex shrink-0 items-center gap-1">
+    <div class="flex w-36 shrink-0 items-center justify-end gap-1">
       <button
         v-if="canRead"
         type="button"
@@ -371,6 +418,7 @@ function showExcelError(): void {
             ? t('batchFlashAuth.config.invalidCommandPrefix')
             : t('batchFlashAuth.slot.readHint')
         "
+        :aria-label="`${t('batchFlashAuth.slot.read')}: ${portSlot.port}`"
         @click="$emit('read', portSlot.port)"
       >
         {{ t("batchFlashAuth.slot.read") }}
@@ -379,22 +427,45 @@ function showExcelError(): void {
         v-if="isActive"
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
+        :aria-label="`${t('batchFlashAuth.slot.cancel')}: ${portSlot.port}`"
         @click="$emit('cancel', portSlot.port)"
       >
         {{ t("batchFlashAuth.slot.cancel") }}
       </button>
       <button
         v-if="
-          portSlot.status === 'failed' &&
+          (portSlot.status === 'failed' || portSlot.status === 'no_code') &&
           !portSlot.cancelledAfterWrite &&
           !portSlot.writeUncertain
         "
         type="button"
         class="ty-btn-secondary min-h-7 px-2 py-0.5 text-xs"
+        :disabled="!!retryDisabledReason"
+        :title="retryDisabledReason || undefined"
+        :aria-label="`${t('batchFlashAuth.slot.retry')}: ${portSlot.port}`"
+        :aria-describedby="
+          retryDisabledReason ? `retry-${rowIndex}-reason` : undefined
+        "
         @click="$emit('retry', portSlot.port)"
       >
         {{ t("batchFlashAuth.slot.retry") }}
       </button>
     </div>
+    <p
+      v-if="isQuarantineRequired"
+      class="w-full pl-0 text-xs font-medium leading-relaxed text-[var(--ty-danger)]"
+    >
+      {{ t("batchFlashAuth.slot.cancelledAfterWriteLabel") }}
+    </p>
+    <p
+      v-else-if="
+        retryDisabledReason &&
+        (portSlot.status === 'failed' || portSlot.status === 'no_code')
+      "
+      :id="`retry-${rowIndex}-reason`"
+      class="w-full text-xs text-[var(--ty-text-muted)]"
+    >
+      {{ retryDisabledReason }}
+    </p>
   </div>
 </template>

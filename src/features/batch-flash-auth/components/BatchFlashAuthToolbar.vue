@@ -67,7 +67,8 @@ async function handleAutoAssign() {
       <button
         type="button"
         class="ty-btn-secondary flex items-center gap-1.5 text-sm"
-        :disabled="store.isBusy"
+        :disabled="store.isBusy || store.portsLoading"
+        :aria-busy="store.portsLoading"
         :title="
           store.isBusy
             ? t('batchFlashAuth.toolbar.autoAssignBusy')

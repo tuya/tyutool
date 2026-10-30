@@ -5,11 +5,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import BatchFlashAuthPortFilterModal from "./BatchFlashAuthPortFilterModal.vue";
 import en from "@/locales/en.json";
 
+const filterStore = vi.hoisted(() => ({
+  filterConfig: { blockedPorts: [] as string[] },
+  addBlockedPort: vi.fn(),
+  removeBlockedPort: vi.fn(),
+}));
+
 vi.mock("@/stores/batch-flash-auth", () => ({
   useBatchFlashAuthStore: () => ({
-    filterConfig: reactive({ blockedPorts: [] }),
-    addBlockedPort: vi.fn(),
-    removeBlockedPort: vi.fn(),
+    filterConfig: reactive(filterStore.filterConfig),
+    addBlockedPort: filterStore.addBlockedPort,
+    removeBlockedPort: filterStore.removeBlockedPort,
   }),
 }));
 
@@ -18,6 +24,8 @@ describe("port filter modal accessibility", () => {
   afterEach(() => {
     app.unmount();
     document.body.replaceChildren();
+    filterStore.filterConfig.blockedPorts = [];
+    vi.clearAllMocks();
   });
 
   it("labels the dialog and input, focuses the field, cycles Tab and restores on Escape", async () => {
@@ -70,5 +78,41 @@ describe("port filter modal accessibility", () => {
     await nextTick();
     expect(open.value).toBe(false);
     expect(document.activeElement).toBe(opener);
+  });
+  it("ignores IME Enter and identifies each remove action by port", async () => {
+    filterStore.filterConfig.blockedPorts = ["COM1", "COM2"];
+    const host = document.createElement("div");
+    document.body.append(host);
+    app = createApp({
+      render: () => h(BatchFlashAuthPortFilterModal, { open: true }),
+    });
+    app.use(createI18n({ legacy: false, locale: "en", messages: { en } }));
+    app.mount(host);
+    await nextTick();
+    const input = document.querySelector("input")!;
+    input.value = "新端口";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(filterStore.addBlockedPort).not.toHaveBeenCalled();
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(filterStore.addBlockedPort).toHaveBeenCalledWith("新端口");
+    expect(
+      [...document.querySelectorAll("button")].some((b) =>
+        b.getAttribute("aria-label")?.includes("COM2"),
+      ),
+    ).toBe(true);
   });
 });

@@ -125,6 +125,7 @@
       </figure>
       <ul class="plain">
         <li>① <strong>选择授权表</strong>（<code>.xlsx</code>）。</li>
+        <li>开始或重试前，等待<strong>当前所选文件</strong>校验完成。换表会清除旧统计；校验中或校验失败时禁止写入操作。</li>
         <li>② <strong>查看表中授权码信息是否符合预期</strong>：总计 / 已用 / 占用中 / 剩余。给新设备分码需要"剩余" &gt; 0；仅恢复/重试已登记设备时剩余 0 也可启动（tyutool 会按 MAC 找回各自原来的码）。</li>
         <li>③ <strong>遇到已带授权的设备怎么办</strong>：跳过（推荐）还是覆盖。</li>
       </ul>
@@ -161,14 +162,15 @@
       <ol class="steps">
         <li><strong>看仪表盘等完成</strong>：实时显示烧录/授权累计统计和当前批次进度；整批结束会出<strong>完成横幅</strong>（全部成功 / 全部失败 / 部分成功 / 全部跳过）。</li>
         <li><strong>逐行核对</strong>：每个端口一行，按状态徽标判断好坏（见<a href="#read-results">下一节</a>）；失败的点错误信息看详情并<strong>重试</strong>。</li>
-        <li><strong>归档（整单跑完时）</strong>：一份授权表的任务全部跑完后，点完成横幅上的<strong>"归档"</strong>按钮一键存档；分多轮跑的中间轮次不用归档（详见<a href="#archive">归档说明</a>）。</li>
+        <li><strong>归档（整单跑完时）</strong>：一份授权表的任务全部跑完后，点仪表盘批次操作区的<strong>"归档"</strong>按钮一键存档；分多轮跑的中间轮次不用归档（详见<a href="#archive">归档说明</a>）。</li>
       </ol>
       <figure class="shot">
         <img src="../assets/images/batch-dashboard.png" alt="仪表盘与完成横幅：烧录累计、授权累计、本次批次统计，整批结束后出现完成横幅与归档按钮" loading="lazy">
-        <figcaption>仪表盘与完成横幅（右侧为"归档"按钮）</figcaption>
+        <figcaption>仪表盘与完成横幅；关闭横幅后归档入口仍保留。</figcaption>
       </figure>
 
       <h2 id="read-results">4. 看懂结果</h2>
+      <p>失败及 <code>no_code</code> 行在当前配置有效、串口可用时提供单口重试；按钮禁用时会说明要修正的条件。可能已经写入凭据的取消授权保持隔离，需要物理隔离并手动验证后再处理。累计烧录、授权统计清零前会确认，并注明受影响的组。关闭完成横幅后，批次操作区仍保留归档入口及结果。</p>
       <p>每个端口一行，一行里有：<strong>状态徽标</strong>（带颜色）、烧录阶段的<strong>进度条</strong>、读取到的 <strong>MAC / UUID</strong>，以及失败时的<strong>错误信息</strong>（点开可看详情并复制）。判断标准就一张表：</p>
       <table>
         <thead><tr><th>状态</th><th>什么意思</th><th>要做什么</th></tr></thead>
@@ -185,7 +187,7 @@
       <p>先分清两个词，避免歧义：点一次"全部开始"叫<strong>一轮</strong>；一份授权表对应的整个生产任务叫<strong>一单</strong>（一单往往分很多轮跑完，比如 4 个串口 × 250 轮 = 1000 台）。<strong>归档以"单"为单位：一份授权表 = 一个档案文件夹，整单跑完（或中途要换表时）归档一次即可</strong>——分多少轮不影响，因为每台设备的状态、MAC、时间都实时写回了授权表，Excel 副本就是全量台账。</p>
       <div class="callout tip">
         <span class="title">一键归档</span>
-        完成横幅右侧有<strong>"归档"</strong>按钮：选一个存放目录，tyutool 会自动创建带时间戳的档案文件夹（如 <code>batch-archive_20260717-143205_esp32/</code>），存入<strong>授权表副本（全量台账）、固件文件（含 SHA256 校验值）、日志 logs.zip、摘要 batch-summary.json</strong>（配置、环境、统计）<strong>和 batch-slots.csv</strong>。注意：summary 里的 <code>lastRun</code> 和 csv 只是<strong>最后一轮的现场快照</strong>——查全量始终以 Excel 副本为准。
+        仪表盘持续显示的批次操作区有<strong>"归档"</strong>按钮：选一个存放目录，tyutool 会自动创建带时间戳的档案文件夹（如 <code>batch-archive_20260717-143205_esp32/</code>），存入<strong>授权表副本（全量台账）、固件文件（含 SHA256 校验值）、日志 logs.zip、摘要 batch-summary.json</strong>（配置、环境、统计）<strong>和 batch-slots.csv</strong>。注意：summary 里的 <code>lastRun</code> 和 csv 只是<strong>最后一轮的现场快照</strong>——查全量始终以 Excel 副本为准。
       </div>
       <p>档案的价值：授权码是花钱买的，这份档案就是<strong>"哪台设备用了哪个码"的台账</strong>，日后出货追溯、售后定位全靠它。点"归档"后，档案文件夹里有：</p>
       <table>
@@ -218,7 +220,7 @@
         </tbody>
       </table>
       <h3 id="save-evidence">报问题前，先把现场保存好</h3>
-      <p>最快的办法：<strong>趁现场还在，直接点完成横幅上的"归档"</strong>——错误明细、日志、授权表副本、配置与环境信息一次全部存下（见<a href="#archive">归档说明</a>；单条错误全文也可以点失败行的错误 → 详情 → 复制）。归档之外，只需再手工补三样：</p>
+      <p>最快的办法：<strong>趁现场还在，直接点仪表盘批次操作区的"归档"</strong>——错误明细、日志、授权表副本、配置与环境信息一次全部存下（见<a href="#archive">归档说明</a>；单条错误全文也可以点失败行的错误 → 详情 → 复制）。归档之外，只需再手工补三样：</p>
       <ul>
         <li><strong>界面截图</strong>：失败行所在的端口列表，要能看到端口号、状态徽标、停在哪一步。<strong>注意遮住 AuthKey</strong>——UUID 可以保留，用来对上是哪一行。</li>
         <li><strong>问题设备实物</strong>：贴标签单独放好，别混回好品堆——尤其是带危险徽标的设备（见<a href="#safety">安全铁律</a>）。</li>

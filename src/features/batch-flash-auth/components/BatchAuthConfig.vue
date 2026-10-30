@@ -91,6 +91,10 @@ async function browseExcel() {
             type="text"
             :value="store.authConfig.excelPath"
             readonly
+            :title="store.authConfig.excelPath"
+            :aria-busy="store.excelLoading"
+            :aria-invalid="!!store.excelError"
+            aria-describedby="batch-excel-feedback"
             :disabled="store.isBusy"
             :placeholder="t('batchFlashAuth.config.noExcel')"
             class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 h-[2.125rem] text-xs text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
@@ -111,7 +115,17 @@ async function browseExcel() {
 
         <!-- Validation feedback -->
         <div
-          v-if="store.excelError"
+          v-if="store.excelLoading"
+          id="batch-excel-feedback"
+          role="status"
+          class="text-xs text-[var(--ty-text-muted)]"
+        >
+          {{ t("batchFlashAuth.toolbar.excelValidationPending") }}
+        </div>
+        <div
+          v-else-if="store.excelError"
+          id="batch-excel-feedback"
+          role="alert"
           class="text-xs"
           :style="{ color: 'var(--ty-danger)' }"
         >
@@ -123,6 +137,8 @@ async function browseExcel() {
         </div>
         <div
           v-else-if="store.excelStats"
+          id="batch-excel-feedback"
+          role="status"
           class="flex flex-wrap items-center gap-3 text-xs"
         >
           <span class="text-[var(--ty-text-muted)]">
