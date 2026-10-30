@@ -147,8 +147,8 @@ onUnmounted(() => {
   padding: 0.75rem 1rem;
   background: var(--ty-surface);
   border: 1px solid var(--ty-border);
-  border-radius: 0.75rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border-radius: var(--ty-radius);
+  box-shadow: var(--ty-overlay-shadow);
   max-width: min(28rem, calc(100vw - 2rem));
   min-width: 16rem;
 }

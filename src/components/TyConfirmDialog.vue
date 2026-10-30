@@ -224,10 +224,9 @@ const dialogKindBadge = computed(() => {
               type="button"
               class="ty-dialog-btn ty-dialog-btn-ok"
               :class="{
-                'ty-dialog-btn-ok-danger':
-                  confirmDialogState.kind === 'danger' ||
-                  confirmDialogState.kind === 'warning',
-                'ty-dialog-btn-ok-primary': confirmDialogState.kind === 'info',
+                'ty-dialog-btn-ok-danger': confirmDialogState.kind === 'danger',
+                'ty-dialog-btn-ok-primary':
+                  confirmDialogState.kind !== 'danger',
               }"
               @click="handleConfirm"
             >
@@ -249,9 +248,7 @@ const dialogKindBadge = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: var(--ty-scrim);
   padding: 1.5rem;
 }
 
@@ -259,22 +256,15 @@ const dialogKindBadge = computed(() => {
 .ty-dialog-container {
   position: relative;
   width: 100%;
-  max-width: 25rem;
-  border-radius: 1rem;
+  max-width: 28rem;
+  max-height: calc(100dvh - 3rem);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ty-radius);
   border: 1px solid var(--ty-border);
   background-color: var(--ty-surface);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.2),
-    0 4px 12px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: var(--ty-overlay-shadow);
   overflow: hidden;
-}
-
-.dark .ty-dialog-container {
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.6),
-    0 4px 12px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 /* ── Top accent bar (3px, same pattern as aside-log-card border-top) ── */
@@ -284,31 +274,20 @@ const dialogKindBadge = computed(() => {
 }
 
 .ty-dialog-accent-warning {
-  background: linear-gradient(
-    90deg,
-    var(--ty-accent),
-    color-mix(in srgb, var(--ty-accent) 60%, transparent)
-  );
+  background: var(--ty-warning);
 }
 
 .ty-dialog-accent-danger {
-  background: linear-gradient(
-    90deg,
-    var(--ty-danger),
-    color-mix(in srgb, var(--ty-danger) 60%, transparent)
-  );
+  background: var(--ty-danger);
 }
 
 .ty-dialog-accent-info {
-  background: linear-gradient(
-    90deg,
-    var(--ty-primary),
-    color-mix(in srgb, var(--ty-primary) 60%, transparent)
-  );
+  background: var(--ty-primary);
 }
 
 /* ── Header (icon + title + close) ── */
 .ty-dialog-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -378,14 +357,10 @@ const dialogKindBadge = computed(() => {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
-.ty-dialog-close:active {
-  transform: scale(0.95);
-}
-
 .ty-dialog-icon-warning {
-  background: color-mix(in srgb, var(--ty-accent) 14%, transparent);
-  color: var(--ty-accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ty-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--ty-warning) 14%, transparent);
+  color: var(--ty-warning);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ty-warning) 22%, transparent);
 }
 
 .ty-dialog-icon-danger {
@@ -416,6 +391,9 @@ const dialogKindBadge = computed(() => {
 
 /* ── Body ── */
 .ty-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   padding: 0.625rem 1.5rem 0.25rem;
   text-align: left;
   font-size: 0.8125rem;
@@ -429,6 +407,8 @@ const dialogKindBadge = computed(() => {
 
 /* ── Footer ── */
 .ty-dialog-footer {
+  flex-wrap: wrap;
+  flex-shrink: 0;
   display: flex;
   gap: 0.625rem;
   padding: 1.25rem 1.5rem 1.5rem;
@@ -461,10 +441,6 @@ const dialogKindBadge = computed(() => {
     transform 0.12s ease;
 }
 
-.ty-dialog-btn:active {
-  transform: scale(0.98);
-}
-
 /* Cancel button */
 .ty-dialog-btn-cancel {
   border: 1px solid var(--ty-border);
@@ -488,26 +464,13 @@ const dialogKindBadge = computed(() => {
 }
 
 .ty-dialog-btn-ok-danger {
-  color: #fff;
-  background: linear-gradient(
-    135deg,
-    var(--ty-danger) 0%,
-    color-mix(in srgb, var(--ty-danger) 82%, #000) 100%
-  );
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.12),
-    0 4px 14px color-mix(in srgb, var(--ty-danger) 28%, transparent);
+  color: var(--ty-on-danger);
+  background: var(--ty-danger);
 }
 
 .ty-dialog-btn-ok-primary {
-  background: linear-gradient(
-    135deg,
-    var(--ty-primary) 0%,
-    var(--ty-primary-hover) 100%
-  );
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.12),
-    0 4px 14px color-mix(in srgb, var(--ty-primary) 28%, transparent);
+  color: var(--ty-on-primary);
+  background: var(--ty-primary);
 }
 
 /* ── Transition ── */

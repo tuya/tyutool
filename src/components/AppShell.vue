@@ -8,6 +8,7 @@ import TySerialPortIcon from "@/components/icons/TySerialPortIcon.vue";
 import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
 import { useFeaturePortIndicators } from "@/features/serial-port-indicators/useFeaturePortIndicators";
 import { useSettingsStore } from "@/stores/settings";
+import { APP_VERSION } from "@/config/app";
 import appLogo from "@/assets/logo.png";
 
 const route = useRoute();
@@ -73,7 +74,7 @@ function navIndicator(name: string) {
 
 <template>
   <div
-    class="flex h-dvh max-h-dvh min-w-0 flex-col overflow-hidden md:flex-row"
+    class="app-shell flex h-dvh max-h-dvh min-w-0 flex-col overflow-hidden md:flex-row"
     :style="{ color: 'var(--ty-text)', backgroundColor: 'var(--ty-canvas)' }"
   >
     <a
@@ -84,45 +85,37 @@ function navIndicator(name: string) {
     >
     <aside
       v-if="!hideChrome"
-      class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[9rem] md:max-h-none md:border-b-0 md:border-r"
+      class="workbench-sidebar flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] md:h-full md:max-h-none md:border-b-0 md:border-r"
       :aria-label="t('app.mainNav')"
     >
-      <div
-        class="border-b border-[var(--ty-border)] px-4 py-2.5 md:px-4 md:py-3"
-      >
-        <div class="flex justify-center">
-          <div
-            class="flex size-10 shrink-0 items-center justify-center"
-            aria-hidden="true"
-          >
-            <img :src="appLogo" alt="tyutool logo" class="size-10 rounded-xl" />
-          </div>
+      <div class="workbench-brand flex items-center gap-3 px-4 py-6">
+        <img :src="appLogo" alt="" class="size-8 shrink-0 rounded-lg" />
+        <div class="min-w-0">
+          <span class="text-xl font-semibold tracking-tight">tyutool</span>
+          <p class="mt-0.5 text-[11px] text-[var(--ty-text-muted)]">
+            {{ t("app.workbench") }}
+          </p>
         </div>
       </div>
       <nav
-        class="flex min-w-0 flex-row gap-1 p-2 md:flex-1 md:flex-col md:gap-1 md:overflow-visible"
+        class="workbench-nav flex min-w-0 flex-row gap-1 px-2 md:flex-1 md:flex-col md:overflow-visible"
         role="navigation"
       >
         <RouterLink
           v-for="item in nav"
           :key="item.to"
           :to="item.to"
-          class="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200 md:flex-none md:justify-start md:border-l-[3px] md:border-transparent md:pl-2.5"
-          :class="
-            isNavItemActive(route.path, item)
-              ? 'bg-[color-mix(in_srgb,var(--ty-primary)_18%,transparent)] font-semibold text-[var(--ty-primary)] shadow-sm ring-1 ring-[color-mix(in_srgb,var(--ty-primary)_32%,transparent)] md:border-[var(--ty-primary)]'
-              : 'text-[var(--ty-text-muted)] hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]'
-          "
+          class="workbench-nav-item flex min-h-11 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors md:flex-none md:justify-start"
           :aria-current="isNavItemActive(route.path, item) ? 'page' : undefined"
         >
           <TySerialPortIcon
             v-if="item.customIcon === 'serial-port'"
-            class="size-5 shrink-0"
+            class="size-4 shrink-0"
           />
           <FontAwesomeIcon
             v-else
             :icon="item.faIcon!"
-            class="size-5 shrink-0"
+            class="size-4 shrink-0"
             aria-hidden="true"
           />
           <div class="flex min-w-0 items-center gap-1.5">
@@ -144,8 +137,12 @@ function navIndicator(name: string) {
 
       <!-- Quick theme + language toggles (md+ only; mobile users go to /settings) -->
       <div
-        class="hidden border-t border-[var(--ty-border)] p-2 md:flex md:items-center md:justify-center md:gap-1.5"
+        class="hidden border-t border-[var(--ty-border)] p-3 md:flex md:items-center md:gap-1.5"
       >
+        <span
+          class="mr-auto font-mono text-[11px] text-[var(--ty-text-muted)]"
+          >{{ APP_VERSION }}</span
+        >
         <button
           type="button"
           class="flex size-9 items-center justify-center rounded-lg text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
@@ -170,44 +167,56 @@ function navIndicator(name: string) {
         </button>
       </div>
     </aside>
-    <main
-      ref="mainRef"
-      id="app-main"
-      class="main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden"
-      :class="
-        fullBleedMain
-          ? 'flex flex-col px-3 py-2 sm:px-4 sm:py-3 md:px-5 md:py-3 max-lg:overflow-y-auto lg:overflow-hidden'
-          : fullBleedScrollMain
-            ? 'overflow-y-auto px-3 py-2 sm:px-4 sm:py-3 md:px-5 md:py-3'
-            : 'overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-8'
-      "
-      role="main"
-      tabindex="-1"
-    >
+    <div class="workbench-content flex min-h-0 min-w-0 flex-1 flex-col">
       <div
-        class="w-full min-w-0"
+        v-if="!hideChrome"
+        class="workbench-location flex shrink-0 items-center border-b border-[var(--ty-border)] px-6 py-3 text-xs text-[var(--ty-text-muted)]"
+      >
+        <span>{{ t("app.workbench") }}</span
+        ><span class="mx-2" aria-hidden="true">/</span
+        ><span>{{
+          route.meta.titleKey ? t(route.meta.titleKey) : "tyutool"
+        }}</span>
+      </div>
+      <main
+        ref="mainRef"
+        id="app-main"
+        class="main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden"
         :class="
           fullBleedMain
-            ? 'flex min-h-0 flex-1 flex-col'
+            ? 'flex flex-col px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-5 max-lg:overflow-y-auto lg:overflow-hidden'
             : fullBleedScrollMain
-              ? ''
-              : 'mx-auto max-w-5xl'
+              ? 'overflow-y-auto px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-5'
+              : 'overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 md:px-6 md:py-5'
         "
+        role="main"
+        tabindex="-1"
       >
         <div
-          class="min-w-0"
-          :class="fullBleedMain ? 'flex min-h-0 w-full flex-1 flex-col' : ''"
+          class="w-full min-w-0"
+          :class="
+            fullBleedMain
+              ? 'flex min-h-0 flex-1 flex-col'
+              : fullBleedScrollMain
+                ? ''
+                : 'mx-auto max-w-5xl'
+          "
         >
-          <RouterView v-slot="{ Component }">
-            <transition name="ty-route" mode="out-in">
-              <keep-alive :include="['SerialDebugPage']">
-                <component :is="Component" :key="route.name" />
-              </keep-alive>
-            </transition>
-          </RouterView>
+          <div
+            class="min-w-0"
+            :class="fullBleedMain ? 'flex min-h-0 w-full flex-1 flex-col' : ''"
+          >
+            <RouterView v-slot="{ Component }">
+              <transition name="ty-route" mode="out-in">
+                <keep-alive :include="['SerialDebugPage']">
+                  <component :is="Component" :key="route.name" />
+                </keep-alive>
+              </transition>
+            </RouterView>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -225,6 +234,34 @@ function navIndicator(name: string) {
 }
 .skip-content:focus {
   transform: translateY(0);
+}
+.workbench-sidebar {
+  background: var(--ty-sidebar);
+}
+.workbench-nav-item {
+  color: var(--ty-text-muted);
+}
+.workbench-nav-item:hover {
+  color: var(--ty-text);
+  background: var(--ty-surface-muted);
+}
+.workbench-nav-item[aria-current="page"] {
+  color: var(--ty-primary);
+  background: var(--ty-primary-soft);
+}
+@media (min-width: 768px) {
+  .workbench-sidebar {
+    width: 184px;
+  }
+}
+@media (min-width: 768px) and (max-width: 1100px) {
+  .workbench-sidebar {
+    width: 160px;
+  }
+  .workbench-brand {
+    padding-inline: 12px;
+    gap: 8px;
+  }
 }
 .main-scroll {
   scrollbar-gutter: stable;

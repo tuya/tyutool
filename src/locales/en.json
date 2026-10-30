@@ -35,7 +35,8 @@
     "quickLang": "Switch language",
     "quickLangOnZh": "Switch to English",
     "quickLangOnEn": "Switch to 简体中文",
-    "skipToContent": "Skip to main content"
+    "skipToContent": "Skip to main content",
+    "workbench": "Workbench"
   },
   "settings": {
     "section": "Preferences",
@@ -175,7 +176,8 @@
       "linkCopied": "The report link was copied to your clipboard. If your browser didn't open, paste it into a new tab. When submitting, drag the log archive you just saved into the issue.",
       "privacyReminder": "Authorization credentials in the logs have been auto-masked. Before submitting, please double-check the archive for any other sensitive data.",
       "webHint": "Log export is only available in the desktop app."
-    }
+    },
+    "updateNav": "Updates"
   },
   "flash": {
     "tool": "Tools",
@@ -926,6 +928,7 @@
     "batchFlashAuth": {
       "name": "Batch Flash & Auth",
       "desc": "Flash firmware and write auth codes to up to 32 ports in parallel"
-    }
+    },
+    "openTool": "Open workbench"
   }
 }
