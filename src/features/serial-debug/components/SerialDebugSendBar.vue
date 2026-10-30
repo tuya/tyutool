@@ -121,7 +121,7 @@ function onHistoryKey(event: KeyboardEvent): void {
 
 <template>
   <div
-    class="send-bar flex items-center gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-2"
+    class="send-bar flex items-center gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-3"
   >
     <div
       class="mode-toggle flex overflow-hidden rounded-lg border border-[var(--ty-border)]"
@@ -217,8 +217,8 @@ function onHistoryKey(event: KeyboardEvent): void {
 
 <style scoped>
 .input {
-  border: 1px solid var(--ty-border);
-  background: var(--ty-canvas);
+  border: 1px solid var(--ty-border-strong);
+  background: var(--ty-field);
   border-radius: 0.5rem;
   padding: 0.5rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -236,8 +236,8 @@ function onHistoryKey(event: KeyboardEvent): void {
   background: var(--ty-surface-muted);
 }
 .mode-btn.active {
-  background: var(--ty-primary);
-  color: var(--ty-on-primary);
+  background: var(--ty-primary-soft);
+  color: var(--ty-primary);
 }
 /* Parent .mode-toggle has overflow:hidden, which clips the global box-shadow
    focus ring — use an inset outline so keyboard focus stays visible. */
