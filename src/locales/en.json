@@ -36,7 +36,7 @@
     "title": "Settings",
     "subtitle": "Manage appearance, language, logging, and updates.",
     "updateCenterTitle": "Update Center",
-    "updateCenterBody": "Make update checks, release notes, and background check cadence the first-class maintenance entry in Settings.",
+    "updateCenterBody": "Check for updates, read release notes, and set automatic update checks.",
     "updateCenterVersionLabel": "Installed build",
     "appearance": "Appearance & Language",
     "appearanceHint": "Tune theme, language, and the interface preferences you touch most often.",
@@ -528,7 +528,7 @@
       "history": "Send history"
     },
     "chip": {
-      "addBtn": "Add filter",
+      "addBtn": "Add filter tab",
       "placeholder": "Keyword…",
       "regexLabel": "Regex",
       "dupWarning": "A chip with this keyword already exists",
@@ -553,7 +553,7 @@
       "waitingData": "Waiting for data…",
       "title": "Log",
       "pausedScroll": "Scroll to bottom",
-      "filterToggle": "Filter",
+      "filterToggle": "Find",
       "toggleTimestamp": "Timestamp",
       "toggleDirBadge": "Badge",
       "connected": "Connected {port} at {baud} baud",

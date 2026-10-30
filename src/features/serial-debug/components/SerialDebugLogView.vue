@@ -215,6 +215,7 @@ function applyScrollTop(el: HTMLElement, top: number): void {
 // Per-tab scroll lock. Key: activeChipId (null = "All" tab).
 // Each tab maintains its own pause state independently.
 const lockByTab = reactive(new Map<string | null, boolean>());
+let viewActive = true;
 
 const lockAutoScroll = computed({
   get: (): boolean => lockByTab.get(s.activeChipId ?? null) ?? false,
@@ -226,7 +227,7 @@ const lockAutoScroll = computed({
 async function scrollToBottom(): Promise<void> {
   await nextTick();
   const el = scrollRef.value;
-  if (!el || lockAutoScroll.value) return;
+  if (!viewActive || !el || lockAutoScroll.value) return;
   // Both panes derive the target from the row model: reading scrollHeight would
   // force a synchronous layout on every batch.
   applyScrollTop(el, maxScrollTop.value);
@@ -293,6 +294,7 @@ watchLayoutChange(() => props.hexBytesPerRow);
 function onScroll(): void {
   const el = scrollRef.value;
   if (!el) return;
+  if (!viewActive) return;
   scrollTop.value = el.scrollTop;
   if (el.clientHeight > 0) viewportHeight.value = el.clientHeight;
   lockAutoScroll.value = maxScrollTop.value - scrollTop.value >= 80;
@@ -557,7 +559,9 @@ let savedScrollTop: number | null = null;
 
 onDeactivated(() => {
   ctxMenu.value = null;
-  savedScrollTop = scrollRef.value?.scrollTop ?? null;
+  // KeepAlive may detach the pane before this hook, leaving DOM scrollTop at 0.
+  savedScrollTop = scrollTop.value;
+  viewActive = false;
 });
 
 onActivated(async () => {
@@ -571,6 +575,7 @@ onActivated(async () => {
     applyScrollTop(el, maxScrollTop.value);
   }
   savedScrollTop = null;
+  viewActive = true;
 });
 
 const containerRef = ref<HTMLDivElement | null>(null);
@@ -890,6 +895,7 @@ async function saveLog(): Promise<void> {
         class="btn-tool"
         :class="{ 'btn-tool-active': s.showTimestamp }"
         :aria-label="t('serialDebug.log.toggleTimestamp')"
+        :aria-pressed="s.showTimestamp"
         @click="s.showTimestamp = !s.showTimestamp"
       >
         <FontAwesomeIcon :icon="['fas', 'clock']" class="size-3 shrink-0" />
@@ -900,6 +906,7 @@ async function saveLog(): Promise<void> {
         class="btn-tool"
         :class="{ 'btn-tool-active': s.showDirBadge }"
         :aria-label="t('serialDebug.log.toggleDirBadge')"
+        :aria-pressed="s.showDirBadge"
         @click="s.showDirBadge = !s.showDirBadge"
       >
         <FontAwesomeIcon :icon="['fas', 'tag']" class="size-3 shrink-0" />
@@ -1448,6 +1455,7 @@ async function saveLog(): Promise<void> {
   gap: 0.625rem;
   padding: 0.1875rem 0.625rem;
   font-size: inherit;
+  min-height: calc(1.5em + 0.375rem);
   /* Fixed row height is what makes index-based virtual scrolling correct;
      keep this in sync with estimateRowHeight() in the script block. */
   line-height: 1.5;
