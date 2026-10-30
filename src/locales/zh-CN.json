@@ -36,7 +36,7 @@
     "title": "设置",
     "subtitle": "管理外观、语言、日志与更新等应用配置。",
     "updateCenterTitle": "更新中心",
-    "updateCenterBody": "把版本检查、更新说明和自动检查节奏集中到这里，作为设置页最优先的维护入口。",
+    "updateCenterBody": "在此检查更新、查看版本说明并设置自动检查。",
     "updateCenterVersionLabel": "当前安装",
     "appearance": "外观与语言",
     "appearanceHint": "调整界面主题、显示语言，以及与日常使用最相关的界面偏好。",
@@ -528,7 +528,7 @@
       "history": "发送历史"
     },
     "chip": {
-      "addBtn": "添加过滤词",
+      "addBtn": "添加过滤标签",
       "placeholder": "关键词…",
       "regexLabel": "正则",
       "dupWarning": "该关键词已存在",
@@ -553,7 +553,7 @@
       "waitingData": "等待数据…",
       "title": "日志",
       "pausedScroll": "滚动到底部",
-      "filterToggle": "过滤",
+      "filterToggle": "查找",
       "toggleTimestamp": "时间戳",
       "toggleDirBadge": "标签",
       "connected": "已连接 {port}，波特率 {baud}",

@@ -358,6 +358,33 @@ describe("SerialDebugLogView auto-scroll", () => {
     await flush();
   }
 
+  it("exposes timestamp and direction toggle state to assistive technology", async () => {
+    const s = useSerialDebugStore();
+    mountComponent();
+    await flush();
+
+    const timestamp = host!.querySelector<HTMLButtonElement>(
+      '[aria-label="serialDebug.log.toggleTimestamp"]',
+    )!;
+    const direction = host!.querySelector<HTMLButtonElement>(
+      '[aria-label="serialDebug.log.toggleDirBadge"]',
+    )!;
+
+    expect(timestamp.getAttribute("aria-pressed")).toBe("true");
+    expect(direction.getAttribute("aria-pressed")).toBe("true");
+
+    timestamp.click();
+    await flush();
+    expect(timestamp.getAttribute("aria-pressed")).toBe("false");
+    expect(direction.getAttribute("aria-pressed")).toBe("true");
+
+    direction.click();
+    await flush();
+    expect(direction.getAttribute("aria-pressed")).toBe("false");
+    expect(s.showTimestamp).toBe(false);
+    expect(s.showDirBadge).toBe(false);
+  });
+
   it("renders appendChunk previews in ASCII and Hex, then completes them once", async () => {
     const s = useSerialDebugStore();
     mountComponent();

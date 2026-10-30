@@ -259,8 +259,8 @@ test.describe("LOG-02 timestamp and direction toggle semantics", () => {
     page,
   }) => {
     await openUi(page, "/serial-debug", "zh-CN");
-    const timestamp = page.getByRole("button", { name: "时间戳" });
-    const direction = page.getByRole("button", { name: "标签" });
+    const timestamp = page.getByRole("button", { name: "时间戳", exact: true });
+    const direction = page.getByRole("button", { name: "标签", exact: true });
     await expect(timestamp).toHaveAttribute("aria-pressed", "true");
     await expect(direction).toHaveAttribute("aria-pressed", "true");
     await timestamp.click();
