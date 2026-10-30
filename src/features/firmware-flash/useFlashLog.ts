@@ -19,6 +19,7 @@ export function useFlashLog() {
     if (logLines.value.length > 500) {
       logLines.value.splice(0, logLines.value.length - 500);
     }
+    void scrollLogToBottom();
   }
 
   async function scrollLogToBottom(): Promise<void> {

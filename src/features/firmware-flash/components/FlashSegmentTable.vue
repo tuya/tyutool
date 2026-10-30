@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
-import { validateAddrRange } from "../hex";
+import { validateAddrRange, parseHexAddr } from "../hex";
 
 /**
  * Editor for the flash address segments.
@@ -20,6 +20,46 @@ const ctx = useFirmwareFlashContext();
 const { onPickFile, addSegment, removeSegment } = ctx;
 
 const MAX_SEGMENTS = 10;
+const addRef = ref<HTMLButtonElement | null>(null);
+function fieldInvalid(id: string, field: "start" | "end"): boolean {
+  const seg = ctx.flashSegments.find((seg) => seg.id === id);
+  if (!seg?.startAddr.trim() || !seg.endAddr.trim()) return false;
+  return (
+    parseHexAddr(field === "start" ? seg.startAddr : seg.endAddr) === null ||
+    validateAddrRange(seg.startAddr, seg.endAddr) === "startAfterEnd"
+  );
+}
+function fieldLabel(index: number, key: string): string {
+  return `${t("flash.segment")} ${index + 1}: ${t(key)}`;
+}
+function segmentSummary(index: number): string {
+  const seg = ctx.flashSegments[index];
+  const start = parseHexAddr(seg.startAddr);
+  const end = parseHexAddr(seg.endAddr);
+  const size = seg.firmwareFile?.size ?? seg.firmwareSize;
+  const range =
+    start !== null && end !== null && end >= start ? String(end - start) : "—";
+  return t("flash.segmentSummary", {
+    size:
+      size === undefined
+        ? t("flash.sizeUnknown")
+        : t("flash.byteCount", { count: size }),
+    range,
+  });
+}
+async function deleteSegment(index: number, event: MouseEvent): Promise<void> {
+  const layout = (event.currentTarget as HTMLElement).closest(
+    ".segment-layout",
+  );
+  removeSegment(index);
+  await nextTick();
+  const buttons = layout?.querySelectorAll<HTMLButtonElement>(
+    "[data-remove-segment]",
+  );
+  (
+    buttons?.[Math.min(index - 1, (buttons?.length ?? 0) - 1)] ?? addRef.value
+  )?.focus();
+}
 
 /** Per-segment inline range error (empty while either field is blank). */
 const segmentErrors = computed<Record<string, string>>(() => {
@@ -47,12 +87,12 @@ const segmentErrors = computed<Record<string, string>>(() => {
     <p id="flash-segments-title" class="ty-block-label mb-2.5">
       {{ t("flash.flashSegmentsTitle") }}
     </p>
-    <p class="mb-3 text-xs leading-snug text-[var(--ty-text-muted)]">
-      {{ t("flash.hexHint") }}
+    <p class="mb-2 text-xs leading-snug text-[var(--ty-text-muted)]">
+      {{ t("flash.hexHint") }} {{ t("flash.rangeExplanation") }}
     </p>
 
     <!-- Use the table only when the operation card has enough room for every field. -->
-    <div class="hidden overflow-x-auto @min-[600px]:block">
+    <div class="segment-layout hidden overflow-x-auto @min-[600px]:block">
       <table class="w-full border-collapse text-left text-sm">
         <thead>
           <tr class="border-b border-[var(--ty-border)]">
@@ -90,6 +130,11 @@ const segmentErrors = computed<Record<string, string>>(() => {
                 }}</label>
                 <input
                   :id="`flash-${seg.id}-start`"
+                  :aria-label="fieldLabel(index, 'flash.addrStart')"
+                  :aria-invalid="fieldInvalid(seg.id, 'start')"
+                  :aria-describedby="
+                    segmentErrors[seg.id] ? `flash-${seg.id}-error` : undefined
+                  "
                   v-model="seg.startAddr"
                   type="text"
                   class="ops-text-input w-full min-w-[7rem] font-mono py-1.5 text-xs"
@@ -105,6 +150,11 @@ const segmentErrors = computed<Record<string, string>>(() => {
                 }}</label>
                 <input
                   :id="`flash-${seg.id}-end`"
+                  :aria-label="fieldLabel(index, 'flash.addrEnd')"
+                  :aria-invalid="fieldInvalid(seg.id, 'end')"
+                  :aria-describedby="
+                    segmentErrors[seg.id] ? `flash-${seg.id}-error` : undefined
+                  "
                   v-model="seg.endAddr"
                   type="text"
                   class="ops-text-input w-full min-w-[7rem] font-mono py-1.5 text-xs"
@@ -121,6 +171,8 @@ const segmentErrors = computed<Record<string, string>>(() => {
                   }}</label>
                   <input
                     :id="`flash-${seg.id}-file`"
+                    :aria-label="fieldLabel(index, 'flash.firmwareFile')"
+                    :title="seg.firmwarePath"
                     v-model="seg.firmwarePath"
                     type="text"
                     readonly
@@ -136,6 +188,9 @@ const segmentErrors = computed<Record<string, string>>(() => {
                     {{ t("flash.browse") }}
                   </button>
                 </div>
+                <p class="mt-1 text-xs text-[var(--ty-text-muted)]">
+                  {{ segmentSummary(index) }}
+                </p>
               </td>
               <td class="py-2.5 align-middle">
                 <div class="flex size-7 shrink-0 items-center justify-center">
@@ -144,8 +199,9 @@ const segmentErrors = computed<Record<string, string>>(() => {
                     type="button"
                     class="flex size-7 items-center justify-center rounded-md text-[var(--ty-danger)] transition-colors hover:bg-[color-mix(in_srgb,var(--ty-danger)_12%,transparent)]"
                     :disabled="ctx.busy"
-                    :aria-label="t('flash.removeSegment')"
-                    @click="removeSegment(index)"
+                    :aria-label="fieldLabel(index, 'flash.removeSegment')"
+                    data-remove-segment
+                    @click="deleteSegment(index, $event)"
                   >
                     <FontAwesomeIcon
                       :icon="['fas', 'trash']"
@@ -163,6 +219,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
               <td />
               <td colspan="4" class="pb-2 pr-2">
                 <p
+                  :id="`flash-${seg.id}-error`"
                   class="text-xs leading-snug text-[var(--ty-danger)]"
                   role="alert"
                 >
@@ -176,13 +233,13 @@ const segmentErrors = computed<Record<string, string>>(() => {
     </div>
 
     <!-- Narrow screen: card layout -->
-    <div class="space-y-3 @min-[600px]:hidden">
+    <div class="segment-layout space-y-3 @min-[600px]:hidden">
       <div
         v-for="(seg, index) in ctx.flashSegments"
         :key="seg.id"
         class="rounded-lg border border-[var(--ty-border)] bg-[color-mix(in_srgb,var(--ty-surface-muted)_88%,transparent)] p-3"
       >
-        <p class="mb-3 text-xs font-semibold text-[var(--ty-text)]">
+        <p class="mb-2 text-xs font-semibold text-[var(--ty-text)]">
           {{ t("flash.segment") }} {{ index + 1 }}
         </p>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -194,6 +251,11 @@ const segmentErrors = computed<Record<string, string>>(() => {
             >
             <input
               :id="`flash-m-${seg.id}-start`"
+              :aria-label="fieldLabel(index, 'flash.addrStart')"
+              :aria-invalid="fieldInvalid(seg.id, 'start')"
+              :aria-describedby="
+                segmentErrors[seg.id] ? `flash-m-${seg.id}-error` : undefined
+              "
               v-model="seg.startAddr"
               type="text"
               class="ops-text-input w-full font-mono py-1.5 text-xs"
@@ -211,25 +273,30 @@ const segmentErrors = computed<Record<string, string>>(() => {
             >
             <input
               :id="`flash-m-${seg.id}-end`"
+              :aria-label="fieldLabel(index, 'flash.addrEnd')"
+              :aria-invalid="fieldInvalid(seg.id, 'end')"
+              :aria-describedby="
+                segmentErrors[seg.id] ? `flash-m-${seg.id}-error` : undefined
+              "
               v-model="seg.endAddr"
               type="text"
               class="ops-text-input w-full font-mono py-1.5 text-xs"
               placeholder="0x00000000"
               spellcheck="false"
               autocomplete="off"
-              :aria-invalid="!!segmentErrors[seg.id]"
               :disabled="ctx.busy"
             />
           </div>
         </div>
         <p
           v-if="segmentErrors[seg.id]"
+          :id="`flash-m-${seg.id}-error`"
           class="mt-2 text-xs leading-snug text-[var(--ty-danger)]"
           role="alert"
         >
           {{ segmentErrors[seg.id] }}
         </p>
-        <div class="mt-3">
+        <div class="mt-2">
           <label
             :for="`flash-m-${seg.id}-file`"
             class="ops-field-label mb-1 block"
@@ -240,6 +307,8 @@ const segmentErrors = computed<Record<string, string>>(() => {
           >
             <input
               :id="`flash-m-${seg.id}-file`"
+              :aria-label="fieldLabel(index, 'flash.firmwareFile')"
+              :title="seg.firmwarePath"
               v-model="seg.firmwarePath"
               type="text"
               readonly
@@ -260,8 +329,9 @@ const segmentErrors = computed<Record<string, string>>(() => {
                 type="button"
                 class="inline-flex min-h-[2.25rem] min-w-11 items-center justify-center rounded-lg border border-[color-mix(in_srgb,var(--ty-danger)_35%,transparent)] text-[var(--ty-danger)] transition-colors hover:bg-[color-mix(in_srgb,var(--ty-danger)_10%,transparent)]"
                 :disabled="ctx.busy"
-                :aria-label="t('flash.removeSegment')"
-                @click="removeSegment(index)"
+                :aria-label="fieldLabel(index, 'flash.removeSegment')"
+                data-remove-segment
+                @click="deleteSegment(index, $event)"
               >
                 <FontAwesomeIcon
                   :icon="['fas', 'trash']"
@@ -272,10 +342,14 @@ const segmentErrors = computed<Record<string, string>>(() => {
             </div>
           </div>
         </div>
+        <p class="mt-2 text-xs text-[var(--ty-text-muted)]">
+          {{ segmentSummary(index) }}
+        </p>
       </div>
     </div>
 
     <button
+      ref="addRef"
       v-if="ctx.flashSegments.length < MAX_SEGMENTS"
       type="button"
       class="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--ty-border)] py-2 text-[var(--ty-text-muted)] transition-all hover:border-[var(--ty-primary)] hover:text-[var(--ty-primary)]"

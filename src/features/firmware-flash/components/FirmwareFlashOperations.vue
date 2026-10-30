@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch, useId } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
 import { chipManifest } from "../chip-manifests";
 import type { ErasePresetKind } from "../types";
 import { toRef } from "vue";
 import FlashSegmentTable from "./FlashSegmentTable.vue";
+import { useCopyFeedback } from "@/composables/useCopyFeedback";
 import TySecretInput from "@/components/TySecretInput.vue";
 import { useAddrRangeError } from "../useAddrRangeError";
 import { authorizeCredentialErrors } from "../validate-operation";
@@ -34,23 +35,18 @@ const {
   startAuthRead,
 } = ctx;
 
-const credentialsCopied = ref(false);
-let credentialsCopiedTimer: ReturnType<typeof setTimeout> | undefined;
-
-async function copyCredentials() {
+const {
+  state: copyState,
+  message: copyMessage,
+  copy,
+  reset: resetCopy,
+} = useCopyFeedback();
+const credentialsCopied = computed(() => copyState.value === "copied");
+watch(() => [ctx.authorizeUuid, ctx.authorizeAuthKey], resetCopy);
+function copyCredentials() {
   const uuid = ctx.authorizeUuid.trim();
   const key = ctx.authorizeAuthKey.trim();
-  if (!uuid && !key) return;
-  try {
-    await navigator.clipboard.writeText(`${uuid}\n${key}`);
-    credentialsCopied.value = true;
-    clearTimeout(credentialsCopiedTimer);
-    credentialsCopiedTimer = setTimeout(() => {
-      credentialsCopied.value = false;
-    }, 1400);
-  } catch {
-    // Clipboard API unavailable — silent.
-  }
+  if (uuid || key) void copy(`${uuid}\n${key}`);
 }
 
 /** i18n key for each erase preset kind. */
@@ -78,6 +74,29 @@ const { message: readAddrError } = useAddrRangeError(
   toRef(ctx, "readEndAddr"),
 );
 
+const tabsRef = ref<HTMLElement | null>(null);
+const tabId = `flash-ops-${useId()}`;
+function onTabKey(event: KeyboardEvent): void {
+  if (
+    !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) ||
+    ctx.busy
+  )
+    return;
+  event.preventDefault();
+  const tabs = ctx.tabList;
+  const current = tabs.findIndex((tab) => tab.id === ctx.activeTab);
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+          tabs.length;
+  ctx.activeTab = tabs[next].id;
+  tabsRef.value
+    ?.querySelectorAll<HTMLButtonElement>("[role=tab]")
+    [next]?.focus();
+}
 const credentialErrors = computed(() =>
   authorizeCredentialErrors(ctx.authorizeUuid, ctx.authorizeAuthKey),
 );
@@ -110,7 +129,9 @@ const operationHint = computed(
       <!-- Tab 选项卡 -->
       <div
         class="ops-tabs mx-3 mb-3 flex gap-1 rounded-xl p-1"
+        ref="tabsRef"
         role="tablist"
+        @keydown="onTabKey"
         :aria-label="t('flash.tabsAria')"
       >
         <button
@@ -118,6 +139,9 @@ const operationHint = computed(
           :key="tab.id"
           type="button"
           role="tab"
+          :id="`${tabId}-${tab.id}`"
+          :aria-controls="`${tabId}-${tab.id}-panel`"
+          :tabindex="ctx.activeTab === tab.id ? 0 : -1"
           :aria-selected="ctx.activeTab === tab.id"
           class="ops-tab flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200"
           :class="
@@ -130,12 +154,26 @@ const operationHint = computed(
         </button>
       </div>
 
+      <p
+        v-if="copyMessage"
+        :role="copyState === 'failed' ? 'alert' : 'status'"
+        class="mx-3 mb-2 text-xs"
+        :class="
+          copyState === 'failed'
+            ? 'text-[var(--ty-danger)]'
+            : 'text-[var(--ty-success)]'
+        "
+      >
+        {{ copyMessage }}
+      </p>
       <!-- 内容区 -->
       <div class="px-3.5 pb-3.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         <div class="space-y-3">
           <!-- 烧录 Tab -->
           <div
             v-show="ctx.activeTab === 'flash'"
+            :id="`${tabId}-flash-panel`"
+            :aria-labelledby="`${tabId}-flash`"
             class="space-y-3"
             role="tabpanel"
           >
@@ -159,6 +197,8 @@ const operationHint = computed(
           <!-- 擦除 Tab -->
           <div
             v-show="ctx.activeTab === 'erase'"
+            :id="`${tabId}-erase-panel`"
+            :aria-labelledby="`${tabId}-erase`"
             class="space-y-3"
             role="tabpanel"
           >
@@ -261,6 +301,8 @@ const operationHint = computed(
           <!-- 读取 Tab -->
           <div
             v-show="ctx.activeTab === 'read'"
+            :id="`${tabId}-read-panel`"
+            :aria-labelledby="`${tabId}-read`"
             class="space-y-3"
             role="tabpanel"
           >
@@ -274,6 +316,7 @@ const operationHint = computed(
               >
                 <input
                   id="read-dir"
+                  :title="ctx.readDir"
                   v-model="ctx.readDir"
                   type="text"
                   readonly
@@ -386,6 +429,8 @@ const operationHint = computed(
           <!-- 授权 Tab -->
           <div
             v-show="ctx.activeTab === 'authorize'"
+            :id="`${tabId}-authorize-panel`"
+            :aria-labelledby="`${tabId}-authorize`"
             class="space-y-3"
             role="tabpanel"
           >
@@ -474,9 +519,12 @@ const operationHint = computed(
                   : 'text-[var(--ty-text-muted)]'
               "
               :disabled="
-                ctx.busy || (!ctx.authorizeUuid && !ctx.authorizeAuthKey)
+                ctx.busy ||
+                copyState === 'copying' ||
+                (!ctx.authorizeUuid && !ctx.authorizeAuthKey)
               "
               :title="t('flash.copyCredentials')"
+              :aria-label="t('flash.copyCredentials')"
               @click="copyCredentials"
             >
               <FontAwesomeIcon

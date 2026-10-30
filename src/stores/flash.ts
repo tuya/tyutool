@@ -264,6 +264,7 @@ export const useFlashStore = defineStore("flash", () => {
     const seg = flashSegments.value[index];
     const startVal = parseHexAddr(seg.startAddr);
     const start = startVal !== null ? Number(startVal) : 0;
+    seg.firmwareSize = fileSize;
     const end = start + fileSize;
     seg.endAddr = `0x${end.toString(16).toUpperCase().padStart(8, "0")}`;
   }
@@ -301,6 +302,7 @@ export const useFlashStore = defineStore("flash", () => {
         });
         if (selected !== null) {
           flashSegments.value[index].firmwarePath = selected;
+          flashSegments.value[index].firmwareSize = undefined;
           try {
             const { invoke } = await import("@tauri-apps/api/core");
             const size = await invoke<number>("get_file_size", {
@@ -323,6 +325,7 @@ export const useFlashStore = defineStore("flash", () => {
       );
       if (result) {
         flashSegments.value[index].firmwarePath = result.path;
+        flashSegments.value[index].firmwareSize = result.file?.size;
         flashSegments.value[index].firmwareFile = result.file;
         if (result.file) updateFlashEndAddr(index, result.file.size);
       }
@@ -338,6 +341,7 @@ export const useFlashStore = defineStore("flash", () => {
     const seg = flashSegments.value[index];
     seg.firmwarePath = file ? file.name : "";
     seg.firmwareFile = file ?? null;
+    seg.firmwareSize = file?.size;
     if (file) {
       updateFlashEndAddr(index, file.size);
     }

@@ -96,6 +96,7 @@
       <ul>
         <li>Clicking "add segment" sets the new segment's start to the <strong>previous segment's end</strong>, sparing you the typing.</li>
         <li>When you pick a firmware file for a segment, its end is <strong>auto-computed</strong> as <code>start + file size</code>.</li>
+        <li>The end is <strong>exclusive</strong>. Start and end remain independently editable: changing start does not recalculate end. Each segment shows measured file size and range length; a restored path without a size measurement says "not measured". Invalid addresses have errors next to the affected fields.</li>
       </ul>
       <p>The Flash button is only enabled when <strong>every segment has a firmware path</strong>; if any segment lacks a path, the button stays disabled.</p>
       <figure class="shot">
