@@ -242,6 +242,52 @@ const segmentErrors = computed<Record<string, string>>(() => {
         <p class="mb-2 text-xs font-semibold text-[var(--ty-text)]">
           {{ t("flash.segment") }} {{ index + 1 }}
         </p>
+        <div class="mb-3">
+          <label
+            :for="`flash-m-${seg.id}-file`"
+            class="ops-field-label mb-1 block"
+            >{{ t("flash.firmwareFile") }}</label
+          >
+          <div
+            class="flex flex-col gap-2 min-[400px]:flex-row min-[400px]:items-stretch"
+          >
+            <input
+              :id="`flash-m-${seg.id}-file`"
+              :aria-label="fieldLabel(index, 'flash.firmwareFile')"
+              :title="seg.firmwarePath"
+              v-model="seg.firmwarePath"
+              type="text"
+              readonly
+              :placeholder="t('flash.noFile')"
+              class="ops-text-input min-h-[2.25rem] min-w-0 flex-1 cursor-default truncate bg-[var(--ty-surface-muted)] py-1.5 text-xs"
+            />
+            <div class="flex shrink-0 gap-2 min-[400px]:items-stretch">
+              <button
+                type="button"
+                class="ops-browse-btn inline-flex min-h-[2.25rem] flex-1 min-[400px]:min-w-[4.75rem] min-[400px]:flex-none items-center justify-center rounded-lg px-3.5 text-sm font-semibold"
+                :disabled="ctx.busy"
+                @click="onPickFile(index)"
+              >
+                {{ t("flash.browse") }}
+              </button>
+              <button
+                v-if="index > 0"
+                type="button"
+                class="inline-flex min-h-[2.25rem] min-w-11 items-center justify-center rounded-lg border border-[color-mix(in_srgb,var(--ty-danger)_35%,transparent)] text-[var(--ty-danger)] transition-colors hover:bg-[color-mix(in_srgb,var(--ty-danger)_10%,transparent)]"
+                :disabled="ctx.busy"
+                :aria-label="fieldLabel(index, 'flash.removeSegment')"
+                data-remove-segment
+                @click="deleteSegment(index, $event)"
+              >
+                <FontAwesomeIcon
+                  :icon="['fas', 'trash']"
+                  class="size-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label
@@ -296,52 +342,6 @@ const segmentErrors = computed<Record<string, string>>(() => {
         >
           {{ segmentErrors[seg.id] }}
         </p>
-        <div class="mt-2">
-          <label
-            :for="`flash-m-${seg.id}-file`"
-            class="ops-field-label mb-1 block"
-            >{{ t("flash.firmwareFile") }}</label
-          >
-          <div
-            class="flex flex-col gap-2 min-[400px]:flex-row min-[400px]:items-stretch"
-          >
-            <input
-              :id="`flash-m-${seg.id}-file`"
-              :aria-label="fieldLabel(index, 'flash.firmwareFile')"
-              :title="seg.firmwarePath"
-              v-model="seg.firmwarePath"
-              type="text"
-              readonly
-              :placeholder="t('flash.noFile')"
-              class="ops-text-input min-h-[2.25rem] min-w-0 flex-1 cursor-default truncate bg-[var(--ty-surface-muted)] py-1.5 text-xs"
-            />
-            <div class="flex shrink-0 gap-2 min-[400px]:items-stretch">
-              <button
-                type="button"
-                class="ops-browse-btn inline-flex min-h-[2.25rem] flex-1 min-[400px]:min-w-[4.75rem] min-[400px]:flex-none items-center justify-center rounded-lg px-3.5 text-sm font-semibold"
-                :disabled="ctx.busy"
-                @click="onPickFile(index)"
-              >
-                {{ t("flash.browse") }}
-              </button>
-              <button
-                v-if="index > 0"
-                type="button"
-                class="inline-flex min-h-[2.25rem] min-w-11 items-center justify-center rounded-lg border border-[color-mix(in_srgb,var(--ty-danger)_35%,transparent)] text-[var(--ty-danger)] transition-colors hover:bg-[color-mix(in_srgb,var(--ty-danger)_10%,transparent)]"
-                :disabled="ctx.busy"
-                :aria-label="fieldLabel(index, 'flash.removeSegment')"
-                data-remove-segment
-                @click="deleteSegment(index, $event)"
-              >
-                <FontAwesomeIcon
-                  :icon="['fas', 'trash']"
-                  class="size-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </div>
-          </div>
-        </div>
         <p class="mt-2 text-xs text-[var(--ty-text-muted)]">
           {{ segmentSummary(index) }}
         </p>

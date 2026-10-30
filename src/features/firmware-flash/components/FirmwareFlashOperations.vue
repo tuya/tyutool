@@ -120,15 +120,12 @@ const operationHint = computed(
         </div>
         <div class="min-w-0">
           <p class="ty-block-label">{{ t("flash.deviceOps") }}</p>
-          <p class="mt-0.5 text-xs text-[var(--ty-text-muted)]">
-            {{ t("flash.deviceOpsHint") }}
-          </p>
         </div>
       </div>
 
       <!-- Tab 选项卡 -->
       <div
-        class="ops-tabs mx-3 mb-3 flex gap-1 rounded-xl p-1"
+        class="ops-tabs mb-4 flex shrink-0 gap-2 px-3"
         ref="tabsRef"
         role="tablist"
         @keydown="onTabKey"
@@ -143,7 +140,7 @@ const operationHint = computed(
           :aria-controls="`${tabId}-${tab.id}-panel`"
           :tabindex="ctx.activeTab === tab.id ? 0 : -1"
           :aria-selected="ctx.activeTab === tab.id"
-          class="ops-tab flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200"
+          class="ops-tab flex-1 px-2 py-2 text-sm font-medium transition-colors"
           :class="
             ctx.activeTab === tab.id ? 'ops-tab-active' : 'ops-tab-inactive'
           "
@@ -216,6 +213,10 @@ const operationHint = computed(
                   }}</label>
                   <input
                     id="erase-start"
+                    :aria-invalid="!!eraseAddrError"
+                    :aria-describedby="
+                      eraseAddrError ? 'erase-range-error' : undefined
+                    "
                     v-model="ctx.eraseStartAddr"
                     type="text"
                     class="ops-text-input w-full font-mono py-1.5"
@@ -231,6 +232,9 @@ const operationHint = computed(
                   }}</label>
                   <input
                     id="erase-end"
+                    :aria-describedby="
+                      eraseAddrError ? 'erase-range-error' : undefined
+                    "
                     v-model="ctx.eraseEndAddr"
                     type="text"
                     class="ops-text-input w-full font-mono py-1.5"
@@ -244,6 +248,7 @@ const operationHint = computed(
               </div>
               <p
                 v-if="eraseAddrError"
+                id="erase-range-error"
                 class="mt-1.5 text-xs leading-snug text-[var(--ty-danger)]"
                 role="alert"
               >
@@ -384,6 +389,10 @@ const operationHint = computed(
                   }}</label>
                   <input
                     id="read-start"
+                    :aria-invalid="!!readAddrError"
+                    :aria-describedby="
+                      readAddrError ? 'read-range-error' : undefined
+                    "
                     v-model="ctx.readStartAddr"
                     type="text"
                     class="ops-text-input w-full font-mono py-1.5"
@@ -399,6 +408,9 @@ const operationHint = computed(
                   }}</label>
                   <input
                     id="read-end"
+                    :aria-describedby="
+                      readAddrError ? 'read-range-error' : undefined
+                    "
                     v-model="ctx.readEndAddr"
                     type="text"
                     class="ops-text-input w-full font-mono py-1.5"
@@ -412,6 +424,7 @@ const operationHint = computed(
               </div>
               <p
                 v-if="readAddrError"
+                id="read-range-error"
                 class="mt-1.5 text-xs leading-snug text-[var(--ty-danger)]"
                 role="alert"
               >
