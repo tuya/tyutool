@@ -1,5 +1,6 @@
 <!-- src/features/batch-flash-auth/BatchFlashAuthPage.vue -->
 <script setup lang="ts">
+import TyPageHeader from "@/components/TyPageHeader.vue";
 import { computed, onMounted, onUnmounted, ref, unref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -71,21 +72,19 @@ onUnmounted(() => {
     />
     <div>
       <ToolboxBreadcrumb :toolName="t('toolbox.batchFlashAuth.name')" />
-      <div class="flex items-center gap-2">
-        <h1 class="text-lg font-semibold text-[var(--ty-text)]">
-          {{ t("batchFlashAuth.title") }}
-        </h1>
-        <TyPortActivityIndicator
-          :indicator="portIndicators.indicatorForFeature('toolbox')"
-          :active-ports="indicatorActivePorts"
-          :palette-mode="indicatorPaletteMode"
-          feature="toolbox"
-          surface="batch-flash-auth-header"
-        />
-      </div>
-      <p class="text-xs text-[var(--ty-text-muted)]">
-        {{ t("batchFlashAuth.subtitle") }}
-      </p>
+      <TyPageHeader
+        :title="t('batchFlashAuth.title')"
+        :description="t('batchFlashAuth.subtitle')"
+      >
+        <template #actions
+          ><TyPortActivityIndicator
+            :indicator="portIndicators.indicatorForFeature('toolbox')"
+            :active-ports="indicatorActivePorts"
+            :palette-mode="indicatorPaletteMode"
+            feature="toolbox"
+            surface="batch-flash-auth-header"
+        /></template>
+      </TyPageHeader>
     </div>
 
     <BatchFlashAuthDashboard />
