@@ -156,12 +156,12 @@ function getLineLevel(line: string): LogLevel {
 }
 
 const LEVEL_CLASS: Record<LogLevel, string> = {
-  error: "text-red-400",
-  warn: "text-yellow-400",
-  info: "text-green-200",
-  debug: "text-slate-300",
-  trace: "text-slate-400",
-  default: "text-green-200",
+  error: "text-[var(--ty-danger)]",
+  warn: "text-[var(--ty-warning)]",
+  info: "text-[var(--ty-text)]",
+  debug: "text-[var(--ty-text-muted)]",
+  trace: "text-[var(--ty-text-muted)]",
+  default: "text-[var(--ty-text)]",
 };
 
 function escapeHtml(s: string): string {
@@ -174,7 +174,7 @@ function highlightMatch(raw: string, query: string): string {
   const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
   return escaped.replace(
     re,
-    (m) => `<mark class="bg-yellow-300 text-black rounded-sm">${m}</mark>`,
+    (m) => `<mark class="log-search-highlight">${m}</mark>`,
   );
 }
 
@@ -364,7 +364,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     v-if="props.open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ty-scrim)] p-4"
     @click.self="emit('close')"
   >
     <div
@@ -373,7 +373,7 @@ onBeforeUnmount(() => {
       aria-modal="true"
       :aria-labelledby="titleId"
       tabindex="-1"
-      class="ty-card flex max-h-[85vh] w-full max-w-3xl flex-col gap-3 rounded-xl p-4 sm:p-5"
+      class="ty-card flex max-h-[85vh] w-full max-w-3xl flex-col gap-3 rounded-xl p-4 shadow-[var(--ty-overlay-shadow)] sm:p-5"
     >
       <p
         v-if="copyMessage"
@@ -417,7 +417,7 @@ onBeforeUnmount(() => {
         <div
           v-else-if="listError"
           role="alert"
-          class="rounded-lg bg-red-950/40 p-3 text-sm text-red-400"
+          class="rounded-lg bg-[var(--ty-field)] p-3 text-sm text-[var(--ty-danger)]"
         >
           {{ listError }}
         </div>
@@ -425,7 +425,7 @@ onBeforeUnmount(() => {
         <!-- Empty -->
         <div
           v-else-if="fileList.length === 0"
-          class="flex flex-1 items-center justify-center py-8 text-sm opacity-50"
+          class="flex flex-1 items-center justify-center py-8 text-sm text-[var(--ty-text-muted)]"
         >
           {{ t("settings.logViewer.empty") }}
         </div>
@@ -434,7 +434,9 @@ onBeforeUnmount(() => {
         <div v-else class="min-h-0 flex-1 overflow-auto">
           <table class="w-full text-sm">
             <thead>
-              <tr class="border-b border-white/10 text-left text-xs opacity-60">
+              <tr
+                class="border-b border-[var(--ty-border)] text-left text-xs text-[var(--ty-text-muted)]"
+              >
                 <th class="pb-1 pr-4 font-medium">
                   {{ t("settings.logViewer.fileName") }}
                 </th>
@@ -450,12 +452,12 @@ onBeforeUnmount(() => {
               <tr
                 v-for="(file, idx) in fileList"
                 :key="file.name"
-                class="cursor-pointer border-b border-white/5 hover:bg-white/5"
+                class="border-b border-[var(--ty-border)] hover:bg-[var(--ty-field)]"
               >
                 <td class="py-1.5 pr-4 font-mono text-xs">
                   <button
                     type="button"
-                    class="log-file-button text-left hover:underline"
+                    class="log-file-button break-all text-left hover:underline"
                     :data-filename="file.name"
                     @click="openFile(file)"
                   >
@@ -468,10 +470,12 @@ onBeforeUnmount(() => {
                     {{ t("settings.logViewer.currentSession") }}
                   </span>
                 </td>
-                <td class="py-1.5 pr-4 tabular-nums opacity-60">
+                <td
+                  class="py-1.5 pr-4 tabular-nums text-[var(--ty-text-muted)]"
+                >
                   {{ formatSize(file.sizeBytes) }}
                 </td>
-                <td class="py-1.5 tabular-nums opacity-60">
+                <td class="py-1.5 tabular-nums text-[var(--ty-text-muted)]">
                   {{ formatDate(file.modifiedMs) }}
                 </td>
               </tr>
@@ -502,18 +506,19 @@ onBeforeUnmount(() => {
       <!-- ════════════════════ CONTENT VIEW ════════════════════ -->
       <template v-else>
         <!-- Breadcrumb -->
-        <div class="flex items-center gap-1 text-sm">
+        <div class="flex min-w-0 items-center gap-1 text-sm">
           <button
             type="button"
-            class="text-blue-400 hover:underline"
+            class="shrink-0 text-[var(--ty-primary)] hover:underline"
             @click="backToList"
           >
             {{ t("settings.logViewer.fileList") }}
           </button>
-          <span class="opacity-40">/</span>
-          <span class="font-mono text-xs opacity-70">{{
-            fileStem(selectedFile?.name ?? "")
-          }}</span>
+          <span class="text-[var(--ty-text-muted)]" aria-hidden="true">/</span>
+          <span
+            class="min-w-0 break-all font-mono text-xs text-[var(--ty-text-muted)]"
+            >{{ fileStem(selectedFile?.name ?? "") }}</span
+          >
         </div>
 
         <!-- Truncation notice -->
@@ -525,15 +530,18 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Search bar -->
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <input
             v-model="searchQuery"
             type="text"
-            class="ty-input flex-1 font-mono text-xs"
+            class="ty-input min-w-0 flex-1 font-mono text-xs"
             :placeholder="t('settings.logViewer.searchPlaceholder')"
             :aria-label="t('settings.logViewer.searchPlaceholder')"
           />
-          <span v-if="searchQuery" class="shrink-0 text-xs opacity-60">
+          <span
+            v-if="searchQuery"
+            class="shrink-0 text-xs text-[var(--ty-text-muted)]"
+          >
             <template v-if="matchTotal === 0">{{
               t("settings.logViewer.noMatches")
             }}</template>
@@ -589,9 +597,12 @@ onBeforeUnmount(() => {
           v-else-if="rawContent || !contentError"
           ref="contentEl"
           :aria-busy="contentLoading"
-          class="min-h-0 flex-1 overflow-auto rounded-lg bg-black/80 p-3 font-mono text-xs leading-relaxed"
+          class="min-h-0 flex-1 overflow-auto rounded-lg bg-[var(--ty-log-bg)] p-3 font-mono text-xs leading-relaxed"
         >
-          <div v-if="displayLines.length === 0" class="opacity-40">
+          <div
+            v-if="displayLines.length === 0"
+            class="text-[var(--ty-text-muted)]"
+          >
             {{
               searchQuery
                 ? t("settings.logViewer.noMatches")
@@ -605,7 +616,7 @@ onBeforeUnmount(() => {
             :class="[
               LEVEL_CLASS[line.level],
               idx === currentMatchIndex && searchQuery
-                ? 'bg-white/10 rounded'
+                ? 'bg-[var(--ty-primary-soft)] rounded'
                 : '',
             ]"
             v-html="line.html"
@@ -656,7 +667,7 @@ onBeforeUnmount(() => {
 
   <div
     v-if="props.open && openerDialogOpen"
-    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--ty-scrim)] p-4"
     @click.self="openerDialogOpen = false"
   >
     <div
@@ -665,7 +676,7 @@ onBeforeUnmount(() => {
       aria-modal="true"
       :aria-labelledby="openerTitleId"
       tabindex="-1"
-      class="ty-card flex w-full max-w-md flex-col gap-3 rounded-xl p-4 sm:p-5"
+      class="ty-card flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-y-auto rounded-xl p-4 shadow-[var(--ty-overlay-shadow)] sm:p-5"
     >
       <div class="flex items-center justify-between gap-3">
         <h3 :id="openerTitleId" class="ty-section-title text-base">
@@ -686,14 +697,15 @@ onBeforeUnmount(() => {
 
       <div
         v-else-if="openersError"
-        class="rounded-lg bg-red-950/40 p-3 text-sm text-red-400"
+        role="alert"
+        class="rounded-lg bg-[var(--ty-field)] p-3 text-sm text-[var(--ty-danger)]"
       >
         {{ openersError }}
       </div>
 
       <div
         v-else-if="openers.length === 0"
-        class="rounded-lg bg-black/60 p-3 text-sm opacity-70"
+        class="rounded-lg bg-[var(--ty-field)] p-3 text-sm text-[var(--ty-text-muted)]"
       >
         {{ t("settings.logViewer.noOpeners") }}
       </div>
@@ -723,6 +735,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+:deep(.log-search-highlight) {
+  border-radius: 2px;
+  background: var(--ty-warning);
+  color: var(--ty-canvas);
+}
 .log-opener-option {
   display: flex;
   width: 100%;
@@ -731,7 +748,7 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   border-radius: 0.95rem;
   border: 1px solid var(--ty-border);
-  background-color: color-mix(in srgb, var(--ty-surface) 88%, white 12%);
+  background-color: var(--ty-field);
   padding: 0.85rem 0.95rem;
   text-align: left;
   transition:
@@ -742,9 +759,7 @@ onBeforeUnmount(() => {
 }
 
 .log-opener-option:hover {
-  transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--ty-primary) 24%, var(--ty-border));
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
 
 .log-opener-option:disabled {
@@ -772,9 +787,9 @@ onBeforeUnmount(() => {
 }
 
 .log-truncated-notice {
-  background-color: color-mix(in srgb, var(--ty-accent) 10%, var(--ty-surface));
-  border: 1px solid color-mix(in srgb, var(--ty-accent) 34%, var(--ty-border));
-  color: var(--ty-accent-hover);
+  background-color: color-mix(in srgb, var(--ty-warning) 8%, var(--ty-surface));
+  border: 1px solid color-mix(in srgb, var(--ty-warning) 34%, var(--ty-border));
+  color: var(--ty-warning);
   font-weight: 600;
 }
 </style>
