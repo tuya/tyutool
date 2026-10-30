@@ -29,6 +29,7 @@
       <p class="lead">This page is the complete reference for the <strong>Settings</strong> page: every configurable option in one place, covering the update center, appearance &amp; language, diagnostics &amp; logs, serial logs, about, and how settings themselves persist.</p>
 
       <h2 id="update">1. Update center</h2>
+      <p>Update notifications stay visible while hovered or focused. Their update action opens the update dialog directly. Download and install failures appear in the dialog so you can retry; packages that require manual installation keep their manual-download entry.</p>
       <p>The update center is the most prominent entry at the top of the Settings page, centralizing version checks and background update cadence:</p>
       <ul>
         <li><strong>Installed build</strong>: shows the version and badge of the currently installed build, so you can tell at a glance which version you're on.</li>
@@ -100,6 +101,7 @@
         <figcaption>Diagnostics &amp; logs: debug-log toggle, log level, open log folder, view logs</figcaption>
       </figure>
       <h3>How log files are written</h3>
+      <p>Log filenames are keyboard-accessible buttons. Refresh keeps the search query and reading position, and follows the tail only if you were already at the bottom. A refresh failure leaves loaded content visible with an error. Copy success and failure are shown beside the controls.</p>
       <p>On the desktop app, logs are written to the <strong>log directory</strong> by <code>tauri-plugin-log</code>, behaving the same as the CLI (see <a href="cli.html">CLI</a>):</p>
       <ul>
         <li><strong>Per-session naming</strong>: each launch writes its own file named <code>tyutool-&lt;timestamp&gt;.log</code>.</li>
