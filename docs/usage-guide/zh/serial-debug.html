@@ -98,7 +98,8 @@
       <ul>
         <li><strong>ASCII 或 Hex 模式</strong>：ASCII 模式按文本发送；Hex 模式按十六进制字节发送（用于发送二进制指令）。</li>
         <li><strong>可选 <code>\r\n</code></strong>：发送时是否在末尾追加回车换行，按目标设备的协议勾选。</li>
-        <li><strong>回车发送</strong>：按 <kbd>Enter</kbd> 即发送当前输入框内容。</li>
+        <li><strong>回车发送</strong>：按 <kbd>Enter</kbd> 即发送当前输入框内容；输入法选字确认时的回车不会触发发送。</li>
+        <li><strong>保留输入</strong>：只有发送成功后才清空输入。Hex 无有效字节或发送失败时，会保留草稿并在输入框旁显示错误；发送期间新编辑的内容也会保留。</li>
         <li><strong>发送历史</strong>：最多保留 <strong>20 条</strong>历史；用 <kbd>↑</kbd> / <kbd>↓</kbd> 在历史条目之间快速翻选，无需重复输入。</li>
       </ul>
       <figure class="shot">

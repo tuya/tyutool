@@ -1,0 +1,740 @@
+[
+  {
+    "run": "audit",
+    "id": "send-draft-history",
+    "up": "OLD",
+    "restoredDraft": "",
+    "expected": "UNSENT"
+  },
+  {
+    "run": "audit",
+    "id": "send-arrowdown-without-history",
+    "actual": "",
+    "expected": "NEW"
+  },
+  {
+    "run": "audit",
+    "id": "send-history-escape",
+    "stillOpen": true,
+    "focused": "<button data-v-9c33fb67=\"\" type=\"button\" class=\"btn-icon\" aria-label=\"Send history\"><svg data-v-9c33fb67=\"\" class=\"svg-inline--fa fa-clock-rotate-left\" data-prefix=\"fas\" data-icon=\"clock-rotate-left\" role=\"img\" viewBox=\"0 0 576 512\" aria-hidden=\"true"
+  },
+  {
+    "run": "audit",
+    "id": "filter-keyboard",
+    "tabIndex": -1,
+    "role": null,
+    "innerButtonNames": [
+      " × "
+    ]
+  },
+  {
+    "run": "audit",
+    "id": "filter-popover-escape",
+    "stillOpen": true
+  },
+  {
+    "run": "audit",
+    "id": "filter-ime-enter",
+    "keywords": [
+      "ERROR",
+      "new-filter"
+    ],
+    "popoverOpen": false
+  },
+  {
+    "run": "audit",
+    "id": "hex-popup",
+    "initiallyFocusedInside": false,
+    "escapeLeavesOpen": true,
+    "dialogRoleCount": 0,
+    "editedContentAfterModeChange": "ABC"
+  },
+  {
+    "run": "audit",
+    "id": "reboot-dialog",
+    "focusedInside": false,
+    "escapeLeavesOpen": true
+  },
+  {
+    "run": "audit",
+    "id": "custom-baud",
+    "displayed": "0",
+    "effectiveBaud": 460800,
+    "openEnabled": true,
+    "label": null
+  },
+  {
+    "run": "audit",
+    "id": "settings-select-names",
+    "controls": [
+      {
+        "id": "settings-auto-update-interval",
+        "text": "Every 6 hours",
+        "labels": [
+          "Automatic update checks"
+        ],
+        "ariaLabel": null
+      },
+      {
+        "id": "settings-locale",
+        "text": "English",
+        "labels": [
+          "Language"
+        ],
+        "ariaLabel": null
+      },
+      {
+        "id": "",
+        "text": "Debug",
+        "labels": [],
+        "ariaLabel": null
+      },
+      {
+        "id": "settings-serial-log-window",
+        "text": "5000 lines",
+        "labels": [],
+        "ariaLabel": null
+      },
+      {
+        "id": "settings-serial-archive-limit",
+        "text": "256 MiB",
+        "labels": [],
+        "ariaLabel": null
+      }
+    ]
+  },
+  {
+    "run": "audit",
+    "id": "select-bottom-clipping",
+    "rect": {
+      "x": 748.9199829101562,
+      "y": 641.6749877929688,
+      "width": 188.15997314453125,
+      "height": 164.1500244140625
+    },
+    "viewport": 680,
+    "lastOption": {
+      "x": 753.8200073242188,
+      "y": 770.0549926757812,
+      "width": 178.3599853515625,
+      "height": 30.8699951171875
+    }
+  },
+  {
+    "run": "audit",
+    "id": "theme-radio-keyboard",
+    "checkedNames": [
+      "Dark"
+    ]
+  },
+  {
+    "run": "audit",
+    "id": "select-keys",
+    "initial": "ty-select-v-1-6",
+    "afterEnd": "ty-select-v-1-6",
+    "afterHome": "ty-select-v-1-6",
+    "options": 9
+  },
+  {
+    "run": "audit",
+    "id": "batch-retry",
+    "enabled": true,
+    "slotAfterClick": {
+      "status": "failed",
+      "error": "Synthetic failure"
+    },
+    "startReason": "batchFlashAuth.toolbar.selectFirmwareFirst"
+  },
+  {
+    "run": "audit",
+    "id": "batch-port-length",
+    "port": {
+      "client": 80,
+      "scroll": 130,
+      "rect": {
+        "x": 180,
+        "y": 582.5,
+        "width": 80,
+        "height": 48,
+        "top": 582.5,
+        "right": 260,
+        "bottom": 630.5,
+        "left": 180
+      },
+      "text": "/dev/cu.usbserial-VERY-LONG-IDENTIFIER"
+    },
+    "rows": [
+      {
+        "height": 40,
+        "scrollHeight": 44,
+        "text": "/dev/cu.usbserial-VERY-LONG-IDENTIFIER IdleRead"
+      },
+      {
+        "height": 40,
+        "scrollHeight": 47,
+        "text": "COM31 Authorization state uncertaintimeoutThe auth command may or may not have been sent; the write is unverified. KV is overwritable, OTP is permanent. Physically isolate this device for manual verification.Read"
+      }
+    ]
+  },
+  {
+    "run": "audit",
+    "id": "batch-context-menu",
+    "stillVisible": false
+  },
+  {
+    "run": "audit",
+    "id": "flash-range",
+    "startInvalid": null,
+    "startDescription": null,
+    "endInvalid": "true",
+    "errorCount": 1,
+    "labels": 2
+  },
+  {
+    "run": "audit",
+    "id": "flash-range",
+    "error": "locator.click: Timeout 5000ms exceeded.",
+    "note": "Failed early probe; see corrected later scenario."
+  },
+  {
+    "run": "audit",
+    "id": "offline-empty",
+    "text": "PORT\n\nDisconnected\nPort\nNo ports available\nBaud\n460800\nSerial Settings\nReboot device\nControl port: Not selected\nChange\nOpen",
+    "log": "Waiting for data…"
+  },
+  {
+    "run": "audit",
+    "id": "toast-timer",
+    "stillVisibleWhenFocused": true,
+    "active": "BUTTON"
+  },
+  {
+    "run": "followup",
+    "id": "batch-menu-corrected",
+    "stillVisible": true,
+    "rect": {
+      "x": 987,
+      "y": 666,
+      "width": 158,
+      "height": 32
+    },
+    "viewport": {
+      "width": 1024,
+      "height": 680
+    }
+  },
+  {
+    "run": "followup",
+    "id": "port-filter-ime",
+    "ports": [
+      "COM_NEW"
+    ]
+  },
+  {
+    "run": "followup",
+    "id": "port-filter-long",
+    "rect": {
+      "x": 288,
+      "y": -293,
+      "width": 448,
+      "height": 1266
+    },
+    "viewport": 680
+  },
+  {
+    "run": "followup",
+    "id": "flash-delete-focus",
+    "active": {
+      "tag": "BODY",
+      "id": ""
+    }
+  },
+  {
+    "run": "followup",
+    "id": "flash-tab-keyboard",
+    "selected": "Flash",
+    "tabs": [
+      {
+        "text": "Flash",
+        "tabIndex": 0,
+        "controls": null
+      },
+      {
+        "text": "Erase",
+        "tabIndex": 0,
+        "controls": null
+      },
+      {
+        "text": "Read",
+        "tabIndex": 0,
+        "controls": null
+      },
+      {
+        "text": "Authorize",
+        "tabIndex": 0,
+        "controls": null
+      }
+    ]
+  },
+  {
+    "run": "followup",
+    "id": "flash-log-cap-scroll",
+    "before": {
+      "top": 10657,
+      "height": 11070,
+      "client": 413
+    },
+    "after": {
+      "top": 10657,
+      "height": 12805,
+      "client": 413
+    },
+    "lineCount": 500
+  },
+  {
+    "run": "followup",
+    "id": "excel-stale-during-load",
+    "state": {
+      "path": "B.xlsx",
+      "stats": {
+        "total": 100,
+        "used": 0,
+        "inProgress": 0,
+        "remaining": 100
+      },
+      "reason": null
+    },
+    "startEnabled": true
+  },
+  {
+    "run": "followup",
+    "id": "excel-response-race",
+    "state": {
+      "path": "C.xlsx",
+      "stats": {
+        "total": 99,
+        "used": 0,
+        "inProgress": 0,
+        "remaining": 99
+      },
+      "reason": null
+    }
+  },
+  {
+    "run": "followup",
+    "id": "log-file-keyboard",
+    "rows": [
+      {
+        "tabIndex": -1,
+        "role": null,
+        "buttons": 0
+      },
+      {
+        "tabIndex": -1,
+        "role": null,
+        "buttons": 0
+      }
+    ]
+  },
+  {
+    "run": "followup",
+    "id": "log-file-response-race",
+    "text": "APPLICATION LOGS\nClose\nApp Logs\n/\ntyutool-B\nINFO CONTENT FROM A\nRefresh\nCopy\nOpen With...\nExport Logs & Report Issue"
+  },
+  {
+    "run": "followup",
+    "id": "log-refresh-reset",
+    "scroll": {
+      "top": 2648,
+      "height": 3008,
+      "client": 360
+    },
+    "searchLabel": null,
+    "searchLabels": []
+  },
+  {
+    "run": "followup",
+    "id": "log-search-names-colors",
+    "arrows": [
+      {
+        "text": "↑",
+        "label": null
+      },
+      {
+        "text": "↓",
+        "label": null
+      }
+    ],
+    "colors": [
+      {
+        "text": "DEBUG low contrast",
+        "color": "oklch(0.551 0.027 264.364)",
+        "background": "oklab(0 0 0 / 0.8)",
+        "parentBackground": "rgb(17, 24, 39)"
+      },
+      {
+        "text": "TRACE low contrast",
+        "color": "oklch(0.446 0.03 256.802)",
+        "background": "oklab(0 0 0 / 0.8)",
+        "parentBackground": "rgb(17, 24, 39)"
+      }
+    ]
+  },
+  {
+    "run": "followup",
+    "id": "log-copy-failed",
+    "text": "APPLICATION LOGS\nClose\nApp Logs\n/\ntyutool-B\n1 of 2\n↑\n↓\nDEBUG low contrast\nTRACE low contrast\nRefresh\nCopy\nOpen With...\nExport Logs & Report Issue"
+  },
+  {
+    "run": "followup",
+    "id": "update-reopen-race",
+    "error": "locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Check for updates', exact: true })\u001b[22m\n"
+  },
+  {
+    "run": "followup",
+    "id": "filter-transport-error",
+    "error": "page.evaluate: TypeError: m.wsTransport.disconnect is not a function\n    at eval (eval at evaluate (:370:30), <anonymous>:1:80)\n    at async <anonymous>:396:30"
+  },
+  {
+    "run": "followup",
+    "id": "toast-focus-timing",
+    "visible": true,
+    "active": "BUTTON"
+  },
+  {
+    "run": "followup",
+    "id": "color-hex-light",
+    "active": [
+      {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(37, 99, 235)",
+        "fontSize": "12.8px"
+      },
+      {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(37, 99, 235)",
+        "fontSize": "12px"
+      },
+      {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(37, 99, 235)",
+        "fontSize": "12px"
+      }
+    ]
+  },
+  {
+    "run": "followup",
+    "id": "color-hex-dark",
+    "active": [
+      {
+        "color": "rgb(15, 23, 42)",
+        "background": "rgb(59, 130, 246)",
+        "fontSize": "12.8px"
+      },
+      {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(59, 130, 246)",
+        "fontSize": "12px"
+      },
+      {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(59, 130, 246)",
+        "fontSize": "12px"
+      }
+    ]
+  },
+  {
+    "run": "followup",
+    "id": "layout-light-zh-flash",
+    "document": {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "height": 800
+    },
+    "main": {
+      "width": 1121,
+      "scrollWidth": 1121
+    }
+  },
+  {
+    "run": "followup",
+    "id": "layout-light-zh-serial-debug",
+    "document": {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "height": 800
+    },
+    "main": {
+      "width": 1121,
+      "scrollWidth": 1121
+    }
+  },
+  {
+    "run": "followup",
+    "id": "layout-light-zh-settings",
+    "document": {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "height": 800
+    },
+    "main": {
+      "width": 1121,
+      "scrollWidth": 1121
+    }
+  },
+  {
+    "run": "followup",
+    "id": "layout-light-zh-toolbox",
+    "document": {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "height": 800
+    },
+    "main": {
+      "width": 1121,
+      "scrollWidth": 1121
+    }
+  },
+  {
+    "run": "followup",
+    "id": "layout-light-zh-batch-flash-auth",
+    "document": {
+      "width": 1280,
+      "scrollWidth": 1280,
+      "height": 800
+    },
+    "main": {
+      "width": 1121,
+      "scrollWidth": 1121
+    }
+  },
+  {
+    "run": "last",
+    "id": "update-primary-colors",
+    "buttons": [
+      {
+        "text": "Update",
+        "color": "rgb(255, 255, 255)",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "text": "Update from This Source",
+        "color": "rgb(255, 255, 255)",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "text": "Update from This Source",
+        "color": "rgb(255, 255, 255)",
+        "background": "rgba(0, 0, 0, 0)"
+      }
+    ]
+  },
+  {
+    "run": "last",
+    "id": "update-download-failure",
+    "text": "Check for Updates\n\nCHECK FOR UPDATES\n\nNew version available\n\nVersion v9.9.9 is ready to install. Review the release notes and start the update when you're ready.\n\nLATEST VERSION\nv9.9.9\nCurrent version: v3.2.10\nGitHub Releases\nUpdate\nWhat's new in v9.9.9\n\nGitHub Releases\n\nAudit note\n\nCheck details\n\nReview status, timing, and errors for each release source.\n\nGitHub Releases\nUpdate found\n\nUpdate to v9.9.9 available (0s)\n\nUpdate from This Source\nTuya OSS\nUpdate found\n\nUpdate to v9.9.9 available (0.2s)\n\n0.2s\n\nUpdate from This Source"
+  },
+  {
+    "run": "last",
+    "id": "update-race-verified",
+    "before": "Check for Updates\n\nCHECK FOR UPDATES\n\nNew version available\n\nVersion v9.9.9 is ready to install. Review the release notes and start the update when you're ready.\n\nLATEST VERSION\nv9.9.9\nCurrent version: v3.2.10\nGitHub Releases\nUpdate\nWhat's new in v9.9.9\n\nGitHub Releases\n\nAudit note\n\nCheck details\n\nReview status, timing, and errors for each release source.\n\nGitHub Releases\nUpdate found\n\nUpdate to v9.9.9 available (0s)\n\nUpdate from This Source\nTuya OSS\nUpdate found\n\nUpdate to v9.9.9 available (0.2s)\n\n0.2s\n\nUpdate from This Source",
+    "after": "Check for Updates\n\nCHECK FOR UPDATES\n\nYou're already up to date\n\nThe installed version v3.2.10 is already the latest available release.\n\nCURRENT VERSION\nv3.2.10\nCurrent version: v3.2.10\nGitHub Releases\nCheck details\n\nReview status, timing, and errors for each release source.\n\nGitHub Releases\nLatest\n\nUp to date (0.8s)\n\n0.8s\n\nTuya OSS\nLatest\n\nUp to date (0.9s)\n\n0.9s"
+  },
+  {
+    "run": "last",
+    "id": "runtime-error",
+    "path": "/serial-debug",
+    "message": "Synthetic backend unavailable"
+  },
+  {
+    "run": "last",
+    "id": "filter-failure-verified",
+    "popup": ".*\nScans the whole session\nAdd filter tab",
+    "errorShown": 0,
+    "buttonEnabled": true
+  },
+  {
+    "run": "last",
+    "id": "filter-close-pending",
+    "settled": "pending"
+  },
+  {
+    "run": "last",
+    "id": "toast-real-time",
+    "visible": false,
+    "timers": [
+      {
+        "at": 1793364762460,
+        "delay": 6000
+      }
+    ],
+    "state": false,
+    "active": "BODY"
+  },
+  {
+    "run": "last",
+    "id": "custom-baud-restore",
+    "display": "460800",
+    "effective": 123456,
+    "customInputShown": 0
+  },
+  {
+    "run": "last",
+    "id": "batch-small-targets",
+    "buttons": [
+      {
+        "label": null,
+        "title": "Read MAC and auth status",
+        "text": "Read",
+        "width": 47,
+        "height": 28
+      },
+      {
+        "label": "View full error",
+        "title": "View full error",
+        "text": "",
+        "width": 20,
+        "height": 20
+      },
+      {
+        "label": null,
+        "title": "Read MAC and auth status",
+        "text": "Read",
+        "width": 47,
+        "height": 28
+      },
+      {
+        "label": null,
+        "title": "",
+        "text": "Retry",
+        "width": 49,
+        "height": 28
+      }
+    ],
+    "uuid": []
+  },
+  {
+    "run": "last",
+    "id": "serial-context-edges",
+    "error": "locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.ctx-menu') to be visible\u001b[22m\n"
+  },
+  {
+    "run": "measure",
+    "id": "serial-menu-measured",
+    "stillOpen": true,
+    "rect": {
+      "x": 165,
+      "y": 137,
+      "width": 110,
+      "height": 104.5
+    }
+  },
+  {
+    "run": "measure",
+    "id": "filter-popover-edge",
+    "opener": {
+      "x": 955.90625,
+      "y": 179,
+      "width": 24,
+      "height": 24
+    },
+    "popup": {
+      "x": 955.90625,
+      "y": 209,
+      "width": 256,
+      "height": 83.875
+    }
+  },
+  {
+    "run": "measure",
+    "id": "update-dark-primary",
+    "buttons": [
+      {
+        "color": "rgb(255, 255, 255)",
+        "image": "linear-gradient(135deg, rgb(59, 130, 246) 0%, rgb(37, 99, 235) 100%)"
+      },
+      {
+        "color": "rgb(255, 255, 255)",
+        "image": "linear-gradient(135deg, rgb(59, 130, 246) 0%, rgb(37, 99, 235) 100%)"
+      },
+      {
+        "color": "rgb(255, 255, 255)",
+        "image": "linear-gradient(135deg, rgb(59, 130, 246) 0%, rgb(37, 99, 235) 100%)"
+      }
+    ]
+  },
+  {
+    "run": "measure",
+    "id": "log-contrast-ratios",
+    "ratios": [
+      {
+        "text": "DEBUG debug line",
+        "foreground": [
+          106,
+          114,
+          130,
+          255
+        ],
+        "background": [
+          3.3999999999999995,
+          4.799999999999999,
+          7.799999999999998,
+          255
+        ],
+        "contrast": 4.221178377228354
+      },
+      {
+        "text": "TRACE trace line",
+        "foreground": [
+          74,
+          85,
+          101,
+          255
+        ],
+        "background": [
+          3.3999999999999995,
+          4.799999999999999,
+          7.799999999999998,
+          255
+        ],
+        "contrast": 2.7011084232015614
+      }
+    ]
+  },
+  {
+    "run": "measure",
+    "id": "batch-uuid-measured",
+    "uuid": [
+      {
+        "font": "10px",
+        "opacity": "0.5",
+        "color": "rgb(157, 166, 184)",
+        "title": "SYNTHETIC_IDENTIFIER"
+      }
+    ],
+    "buttons": [
+      {
+        "name": "Excel write failed",
+        "width": 16,
+        "height": 16
+      },
+      {
+        "name": null,
+        "width": 47,
+        "height": 28
+      }
+    ]
+  },
+  {
+    "run": "vite-browser-console",
+    "id": "update-entry-missing-icon",
+    "message": "Could not find one or more icon(s): fas/angle-right",
+    "source": "src/features/settings/SettingsPage.vue:245; src/icons.ts"
+  },
+  {
+    "run": "vite-browser-console",
+    "id": "batch-row-class-inheritance",
+    "message": "Extraneous non-props attributes (class) could not be automatically inherited because component renders fragment or text or teleport root nodes.",
+    "source": "BatchFlashAuthSlotRow rendered inside BatchFlashAuthSlotList"
+  }
+]

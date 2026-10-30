@@ -46,7 +46,7 @@
       <p>把很多台设备<strong>一次性</strong>处理完：把多块设备插到电脑的多个串口上，点一下<strong>"全部开始"</strong>，tyutool 就会<strong>同时</strong>给它们烧录固件并写入上网所需的授权码。授权码不用手敲，从一份 Excel 表里自动一行行读取。</p>
       <figure class="shot">
         <img src="../assets/images/batch-overview.png" alt="批量烧录授权页总览：配置区、仪表盘、工具栏与端口列表" loading="lazy">
-        <figcaption>页面从上到下：<strong>完成横幅</strong>（批次结束时出现）、<strong>仪表盘</strong>（烧录累计 / 授权累计 / 本次批次）、<strong>"配置"折叠面板</strong>（共享配置 + 批量授权配置）、<strong>工具栏</strong>（自动分配 / 串口过滤 / 全部读取 / 全部开始），以及<strong>端口列表</strong>（一台设备一行）。</figcaption>
+        <figcaption>批量操作页包含<strong>完成横幅</strong>（批次结束时出现）、<strong>仪表盘</strong>、<strong>工具栏</strong>、<strong>“配置”折叠面板</strong>和<strong>端口列表</strong>（一台设备一行）。工具栏位于配置上方，滚动时仍可使用。</figcaption>
       </figure>
 
       <h2 id="prepare">2. 开工前清单</h2>
@@ -118,6 +118,7 @@
         <li>⑤ <strong>固件文件</strong>：本地文件 / 默认授权固件，二选一。</li>
         <li>⑥ 本地文件：<strong>选择固件位置</strong>；默认授权固件：<strong>选择版本</strong>（建议使用最新版），下载就绪后显示"固件已就绪"。</li>
       </ul>
+      <p>工具栏会在<strong>全部开始</strong>旁显示本次模式和缺少的条件。开启烧录时，必须选择本地固件或等待默认固件下载完成；缺少文件会禁用开始按钮，不会自动改成仅授权。若只需授权，请明确关闭<strong>烧录固件</strong>。</p>
       <figure class="shot">
         <img src="../assets/images/batch-config.png" alt="配置区特写：芯片、烧录/授权波特率、烧录固件开关与固件来源" loading="lazy">
         <figcaption>配置区（共享配置）</figcaption>
