@@ -154,4 +154,24 @@ test.describe("UI-03 serial settings modal focus management", () => {
       })
       .toBe(true);
   });
+  test("Escape closes the select popup before the settings modal", async ({
+    page,
+  }) => {
+    const { dialog, opener } = await openSettings(page);
+    const selectTrigger = dialog.locator(".ty-select-trigger").first();
+    await selectTrigger.focus();
+    await page.keyboard.press("ArrowDown");
+    const listbox = page.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(listbox).toBeHidden();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(() => opener.evaluate((el) => el === document.activeElement), {
+        timeout: 2500,
+      })
+      .toBe(true);
+  });
 });
