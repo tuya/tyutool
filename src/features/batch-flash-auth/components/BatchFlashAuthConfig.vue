@@ -85,19 +85,20 @@ function toggleFlashFirmware() {
 
 <template>
   <div
-    class="rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-4 py-3"
+    class="rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-2.5"
   >
-    <h3 class="mb-3 text-sm font-semibold text-[var(--ty-text)]">
+    <h3 class="mb-2 text-sm font-semibold text-[var(--ty-text)]">
       {{ t("batchFlashAuth.config.sharedConfig") }}
     </h3>
-    <div class="space-y-3">
-      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="space-y-2">
+      <div class="grid gap-2 sm:grid-cols-4">
         <!-- Chip selector -->
         <div class="flex min-w-0 flex-col gap-1">
-          <label class="text-xs text-[var(--ty-text-muted)]">{{
+          <label for="batch-chip" class="text-xs text-[var(--ty-text-muted)]">{{
             t("batchFlashAuth.config.chip")
           }}</label>
           <TySelect
+            id="batch-chip"
             v-model="store.chipId"
             :options="chipOptions"
             :disabled="store.isBusy"
@@ -106,10 +107,13 @@ function toggleFlashFirmware() {
 
         <!-- Flash baud rate -->
         <div class="flex min-w-0 flex-col gap-1">
-          <label class="text-xs text-[var(--ty-text-muted)]">{{
-            t("batchFlashAuth.config.flashBaud")
-          }}</label>
+          <label
+            for="batch-flash-baud"
+            class="text-xs text-[var(--ty-text-muted)]"
+            >{{ t("batchFlashAuth.config.flashBaud") }}</label
+          >
           <TySelect
+            id="batch-flash-baud"
             v-model="baudRateStr"
             :options="baudOptions"
             :disabled="store.isBusy"
@@ -118,10 +122,13 @@ function toggleFlashFirmware() {
 
         <!-- Auth baud rate -->
         <div class="flex min-w-0 flex-col gap-1">
-          <label class="text-xs text-[var(--ty-text-muted)]">{{
-            t("batchFlashAuth.config.authBaud")
-          }}</label>
+          <label
+            for="batch-auth-baud"
+            class="text-xs text-[var(--ty-text-muted)]"
+            >{{ t("batchFlashAuth.config.authBaud") }}</label
+          >
           <TySelect
+            id="batch-auth-baud"
             v-model="authBaudRateStr"
             :options="baudOptions"
             :disabled="store.isBusy"
@@ -153,7 +160,7 @@ function toggleFlashFirmware() {
       <!-- Firmware — only for flash-capable chips (not "other") -->
       <div
         v-if="store.canFlash && store.flashFirmware"
-        class="grid gap-3 border-t border-[var(--ty-border)] pt-3 lg:grid-cols-[12rem_minmax(0,1fr)]"
+        class="grid gap-2 border-t border-[var(--ty-border)] pt-2 sm:grid-cols-[12rem_minmax(0,1fr)]"
       >
         <!-- Source toggle -->
         <div class="flex min-w-0 flex-col gap-1">
@@ -189,11 +196,14 @@ function toggleFlashFirmware() {
           v-if="store.firmwareSource === 'local'"
           class="flex min-w-0 flex-col gap-1"
         >
-          <span class="text-xs text-[var(--ty-text-muted)]">{{
-            t("batchFlashAuth.config.sourceLocal")
-          }}</span>
+          <label
+            for="batch-firmware-path"
+            class="text-xs text-[var(--ty-text-muted)]"
+            >{{ t("batchFlashAuth.config.sourceLocal") }}</label
+          >
           <div class="flex min-w-0 gap-2">
             <input
+              id="batch-firmware-path"
               type="text"
               :value="store.firmwarePath"
               readonly
@@ -218,10 +228,13 @@ function toggleFlashFirmware() {
 
         <!-- Default firmware: version select + status -->
         <div v-else class="flex flex-col gap-1">
-          <span class="text-xs text-[var(--ty-text-muted)]">{{
-            t("batchFlashAuth.config.sourceDefault")
-          }}</span>
+          <label
+            for="batch-firmware-version"
+            class="text-xs text-[var(--ty-text-muted)]"
+            >{{ t("batchFlashAuth.config.sourceDefault") }}</label
+          >
           <TySelect
+            id="batch-firmware-version"
             v-model="selectedVersion"
             :options="versionOptions"
             :placeholder="t('batchFlashAuth.config.selectVersion')"

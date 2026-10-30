@@ -42,10 +42,10 @@ async function browseExcel() {
 
 <template>
   <div
-    class="rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-4 py-3"
+    class="rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-2.5"
     style="border-left: 3px solid var(--ty-accent)"
   >
-    <div class="mb-3 flex items-center justify-between gap-3">
+    <div class="mb-2 flex items-center justify-between gap-3">
       <h3 class="text-sm font-semibold text-[var(--ty-text)]">
         {{ t("batchFlashAuth.config.authTitle") }}
       </h3>
@@ -77,14 +77,17 @@ async function browseExcel() {
     >
       {{ t("batchFlashAuth.config.authorizeDisabledHint") }}
     </p>
-    <div v-else class="flex flex-col gap-3">
+    <div v-else class="grid gap-2 sm:grid-cols-2">
       <!-- Excel file -->
       <div class="flex flex-col gap-1">
-        <label class="text-xs text-[var(--ty-text-muted)]">{{
-          t("batchFlashAuth.config.excelFile")
-        }}</label>
+        <label
+          for="batch-auth-excel-path"
+          class="text-xs text-[var(--ty-text-muted)]"
+          >{{ t("batchFlashAuth.config.excelFile") }}</label
+        >
         <div class="flex gap-2">
           <input
+            id="batch-auth-excel-path"
             type="text"
             :value="store.authConfig.excelPath"
             readonly
@@ -246,7 +249,7 @@ async function browseExcel() {
       </div>
 
       <!-- Conflict policy + Storage mode (T5AI): same row when space allows, wraps otherwise -->
-      <div class="flex flex-col gap-1.5">
+      <div class="flex flex-col gap-1.5 sm:col-span-2">
         <div
           class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--ty-text-muted)]"
         >
