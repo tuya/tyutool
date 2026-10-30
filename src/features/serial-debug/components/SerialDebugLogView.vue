@@ -1479,18 +1479,19 @@ async function saveLog(): Promise<void> {
 .prefix {
   display: flex;
   align-items: baseline;
+  line-height: 1;
   gap: 0.25rem;
   flex-shrink: 0;
   white-space: nowrap;
 }
 .ts {
   color: var(--ty-text-muted);
-  font-size: 0.85em;
+  font-size: max(0.85em, 0.6875rem);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
 .dir-badge {
-  font-size: 0.7em;
+  font-size: max(0.7em, 0.625rem);
   font-weight: 700;
   font-family: system-ui, sans-serif;
   letter-spacing: 0.05em;

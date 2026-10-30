@@ -511,6 +511,7 @@ describe("useSerialDebugStore.send", () => {
     await s.send();
     expect(fake.sent.length).toBe(1);
     expect(Array.from(fake.sent[0])).toEqual([0x41, 0x54, 0x0d, 0x0a]);
+    expect(s.sendInput).toBe("");
   });
 
   it("parses Hex and ignores non-hex characters", async () => {
@@ -521,6 +522,128 @@ describe("useSerialDebugStore.send", () => {
     s.sendInput = "AA,BB;CC";
     await s.send();
     expect(Array.from(fake.sent[0])).toEqual([0xaa, 0xbb, 0xcc]);
+  });
+
+  it("blocks duplicate submissions until a successful send settles", async () => {
+    let finish!: () => void;
+    const write = vi.spyOn(fake, "send").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const s = useSerialDebugStore();
+    s.open = true;
+    s.sendInput = "AT";
+    const pending = s.send();
+    expect(s.sending).toBe(true);
+    expect(s.sendInput).toBe("AT");
+    await s.send();
+    expect(write).toHaveBeenCalledTimes(1);
+    finish();
+    await pending;
+    expect(s.sending).toBe(false);
+    expect(s.sendInput).toBe("");
+    expect(s.sendHistory).toEqual(["AT"]);
+  });
+
+  it.each(["NEXT", "AT"])(
+    "preserves an edited draft even if it is changed back to %s while sending",
+    async (draft) => {
+      let finish!: () => void;
+      vi.spyOn(fake, "send").mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const s = useSerialDebugStore();
+      s.open = true;
+      s.sendInput = "AT";
+      const pending = s.send();
+      s.sendInput = "edited";
+      s.sendInput = draft;
+      finish();
+      await pending;
+      expect(s.sendInput).toBe(draft);
+      expect(s.sendHistory).toEqual(["AT"]);
+    },
+  );
+
+  it("keeps odd Hex warning/drop behavior and guards the warning await", async () => {
+    let finishWarning!: () => void;
+    vi.spyOn(fake, "appendSysLine").mockImplementation(
+      () =>
+        new Promise<number | null>((resolve) => {
+          finishWarning = () => resolve(null);
+        }),
+    );
+    const s = useSerialDebugStore();
+    s.open = true;
+    s.sendMode = "hex";
+    s.sendInput = "AA,bb;C";
+    const pending = s.send();
+    expect(s.sending).toBe(true);
+    await s.send();
+    expect(s.lines).toHaveLength(1);
+    expect(s.lines[0].direction).toBe("sys");
+    expect(fake.sent).toHaveLength(0);
+    finishWarning();
+    await pending;
+    expect(fake.sent.map((bytes) => Array.from(bytes))).toEqual([[0xaa, 0xbb]]);
+    expect(s.sendInput).toBe("");
+    expect(s.sendError).toBeNull();
+    expect(s.sending).toBe(false);
+  });
+
+  it("does not mark an edited Hex draft invalid after its old warning settles", async () => {
+    let finishWarning!: () => void;
+    vi.spyOn(fake, "appendSysLine").mockImplementation(
+      () =>
+        new Promise<number | null>((resolve) => {
+          finishWarning = () => resolve(null);
+        }),
+    );
+    const s = useSerialDebugStore();
+    s.open = true;
+    s.sendMode = "hex";
+    s.sendInput = "F";
+    const pending = s.send();
+    s.sendInput = "FF";
+    finishWarning();
+    await pending;
+    expect(fake.sent).toHaveLength(0);
+    expect(s.sendInput).toBe("FF");
+    expect(s.sendError).toBeNull();
+    expect(s.sending).toBe(false);
+  });
+
+  it("releases the pending guard after rejection and preserves the current draft", async () => {
+    let fail!: (error: string) => void;
+    const write = vi.spyOn(fake, "send").mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const s = useSerialDebugStore();
+    s.open = true;
+    s.sendInput = "AT";
+    const pending = s.send();
+    s.sendInput = "NEXT";
+    await s.send();
+    expect(write).toHaveBeenCalledTimes(1);
+    fail("disconnected");
+    await pending;
+    expect(s.sendInput).toBe("NEXT");
+    expect(s.sendError).toBeNull();
+    expect(s.lines[s.lines.length - 1]?.text).toContain("disconnected");
+    expect(s.sendHistory).toEqual([]);
+    expect(s.sending).toBe(false);
+    await s.send();
+    expect(s.sendHistory).toEqual(["NEXT"]);
+    expect(s.sendInput).toBe("");
+    expect(s.sendError).toBeNull();
   });
 
   it("keeps send history, trimmed to MAX_SEND_HISTORY and deduped", async () => {
@@ -2129,6 +2252,8 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
     s.sendInput = "AT";
     await s.send();
     expect(cfg.state.sent.length).toBe(0);
+    expect(s.sendInput).toBe("AT");
+    expect(s.sending).toBe(false);
   });
 
   it("send is a no-op when the input is empty", async () => {
@@ -2146,6 +2271,11 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
     s.sendInput = "zz"; // all ignored → zero bytes
     await s.send();
     expect(cfg.state.sent.length).toBe(0);
+    expect(s.sendInput).toBe("zz");
+    expect(s.sendError).toEqual({ kind: "invalidHex" });
+    expect(s.sending).toBe(false);
+    s.sendInput = "AA";
+    expect(s.sendError).toBeNull();
   });
 
   it("send logs a sys error line when transport.send rejects", async () => {
@@ -2161,6 +2291,14 @@ describe("useSerialDebugStore open/close/send lifecycle", () => {
     expect(s.lines[s.lines.length - 1].direction).toBe("sys");
     // history is only updated on a successful send
     expect(s.sendHistory).toEqual([]);
+    expect(s.sendInput).toBe("AT");
+    expect(s.sendError).toEqual({ kind: "failed", message: "write failed" });
+    expect(s.sending).toBe(false);
+    cfg.state.sendError = null;
+    await s.send();
+    expect(cfg.state.sent).toHaveLength(1);
+    expect(s.sendInput).toBe("");
+    expect(s.sendError).toBeNull();
   });
 });
 

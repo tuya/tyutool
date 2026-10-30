@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
+import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import TySelect from "@/components/TySelect.vue";
@@ -9,7 +10,7 @@ const emit = defineEmits<{ close: [] }>();
 const s = useSerialDebugStore();
 const { t } = useI18n();
 const dialogRef = ref<HTMLElement | null>(null);
-let opener: HTMLElement | null = null;
+useModalFocus(dialogRef, () => true, close);
 
 const dataBitsOptions = computed(() => [
   { value: "five", label: "5" },
@@ -28,68 +29,19 @@ const stopBitsOptions = computed(() => [
   { value: "two", label: "2" },
 ]);
 
-function focusableElements(): HTMLElement[] {
-  return Array.from(
-    dialogRef.value?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"]):not([disabled])',
-    ) ?? [],
-  ).filter((element) => element.getClientRects().length > 0);
-}
-
-function onKeydown(e: KeyboardEvent): void {
-  if (e.defaultPrevented) return;
-  if (e.key === "Escape") {
-    e.preventDefault();
-    e.stopPropagation();
-    close();
-    return;
-  }
-  if (e.key !== "Tab") return;
-  const elements = focusableElements();
-  if (elements.length === 0) {
-    e.preventDefault();
-    return;
-  }
-  const first = elements[0];
-  const last = elements[elements.length - 1];
-  if (
-    e.shiftKey &&
-    (document.activeElement === first ||
-      !dialogRef.value?.contains(document.activeElement))
-  ) {
-    e.preventDefault();
-    last.focus();
-  } else if (
-    !e.shiftKey &&
-    (document.activeElement === last ||
-      !dialogRef.value?.contains(document.activeElement))
-  ) {
-    e.preventDefault();
-    first.focus();
-  }
-}
-
 function close(): void {
   emit("close");
-  void nextTick(() => opener?.focus());
 }
-onMounted(() => {
-  opener =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-  void nextTick(() => focusableElements()[0]?.focus());
-});
 </script>
 
 <template>
   <div
     ref="dialogRef"
+    tabindex="-1"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
     role="dialog"
     aria-modal="true"
     :aria-label="t('serialDebug.conn.settings')"
-    @keydown="onKeydown"
     @click.self="close"
   >
     <div class="ty-card w-[min(90vw,400px)] overflow-hidden">
@@ -116,6 +68,7 @@ onMounted(() => {
             }}</span>
             <TySelect
               v-model="s.dataBits"
+              :aria-label="t('serialDebug.conn.dataBits')"
               :options="dataBitsOptions"
               :disabled="s.open"
             />
@@ -126,6 +79,7 @@ onMounted(() => {
             }}</span>
             <TySelect
               v-model="s.parity"
+              :aria-label="t('serialDebug.conn.parity')"
               :options="parityOptions"
               :disabled="s.open"
             />
@@ -136,6 +90,7 @@ onMounted(() => {
             }}</span>
             <TySelect
               v-model="s.stopBits"
+              :aria-label="t('serialDebug.conn.stopBits')"
               :options="stopBitsOptions"
               :disabled="s.open"
             />
