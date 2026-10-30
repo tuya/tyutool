@@ -26,7 +26,7 @@ watch(
 
 <template>
   <aside
-    class="flex min-h-0 w-full flex-1 flex-col gap-2 lg:max-w-[22rem] lg:flex-none lg:shrink-0"
+    class="flex min-h-0 w-full flex-1 flex-col gap-3"
     :aria-label="t('flash.asideAria')"
   >
     <!-- 错误提示 -->
@@ -106,7 +106,7 @@ watch(
         </span>
       </div>
       <div
-        class="aside-progress-track h-3 overflow-hidden rounded-full"
+        class="aside-progress-track h-1.5 overflow-hidden rounded-full"
         role="progressbar"
         :aria-busy="ctx.phaseIndeterminate"
         :aria-valuenow="ctx.phaseIndeterminate ? undefined : ctx.phaseProgress"
@@ -123,19 +123,9 @@ watch(
           "
           :style="{
             width: `${ctx.phaseProgress}%`,
-            background:
-              ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
-                ? PHASE_STYLES[ctx.currentBackendPhase].gradient
-                : 'linear-gradient(90deg, var(--ty-primary), var(--ty-accent))',
-            boxShadow:
-              ctx.currentBackendPhase && PHASE_STYLES[ctx.currentBackendPhase]
-                ? `0 0 8px color-mix(in srgb, ${PHASE_STYLES[ctx.currentBackendPhase].glowColor} 60%, transparent),
-                 0 0 20px color-mix(in srgb, ${PHASE_STYLES[ctx.currentBackendPhase].glowColor} 22%, transparent)`
-                : 'none',
+            background: 'var(--ty-primary)',
           }"
-        >
-          <div class="aside-progress-shimmer" aria-hidden="true" />
-        </div>
+        ></div>
         <div
           v-else
           class="aside-progress-indeterminate h-full w-full rounded-full"
@@ -150,7 +140,7 @@ watch(
     >
       <!-- 日志头部工具栏 -->
       <div
-        class="aside-log-header flex min-w-0 shrink-0 flex-col gap-1 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+        class="aside-log-header flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-3"
       >
         <div
           class="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-[var(--ty-text)]"
