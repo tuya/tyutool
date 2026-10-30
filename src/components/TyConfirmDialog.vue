@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { watch, ref, onMounted, onUnmounted, computed } from "vue";
+import { watch, ref, computed } from "vue";
+import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import {
   confirmDialogState,
@@ -9,7 +10,19 @@ import {
 const { t } = useI18n({ useScope: "global" });
 
 const okBtnRef = ref<HTMLButtonElement | null>(null);
+const cancelBtnRef = ref<HTMLButtonElement | null>(null);
+const dialogRef = ref<HTMLElement | null>(null);
 const extraActionBusy = ref(false);
+
+useModalFocus(
+  dialogRef,
+  () => confirmDialogState.visible,
+  handleCancel,
+  () =>
+    confirmDialogState.showCancel && confirmDialogState.kind !== "info"
+      ? cancelBtnRef.value
+      : okBtnRef.value,
+);
 
 function handleConfirm(): void {
   resolveConfirmDialog(true);
@@ -31,35 +44,14 @@ async function handleExtraAction(): Promise<void> {
   }
 }
 
-function onKeydown(e: KeyboardEvent): void {
-  if (!confirmDialogState.visible) return;
-  if (e.key === "Escape") {
-    e.preventDefault();
-    handleCancel();
-  }
-}
-
-// Focus the confirm button when dialog opens for keyboard accessibility.
 watch(
   () => confirmDialogState.visible,
   (visible) => {
-    if (visible) {
-      requestAnimationFrame(() => {
-        okBtnRef.value?.focus();
-      });
-    } else {
+    if (!visible) {
       extraActionBusy.value = false;
     }
   },
 );
-
-onMounted(() => {
-  document.addEventListener("keydown", onKeydown);
-});
-
-onUnmounted(() => {
-  document.removeEventListener("keydown", onKeydown);
-});
 
 const kindIcon: Record<string, [string, string]> = {
   info: ["fas", "circle-info"],
@@ -102,7 +94,9 @@ const dialogKindBadge = computed(() => {
         @click.self="handleCancel"
       >
         <div
+          ref="dialogRef"
           class="ty-dialog-container"
+          tabindex="-1"
           role="alertdialog"
           aria-modal="true"
           :aria-labelledby="'ty-dialog-title'"
@@ -183,6 +177,7 @@ const dialogKindBadge = computed(() => {
           >
             <button
               v-if="confirmDialogState.showCancel"
+              ref="cancelBtnRef"
               type="button"
               class="ty-dialog-btn ty-dialog-btn-cancel"
               @click="handleCancel"

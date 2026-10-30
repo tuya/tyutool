@@ -272,6 +272,9 @@
     "btnAuth": "开始授权",
     "btnAuthing": "授权中…",
     "btnReadAuth": "读取授权",
+    "selectPortFirst": "请先选择串口。",
+    "operationInProgress": "操作正在进行，请等待完成或取消当前操作。",
+    "authorizationOnlyChip": "此芯片选项仅支持授权。",
     "asideAria": "状态与日志",
     "clearResult": "清除结果",
     "progress": "进度",
@@ -522,6 +525,9 @@
       "rebootTargetConfirm": "确认"
     },
     "send": {
+      "inputLabel": "发送内容",
+      "invalidHex": "请输入至少一个完整的十六进制字节。",
+      "failed": "发送失败：{msg}。已保留输入内容，请重试。",
       "placeholder": "输入内容…",
       "sendBtn": "发送",
       "hexParseIgnored": "已忽略 {n} 个不完整字节",
@@ -689,6 +695,11 @@
       "firmwareNetworkHint": "（可切换到『本地文件』使用离线固件）"
     },
     "toolbar": {
+      "currentMode": "本次操作：{mode}",
+      "modeFlashOnly": "仅烧录",
+      "modeAuthOnly": "仅授权",
+      "modeFlashThenAuth": "先烧录，再授权",
+      "excelValidationPending": "正在验证授权表，请稍候。",
       "autoAssign": "自动分配",
       "filter": "串口过滤",
       "start": "全部开始",
