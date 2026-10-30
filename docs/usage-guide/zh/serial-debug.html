@@ -83,7 +83,7 @@
         <li><strong>字号</strong>：10–18px 范围内调节，适应不同屏幕和阅读习惯。</li>
         <li><strong>时间戳开关</strong>：在每行前显示接收时间。</li>
         <li><strong>方向徽标开关</strong>：在每行前标注 <strong>TX</strong>（发送）/ <strong>RX</strong>（接收）/ <strong>SYS</strong>（系统消息）方向。</li>
-        <li><strong>清空（clear）</strong>：清掉当前可见缓冲区。</li>
+        <li><strong>清空（clear）</strong>：清掉当前会话日志和归档历史，行号从头开始；发送命令历史不受影响。</li>
         <li><strong>导出（export）</strong>：把当前日志导出为文件。</li>
       </ul>
       <figure class="shot">
@@ -91,9 +91,14 @@
         <figcaption>日志视图：方向徽标、时间戳（图中的弹窗为串口设置）</figcaption>
       </figure>
       <div class="callout warn">
-        <span class="title">可见窗口上限 3000 行</span>
-        为保证性能，<strong>可见窗口最多保留 3000 行</strong>；超出后旧行会被从视口移除。需要完整会话记录时请使用下方<a href="#auto">自动保存</a>，或在数据丢失前及时<strong>导出</strong>。
+        <span class="title">显示窗口与历史记录</span>
+        显示窗口默认保留 <strong>5000 行</strong>，可在设置中调整；旧行仍可从当前会话归档回看。归档默认上限 <strong>256 MiB</strong>，达到上限后保留已有记录并停止归档，实时接收继续。提高上限后可继续归档，但停写期间的数据无法补回。需要长期留存时，请使用<a href="#auto">自动保存</a>。
       </div>
+
+      <h3>历史回看与搜索</h3>
+      <p>点击<strong>历史回看</strong>进入当前会话的归档日志，也可向上滚动加载更早内容。回看区显示已加载的行号范围，并提供<strong>跳到开头</strong>和<strong>返回实时</strong>。回看期间新数据继续接收，新增行数会显示在状态栏，正在阅读的内容保持原位；读取失败时保留已加载内容，点击<strong>重试</strong>继续。</p>
+      <p>实时窗口中向上滚动也会暂停跟随，保留一份受显示窗口上限约束的阅读快照。离开页面再返回可继续阅读；缩小显示窗口上限会裁剪快照，点击返回底部则恢复最新内容。</p>
+      <p><kbd>Ctrl</kbd> + <kbd>F</kbd> 搜索当前已加载窗口；点击<strong>搜索整个会话</strong>可查找归档中的内容。筛选结果中的<strong>查看上下文</strong>打开结果附近的会话日志，再点击<strong>返回搜索结果</strong>回到原来的结果和位置。</p>
 
       <h2 id="send-bar">5. 发送栏</h2>
       <p>底部的发送栏用于向设备<strong>主动发送数据</strong>：</p>
@@ -102,7 +107,9 @@
         <li><strong>可选 <code>\r\n</code></strong>：发送时是否在末尾追加回车换行，按目标设备的协议勾选。</li>
         <li><strong>回车发送</strong>：按 <kbd>Enter</kbd> 即发送当前输入框内容；输入法选字确认时的回车不会触发发送。</li>
         <li><strong>保留输入</strong>：只有发送成功后才清空输入。Hex 无有效字节或发送失败时，会保留草稿并在输入框旁显示错误；发送期间新编辑的内容也会保留。</li>
-        <li><strong>发送历史</strong>：最多保留 <strong>20 条</strong>；用 <kbd>↑</kbd> / <kbd>↓</kbd> 浏览历史，回到最新位置时恢复未发送草稿。未进入历史时按 ↓ 不改动草稿。历史菜单内可用方向键移动焦点并展开长命令，按 <kbd>Escape</kbd> 关闭。</li>
+        <li><strong>发送历史</strong>：保留最近 <strong>100 条</strong>命令，另可收藏最多 <strong>50 条</strong>常用命令。历史面板支持按内容或名称搜索、完整预览、命名、收藏和单条删除，重启后仍保留。</li>
+        <li><strong>准确复用</strong>：选择历史项只预览，点击<strong>填入发送框</strong>才替换输入，并恢复当次发送的 ASCII/Hex 模式和换行设置；不会自动发送。旧版本记录显示“参数未知”，填入时保留当前设置。</li>
+        <li><strong>草稿恢复与键盘</strong>：用 <kbd>↑</kbd> / <kbd>↓</kbd> 快速浏览，回到最新位置时恢复草稿及发送设置，也可点击<strong>恢复原草稿</strong>。历史面板的搜索框中方向键选择、Enter 填入，Escape 关闭并恢复入口焦点。串口未打开时也能准备命令，发送按钮等待连接后可用。</li>
       </ul>
       <figure class="shot">
         <img src="../assets/images/serial-debug-send-bar.png" alt="发送栏：ASCII/Hex 切换、\r\n 选项、历史下拉" loading="lazy">
@@ -126,7 +133,7 @@
         <li><strong>“加载更早（load older）”</strong>：匹配结果较多时分页加载更早的命中行。</li>
         <li><strong>键盘与失败反馈</strong>：标签的激活和删除是独立按钮。输入法组合结束后按 Enter 可新增；请求期间显示等待状态，失败时保留关键词。Escape 关闭新增浮层并恢复按钮焦点。</li>
       </ul>
-      <p>过滤是在<strong>服务端、针对整个会话</strong>执行的，而不是只过滤当前可见窗口——因此即便旧数据已经从 3000 行视口里被移除，过滤结果仍能把它找回来。</p>
+      <p>过滤是在<strong>服务端、针对整个会话</strong>执行的，而不是只过滤当前可见窗口——因此即便旧数据已经从显示窗口里被移除，过滤结果仍能把它找回来。</p>
       <figure class="shot">
         <img src="../assets/images/serial-debug-filter-tabs.png" alt="过滤标签：关键词、6 色徽标、实时计数、&ldquo;全部&rdquo;标签" loading="lazy">
         <figcaption>过滤标签：关键词、6 色徽标、实时计数、“全部”标签</figcaption>
@@ -141,7 +148,7 @@
         <li>烧录结束后，串口调试会<strong>自动恢复</strong>之前的连接，继续接收日志，无需你手动重连。</li>
       </ul>
       <h3>自动保存（Auto-save）</h3>
-      <p>自动保存用于留一份<strong>完整的会话日志</strong>，避免超过 3000 行视口上限后丢数据：</p>
+      <p>自动保存用于<strong>持续保存接收的日志</strong>，方便在会话结束或归档达到上限后继续留存：</p>
       <ul>
         <li><strong>保存目录</strong>：选一个目录，串口调试会把整段会话流式写入其中。</li>
         <li><strong>时间戳文件名</strong>：可选在文件名里加上时间戳，便于区分不同会话。</li>
@@ -149,7 +156,7 @@
       </ul>
       <div class="callout note">
         <span class="title">自动保存 vs 手动导出</span>
-        手动导出（见<a href="#log-view">日志视图</a>）保存的是<strong>当前可见窗口</strong>内的内容；自动保存则是把<strong>整个会话</strong>持续落盘，是留存长时间日志的正确做法。
+        手动导出（见<a href="#log-view">日志视图</a>）保存<strong>当前会话已归档的日志或当前筛选结果</strong>，范围受归档上限约束；自动保存持续落盘，适合长期留存。归档回看面向当前会话，不提供跨重启的会话列表。
       </div>
 
       <nav class="pager">

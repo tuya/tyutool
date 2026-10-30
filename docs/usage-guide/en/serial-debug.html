@@ -83,7 +83,7 @@
         <li><strong>Font size</strong>: adjustable from 10–18px to suit your screen and eyes.</li>
         <li><strong>Timestamp toggle</strong>: prefixes each line with its receive time.</li>
         <li><strong>Direction badge toggle</strong>: prefixes each line with a <strong>TX</strong> (sent) / <strong>RX</strong> (received) / <strong>SYS</strong> (system) badge.</li>
-        <li><strong>Clear</strong>: wipes the currently visible buffer.</li>
+        <li><strong>Clear</strong>: clears the current session log and its archive; line numbers restart. Command history is kept.</li>
         <li><strong>Export</strong>: saves the current log to a file.</li>
       </ul>
       <figure class="shot">
@@ -91,9 +91,14 @@
         <figcaption>Log view: direction badges, timestamps (the modal shown is Serial Port Settings)</figcaption>
       </figure>
       <div class="callout warn">
-        <span class="title">Visible window caps at 3000 lines</span>
-        For performance, the <strong>visible window keeps at most 3000 lines</strong>; once exceeded, the oldest lines are dropped from the viewport. When you need the full session record, use <a href="#auto">Auto-save</a> below, or <strong>export</strong> in time before data is lost.
+        <span class="title">Display window and history</span>
+        The display window defaults to <strong>5000 lines</strong> and is adjustable in settings. Older lines remain available in the current session archive. The archive defaults to <strong>256 MiB</strong>; reaching the limit keeps existing records and stops archiving while live reception continues. Raising the limit can resume archiving, but it cannot recover the gap. Use <a href="#auto">Auto-save</a> for longer retention.
       </div>
+
+      <h3>History and search</h3>
+      <p>Click <strong>History</strong> to read the current session archive, or scroll up to load older lines. History shows the loaded line range and offers <strong>Jump to start</strong> and <strong>Back to live</strong>. New data continues arriving while your reading position stays fixed; the status bar shows new line counts. A failed read keeps loaded content; click <strong>Retry</strong> to continue.</p>
+      <p>Scrolling up in the live window also pauses following and retains a reading snapshot bounded by the display-window limit. It survives page navigation; reducing the window limit trims the snapshot. Returning to the bottom resumes the latest content.</p>
+      <p><kbd>Ctrl</kbd> + <kbd>F</kbd> searches the loaded window; <strong>Search whole session</strong> searches archived content. In filter results, <strong>View context</strong> opens surrounding session lines. <strong>Back to results</strong> restores the previous results and position.</p>
 
       <h2 id="send-bar">5. Send bar</h2>
       <p>The bottom send bar is for <strong>actively sending data</strong> to the device:</p>
@@ -102,7 +107,9 @@
         <li><strong>Optional <code>\r\n</code></strong>: choose whether to append a CR/LF on send, per the target device's protocol.</li>
         <li><strong>Enter to send</strong>: press <kbd>Enter</kbd> to send the current input. Enter used to confirm input-method composition does not send.</li>
         <li><strong>Input retention</strong>: input clears only after a successful send. Invalid Hex or a send failure keeps your draft and shows an inline error; edits made while sending are also preserved.</li>
-        <li><strong>Send history</strong>: keeps up to <strong>20 entries</strong>; <kbd>↑</kbd> / <kbd>↓</kbd> browse history and restore your unsent draft when you return to the newest position. Down outside history leaves the draft unchanged. In the history menu, arrow keys move focus and reveal long commands; <kbd>Escape</kbd> closes it.</li>
+        <li><strong>Send history</strong>: keeps the latest <strong>100 commands</strong> plus up to <strong>50 favorites</strong>. Search by content or name, preview the full command, name it, favorite it, or delete one entry. Commands persist across restarts.</li>
+        <li><strong>Accurate reuse</strong>: selecting an entry previews it. <strong>Fill send input</strong> restores its ASCII/Hex mode and line endings without sending. Older entries show “Settings unknown” and retain your current settings when filled.</li>
+        <li><strong>Draft recovery and keyboard</strong>: <kbd>↑</kbd> / <kbd>↓</kbd> browse recent commands and restore the draft and settings on returning to the newest position. <strong>Restore draft</strong> also recovers them. In the history search field, arrow keys select and Enter fills; Escape closes and restores trigger focus. Commands can be prepared before connecting; Send becomes available with an open port.</li>
       </ul>
       <figure class="shot">
         <img src="../assets/images/serial-debug-send-bar.png" alt="Send bar: ASCII/Hex toggle, \r\n option, history dropdown" loading="lazy">
@@ -126,7 +133,7 @@
         <li><strong>"Load older"</strong>: paginates in earlier matches when there are many.</li>
         <li><strong>Keyboard and failures</strong>: activate a filter with its button, or use its separate remove button. Enter adds a filter after composition ends; creation shows a pending state and preserves the keyword on failure. Escape closes the add panel and restores its trigger.</li>
       </ul>
-      <p>Filtering runs <strong>server-side over the whole session</strong>, not just over the current visible window — so even data that has aged out of the 3000-line viewport can still be recovered by a filter.</p>
+      <p>Filtering runs <strong>server-side over the whole session</strong>, not just over the current visible window — so even data that has aged out of the display window can still be recovered by a filter.</p>
       <figure class="shot">
         <img src="../assets/images/serial-debug-filter-tabs.png" alt="Filter tabs: keywords, 6-color badges, live counts, &quot;All&quot; tab" loading="lazy">
         <figcaption>Filter tabs: keywords, 6-color badges, live counts, "All" tab</figcaption>
@@ -141,7 +148,7 @@
         <li>After flashing finishes, Serial Debug <strong>auto-resumes</strong> the previous connection and keeps receiving the log — no manual reconnect needed.</li>
       </ul>
       <h3>Auto-save</h3>
-      <p>Auto-save keeps a <strong>complete session log</strong> on disk, so you don't lose data once it passes the 3000-line viewport cap:</p>
+      <p>Auto-save <strong>continuously saves received logs</strong> to disk, for retention after a session ends or the archive reaches its limit:</p>
       <ul>
         <li><strong>Save directory</strong>: pick a directory and Serial Debug streams the whole session into it.</li>
         <li><strong>Timestamped filename</strong>: optionally add a timestamp to the filename to tell sessions apart.</li>
@@ -149,7 +156,7 @@
       </ul>
       <div class="callout note">
         <span class="title">Auto-save vs manual export</span>
-        Manual export (see <a href="#log-view">Log view</a>) saves what's in the <strong>current visible window</strong>; auto-save streams the <strong>entire session</strong> to disk continuously, and is the right way to retain long logs.
+        Manual export (see <a href="#log-view">Log view</a>) saves <strong>archived lines from the current session or the active filter results</strong>, bounded by the archive limit. Auto-save writes continuously for longer retention. Archive browsing covers the current session; there is no session list across app restarts.
       </div>
 
       <nav class="pager">
