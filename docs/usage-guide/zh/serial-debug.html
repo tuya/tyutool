@@ -44,6 +44,8 @@
       <p>顶部连接栏用于建立和管理串口连接：</p>
       <ul>
         <li><strong>串口选择</strong>：下拉列出当前可用串口，每次打开会重新扫描。</li>
+        <li><strong>刷新反馈</strong>：扫描中、没有设备和扫描失败会分别提示。记住但已不可用的端口仍显示，不能打开；重新连接设备后可点刷新。</li>
+        <li><strong>自定义波特率</strong>：恢复的自定义值会直接显示。请输入 1–4294967295 的整数；无效输入会显示字段错误并阻止打开。所选速率还需适配器支持。</li>
         <li><strong>连接 / 断开</strong>：手动打开或关闭与所选串口的链路。</li>
         <li><strong>状态指示</strong>：显示当前端口是已连接 / 未连接 / 被其他页面占用。</li>
       </ul>
@@ -100,7 +102,7 @@
         <li><strong>可选 <code>\r\n</code></strong>：发送时是否在末尾追加回车换行，按目标设备的协议勾选。</li>
         <li><strong>回车发送</strong>：按 <kbd>Enter</kbd> 即发送当前输入框内容；输入法选字确认时的回车不会触发发送。</li>
         <li><strong>保留输入</strong>：只有发送成功后才清空输入。Hex 无有效字节或发送失败时，会保留草稿并在输入框旁显示错误；发送期间新编辑的内容也会保留。</li>
-        <li><strong>发送历史</strong>：最多保留 <strong>20 条</strong>历史；用 <kbd>↑</kbd> / <kbd>↓</kbd> 在历史条目之间快速翻选，无需重复输入。</li>
+        <li><strong>发送历史</strong>：最多保留 <strong>20 条</strong>；用 <kbd>↑</kbd> / <kbd>↓</kbd> 浏览历史，回到最新位置时恢复未发送草稿。未进入历史时按 ↓ 不改动草稿。历史菜单内可用方向键移动焦点并展开长命令，按 <kbd>Escape</kbd> 关闭。</li>
       </ul>
       <figure class="shot">
         <img src="../assets/images/serial-debug-send-bar.png" alt="发送栏：ASCII/Hex 切换、\r\n 选项、历史下拉" loading="lazy">
@@ -108,10 +110,10 @@
       </figure>
 
       <h2 id="hex-popup">6. Hex 弹窗</h2>
-      <p>在日志视图中<strong>选中一段 RX 数据</strong>后，可以打开一个 <strong>Hex 弹窗</strong>，把所选字节同时以<strong>十六进制和 ASCII</strong> 两种形式并排展示，方便逐字节核对一段二进制回复或协议帧。</p>
+      <p>选中日志显示文本后，从右键菜单选择<strong>文本转 Hex</strong>或<strong>以文本查看</strong>。弹窗是<strong>只读查看器</strong>，可切换 Hex / ASCII、每行字节数，复制当前结果，或按 <kbd>Escape</kbd> 返回日志。</p>
       <div class="callout tip">
-        <span class="title">什么时候用</span>
-        当设备返回的是结构化二进制（例如自定义协议帧、授权回复）而不是可读文本时，用 Hex 弹窗逐字节检查比在 ASCII 视图里看乱码要可靠得多。
+        <span class="title">选择与转换范围</span>
+        原生选择只覆盖当前已挂载的日志行。弹窗将<strong>选中的显示文本</strong>转换为 UTF-8，不会恢复原始串口字节。检查原始字节请使用日志的 <strong>Hex 视图</strong>；需要较大的会话记录时使用日志导出或自动保存。
       </div>
 
       <h2 id="filter-tabs">7. 过滤标签（Watch chips）</h2>
@@ -122,6 +124,7 @@
         <li><strong>实时计数</strong>：每个标签上显示当前会话内<strong>命中的条数</strong>，随日志增长实时更新。</li>
         <li><strong>按标签过滤</strong>：点选某个标签后，视图只显示<strong>匹配该关键词</strong>的行；<strong>“全部（All）”</strong>标签则恢复显示全部内容。</li>
         <li><strong>“加载更早（load older）”</strong>：匹配结果较多时分页加载更早的命中行。</li>
+        <li><strong>键盘与失败反馈</strong>：标签的激活和删除是独立按钮。输入法组合结束后按 Enter 可新增；请求期间显示等待状态，失败时保留关键词。Escape 关闭新增浮层并恢复按钮焦点。</li>
       </ul>
       <p>过滤是在<strong>服务端、针对整个会话</strong>执行的，而不是只过滤当前可见窗口——因此即便旧数据已经从 3000 行视口里被移除，过滤结果仍能把它找回来。</p>
       <figure class="shot">

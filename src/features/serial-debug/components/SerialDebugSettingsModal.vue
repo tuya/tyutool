@@ -98,20 +98,22 @@ function close(): void {
         </div>
 
         <div class="check-row">
-          <div class="check-row__copy">
+          <div class="check-row__copy flex-col items-start">
             <span class="text-[var(--ty-text)]">{{
               t("serialDebug.conn.autoRelease")
             }}</span>
-            <FontAwesomeIcon
-              :icon="['fas', 'circle-info']"
-              class="size-3.5 cursor-help text-[var(--ty-text-muted)]"
-              :title="t('serialDebug.conn.autoReleaseTip')"
-            />
+            <p
+              id="serial-setting-autoRelease-hint"
+              class="text-xs leading-relaxed text-[var(--ty-text-muted)]"
+            >
+              {{ t("serialDebug.conn.autoReleaseTip") }}
+            </p>
           </div>
           <TySwitch
             v-model="s.autoRelease"
             size="sm"
             :aria-label="t('serialDebug.conn.autoRelease')"
+            aria-describedby="serial-setting-autoRelease-hint"
           />
         </div>
 
@@ -127,20 +129,22 @@ function close(): void {
         </div>
 
         <div class="check-row">
-          <div class="check-row__copy">
+          <div class="check-row__copy flex-col items-start">
             <span class="text-[var(--ty-text)]">{{
               t("serialDebug.conn.ansiParse")
             }}</span>
-            <FontAwesomeIcon
-              :icon="['fas', 'circle-info']"
-              class="size-3.5 cursor-help text-[var(--ty-text-muted)]"
-              :title="t('serialDebug.conn.ansiParseTip')"
-            />
+            <p
+              id="serial-setting-ansiParse-hint"
+              class="text-xs leading-relaxed text-[var(--ty-text-muted)]"
+            >
+              {{ t("serialDebug.conn.ansiParseTip") }}
+            </p>
           </div>
           <TySwitch
             v-model="s.ansiEnabled"
             size="sm"
             :aria-label="t('serialDebug.conn.ansiParse')"
+            aria-describedby="serial-setting-ansiParse-hint"
           />
         </div>
       </div>
@@ -165,7 +169,8 @@ function close(): void {
 .check-row__copy {
   display: inline-flex;
   min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 </style>

@@ -114,6 +114,27 @@ function latest(): MockWebSocket {
   return MockWebSocket.instances[MockWebSocket.instances.length - 1];
 }
 
+describe("filter creation request lifecycle", () => {
+  it.each(["close", "error", "send"])(
+    "rejects and removes temporary listeners after %s failure",
+    async (kind) => {
+      const t = new WsTransport();
+      const p = t.serialDebugFilterAdd("ERROR", false, "#ef4444");
+      const rejection = expect(p).rejects.toThrow();
+      await flush();
+      const ws = latest();
+      if (kind === "send") ws.sendFailure = new Error("send failed");
+      ws.open();
+      await flush();
+      if (kind === "close") ws.fireClose();
+      if (kind === "error") ws.error();
+      await rejection;
+      expect(ws.listenerCount).toBe(0);
+      expect(ws.temporaryListenerCount).toBe(0);
+    },
+  );
+});
+
 /** Wait a macrotask so connect()'s onopen-resolved promise chain flushes. */
 function flush() {
   return new Promise((r) => setTimeout(r, 0));

@@ -1583,4 +1583,53 @@ describe("SerialDebugLogView auto-scroll", () => {
       "serialDebug.log.exportCancelled",
     );
   });
+  it("opens selection actions from the keyboard, reports copy failure and restores focus", async () => {
+    mountComponent();
+    await flush();
+    const root = host!.querySelector<HTMLElement>('[tabindex="0"]')!;
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      toString: () => "DISPLAY TEXT",
+    } as Selection);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("Denied")) },
+    });
+    root.focus();
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ContextMenu",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await flush();
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+    expect(menu).toBeTruthy();
+    expect(menu.contains(document.activeElement)).toBe(true);
+    menu.querySelector<HTMLButtonElement>("button")!.click();
+    await flush();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      "common.copyFailed",
+    );
+    expect(document.activeElement).toBe(root);
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "F10",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await flush();
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await flush();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(root);
+  });
 });

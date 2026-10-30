@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, onMounted, ref } from "vue";
+import {
+  computed,
+  onActivated,
+  onDeactivated,
+  onMounted,
+  onBeforeUnmount,
+  ref,
+  watch,
+} from "vue";
+import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { faCircleNotch } from "@fortawesome/free-solid-svg-icons";
 import { useSerialDebugStore } from "@/stores/serial-debug";
@@ -48,13 +57,55 @@ const serialPortOptions = computed(() => {
   }
   return allKnownPortRows.value.map((row) => ({
     value: row.path,
-    label: formatSerialPortLabel(row, t),
+    label: availablePortRows.value.some((p) => p.path === row.path)
+      ? formatSerialPortLabel(row, t)
+      : `${row.path} — ${t("serialDebug.conn.portUnavailable")}`,
+    disabled: !availablePortRows.value.some((p) => p.path === row.path),
+    optionTooltip:
+      tuyaDualSerialHoverTooltip(row.usbVid, row.usbPid, row.usbInterface, t) ??
+      undefined,
   }));
 });
-const useCustomBaud = ref(false);
-const customBaudInput = ref("");
+const useCustomBaud = ref(s.customBaudRate !== null);
+const customBaudInput = ref(
+  s.customBaudRate === null ? "" : String(s.customBaudRate),
+);
+const customBaudValid = computed(
+  () =>
+    /^\d+$/.test(customBaudInput.value) &&
+    Number(customBaudInput.value) > 0 &&
+    Number(customBaudInput.value) <= 0xffffffff,
+);
+const customBaudError = computed(() =>
+  useCustomBaud.value && !customBaudValid.value
+    ? t("serialDebug.conn.invalidCustomBaud")
+    : "",
+);
+watch(
+  () => s.customBaudRate,
+  (value) => {
+    if (value !== null) {
+      useCustomBaud.value = true;
+      customBaudInput.value = String(value);
+    }
+  },
+);
+const portsLoading = ref(false);
+const portsError = ref("");
+let portsGeneration = 0;
+const selectedPortAvailable = computed(() =>
+  availablePortRows.value.some((row) => row.path === s.port.trim()),
+);
 const showSettings = ref(false);
 const showRebootTargetDialog = ref(false);
+const rebootDialogRef = ref<HTMLElement | null>(null);
+useModalFocus(
+  rebootDialogRef,
+  () => showRebootTargetDialog.value,
+  () => {
+    showRebootTargetDialog.value = false;
+  },
+);
 const rebootDialogMode = ref<RebootDialogMode>("change");
 const draftRebootControlPort = ref("");
 const draftRebootChipId = ref<ChipId>(DEFAULT_CHIP_ID);
@@ -101,7 +152,7 @@ const selectedBaudValue = computed({
     if (v === "custom") {
       useCustomBaud.value = true;
       customBaudInput.value = customBaudInput.value || String(s.baudRate);
-      s.customBaudRate = parseInt(customBaudInput.value, 10) || s.baudRate;
+      onCustomBaudInput(customBaudInput.value);
     } else {
       useCustomBaud.value = false;
       s.customBaudRate = null;
@@ -112,39 +163,47 @@ const selectedBaudValue = computed({
 
 function onCustomBaudInput(v: string): void {
   customBaudInput.value = v;
-  const n = parseInt(v, 10);
-  s.customBaudRate = Number.isFinite(n) && n > 0 ? n : null;
+  s.customBaudRate = customBaudValid.value ? Number(v) : null;
 }
 
 const canOpen = computed(
-  () => !s.opening && !!s.port.trim() && (s.customBaudRate ?? s.baudRate) > 0,
+  () =>
+    !s.opening &&
+    !portsLoading.value &&
+    !portsError.value &&
+    selectedPortAvailable.value &&
+    !customBaudError.value &&
+    (s.customBaudRate ?? s.baudRate) > 0,
 );
 
 async function refreshPorts(): Promise<void> {
+  const generation = ++portsGeneration;
+  portsLoading.value = true;
+  portsError.value = "";
   try {
+    let rows: TauriSerialPortRow[];
     if (isTauriRuntime()) {
       const { invoke } = await import("@tauri-apps/api/core");
-      availablePortRows.value = await invoke<TauriSerialPortRow[]>(
-        "list_serial_ports_cmd",
-      );
-    } else {
-      availablePortRows.value = await wsTransport.listPorts();
-    }
-  } catch {
-    availablePortRows.value = [];
-  }
-  if (allKnownPortRows.value.length > 0) {
-    const exists = allKnownPortRows.value.some((row) => row.path === s.port);
-    if (!exists) {
-      s.port = allKnownPortRows.value[0].path;
-    }
+      rows = await invoke<TauriSerialPortRow[]>("list_serial_ports_cmd");
+    } else rows = await wsTransport.listPorts();
+    if (generation !== portsGeneration) return;
+    availablePortRows.value = rows;
+    if (!s.port.trim() && rows.length) s.port = rows[0].path;
+  } catch (error) {
+    if (generation === portsGeneration)
+      portsError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (generation === portsGeneration) portsLoading.value = false;
   }
 }
+onBeforeUnmount(() => {
+  portsGeneration++;
+});
 
 async function toggleOpen(): Promise<void> {
   if (s.open) {
     await s.closePort();
-  } else {
+  } else if (canOpen.value) {
     await s.openPort();
   }
 }
@@ -246,6 +305,8 @@ onActivated(() => {
 });
 
 onDeactivated(() => {
+  portsGeneration++;
+  portsLoading.value = false;
   showSettings.value = false;
   showRebootTargetDialog.value = false;
 });
@@ -291,6 +352,8 @@ onDeactivated(() => {
           id="sd-port"
           v-model="s.port"
           :options="serialPortOptions"
+          :aria-label="t('serialDebug.conn.port')"
+          aria-describedby="sd-port-feedback"
           :placeholder="
             allKnownPortRows.length === 0
               ? t('flash.noPortsPlaceholder')
@@ -312,6 +375,7 @@ onDeactivated(() => {
           id="sd-baud"
           :model-value="selectedBaudValue"
           :options="baudOptions"
+          :aria-label="t('serialDebug.conn.baud')"
           :disabled="s.open"
           @update:model-value="selectedBaudValue = $event"
           class="w-[8rem]"
@@ -320,6 +384,12 @@ onDeactivated(() => {
           v-if="useCustomBaud"
           type="number"
           min="1"
+          max="4294967295"
+          step="1"
+          id="sd-custom-baud"
+          :aria-label="t('serialDebug.conn.customBaud')"
+          :aria-invalid="!!customBaudError"
+          aria-describedby="sd-baud-error"
           class="conn-select w-[6.5rem] min-w-0"
           :value="customBaudInput"
           :disabled="s.open"
@@ -327,6 +397,38 @@ onDeactivated(() => {
             (e) => onCustomBaudInput((e.target as HTMLInputElement).value)
           "
         />
+      </div>
+      <p
+        v-if="customBaudError"
+        id="sd-baud-error"
+        role="alert"
+        class="w-full text-xs text-[var(--ty-danger)]"
+      >
+        {{ customBaudError }}
+      </p>
+      <div
+        id="sd-port-feedback"
+        class="w-full flex flex-wrap items-center gap-2 text-xs text-[var(--ty-text-muted)]"
+      >
+        <span v-if="portsLoading" role="status">{{ t("common.loading") }}</span>
+        <span v-else-if="portsError" role="alert">{{
+          t("serialDebug.conn.portsFailed", { msg: portsError })
+        }}</span>
+        <span v-else-if="s.port && !selectedPortAvailable">{{
+          t("serialDebug.conn.rememberedUnavailable", { port: s.port })
+        }}</span>
+        <span v-else-if="!availablePortRows.length">{{
+          t("serialDebug.conn.noDevicesHint")
+        }}</span>
+        <button
+          v-if="portsError || !selectedPortAvailable"
+          type="button"
+          class="underline"
+          :disabled="portsLoading"
+          @click="refreshPorts"
+        >
+          {{ t("common.refresh") }}
+        </button>
       </div>
     </template>
     <template #actions>
@@ -425,12 +527,16 @@ onDeactivated(() => {
     <div
       v-if="showRebootTargetDialog"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="t('serialDebug.conn.rebootTargetDialogTitle')"
       @click.self="showRebootTargetDialog = false"
     >
-      <div class="ty-card w-[min(90vw,420px)] overflow-hidden">
+      <div
+        ref="rebootDialogRef"
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('serialDebug.conn.rebootTargetDialogTitle')"
+        class="ty-card w-[min(90vw,420px)] max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      >
         <div
           class="flex items-center justify-between border-b border-[var(--ty-border)] px-4 py-3"
         >
@@ -454,6 +560,7 @@ onDeactivated(() => {
             <TySelect
               v-model="draftRebootControlPort"
               :options="rebootControlPortOptions"
+              :aria-label="t('serialDebug.conn.rebootControlPort')"
             />
           </label>
 
@@ -464,6 +571,7 @@ onDeactivated(() => {
             <TySelect
               v-model="draftRebootChipId"
               :options="rebootChipOptions"
+              :aria-label="t('serialDebug.conn.rebootTargetChip')"
             />
           </label>
         </div>
