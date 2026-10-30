@@ -202,12 +202,17 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   // logWindowLines: that bounds what the UI keeps in memory, this bounds what
   // is written to disk.
   const archiveLimitMib = ref(DEFAULT_ARCHIVE_LIMIT_MIB);
+  // Keep the warning until clear: raising the cap cannot restore a missing interval.
+  const archiveLimitReached = ref(false);
+  const receivedLineCount = ref(0);
   const showTimestamp = ref(true);
   const showDirBadge = ref(true);
   const filterStatsById = ref<Record<string, SerialDebugFilterStats>>({});
   const filterPagesById = ref<Record<string, SerialDebugFilterLinePage>>({});
   const archiveSessionRevision = ref(0);
   const activeFilterLoading = ref(false);
+  const filterReadError = ref<string | null>(null);
+  const filterRetryKind = ref<"older" | "tail">("tail");
   const activeFilterFullyLoaded = ref(false);
   /**
    * The user paged the active filter window backwards, so it no longer sits on
@@ -355,6 +360,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     historyEndLineNo,
     historyTotalLines,
     historyLoading,
+    historyError,
     historyAtSessionStart,
     historyAtArchiveEnd,
     historyEntryOffsetLines,
@@ -362,13 +368,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     loadOlderHistory,
     loadNewerHistory,
     jumpToSessionStart,
+    jumpToLine,
     exitHistoryMode,
   } = useSerialDebugHistory({
     readSessionPage: (start, limit) => transport.readSessionPage(start, limit),
     archiveLineId: (lineNo) => archiveLineId(lineNo),
     historyBudget: () => logWindowLines.value,
     reportError: (msg) => {
-      void appendSysLine(t("serialDebug.log.historyLoadFailed", { msg }));
+      rLog.warn(`[serial-debug] history read failed: ${msg}`);
     },
   });
 
@@ -561,6 +568,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       rawBytes,
     };
     lines.value.push(line);
+    receivedLineCount.value++;
     const entry = enqueueAutoSaveLine(line, archivedBefore);
     trimVisibleLines();
     triggerRef(lines);
@@ -572,6 +580,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     // One bulk push per frame — a per-line push would re-enter the reactive
     // array once per line.
     lines.value.push(...batch.map((prepared) => prepared.line));
+    receivedLineCount.value += batch.length;
     if (sessionAutoSavePath.value !== null) {
       for (const prepared of batch) {
         enqueueAutoSaveLine(prepared.line, prepared.archivedBefore);
@@ -803,6 +812,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       dropPendingAutoSaveLinesThrough(autoSaveBoundary);
 
       lines.value = [];
+      receivedLineCount.value = 0;
+      archiveLimitReached.value = false;
+      filterReadError.value = null;
       pendingPreview.value = [];
       // A clear starts a new archive session whose line numbers restart at 1, so
       // every anchor the history window holds points at the wrong lines.
@@ -1059,7 +1071,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       // bottom re-anchors on the tail, which *is* this refresh, so nothing is
       // owed here. The match counts on the chips are updated by the caller and
       // stay live either way.
-      if (activeFilterPinned.value) return;
+      if (activeFilterPinned.value || filterReadError.value) return;
       void loadActiveFilterTail().finally(() => {
         if (activeFilterRefreshPending) {
           scheduleActiveFilterRefresh();
@@ -1197,6 +1209,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     // being capped).
     unsubscribeArchiveCapped = transport.onArchiveCapped(
       ({ limitMib, archivedBefore }) => {
+        archiveLimitReached.value = true;
         pushLine(
           "sys",
           Date.now(),
@@ -1460,11 +1473,15 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
-  async function setActiveChip(id: string | null): Promise<void> {
+  async function setActiveChip(
+    id: string | null,
+    preservePage = false,
+  ): Promise<void> {
     filterRequestGeneration.value += 1;
     activeChipId.value = id;
     activeFilterLoading.value = false;
-    if (id !== null) {
+    filterReadError.value = null;
+    if (id !== null && (!preservePage || !filterPagesById.value[id])) {
       await loadActiveFilterTail();
     }
   }
@@ -1514,8 +1531,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     // This is the one operation that puts the window back on the newest
     // matches, so it is where the pin comes off — every caller (tab switch,
     // chip add/remove, live refresh, scrolled back to the bottom) means it.
-    activeFilterPinned.value = false;
     activeFilterLoading.value = true;
+    filterReadError.value = null;
+    filterRetryKind.value = "tail";
     try {
       const start = Math.max(0, stats.totalMatches - FILTER_PAGE_SIZE);
       const page = await loadFilterPage(id, start, FILTER_PAGE_SIZE);
@@ -1525,7 +1543,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       )
         return;
       filterPagesById.value = { ...filterPagesById.value, [id]: page };
+      activeFilterPinned.value = false;
       activeFilterFullyLoaded.value = page.start === 0;
+    } catch (e) {
+      if (
+        generation === filterRequestGeneration.value &&
+        activeChipId.value === id
+      )
+        filterReadError.value = e instanceof Error ? e.message : String(e);
     } finally {
       if (
         generation === filterRequestGeneration.value &&
@@ -1546,6 +1571,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
     const generation = ++filterRequestGeneration.value;
     activeFilterLoading.value = true;
+    filterReadError.value = null;
+    filterRetryKind.value = "older";
     try {
       const start = Math.max(0, existing.start - FILTER_PAGE_SIZE);
       const page = await loadFilterPage(id, start, existing.start - start);
@@ -1574,6 +1601,13 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       activeFilterFullyLoaded.value = start === 0;
       activeFilterPinned.value = true;
       return page.items.length;
+    } catch (e) {
+      if (
+        generation === filterRequestGeneration.value &&
+        activeChipId.value === id
+      )
+        filterReadError.value = e instanceof Error ? e.message : String(e);
+      return 0;
     } finally {
       if (
         generation === filterRequestGeneration.value &&
@@ -1781,12 +1815,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     logFontSize,
     logWindowLines,
     archiveLimitMib,
+    archiveLimitReached,
+    receivedLineCount,
     showTimestamp,
     showDirBadge,
     filterStatsById,
     filterPagesById,
     archiveSessionRevision,
     activeFilterLoading,
+    filterReadError,
+    filterRetryKind,
     activeFilterFullyLoaded,
     activeFilterPinned,
     historyMode,
@@ -1795,6 +1833,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     historyEndLineNo,
     historyTotalLines,
     historyLoading,
+    historyError,
     historyAtSessionStart,
     historyAtArchiveEnd,
     historyEntryOffsetLines,
@@ -1848,6 +1887,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     loadOlderHistory,
     loadNewerHistory,
     jumpToSessionStart,
+    jumpToLine,
     exitHistoryMode,
     increaseFontSize,
     decreaseFontSize,

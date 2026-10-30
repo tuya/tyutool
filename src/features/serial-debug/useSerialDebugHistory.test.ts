@@ -54,6 +54,59 @@ function history(
 }
 
 describe("useSerialDebugHistory", () => {
+  it("preserves the reading window on a failed older read and retries the same page", async () => {
+    let fail = false;
+    const h = history(async (start, limit) => {
+      if (fail && start === 400) throw new Error("temporary read failure");
+      return page(start, limit, 2000);
+    });
+    await h.enterHistoryMode(20);
+    const before = h.historyLines.value;
+    fail = true;
+    await h.loadOlderHistory();
+    expect(h.historyMode.value).toBe(true);
+    expect(h.historyLines.value).toBe(before);
+    expect(h.historyError.value).toBe("temporary read failure");
+    fail = false;
+    expect((await h.loadOlderHistory()).prepended).toBe(400);
+    expect(h.historyError.value).toBeNull();
+  });
+
+  it("opens context directly at an archive line with exact bytes and bounded reads", async () => {
+    const reader = vi.fn(async (start: number, limit: number) => {
+      const result = page(start, limit, 5000);
+      const target = result.items.find((line) => line.lineNo === 2000);
+      if (target) target.rawBytes = [0, 255, 13, 10];
+      return result;
+    });
+    const h = history(reader);
+    expect(await h.jumpToLine(2000)).toBe(true);
+    expect(h.historyMode.value).toBe(true);
+    expect(h.historyLines.value[h.historyEntryOffsetLines.value].text).toBe(
+      "line-2000",
+    );
+    expect(
+      h.historyLines.value[h.historyEntryOffsetLines.value].rawBytes,
+    ).toEqual(Uint8Array.from([0, 255, 13, 10]));
+    expect(h.historyLines.value.length).toBeLessThanOrEqual(1200);
+    expect(
+      reader.mock.calls.every(([, limit]) => limit <= HISTORY_PAGE_SIZE),
+    ).toBe(true);
+  });
+
+  it("does not replace the window or report an error after leaving a context request's source", async () => {
+    const range = deferred<SerialDebugSessionPage>();
+    const h = history(() => range.promise);
+    let current = true;
+    const loading = h.jumpToLine(2000, () => current);
+    current = false;
+    range.reject(new Error("old context failed"));
+    expect(await loading).toBe(false);
+    expect(h.historyMode.value).toBe(false);
+    expect(h.historyError.value).toBeNull();
+    expect(h.reportError).not.toHaveBeenCalled();
+  });
+
   it("does not apply a tail range that resolves after exit", async () => {
     const range = deferred<SerialDebugSessionPage>();
     const h = history(async (start, limit) => {

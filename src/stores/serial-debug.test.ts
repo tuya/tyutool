@@ -968,6 +968,23 @@ describe("useSerialDebugStore port-manager integration", () => {
       expect(fake.sysLineWrites).toEqual([]);
     });
 
+    it("keeps the gap warning after raising the limit until the archive is cleared", async () => {
+      const s = useSerialDebugStore();
+      s.port = "/dev/ttyUSB0";
+      await s.openPort();
+      expect(s.archiveLimitReached).toBe(false);
+
+      fake.emitArchiveCapped(256);
+      expect(s.archiveLimitReached).toBe(true);
+      s.archiveLimitMib = 512;
+      await nextTick();
+      expect(fake.archiveLimitCalls).toContain(512 * 1024 * 1024);
+      expect(s.archiveLimitReached).toBe(true);
+
+      await s.clear();
+      expect(s.archiveLimitReached).toBe(false);
+    });
+
     it("stops listening once the session is torn down", async () => {
       const s = useSerialDebugStore();
       s.port = "/dev/ttyUSB0";
@@ -1405,6 +1422,45 @@ describe("useSerialDebugStore watch chip management", () => {
       useRegex: false,
     });
     expect(s.activeChipId).toBe(s.watchChips[0].id);
+  });
+
+  it("retains filter results and the reading pin on a failed tail refresh, then retries", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERROR", false);
+    const id = s.activeChipId!;
+    const before = s.filterPagesById[id];
+    s.activeFilterPinned = true;
+    const reader = vi
+      .spyOn(fake, "readFilterMatches")
+      .mockRejectedValueOnce(new Error("filter unavailable"));
+    await s.loadActiveFilterTail();
+    expect(s.filterReadError).toBe("filter unavailable");
+    expect(s.filterPagesById[id]).toBe(before);
+    expect(s.activeFilterPinned).toBe(true);
+    expect(s.activeFilterLoading).toBe(false);
+    await s.loadActiveFilterTail();
+    expect(s.filterReadError).toBeNull();
+    expect(s.activeFilterPinned).toBe(false);
+    reader.mockRestore();
+  });
+
+  it("ignores a filter read failure after switching its source tab", async () => {
+    const s = useSerialDebugStore();
+    await s.addChip("ERROR", false);
+    let fail!: (error: Error) => void;
+    const reader = vi.spyOn(fake, "readFilterMatches").mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const pending = s.loadActiveFilterTail();
+    await s.setActiveChip(null);
+    fail(new Error("old tab failed"));
+    await pending;
+    expect(s.filterReadError).toBeNull();
+    expect(s.activeFilterLoading).toBe(false);
+    reader.mockRestore();
   });
 
   it("addChip returns duplicate when same keyword added twice", async () => {
@@ -2765,19 +2821,20 @@ describe("useSerialDebugStore full-session history window", () => {
     expect(s.historyLines).toEqual([]);
   });
 
-  it("falls back to the live view and says why when the archive read fails", async () => {
+  it("keeps the reading window and exposes a retryable error when the archive read fails", async () => {
     const s = useSerialDebugStore();
     fake.setSessionArchive(2000);
     await s.enterHistoryMode(10);
+    const before = s.historyLines;
     fake.setSessionPageResponder(() => {
       throw new Error("archive gone");
     });
 
     expect((await s.loadOlderHistory()).prepended).toBe(0);
 
-    expect(s.historyMode).toBe(false);
-    expect(s.historyLines).toEqual([]);
-    expect(s.lines[s.lines.length - 1].text).toContain("archive gone");
+    expect(s.historyMode).toBe(true);
+    expect(s.historyLines).toBe(before);
+    expect(s.historyError).toBe("archive gone");
   });
 
   it("does not enter history mode when the archive is empty", async () => {

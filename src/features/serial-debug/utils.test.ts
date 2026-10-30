@@ -17,6 +17,7 @@ describe("archiveLineToLogLine", () => {
       ),
     ).toEqual({
       id: 7,
+      archiveLineNo: 42,
       tsMs: 1700,
       direction: "rx",
       text: "ERR boom",

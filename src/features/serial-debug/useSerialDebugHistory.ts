@@ -70,6 +70,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
   const historyStartLineNo = ref(0);
   const historyTotalLines = ref(0);
   const historyLoading = ref(false);
+  const historyError = ref<string | null>(null);
   const historyAtSessionStart = ref(false);
   const historyAtArchiveEnd = ref(true);
   /**
@@ -160,15 +161,15 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     if (gen !== generation) return false;
     if (items.length === 0) return false;
     // Deliberately `true` even if the archive grew during the reads: the window
-    // ends where the archive ended when the user asked for it, and "scroll back
-    // down to leave history mode" must stay reachable on a live port.
+    // ends where the archive ended when the user asked for it. Only Back to live
+    // leaves this snapshot, so incoming lines cannot move the reading position.
     applyWindow(items, Math.max(totalLines, total), true);
     return true;
   }
 
   function fail(e: unknown): void {
-    exitHistoryMode();
-    deps.reportError(e instanceof Error ? e.message : String(e));
+    historyError.value = e instanceof Error ? e.message : String(e);
+    deps.reportError(historyError.value);
   }
 
   /**
@@ -180,6 +181,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     if (historyMode.value || historyLoading.value) return false;
     const gen = generation;
     historyLoading.value = true;
+    historyError.value = null;
     try {
       const ok = await loadTailWindow();
       if (gen !== generation || !ok) return false;
@@ -215,6 +217,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     }
     const gen = generation;
     historyLoading.value = true;
+    historyError.value = null;
     try {
       const page = await deps.readSessionPage(firstLineNo - 1 - want, want);
       if (gen !== generation) return none;
@@ -275,6 +278,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     if (lastLineNo === 0) return 0;
     const gen = generation;
     historyLoading.value = true;
+    historyError.value = null;
     try {
       // `lastLineNo` as a 0-based offset is the line right after the window.
       const page = await deps.readSessionPage(lastLineNo, HISTORY_PAGE_SIZE);
@@ -303,8 +307,8 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
       historyStartLineNo.value += dropped;
       // A short page means the archive was exhausted at read time. Checking that
       // as well as the line number matters on a live port, where `totalLines`
-      // keeps moving and the second test alone would never become true — leaving
-      // "scroll back down to return to live" permanently out of reach.
+      // keeps moving and the second test alone could keep requesting new pages
+      // instead of stopping at the tail snapshot.
       historyAtArchiveEnd.value =
         items.length < HISTORY_PAGE_SIZE ||
         items[items.length - 1].lineNo >= historyTotalLines.value;
@@ -317,40 +321,51 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     }
   }
 
-  /**
-   * Anchor the window on the head of the archive. No UI entry point today (the
-   * session-history bar it lived in was removed); kept because it is the only
-   * cheap way to reach line 1 — `loadOlderHistory` needs one call per page —
-   * which is both what a re-added jump affordance would need and what the
-   * `loadNewerHistory` tests use to set up.
-   */
-  async function jumpToSessionStart(): Promise<boolean> {
-    if (!historyMode.value || historyLoading.value) return false;
+  /** Load bounded context around an archive line without scanning the session. */
+  async function jumpToLine(
+    lineNo: number,
+    isCurrent: () => boolean = () => true,
+  ): Promise<boolean> {
+    if (historyLoading.value || !Number.isSafeInteger(lineNo) || lineNo < 1)
+      return false;
     const gen = generation;
     historyLoading.value = true;
+    historyError.value = null;
     try {
       const want = Math.min(HISTORY_PAGE_SIZE * HISTORY_ENTRY_PAGES, budget());
-      const { items, totalLines } = await readRange(0, want);
-      if (gen !== generation) return false;
-      if (items.length === 0) return false;
+      const start = Math.max(0, lineNo - 1 - Math.floor(want / 3));
+      const { items, totalLines } = await readRange(start, want);
+      if (gen !== generation || !isCurrent() || items.length === 0)
+        return false;
       applyWindow(
         items,
         totalLines,
         items[items.length - 1].lineNo >= totalLines,
       );
+      historyEntryOffsetLines.value = Math.max(
+        0,
+        Math.min(items.length - 1, lineNo - items[0].lineNo),
+      );
+      historyMode.value = true;
       return true;
     } catch (e) {
-      if (gen === generation) fail(e);
+      if (gen === generation && isCurrent()) fail(e);
       return false;
     } finally {
       if (gen === generation) historyLoading.value = false;
     }
   }
 
+  /** Reach the session head directly, including from an empty live window. */
+  async function jumpToSessionStart(): Promise<boolean> {
+    return jumpToLine(1);
+  }
+
   function exitHistoryMode(): void {
     generation += 1;
     historyMode.value = false;
     historyLoading.value = false;
+    historyError.value = null;
     historyLines.value = [];
     historyStartLineNo.value = 0;
     historyTotalLines.value = 0;
@@ -366,6 +381,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     historyEndLineNo,
     historyTotalLines,
     historyLoading,
+    historyError,
     historyAtSessionStart,
     historyAtArchiveEnd,
     historyEntryOffsetLines,
@@ -373,6 +389,7 @@ export function useSerialDebugHistory(deps: SerialDebugHistoryDeps) {
     loadOlderHistory,
     loadNewerHistory,
     jumpToSessionStart,
+    jumpToLine,
     exitHistoryMode,
   };
 }

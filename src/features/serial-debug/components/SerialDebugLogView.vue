@@ -7,13 +7,18 @@ import {
   onUnmounted,
   reactive,
   ref,
+  shallowRef,
   watch,
   watchEffect,
 } from "vue";
 import { useFloatingPanel } from "@/composables/useFloatingPanel";
 import { useCopyFeedback } from "@/composables/useCopyFeedback";
 import { useI18n } from "vue-i18n";
-import { faCircleNotch, faFloppyDisk } from "@fortawesome/free-solid-svg-icons";
+import {
+  faArrowUp,
+  faCircleNotch,
+  faFloppyDisk,
+} from "@fortawesome/free-solid-svg-icons";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { isTauriRuntime } from "@/runtime";
@@ -65,7 +70,20 @@ const activeChip = computed(() =>
 // array identity stays the same across appends, and a computed that returns an
 // identity-stable value never notifies its subscribers. Calling through makes
 // every computed/watcher below depend on the store refs directly.
-const displayLines = (): DebugLogLine[] => s.activeDisplayLines();
+// Freeze only the bounded live window while reading it. Incoming data keeps
+// filling the store's ring, so trimming that ring cannot replace a visible row.
+const pausedLiveLines = shallowRef<DebugLogLine[] | null>(null);
+const displayLines = (): DebugLogLine[] =>
+  !s.activeChipId && !s.historyMode && pausedLiveLines.value
+    ? pausedLiveLines.value
+    : s.activeDisplayLines();
+watch(
+  () => s.logWindowLines,
+  (limit) => {
+    if (pausedLiveLines.value && pausedLiveLines.value.length > limit)
+      pausedLiveLines.value = pausedLiveLines.value.slice(-limit);
+  },
+);
 
 const scrollRef = ref<HTMLDivElement | null>(null);
 
@@ -299,7 +317,19 @@ function onScroll(): void {
   if (!viewActive) return;
   scrollTop.value = el.scrollTop;
   if (el.clientHeight > 0) viewportHeight.value = el.clientHeight;
-  lockAutoScroll.value = maxScrollTop.value - scrollTop.value >= 80;
+  lockAutoScroll.value =
+    s.historyMode ||
+    (s.activeFilterPinned && s.activeChipId !== null) ||
+    maxScrollTop.value - scrollTop.value >= 80;
+  if (!s.activeChipId && !s.historyMode) {
+    if (lockAutoScroll.value && !pausedLiveLines.value)
+      pausedLiveLines.value = [...s.activeDisplayLines()];
+    else if (!lockAutoScroll.value && pausedLiveLines.value) {
+      pausedLiveLines.value = null;
+      void scrollToBottom();
+    }
+  } else if (s.activeChipId && lockAutoScroll.value)
+    s.activeFilterPinned = true;
   void onScrollEdge();
 }
 
@@ -317,15 +347,125 @@ async function resumeScroll(): Promise<void> {
   // window instead of to the live tail — the buffer under the pane is a
   // different one, and on a filter tab it is pinned against the live refresh.
   if (s.historyMode) s.exitHistoryMode();
-  if (s.activeFilterPinned) await s.loadActiveFilterTail();
+  pausedLiveLines.value = null;
+  if (s.activeFilterPinned) {
+    await s.loadActiveFilterTail();
+    if (s.filterReadError) return;
+  }
+  historyNotice.value = "";
+  contextReturn.value = null;
   lockAutoScroll.value = false;
   await scrollToBottom();
 }
 
+const historyNotice = ref("");
+const searchNotice = ref("");
+const contextReturn = ref<{ id: string; top: number } | null>(null);
+const contextSourceId = ref<string | null>(null);
+const historyReceivedAt = ref(0);
+let retryHistory: "entry" | "start" | "older" | "newer" | "context" = "entry";
+watch(
+  () => s.historyMode,
+  (active) => {
+    if (active) historyReceivedAt.value = s.receivedLineCount;
+  },
+);
+watch(
+  () => s.archiveSessionRevision,
+  () => {
+    historyNotice.value = "";
+    contextReturn.value = null;
+    contextSourceId.value = null;
+    pausedLiveLines.value = null;
+  },
+);
+const historyNewLines = computed(() =>
+  Math.max(0, s.receivedLineCount - historyReceivedAt.value),
+);
+const readError = computed(() =>
+  s.activeChipId
+    ? (s.filterReadError ??
+      (contextSourceId.value === s.activeChipId ? s.historyError : null))
+    : s.historyError,
+);
+
+async function startHistory(): Promise<void> {
+  retryHistory = "start";
+  historyNotice.value = "";
+  const wasLocked = lockAutoScroll.value;
+  lockAutoScroll.value = true;
+  if (!(await s.jumpToSessionStart())) {
+    lockAutoScroll.value = wasLocked;
+    if (!s.historyError)
+      historyNotice.value = t("serialDebug.log.historyEmpty");
+    return;
+  }
+  await nextTick();
+  if (scrollRef.value) applyScrollTop(scrollRef.value, 0);
+}
+async function showContext(): Promise<void> {
+  const id = s.activeChipId;
+  const items = displayLines();
+  const match = currentMatchLineId.value;
+  const line =
+    items.find((item) => item.id === match) ??
+    items[props.hexView ? 0 : Math.floor(scrollTop.value / rowHeight.value)];
+  if (!id || !line?.archiveLineNo) return;
+  const contextLineNo = line.archiveLineNo;
+  contextSourceId.value = id;
+  retryHistory = "context";
+  const revision = s.archiveSessionRevision;
+  const top = scrollTop.value;
+  s.activeFilterPinned = true;
+  if (
+    !(await s.jumpToLine(
+      contextLineNo,
+      () =>
+        revision === s.archiveSessionRevision &&
+        s.activeChipId === id &&
+        viewActive,
+    ))
+  )
+    return;
+  contextReturn.value = { id, top };
+  lockByTab.set(null, true);
+  await s.setActiveChip(null);
+  await nextTick();
+  const row = props.hexView
+    ? hexViewRenderer.rowOfLine(
+        displayLines(),
+        props.hexBytesPerRow,
+        s.historyEntryOffsetLines,
+      )
+    : s.historyEntryOffsetLines;
+  if (scrollRef.value)
+    applyScrollTop(scrollRef.value, row * rowHeight.value + insetTop.value);
+}
+async function backToResults(): Promise<void> {
+  const previous = contextReturn.value;
+  if (!previous || !s.watchChips.some((chip) => chip.id === previous.id))
+    return;
+  contextReturn.value = null;
+  lockByTab.set(previous.id, true);
+  await s.setActiveChip(previous.id, true);
+  await nextTick();
+  if (scrollRef.value) applyScrollTop(scrollRef.value, previous.top);
+}
+async function retryRead(): Promise<void> {
+  if (s.filterReadError) {
+    if (s.filterRetryKind === "older") await loadOlderFilterMatchesAtTop();
+    else await s.loadActiveFilterTail();
+  } else if (retryHistory === "start") await startHistory();
+  else if (retryHistory === "older") await loadOlderHistoryAtTop();
+  else if (retryHistory === "newer") await loadNewerHistoryAtBottom();
+  else if (retryHistory === "context") await showContext();
+  else await enterHistory();
+}
+
 // ── full-session scrollback ("All" tab) ─────────────────────────────────
 // Scrolling past the top of the live ring buffer switches the pane over to a
-// bounded sliding window on the Rust session archive; scrolling back past its
-// end switches back. The two buffers are never concatenated — see
+// bounded sliding window on the Rust session archive. Back to live explicitly
+// returns to the live buffer. The two buffers are never concatenated — see
 // `useSerialDebugHistory` for why that is not merely a simplification.
 
 /**
@@ -357,18 +497,23 @@ function compensateScroll(
 }
 
 async function enterHistory(): Promise<void> {
+  retryHistory = "entry";
   const el = scrollRef.value;
   if (!el) return;
   const wasLocked = lockAutoScroll.value;
+  historyNotice.value = "";
   // Explicit, not incidental: the mode switch changes the id of the last line,
   // which is exactly what the follow-tail watcher tracks, so it fires once on
   // the switch. `scrollToBottom` bails out while the lock is set.
   lockAutoScroll.value = true;
   const entered = await s.enterHistoryMode(s.lines.length);
   if (!entered) {
+    if (!s.historyError)
+      historyNotice.value = t("serialDebug.log.historyEmpty");
     lockAutoScroll.value = wasLocked;
     return;
   }
+  pausedLiveLines.value = null;
   await nextTick();
   const offset = s.historyEntryOffsetLines;
   const row = props.hexView
@@ -378,9 +523,9 @@ async function enterHistory(): Promise<void> {
 }
 
 async function loadOlderHistoryAtTop(): Promise<void> {
+  retryHistory = "older";
   const el = scrollRef.value;
   if (!el) return;
-  const beforeTop = scrollTop.value;
   const { prepended, reanchored } = await s.loadOlderHistory();
   if (!prepended && !reanchored) return;
   await nextTick();
@@ -390,13 +535,13 @@ async function loadOlderHistoryAtTop(): Promise<void> {
     applyScrollTop(el, 0);
     return;
   }
-  compensateScroll(el, beforeTop, headRowsForPrepend(prepended));
+  compensateScroll(el, scrollTop.value, headRowsForPrepend(prepended));
 }
 
 async function loadNewerHistoryAtBottom(): Promise<void> {
+  retryHistory = "newer";
   const el = scrollRef.value;
   if (!el) return;
-  const beforeTop = scrollTop.value;
   const before = displayLines();
   const dropped = await s.loadNewerHistory();
   // Appended rows land below the viewport; only what left the head moves it.
@@ -405,13 +550,13 @@ async function loadNewerHistoryAtBottom(): Promise<void> {
     ? hexViewRenderer.rowOfLine(before, props.hexBytesPerRow, dropped)
     : dropped;
   await nextTick();
-  compensateScroll(el, beforeTop, -rows);
+  compensateScroll(el, scrollTop.value, -rows);
 }
 
 /**
  * Back at the bottom of a paged-back filter tab: put the window on the newest
- * matches and start following them again. The mirror of the All tab leaving
- * history mode at the same edge.
+ * matches and start following them again. The All tab instead stays in history
+ * until Back to live is selected.
  *
  * The scroll position is re-applied by hand because the window shrinks back to
  * one page here — the follow-tail watcher only fires when the id of the *last*
@@ -426,11 +571,10 @@ async function reanchorFilterTailAtBottom(): Promise<void> {
 
 async function loadOlderFilterMatchesAtTop(): Promise<void> {
   const el = scrollRef.value;
-  const beforeTop = scrollTop.value;
   const prepended = await s.loadOlderActiveFilterMatches();
   if (prepended <= 0 || !el) return;
   await nextTick();
-  compensateScroll(el, beforeTop, headRowsForPrepend(prepended));
+  compensateScroll(el, scrollTop.value, headRowsForPrepend(prepended));
 }
 
 /**
@@ -440,22 +584,22 @@ async function loadOlderFilterMatchesAtTop(): Promise<void> {
  * (`historyAtSessionStart` / `historyAtArchiveEnd` / `activeFilterFullyLoaded`).
  */
 async function onScrollEdge(): Promise<void> {
-  if (s.historyLoading) return;
+  if (s.historyLoading || (s.activeChipId ? s.filterReadError : s.historyError))
+    return;
   // Not scrollable at all: there is no "the user scrolled up" to react to, and
   // entering history mode here would lock auto-scroll for no reason.
   if (maxScrollTop.value <= 0) return;
   // Filter tabs page backwards through their own match list, not the archive
-  // window, so they stop here — there is no history mode to enter and no
-  // bottom-edge case (the tail is reloaded on tab switch and live refresh).
+  // window, so their top and bottom edges use the match paging operations.
   if (s.activeChipId !== null) {
-    if (scrollTop.value <= rowHeight.value) {
+    if (scrollTop.value <= rowHeight.value * 6) {
       if (!s.activeFilterLoading && !s.activeFilterFullyLoaded) {
         await loadOlderFilterMatchesAtTop();
       }
       return;
     }
     if (
-      maxScrollTop.value - scrollTop.value <= rowHeight.value &&
+      maxScrollTop.value - scrollTop.value <= rowHeight.value * 6 &&
       s.activeFilterPinned &&
       !s.activeFilterLoading
     ) {
@@ -463,7 +607,7 @@ async function onScrollEdge(): Promise<void> {
     }
     return;
   }
-  if (scrollTop.value <= rowHeight.value) {
+  if (scrollTop.value <= rowHeight.value * 6) {
     if (!s.historyMode) {
       await enterHistory();
     } else if (!s.historyAtSessionStart) {
@@ -472,12 +616,8 @@ async function onScrollEdge(): Promise<void> {
     return;
   }
   if (!s.historyMode) return;
-  if (maxScrollTop.value - scrollTop.value > rowHeight.value) return;
-  if (s.historyAtArchiveEnd) {
-    await resumeScroll();
-  } else {
-    await loadNewerHistoryAtBottom();
-  }
+  if (maxScrollTop.value - scrollTop.value > rowHeight.value * 6) return;
+  if (!s.historyAtArchiveEnd) await loadNewerHistoryAtBottom();
 }
 
 /**
@@ -489,15 +629,19 @@ async function onScrollEdge(): Promise<void> {
 async function searchWholeSession(): Promise<void> {
   const keyword = searchText.value.trim();
   if (!keyword) return;
-  const existing = s.watchChips.find(
-    (c) => c.keyword === keyword && !c.useRegex,
-  );
-  if (existing) {
-    await s.setActiveChip(existing.id);
-  } else if ((await s.addChip(keyword, false)) !== "ok") {
-    return;
+  searchNotice.value = "";
+  try {
+    const existing = s.watchChips.find(
+      (c) => c.keyword === keyword && !c.useRegex,
+    );
+    if (existing) await s.setActiveChip(existing.id);
+    else if ((await s.addChip(keyword, false)) !== "ok") return;
+    closeSearch();
+  } catch (e) {
+    searchNotice.value = t("serialDebug.search.failed", {
+      msg: e instanceof Error ? e.message : String(e),
+    });
   }
-  closeSearch();
 }
 
 // Only the windowed rows are formatted, and the result is byte-identical to the
@@ -989,6 +1133,20 @@ async function saveLog(): Promise<void> {
       </button>
 
       <button
+        v-if="!activeChip && !s.historyMode"
+        type="button"
+        class="btn-tool"
+        :disabled="s.historyLoading"
+        :aria-label="t('serialDebug.log.history')"
+        @click="enterHistory"
+      >
+        <FontAwesomeIcon
+          :icon="['fas', 'clock-rotate-left']"
+          class="size-3 shrink-0"
+        />
+        {{ t("serialDebug.log.history") }}
+      </button>
+      <button
         v-if="lockAutoScroll"
         type="button"
         class="paused-badge"
@@ -1107,9 +1265,101 @@ async function saveLog(): Promise<void> {
       </div>
     </div>
 
+    <div v-if="s.historyMode && !activeChip" class="history-status">
+      <div class="history-position">
+        <strong>{{ t("serialDebug.log.historyReading") }}</strong>
+        <span>{{
+          t("serialDebug.log.historyRange", {
+            start: s.historyStartLineNo,
+            end: s.historyEndLineNo,
+            total: s.historyTotalLines,
+          })
+        }}</span>
+        <span>{{
+          t(
+            s.open
+              ? "serialDebug.log.receiving"
+              : "serialDebug.log.sessionClosed",
+          )
+        }}</span>
+        <span v-if="historyNewLines > 0">{{
+          t("serialDebug.log.newLines", { count: historyNewLines })
+        }}</span>
+      </div>
+      <div class="history-controls">
+        <button
+          type="button"
+          class="btn-tool"
+          :disabled="s.historyLoading || s.historyAtSessionStart"
+          @click="startHistory"
+        >
+          {{ t("serialDebug.log.sessionStart") }}
+        </button>
+        <button type="button" class="btn-tool" @click="openSearch">
+          {{ t("serialDebug.log.filterToggle") }}
+        </button>
+        <button
+          v-if="contextReturn"
+          type="button"
+          class="btn-tool"
+          @click="backToResults"
+        >
+          {{ t("serialDebug.search.backToResults") }}
+        </button>
+      </div>
+    </div>
+    <p v-if="s.archiveLimitReached" class="history-notice" role="status">
+      {{ t("serialDebug.log.archiveStopped") }}
+    </p>
+    <div v-if="readError" class="history-notice" role="alert">
+      <span>{{
+        s.activeChipId && s.filterReadError
+          ? t("serialDebug.log.filterReadFailed", { msg: s.filterReadError })
+          : t("serialDebug.log.historyLoadFailed", { msg: readError })
+      }}</span>
+      <button
+        type="button"
+        class="btn-tool"
+        :disabled="s.historyLoading || s.activeFilterLoading"
+        @click="retryRead"
+      >
+        {{ t("serialDebug.log.retry") }}
+      </button>
+    </div>
+    <p
+      v-if="historyNotice || searchNotice"
+      class="history-notice"
+      role="status"
+    >
+      {{ historyNotice || searchNotice }}
+    </p>
+    <div
+      v-if="s.historyMode && !activeChip"
+      class="history-load-state"
+      role="status"
+    >
+      {{
+        t(
+          s.historyLoading
+            ? "serialDebug.log.historyLoading"
+            : "serialDebug.log.historyReady",
+        )
+      }}
+    </div>
+
     <!-- chip bar -->
     <SerialDebugChipBar />
 
+    <div v-if="activeChip" class="history-controls filter-context">
+      <button
+        type="button"
+        class="btn-tool"
+        :disabled="!displayLines().length || s.historyLoading"
+        @click="showContext"
+      >
+        {{ t("serialDebug.search.context") }}
+      </button>
+    </div>
     <!-- Older matches load themselves when the pane reaches the top; this only
          says so, and says when a read is in flight. Rendered on the same
          condition as before (not only while loading) so it appears and
@@ -1120,7 +1370,7 @@ async function saveLog(): Promise<void> {
       class="load-hint flex items-center gap-1 border-b border-[var(--ty-border)] px-3 py-1"
     >
       <FontAwesomeIcon
-        :icon="s.activeFilterLoading ? faCircleNotch : ['fas', 'arrow-up']"
+        :icon="s.activeFilterLoading ? faCircleNotch : faArrowUp"
         class="size-3 shrink-0"
         :class="{ 'fa-spin': s.activeFilterLoading }"
       />
@@ -1159,8 +1409,16 @@ async function saveLog(): Promise<void> {
       </span>
       <!-- In history mode the pane holds a window on the archive, not the live
            buffer, so say so rather than let the count read as session-wide. -->
-      <span v-if="!activeChip && s.historyMode" class="search-scope-hint">
-        {{ t("serialDebug.search.scopeHistory") }}
+      <span class="search-scope-hint">
+        {{
+          t(
+            activeChip
+              ? "serialDebug.search.scopeFilter"
+              : s.historyMode
+                ? "serialDebug.search.scopeHistory"
+                : "serialDebug.search.scopeWindow",
+          )
+        }}
       </span>
       <button
         v-if="searchText.trim()"
@@ -1171,6 +1429,14 @@ async function saveLog(): Promise<void> {
       >
         <FontAwesomeIcon :icon="['fas', 'filter']" class="size-3 shrink-0" />
         {{ t("serialDebug.search.wholeSession") }}
+      </button>
+      <button
+        v-if="activeChip"
+        type="button"
+        class="btn-tool"
+        @click="showContext"
+      >
+        {{ t("serialDebug.search.context") }}
       </button>
       <button
         type="button"
@@ -1365,6 +1631,42 @@ async function saveLog(): Promise<void> {
 </template>
 
 <style scoped>
+.history-status,
+.history-notice,
+.history-controls,
+.history-position {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.history-status {
+  justify-content: space-between;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--ty-border);
+  font-size: 0.75rem;
+  background: var(--ty-surface-muted);
+}
+.history-position {
+  color: var(--ty-text-muted);
+}
+.history-position strong {
+  color: var(--ty-text);
+}
+.history-notice {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--ty-border);
+  color: var(--ty-text);
+  font-size: 0.75rem;
+}
+.history-load-state {
+  padding: 0.2rem 0.75rem;
+  color: var(--ty-text-muted);
+  font-size: 0.75rem;
+}
+.filter-context {
+  padding: 0.2rem 0.75rem;
+}
 /* toolbar */
 .log-toolbar {
   background: var(--ty-surface);
@@ -1499,6 +1801,7 @@ async function saveLog(): Promise<void> {
 }
 /* search bar */
 .search-bar {
+  flex-wrap: wrap;
   background: var(--ty-surface);
 }
 .search-input {

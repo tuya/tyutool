@@ -72,6 +72,7 @@ export interface DebugLogLine {
   direction: DebugLineDirection;
   text: string; // already decoded (UTF-8, lossy) for ASCII view
   rawBytes?: Uint8Array; // kept when needed for hex view; undefined for 'sys' lines
+  archiveLineNo?: number; // only archive-backed lines have a session line anchor
 }
 
 export type SendMode = "ascii" | "hex";
