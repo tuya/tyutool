@@ -130,8 +130,9 @@ export function useFlashProgress(deps: FlashProgressDeps) {
             try {
               await navigator.clipboard.writeText(copyText);
               deps.appendLog(t("flash.log.authReadCopied"));
-            } catch {
+            } catch (error) {
               deps.appendLog(t("flash.log.copyFailed"));
+              throw error;
             }
           },
           okLabel: t("flash.confirm.authReadOk"),
