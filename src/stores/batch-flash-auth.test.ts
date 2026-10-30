@@ -9,6 +9,7 @@ import type { BatchSlotState } from "@/features/batch-flash-auth/types";
 
 vi.mock("@/runtime", () => ({
   isTauriRuntime: () => false,
+  getRuntime: () => "web",
 }));
 
 describe("OTP storage coupling", () => {
@@ -1368,7 +1369,10 @@ describe("startBatch — firmware toggle in Tauri mode", () => {
       }
       return undefined;
     });
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
       loadBatchFlashAuthWorkspace: vi.fn(),
@@ -1427,7 +1431,10 @@ describe("batch_auth_start rejection — slots must not hang in reading_mac", ()
         return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
       return undefined;
     });
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
       loadBatchFlashAuthWorkspace: vi.fn(),
@@ -1513,7 +1520,10 @@ describe("default firmware list — per-chip isolation", () => {
   };
 
   async function setupStore(downloadImpl?: () => Promise<string>) {
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
       loadBatchFlashAuthWorkspace: vi.fn(),
       saveBatchFlashAuthCumulative: vi.fn(),
@@ -1602,7 +1612,10 @@ describe("autoAssign — stale slot pruning in Tauri mode", () => {
     const invoke = vi
       .fn()
       .mockResolvedValue(currentPorts.map((path) => ({ path })));
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
       loadBatchFlashAuthWorkspace: vi.fn(),
@@ -1639,6 +1652,27 @@ describe("autoAssign — stale slot pruning in Tauri mode", () => {
     store.slots[1].status = "failed";
     await store.autoAssign();
     expect(store.slots.map((s) => s.port)).toEqual(["COM4"]);
+  });
+  it("shows enumeration failure without discarding usable slots", async () => {
+    const store = await setupStore(["COM3"]);
+    await store.autoAssign();
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockRejectedValue(new Error("Scan refused"));
+    await store.autoAssign();
+    expect(store.portsError).toBe("Scan refused");
+    expect(store.portsLoading).toBe(false);
+    expect(store.slots.map((slot) => slot.port)).toEqual(["COM3"]);
+  });
+  it("distinguishes an empty scan from ports removed by filters", async () => {
+    const store = await setupStore(["COM3"]);
+    store.filterConfig.blockedPorts = ["COM3"];
+    await store.autoAssign();
+    expect(store.slots).toHaveLength(0);
+    expect(store.lastScannedPorts).toEqual(["COM3"]);
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockResolvedValue([]);
+    await store.autoAssign();
+    expect(store.lastScannedPorts).toEqual([]);
   });
 });
 
@@ -1734,7 +1768,10 @@ describe("loadPersistedData — legacy lockOtpAfterAuth key does not leak in", (
       saveBatchFlashAuthConfig: vi.fn(),
       saveBatchFlashAuthSharedConfig: vi.fn(),
     }));
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     const { useBatchFlashAuthStore: useStore } =
       await import("./batch-flash-auth");
     const store = useStore();
@@ -1881,7 +1918,10 @@ describe("startAuth — flash-only in Tauri mode", () => {
 
   it("passes authorizeEnabled=false and marks slots flashing without excel checks", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/stores/batch-flash-auth-workspace", () => ({
       loadBatchFlashAuthWorkspace: vi.fn(),
@@ -1938,7 +1978,10 @@ describe("port-manager integration", () => {
         return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
       return undefined;
     });
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/composables/confirmDialog", () => ({
       showConfirmDialog: vi.fn().mockResolvedValue(false),
@@ -2247,7 +2290,10 @@ describe("port-manager integration", () => {
         return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
       return undefined;
     });
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/composables/confirmDialog", () => ({
       showConfirmDialog: vi.fn().mockResolvedValue(false),
@@ -2293,7 +2339,10 @@ describe("port-manager integration", () => {
         return { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 };
       return undefined;
     });
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
     vi.doMock("@/composables/confirmDialog", () => ({
       showConfirmDialog: vi.fn().mockResolvedValue(false),
@@ -2343,7 +2392,10 @@ describe("configured batch prerequisites", () => {
         ? { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 }
         : undefined,
     );
-    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
   });
 
@@ -2458,5 +2510,91 @@ describe("configured batch prerequisites", () => {
       config: expect.objectContaining({ chipId: "esp32" }),
     });
     store.cleanup();
+  });
+});
+
+describe("Excel validation follows the selected file", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+  });
+
+  async function setup() {
+    const pending = new Map<
+      string,
+      { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    >();
+    const invoke = vi.fn((cmd: string, args: { path: string }) =>
+      cmd === "validate_excel_cmd"
+        ? new Promise((resolve, reject) =>
+            pending.set(args.path, { resolve, reject }),
+          )
+        : Promise.resolve(undefined),
+    );
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => true,
+      getRuntime: () => "tauri",
+    }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const s = useStore();
+    s.flashFirmware = false;
+    s.addPorts(["COM31"]);
+    const select = async (path: string) => {
+      s.authConfig.excelPath = path;
+      await vi.waitFor(() => expect(pending.has(path)).toBe(true));
+    };
+    const stats = (remaining: number) => ({
+      total: remaining,
+      used: 0,
+      inProgress: 0,
+      remaining,
+      invalid: 0,
+    });
+    return { s, pending, select, stats };
+  }
+
+  it("blocks starts and drops old statistics immediately when a new file needs validation", async () => {
+    const { s, pending, select, stats } = await setup();
+    await select("A.xlsx");
+    pending.get("A.xlsx")!.resolve(stats(100));
+    await vi.waitFor(() => expect(s.canStart).toBe(true));
+    await select("B.xlsx");
+    expect(s.canStart).toBe(false);
+    expect(s.excelStats).toBeNull();
+    pending.get("B.xlsx")!.resolve(stats(3));
+    await vi.waitFor(() => expect(s.excelStats?.remaining).toBe(3));
+    s.cleanup();
+  });
+
+  it.each(["success", "failure"])(
+    "ignores a late %s from the previously selected file",
+    async (outcome) => {
+      const { s, pending, select, stats } = await setup();
+      await select("A.xlsx");
+      await select("B.xlsx");
+      pending.get("B.xlsx")!.resolve(stats(3));
+      await vi.waitFor(() => expect(s.excelStats?.remaining).toBe(3));
+      if (outcome === "success") pending.get("A.xlsx")!.resolve(stats(99));
+      else pending.get("A.xlsx")!.reject(new Error("old failure"));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(s.excelStats?.remaining).toBe(3);
+      expect(s.excelError).toBeNull();
+      expect(s.canStart).toBe(true);
+      s.cleanup();
+    },
+  );
+
+  it("invalidates an in-flight validation when the selected path is cleared", async () => {
+    const { s, pending, select, stats } = await setup();
+    await select("A.xlsx");
+    s.authConfig.excelPath = "";
+    await nextTick();
+    pending.get("A.xlsx")!.resolve(stats(100));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.excelStats).toBeNull();
+    expect(s.canStart).toBe(false);
+    s.cleanup();
   });
 });

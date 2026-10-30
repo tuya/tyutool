@@ -1,6 +1,6 @@
 <!-- src/features/batch-flash-auth/components/DisclaimerModal.vue -->
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, nextTick, useId } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -12,18 +12,25 @@ const emit = defineEmits<{
 }>();
 
 const dontShowAgain = ref(false);
+const titleId = `batch-disclaimer-${useId()}`;
+const titleRef = ref<HTMLElement | null>(null);
 const dialogRef = ref<HTMLDialogElement | null>(null);
 
 watch(
   () => props.show,
-  (val) => {
-    if (val) {
-      dontShowAgain.value = false;
-      dialogRef.value?.showModal();
-    } else {
+  async (show) => {
+    if (!show) {
       dialogRef.value?.close();
+      return;
     }
+    dontShowAgain.value = false;
+    await nextTick();
+    if (!props.show) return;
+    dialogRef.value?.showModal();
+    if (dialogRef.value) dialogRef.value.scrollTop = 0;
+    titleRef.value?.focus();
   },
+  { immediate: true },
 );
 </script>
 
@@ -32,11 +39,17 @@ watch(
     <dialog
       ref="dialogRef"
       class="m-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-0 shadow-xl backdrop:bg-black/50"
-      @cancel.prevent
+      :aria-labelledby="titleId"
+      @cancel.prevent="emit('cancel')"
     >
       <div class="p-5">
         <!-- Title -->
-        <h2 class="mb-4 text-base font-semibold text-[var(--ty-text)]">
+        <h2
+          ref="titleRef"
+          :id="titleId"
+          tabindex="-1"
+          class="mb-4 text-base font-semibold text-[var(--ty-text)]"
+        >
           {{ t("batchFlashAuth.disclaimer.title") }}
         </h2>
 

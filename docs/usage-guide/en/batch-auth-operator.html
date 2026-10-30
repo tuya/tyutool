@@ -125,6 +125,7 @@
       </figure>
       <ul class="plain">
         <li>① <strong>Pick the auth sheet</strong> (<code>.xlsx</code>).</li>
+        <li>Wait for validation of the <strong>currently selected file</strong> before starting or retrying. Changing the file clears the old statistics; a pending or failed validation blocks write operations.</li>
         <li>② <strong>Check that the sheet's code stats look as expected</strong>: Total / Used / Occupied / Remaining. New devices need "Remaining" &gt; 0; recovery/retry of recorded devices can start at 0 (tyutool matches each device back to its own row by MAC).</li>
         <li>③ <strong>Decide what to do with devices that already carry auth</strong>: Skip (recommended) or Overwrite.</li>
       </ul>
@@ -160,14 +161,15 @@
       <ol class="steps">
         <li><strong>Watch the dashboard</strong>: cumulative flash/auth stats and the current batch progress update in real time; a <strong>completion banner</strong> appears at the end (all-success / all-failed / partial / all-skipped).</li>
         <li><strong>Verify row by row</strong>: one row per port; judge each by its status badge (see the <a href="#read-results">next section</a>). For failures, click the error for details and <strong>retry</strong>.</li>
-        <li><strong>Archive (when the job is done)</strong>: after the whole auth sheet's task has finished, click <strong>"Archive"</strong> on the completion banner to export everything in one step; intermediate rounds of a multi-round job don't need archiving (see the <a href="#archive">archive section</a>).</li>
+        <li><strong>Archive (when the job is done)</strong>: after the whole auth sheet's task has finished, click <strong>"Archive"</strong> in the dashboard’s batch controls to export everything in one step; intermediate rounds of a multi-round job don't need archiving (see the <a href="#archive">archive section</a>).</li>
       </ol>
       <figure class="shot">
         <img src="../assets/images/batch-dashboard.png" alt="Dashboard and completion banner: flash cumulative, auth cumulative and current-batch stats, with the completion banner and Archive button after the batch finishes" loading="lazy">
-        <figcaption>The dashboard and completion banner (the "Archive" button on its right)</figcaption>
+        <figcaption>The dashboard and completion banner; Archive remains available after dismissing the banner.</figcaption>
       </figure>
 
       <h2 id="read-results">4. Reading the results</h2>
+      <p>Per-port retry is available for failed and <code>no_code</code> rows once the current configuration is valid and the port is available; a disabled button explains what to correct. A cancelled authorization that may have written credentials stays quarantined: physically isolate and manually verify it before further action. Resetting cumulative flash or auth statistics asks for confirmation and names the affected group. Dismissing the completion banner keeps Archive and its result available in the batch controls.</p>
       <p>Each port occupies one row showing: a colored <strong>status badge</strong>, a <strong>progress bar</strong> during the flash phase, the <strong>MAC / UUID</strong> once read, and an <strong>error message</strong> on failure (click for details and copy). One table is all you need:</p>
       <table>
         <thead><tr><th>Status</th><th>What it means</th><th>What to do</th></tr></thead>
@@ -184,7 +186,7 @@
       <p>Two terms, to avoid ambiguity: one click of "Start All" is a <strong>round</strong>; the whole production task tied to one auth sheet is a <strong>job</strong> (a job usually spans many rounds — e.g. 4 ports × 250 rounds = 1000 devices). <strong>Archiving is per job: one auth sheet = one archive folder, created once when the job finishes (or before switching to another sheet)</strong> — the number of rounds doesn't matter, because every device's status, MAC and timestamp are written back into the sheet as you go; the Excel copy is the complete ledger.</p>
       <div class="callout tip">
         <span class="title">One-click archive</span>
-        The completion banner has an <strong>"Archive"</strong> button: pick a destination directory and tyutool creates a timestamped archive folder (e.g. <code>batch-archive_20260717-143205_esp32/</code>) containing the <strong>auth-sheet copy (the full ledger), the firmware file (with its SHA-256), a logs.zip, batch-summary.json</strong> (config, environment, stats) <strong>and batch-slots.csv</strong>. Note: the <code>lastRun</code> section and the csv are only a <strong>snapshot of the final round</strong> — the Excel copy is always the authority for the full job.
+        The dashboard’s persistent batch controls have an <strong>"Archive"</strong> button: pick a destination directory and tyutool creates a timestamped archive folder (e.g. <code>batch-archive_20260717-143205_esp32/</code>) containing the <strong>auth-sheet copy (the full ledger), the firmware file (with its SHA-256), a logs.zip, batch-summary.json</strong> (config, environment, stats) <strong>and batch-slots.csv</strong>. Note: the <code>lastRun</code> section and the csv are only a <strong>snapshot of the final round</strong> — the Excel copy is always the authority for the full job.
       </div>
       <p>Why it matters: auth codes are paid for — this archive is your <strong>"which device got which code" ledger</strong>, and shipping traceability and after-sales lookups depend on it. After clicking "Archive", the folder contains:</p>
       <table>
@@ -217,7 +219,7 @@
         </tbody>
       </table>
       <h3 id="save-evidence">Before reporting: preserve the scene</h3>
-      <p>The fastest way: <strong>while the scene is still intact, click "Archive" on the completion banner</strong> — error details, logs, the auth-sheet copy, and config/environment info are all saved in one go (see the <a href="#archive">archive section</a>; a single error's full text can also be copied via the failed row's error → details → copy). Beyond the archive, only three things need doing by hand:</p>
+      <p>The fastest way: <strong>while the scene is still intact, click "Archive" in the dashboard’s batch controls</strong> — error details, logs, the auth-sheet copy, and config/environment info are all saved in one go (see the <a href="#archive">archive section</a>; a single error's full text can also be copied via the failed row's error → details → copy). Beyond the archive, only three things need doing by hand:</p>
       <ul>
         <li><strong>A UI screenshot</strong>: the port list with the failed rows, showing port names, status badges and which step it stopped at. <strong>Mask the AuthKey</strong> — the UUID can stay, it's how you match the row.</li>
         <li><strong>The affected devices themselves</strong>: label them and set them aside — don't mix them back with good units, especially any showing the danger badge (see <a href="#safety">Safety rules</a>).</li>

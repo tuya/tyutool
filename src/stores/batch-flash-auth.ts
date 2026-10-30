@@ -2,6 +2,7 @@ import { ref, computed, watch } from "vue";
 import { defineStore } from "pinia";
 import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
+import { wsTransport } from "@/transport/ws-transport";
 import { isTauriRuntime } from "@/runtime";
 import { i18n } from "@/i18n";
 import { rLog } from "@/utils/log";
@@ -108,6 +109,12 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   const firmwareDownloadProgress = ref<number | null>(null);
   const excelStats = ref<ExcelStats | null>(null);
   const excelError = ref<string | null>(null);
+  const portsLoading = ref(false);
+  const portsError = ref("");
+  const lastScannedPorts = ref<string[] | null>(null);
+  let portsGeneration = 0;
+  const excelLoading = ref(false);
+  let excelValidationGeneration = 0;
   const archiveStatus = ref<"idle" | "archiving" | "done" | "error">("idle");
   const archiveError = ref<string>("");
   const lastArchivePath = ref<string>("");
@@ -166,7 +173,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
       if (!authConfig.value.excelPath)
         return "batchFlashAuth.toolbar.selectExcelFirst";
       if (excelError.value) return "batchFlashAuth.toolbar.excelInvalid";
-      if (!excelStats.value)
+      if (excelLoading.value || !excelStats.value)
         return "batchFlashAuth.toolbar.excelValidationPending";
       // Only NEW devices need an Available row ("remaining"). Devices already
       // recorded in the sheet (in-progress or used rows) are matched by MAC
@@ -373,34 +380,57 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   async function autoAssign() {
-    if (!isTauriRuntime()) return;
-    const { invoke } = await import("@tauri-apps/api/core");
-    const all: Array<{ path: string }> = await invoke("list_serial_ports_cmd");
-    // Windows reassigns COM numbers when an adapter is re-plugged; drop
-    // non-active slots whose port no longer exists so stale numbers don't
-    // accumulate alongside the new ones.
-    const present = new Set(all.map((p) => p.path));
-    slots.value = slots.value.filter(
-      (s) => ACTIVE_STATUSES.includes(s.status) || present.has(s.port),
-    );
-    const filtered = applyPortFilter(
-      all.map((p) => p.path),
-      filterConfig.value.blockedPorts,
-    );
-    addPorts(filtered);
+    const generation = ++portsGeneration;
+    portsLoading.value = true;
+    portsError.value = "";
+    try {
+      let all: Array<{ path: string }>;
+      if (isTauriRuntime()) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        all = await invoke("list_serial_ports_cmd");
+      } else all = await wsTransport.listPorts();
+      if (generation !== portsGeneration) return;
+      lastScannedPorts.value = all.map((row) => row.path);
+      // Keep active slots; pruning stale idle results follows the existing refresh contract.
+      const present = new Set(lastScannedPorts.value);
+      slots.value = slots.value.filter(
+        (slot) =>
+          ACTIVE_STATUSES.includes(slot.status) || present.has(slot.port),
+      );
+      addPorts(
+        applyPortFilter(
+          lastScannedPorts.value,
+          filterConfig.value.blockedPorts,
+        ),
+      );
+    } catch (error) {
+      if (generation === portsGeneration)
+        portsError.value =
+          error instanceof Error ? error.message : String(error);
+    } finally {
+      if (generation === portsGeneration) portsLoading.value = false;
+    }
   }
 
   async function validateExcel(path: string) {
+    const generation = ++excelValidationGeneration;
+    excelStats.value = null;
+    excelError.value = null;
+    excelLoading.value = false;
     if (!path || !isTauriRuntime()) {
-      excelStats.value = null;
-      excelError.value = null;
       return;
     }
+    excelLoading.value = true;
+    const current = () =>
+      generation === excelValidationGeneration &&
+      path === authConfig.value.excelPath;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      excelStats.value = await invoke<ExcelStats>("validate_excel_cmd", {
+      const stats = await invoke<ExcelStats>("validate_excel_cmd", {
         path,
       });
+      if (!current()) return;
+      excelStats.value = stats;
       excelError.value = null;
       if (excelStats.value) {
         rLog.info(
@@ -408,13 +438,19 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
         );
       }
     } catch (e) {
+      if (!current()) return;
       excelStats.value = null;
       const raw = String(e);
       excelError.value = EXCEL_ERROR_CODES[raw] ?? raw;
+    } finally {
+      if (current()) excelLoading.value = false;
     }
   }
 
-  watch(() => authConfig.value.excelPath, validateExcel, { immediate: true });
+  watch(() => authConfig.value.excelPath, validateExcel, {
+    immediate: true,
+    flush: "sync",
+  });
 
   // ── Default-firmware download ─────────────────────────────────────────────
   async function saveFirmwareConfig() {
@@ -1296,6 +1332,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   function cleanup() {
+    portsGeneration++;
+    portsLoading.value = false;
+    excelValidationGeneration++;
+    excelLoading.value = false;
     clearTimeout(_saveStatsTimer);
     _saveStatsTimer = undefined;
     releaseAllClaimedPorts();
@@ -1379,6 +1419,11 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     firmwareDownloadProgress,
     excelStats,
     excelError,
+    excelLoading,
+    portsLoading,
+    portsError,
+    lastScannedPorts,
+    configurationDisabledReason,
     archiveStatus,
     archiveError,
     lastArchivePath,
