@@ -602,19 +602,7 @@ export const useFlashStore = defineStore("flash", () => {
     }
 
     // ── 1. Input validation ────────────────────────────────────────
-    const vErr = validateOperation(kind, {
-      flashSegments: flashSegments.value,
-      readDir: readDir.value,
-      readFileName: readFileName.value,
-      authorizeUuid: authorizeUuid.value,
-      authorizeAuthKey: authorizeAuthKey.value,
-      selectedSerialPort: selectedSerialPort.value,
-      eraseStartAddr: eraseStartAddr.value,
-      eraseEndAddr: eraseEndAddr.value,
-      readStartAddr: readStartAddr.value,
-      readEndAddr: readEndAddr.value,
-      isTauri: isTauriRuntime(),
-    });
+    const vErr = validateOperation(kind, operationInput.value);
     if (vErr) {
       flashMessage.value = vErr.message;
       flashPhase.value = "error";
@@ -984,34 +972,47 @@ export const useFlashStore = defineStore("flash", () => {
     );
   }
 
-  const canFlash = computed(() => {
-    if (busy.value || !selectedSerialPort.value) return false;
-    if (selectedChipId.value === AUTH_ONLY_CHIP_ID) return false;
-    return flashSegments.value.every((s) => !!s.firmwarePath.trim());
+  const operationInput = computed(() => ({
+    flashSegments: flashSegments.value,
+    readDir: readDir.value,
+    readFileName: readFileName.value,
+    authorizeUuid: authorizeUuid.value,
+    authorizeAuthKey: authorizeAuthKey.value,
+    selectedSerialPort: selectedSerialPort.value,
+    eraseStartAddr: eraseStartAddr.value,
+    eraseEndAddr: eraseEndAddr.value,
+    readStartAddr: readStartAddr.value,
+    readEndAddr: readEndAddr.value,
+    isTauri: isTauriRuntime(),
+  }));
+
+  // Button availability and its visible explanation use the same preflight rules.
+  const operationDisabledReasons = computed(() => {
+    const reason = (kind: OpKind): string => {
+      if (busy.value) return t("flash.operationInProgress");
+      if (kind !== "authorize" && selectedChipId.value === AUTH_ONLY_CHIP_ID)
+        return t("flash.authorizationOnlyChip");
+      if (!selectedSerialPort.value) return t("flash.selectPortFirst");
+      if (
+        kind === "authorize" &&
+        (!authorizeUuid.value.trim() || !authorizeAuthKey.value.trim())
+      )
+        return t("flash.err.fillAuth");
+      return validateOperation(kind, operationInput.value)?.message ?? "";
+    };
+    return {
+      flash: reason("flash"),
+      erase: reason("erase"),
+      read: reason("read"),
+      authorize: reason("authorize"),
+    };
   });
 
-  const canErase = computed(
-    () =>
-      !busy.value &&
-      !!selectedSerialPort.value &&
-      selectedChipId.value !== AUTH_ONLY_CHIP_ID,
-  );
-
-  const canRead = computed(
-    () =>
-      !busy.value &&
-      (isTauriRuntime() ? !!readDir.value.trim() : true) &&
-      !!readFileName.value.trim() &&
-      !!selectedSerialPort.value &&
-      selectedChipId.value !== AUTH_ONLY_CHIP_ID,
-  );
-
+  const canFlash = computed(() => !operationDisabledReasons.value.flash);
+  const canErase = computed(() => !operationDisabledReasons.value.erase);
+  const canRead = computed(() => !operationDisabledReasons.value.read);
   const canAuthorize = computed(
-    () =>
-      !busy.value &&
-      !!selectedSerialPort.value &&
-      !!authorizeUuid.value.trim() &&
-      !!authorizeAuthKey.value.trim(),
+    () => !operationDisabledReasons.value.authorize,
   );
 
   /** Read-only auth — only needs a connected port. */
@@ -1039,6 +1040,7 @@ export const useFlashStore = defineStore("flash", () => {
   ]);
 
   return {
+    operationDisabledReasons,
     CHIP_IDS,
     AUTH_CHIP_IDS,
     SERIAL_PORT_OPTIONS: serialPortOptions,
