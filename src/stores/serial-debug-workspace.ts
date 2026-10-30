@@ -14,14 +14,15 @@ import {
   DEFAULT_STOP_BITS,
   DEFAULT_VISIBLE_LOG_WINDOW_LINES,
   MAX_ARCHIVE_LIMIT_MIB,
-  MAX_SEND_HISTORY,
   MAX_VISIBLE_LOG_WINDOW_LINES,
   MIN_ARCHIVE_LIMIT_MIB,
   MIN_VISIBLE_LOG_WINDOW_LINES,
 } from "@/features/serial-debug/constants";
 import { isTauriRuntime } from "@/runtime";
+import { parseSendHistory } from "@/features/serial-debug/send-history";
+import type { SendHistoryEntry } from "@/features/serial-debug/types";
 
-export const SD_WORKSPACE_VERSION = 1;
+export const SD_WORKSPACE_VERSION = 2;
 const KEY = "serial-debug-workspace.v1";
 
 const VALID_DATA_BITS: readonly DebugDataBits[] = [
@@ -56,7 +57,7 @@ export interface SerialDebugWorkspaceSerialized {
   hexBytesPerRow: HexBytesPerRow;
   sendMode: SendMode;
   sendAppendCrlf: boolean;
-  sendHistory: string[];
+  sendHistory: SendHistoryEntry[];
   ansiEnabled?: boolean;
   logFontSize?: number;
   logWindowLines?: number;
@@ -79,7 +80,7 @@ export function parseSerialDebugWorkspace(
 ): SerialDebugWorkspaceSerialized | null {
   if (!rec || typeof rec !== "object") return null;
   const r = rec as Record<string, unknown>;
-  if (r.v !== SD_WORKSPACE_VERSION) return null;
+  if (r.v !== 1 && r.v !== SD_WORKSPACE_VERSION) return null;
 
   const str = (v: unknown, fallback = ""): string =>
     typeof v === "string" ? v : fallback;
@@ -146,12 +147,8 @@ export function parseSerialDebugWorkspace(
     );
   })();
 
-  // Send history: must be an array of strings; cap length + drop non-strings.
-  const sendHistory: string[] = Array.isArray(r.sendHistory)
-    ? r.sendHistory
-        .filter((s): s is string => typeof s === "string")
-        .slice(0, MAX_SEND_HISTORY)
-    : [];
+  // Keep the existing storage key so upgrades can read text-only v1 history.
+  const sendHistory = parseSendHistory(r.sendHistory);
 
   return {
     v: SD_WORKSPACE_VERSION,

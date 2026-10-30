@@ -643,6 +643,31 @@
       "openFailedWith": "Open failed: {msg}",
       "sendFailed": "Send failed: {msg}",
       "portDenied": "Port is busy; open cancelled"
+    },
+    "history": {
+      "search": "Search commands or names…",
+      "favoritesOnly": "Favorites only",
+      "unknownSettings": "Settings unknown",
+      "noNewline": "No newline",
+      "unknownTime": "Time unknown",
+      "favorite": "Favorite",
+      "unfavorite": "Unfavorite",
+      "favoriteLimit": "You can keep up to {count} favorites. Remove one first.",
+      "deleted": "Command deleted.",
+      "nameSaved": "Name saved.",
+      "name": "Command name",
+      "saveName": "Save name",
+      "delete": "Delete",
+      "close": "Close history",
+      "preview": "Full preview",
+      "lastSent": "Last sent: {time} · Sent {count} times",
+      "fill": "Fill send input",
+      "fillHint": "Restores mode and line endings. Send when ready.",
+      "legacyHint": "This older entry has no saved settings. Your current mode and line endings will be kept.",
+      "keys": "↑ / ↓ select · Enter fills from search · Esc closes",
+      "empty": "Successfully sent commands will appear here.",
+      "noMatch": "No matching commands. Try another search or show all.",
+      "restoreDraft": "Restore draft"
     }
   },
   "batchFlashAuth": {

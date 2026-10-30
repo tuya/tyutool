@@ -75,6 +75,16 @@ export interface DebugLogLine {
 }
 
 export type SendMode = "ascii" | "hex";
+export interface SendHistoryEntry {
+  text: string;
+  /** null for text-only entries saved by older versions. */
+  mode: SendMode | null;
+  appendCrlf: boolean | null;
+  lastSentAt: number | null;
+  sendCount: number;
+  favorite: boolean;
+  name: string;
+}
 export type HexBytesPerRow = 8 | 16 | 32;
 
 export interface WatchChip {
@@ -85,10 +95,7 @@ export interface WatchChip {
 }
 
 export type SerialDebugFilterStatus =
-  | "pending"
-  | "backfilling"
-  | "complete"
-  | "failed";
+  "pending" | "backfilling" | "complete" | "failed";
 
 export interface SerialDebugFilterStats {
   filterId: string;

@@ -643,6 +643,31 @@
       "openFailedWith": "打开失败: {msg}",
       "sendFailed": "发送失败: {msg}",
       "portDenied": "当前端口被占用，本次未打开"
+    },
+    "history": {
+      "search": "搜索命令内容或名称…",
+      "favoritesOnly": "只看常用",
+      "unknownSettings": "参数未知",
+      "noNewline": "无换行",
+      "unknownTime": "时间未知",
+      "favorite": "收藏",
+      "unfavorite": "取消收藏",
+      "favoriteLimit": "最多保留 {count} 条常用命令，请先取消一条收藏。",
+      "deleted": "已删除命令。",
+      "nameSaved": "已保存名称。",
+      "name": "命令名称",
+      "saveName": "保存名称",
+      "delete": "删除",
+      "close": "关闭历史",
+      "preview": "完整预览",
+      "lastSent": "最近发送：{time} · 已发送 {count} 次",
+      "fill": "填入发送框",
+      "fillHint": "同时恢复模式和换行设置，准备好后再发送。",
+      "legacyHint": "这条旧记录未保存发送参数，将保留当前模式和换行设置。",
+      "keys": "↑ / ↓ 选择 · 搜索框 Enter 填入 · Esc 关闭",
+      "empty": "成功发送过的命令会显示在这里。",
+      "noMatch": "没有匹配的命令，请更换关键词或显示全部。",
+      "restoreDraft": "恢复原草稿"
     }
   },
   "batchFlashAuth": {

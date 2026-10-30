@@ -11,7 +11,7 @@ import {
   FILTER_LIVE_REFRESH_MS,
   FILTER_PAGE_SIZE,
   MAX_PENDING_LINE_BYTES,
-  MAX_SEND_HISTORY,
+  MAX_FAVORITE_COMMANDS,
   MAX_VISIBLE_LOG_WINDOW_LINES,
   DEFAULT_VISIBLE_LOG_WINDOW_LINES,
   DEFAULT_ARCHIVE_LIMIT_MIB,
@@ -19,6 +19,11 @@ import {
   AUTO_SAVE_QUEUE_MAX_LINES,
 } from "@/features/serial-debug/constants";
 import { useSerialDebugHistory } from "@/features/serial-debug/useSerialDebugHistory";
+import {
+  limitSendHistory,
+  recordSendHistory,
+  sendHistoryKey,
+} from "@/features/serial-debug/send-history";
 import {
   chipManifest,
   rustPluginIdForChip,
@@ -43,6 +48,7 @@ import type {
   DebugLogLine,
   HexBytesPerRow,
   SendMode,
+  SendHistoryEntry,
   SerialDebugFilterLinePage,
   SerialDebugFilterStats,
   SerialDebugFilterUpdatePayload,
@@ -299,7 +305,7 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const sendMode = ref<SendMode>("ascii");
   const sendAppendCrlf = ref(true);
   const sendInput = ref("");
-  const sendHistory = ref<string[]>([]);
+  const sendHistory = ref<SendHistoryEntry[]>([]);
   const sending = ref(false);
   const sendError = ref<
     { kind: "invalidHex" } | { kind: "failed"; message: string } | null
@@ -1309,12 +1315,14 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     if (!open.value || sending.value) return false;
     const raw = sendInput.value;
     if (!raw) return false;
+    const mode = sendMode.value;
+    const appendCrlf = sendAppendCrlf.value;
     const draftRevision = sendDraftRevision;
     sending.value = true;
     sendError.value = null;
     try {
       let bytes: Uint8Array;
-      if (sendMode.value === "hex") {
+      if (mode === "hex") {
         const r = parseHexInput(raw);
         bytes = r.bytes;
         if (r.ignoredCount > 0) {
@@ -1329,16 +1337,17 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
           return false;
         }
       } else {
-        const withTail = sendAppendCrlf.value ? raw + "\r\n" : raw;
+        const withTail = appendCrlf ? raw + "\r\n" : raw;
         bytes = new TextEncoder().encode(withTail);
       }
       await transport.send(bytes);
-      const idx = sendHistory.value.indexOf(raw);
-      if (idx >= 0) sendHistory.value.splice(idx, 1);
-      sendHistory.value.unshift(raw);
-      if (sendHistory.value.length > MAX_SEND_HISTORY) {
-        sendHistory.value.length = MAX_SEND_HISTORY;
-      }
+      sendHistory.value = recordSendHistory(
+        sendHistory.value,
+        raw,
+        mode,
+        appendCrlf,
+        Date.now(),
+      );
       if (sendDraftRevision === draftRevision) sendInput.value = "";
       return true;
     } catch (e) {
@@ -1350,6 +1359,39 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     } finally {
       sending.value = false;
     }
+  }
+
+  function toggleFavoriteCommand(key: string): boolean {
+    const entry = sendHistory.value.find(
+      (item) => sendHistoryKey(item) === key,
+    );
+    if (!entry) return false;
+    if (
+      !entry.favorite &&
+      sendHistory.value.filter((item) => item.favorite).length >=
+        MAX_FAVORITE_COMMANDS
+    )
+      return false;
+    sendHistory.value = limitSendHistory(
+      sendHistory.value.map((item) =>
+        item === entry ? { ...item, favorite: !item.favorite } : item,
+      ),
+    );
+    return true;
+  }
+
+  function renameHistoryCommand(key: string, name: string): void {
+    sendHistory.value = sendHistory.value.map((item) =>
+      sendHistoryKey(item) === key
+        ? { ...item, name: name.trim().slice(0, 80) }
+        : item,
+    );
+  }
+
+  function deleteHistoryCommand(key: string): void {
+    sendHistory.value = sendHistory.value.filter(
+      (item) => sendHistoryKey(item) !== key,
+    );
   }
 
   // ── chip actions ──────────────────────────────────────────────────────
@@ -1760,6 +1802,9 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     sendAppendCrlf,
     sendInput,
     sendHistory,
+    toggleFavoriteCommand,
+    renameHistoryCommand,
+    deleteHistoryCommand,
     sending,
     sendError,
     hexPopup,

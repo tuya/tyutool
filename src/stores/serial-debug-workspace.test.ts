@@ -1,3 +1,4 @@
+import { parseSendHistory } from "@/features/serial-debug/send-history";
 import { describe, expect, it } from "vitest";
 import {
   parseSerialDebugWorkspace,
@@ -28,7 +29,7 @@ function base(): SerialDebugWorkspaceSerialized {
     hexBytesPerRow: 16,
     sendMode: "ascii",
     sendAppendCrlf: true,
-    sendHistory: ["hello"],
+    sendHistory: parseSendHistory(["hello"]),
     ansiEnabled: true,
     logFontSize: 12,
     autoSave: false,
@@ -54,7 +55,38 @@ describe("parseSerialDebugWorkspace", () => {
     expect(w!.port).toBe("COM3");
     expect(w!.baudRate).toBe(115200);
     expect(w!.dataBits).toBe("eight");
-    expect(w!.sendHistory).toEqual(["hello"]);
+    expect(w!.sendHistory).toEqual(parseSendHistory(["hello"]));
+  });
+
+  it("migrates v1 text history and round-trips v2 settings without inventing metadata", () => {
+    const migrated = parseSerialDebugWorkspace({
+      ...base(),
+      v: 1,
+      sendHistory: ["AT"],
+    })!;
+    expect(migrated.v).toBe(SD_WORKSPACE_VERSION);
+    expect(migrated.sendHistory[0]).toMatchObject({
+      mode: null,
+      appendCrlf: null,
+      lastSentAt: null,
+    });
+    const saved = {
+      ...migrated,
+      sendHistory: [
+        {
+          ...migrated.sendHistory[0],
+          mode: "ascii",
+          appendCrlf: true,
+          name: "Version",
+          favorite: true,
+          lastSentAt: 1000,
+          sendCount: 3,
+        },
+      ],
+    };
+    expect(
+      parseSerialDebugWorkspace(JSON.parse(JSON.stringify(saved)))!.sendHistory,
+    ).toEqual(saved.sendHistory);
   });
 
   it("rejects an unrecognized baud rate, falling back to null (chip default)", () => {
@@ -85,13 +117,13 @@ describe("parseSerialDebugWorkspace", () => {
   });
 
   it("drops non-string sendHistory entries and caps length", () => {
-    const long = Array.from({ length: 50 }, (_, i) => `cmd${i}`);
+    const long = Array.from({ length: 150 }, (_, i) => `cmd${i}`);
     const w = parseSerialDebugWorkspace({
       ...base(),
       sendHistory: ["ok", 123, null, { x: 1 }, ...long, "tail"],
     });
-    expect(w!.sendHistory.every((s) => typeof s === "string")).toBe(true);
-    expect(w!.sendHistory.length).toBeLessThanOrEqual(20);
+    expect(w!.sendHistory.every((s) => typeof s.text === "string")).toBe(true);
+    expect(w!.sendHistory.length).toBeLessThanOrEqual(100);
   });
 
   it("returns [] when sendHistory is not an array", () => {
