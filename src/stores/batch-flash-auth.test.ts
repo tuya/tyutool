@@ -39,9 +39,9 @@ describe("OTP storage coupling", () => {
 describe("opMode", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
-  it("is auth-only by default (chip=esp32, no firmware, no excel)", () => {
+  it("keeps the configured flash-then-auth intent before a firmware is selected", () => {
     const store = useBatchFlashAuthStore();
-    expect(store.opMode).toBe("auth-only");
+    expect(store.opMode).toBe("flash-then-auth");
   });
 
   it("is auth-only when chip=other regardless of firmware and excel", () => {
@@ -52,11 +52,11 @@ describe("opMode", () => {
     expect(store.opMode).toBe("auth-only");
   });
 
-  it("is auth-only when excel selected and chip supports auth, no firmware", () => {
+  it("does not fall back to auth-only when Excel is selected without firmware", () => {
     const store = useBatchFlashAuthStore();
     store.chipId = "esp32";
     store.authConfig.excelPath = "/path/to/auth.xlsx";
-    expect(store.opMode).toBe("auth-only");
+    expect(store.opMode).toBe("flash-then-auth");
   });
 
   it("is flash-then-auth when both firmware and excel are set with supported chip", () => {
@@ -128,10 +128,12 @@ describe("inputsValid", () => {
     expect(store.inputsValid).toBe(false);
   });
 
-  it("is true when excel set, no firmware", () => {
+  it("requires firmware when flashing is enabled, but allows explicit auth-only", () => {
     const store = useBatchFlashAuthStore();
     store.chipId = "esp32";
     store.authConfig.excelPath = "/auth.xlsx";
+    expect(store.inputsValid).toBe(false);
+    store.flashFirmware = false;
     expect(store.inputsValid).toBe(true);
   });
 
@@ -328,7 +330,10 @@ describe("slot state machine", () => {
 });
 
 describe("canStart / canRetry / canCancel", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    useBatchFlashAuthStore().flashFirmware = false;
+  });
 
   it("canStart is false when no slots", () => {
     const store = useBatchFlashAuthStore();
@@ -367,6 +372,7 @@ describe("canStart / canRetry / canCancel", () => {
     expect(store.commandPrefixValid).toBe(false);
     expect(store.canStart).toBe(false);
     store.firmwarePath = "/fw.bin";
+    store.flashFirmware = true;
     store.authorizeEnabled = false;
     expect(store.canStart).toBe(true);
   });
@@ -451,8 +457,16 @@ describe("canStart / canRetry / canCancel", () => {
     expect(store.canRetry).toBe(false);
   });
 
-  it("canRetry is true when any slot is failed", () => {
+  it("canRetry is true when a slot failed and prerequisites are ready", () => {
     const store = useBatchFlashAuthStore();
+    store.authConfig.excelPath = "/auth.xlsx";
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
     store.addPorts(["COM3"]);
     store.slots[0].status = "failed";
     expect(store.canRetry).toBe(true);
@@ -971,7 +985,20 @@ describe("handleAuthProgress — excelError", () => {
 });
 
 describe("retryFailed", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    const store = useBatchFlashAuthStore();
+    store.flashFirmware = false;
+    store.authConfig.excelPath = "/auth.xlsx";
+    await nextTick();
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+  });
 
   it("clears excelError on failed slot", async () => {
     const store = useBatchFlashAuthStore();
@@ -1014,6 +1041,21 @@ describe("retryFailed", () => {
     store.completionBanner = { kind: "all-success", count: 1 };
     await store.retryFailed();
     expect(store.completionBanner).not.toBeNull();
+  });
+
+  it("keeps failed diagnostics until an active batch finishes before retrying all", async () => {
+    const store = useBatchFlashAuthStore();
+    store.addPorts(["COM3", "COM5"]);
+    store.slots[0].status = "failed";
+    store.slots[0].error = "timeout";
+    store.slots[1].status = "authorizing";
+    expect(store.canRetry).toBe(false);
+    await store.retryFailed();
+    expect(store.slots[0].status).toBe("failed");
+    expect(store.slots[0].error).toBe("timeout");
+    expect(store.slots[1].status).toBe("authorizing");
+    store.slots[1].status = "done";
+    expect(store.canRetry).toBe(true);
   });
 });
 
@@ -1151,7 +1193,20 @@ describe("isBusy computed", () => {
 });
 
 describe("cancelledAfterWrite (B1 OTP-brick safety)", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    const store = useBatchFlashAuthStore();
+    store.flashFirmware = false;
+    store.authConfig.excelPath = "/auth.xlsx";
+    await nextTick();
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+  });
 
   it("handleAuthProgress sets cancelledAfterWrite and emits failed status when payload step is cancelled_after_write", () => {
     const store = useBatchFlashAuthStore();
@@ -1218,7 +1273,20 @@ describe("cancelledAfterWrite (B1 OTP-brick safety)", () => {
 });
 
 describe("writeUncertain (auth command outcome safety)", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    const store = useBatchFlashAuthStore();
+    store.flashFirmware = false;
+    store.authConfig.excelPath = "/auth.xlsx";
+    await nextTick();
+    store.excelStats = {
+      total: 1,
+      used: 0,
+      inProgress: 0,
+      remaining: 1,
+      invalid: 0,
+    };
+  });
 
   it("marks a failed auth write as uncertain without claiming user cancellation", () => {
     const store = useBatchFlashAuthStore();
@@ -1374,6 +1442,7 @@ describe("batch_auth_start rejection — slots must not hang in reading_mac", ()
     const store = useStore();
     store.addPorts(["COM3", "COM5"]);
     store.chipId = "esp32";
+    store.flashFirmware = false;
     store.authConfig.excelPath = "/auth.xlsx";
     store.excelStats = {
       total: 1,
@@ -1902,6 +1971,7 @@ describe("port-manager integration", () => {
     const pm = usePM();
     store.addPorts(["COM3", "COM5"]);
     store.chipId = "esp32";
+    store.flashFirmware = false;
     store.authConfig.excelPath = "/auth.xlsx";
     store.excelStats = {
       total: 1,
@@ -2198,6 +2268,7 @@ describe("port-manager integration", () => {
     const pm = usePM();
     store.addPorts(["COM3"]);
     store.chipId = "esp32";
+    store.flashFirmware = false;
     store.authConfig.excelPath = "/auth.xlsx";
     store.excelStats = {
       total: 1,
@@ -2258,5 +2329,134 @@ describe("port-manager integration", () => {
     readCb!({ payload: { port: "COM3", step: "done" } });
     await nextTick();
     expect(pm.currentOwner("COM3")).toBeNull();
+  });
+});
+
+describe("configured batch prerequisites", () => {
+  let invoke: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    setActivePinia(createPinia());
+    invoke = vi.fn(async (command: string) =>
+      command === "validate_excel_cmd"
+        ? { total: 1, used: 0, inProgress: 0, remaining: 1, invalid: 0 }
+        : undefined,
+    );
+    vi.doMock("@/runtime", () => ({ isTauriRuntime: () => true }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+  });
+
+  async function setup() {
+    const { useBatchFlashAuthStore: useStore } =
+      await import("./batch-flash-auth");
+    const { usePortManagerStore: usePM } = await import("./port-manager");
+    const store = useStore();
+    store.addPorts(["COM31"]);
+    store.authConfig.excelPath = "/auth.xlsx";
+    await vi.waitFor(() => expect(store.excelStats?.remaining).toBe(1));
+    invoke.mockClear();
+    return { store, pm: usePM() };
+  }
+
+  it.each(["startBatch", "startAuth", "retryFailed", "retryPort"] as const)(
+    "%s blocks missing firmware without discarding results or claiming ports",
+    async (action) => {
+      const { store, pm } = await setup();
+      store.slots[0].status = "failed";
+      store.slots[0].error = "Keep this diagnostic";
+      store.completionBanner = { kind: "partial", done: 0, failed: 1 };
+      const before = JSON.stringify(store.slots);
+      const banner = store.completionBanner;
+      await store[action]("COM31");
+      expect(invoke).not.toHaveBeenCalled();
+      expect(JSON.stringify(store.slots)).toBe(before);
+      expect(store.completionBanner).toBe(banner);
+      expect(pm.currentOwner("COM31")).toBeNull();
+      expect(store.canStart).toBe(false);
+      expect(store.canRetry).toBe(false);
+    },
+  );
+
+  it.each(["retryFailed", "retryPort"] as const)(
+    "%s uses the same Excel gates as Start",
+    async (action) => {
+      const { store } = await setup();
+      store.firmwarePath = "/fw.bin";
+      store.slots[0].status = "failed";
+      for (const state of ["pending", "invalid", "exhausted"] as const) {
+        store.excelError = state === "invalid" ? "excel.locked" : null;
+        store.excelStats =
+          state === "pending"
+            ? null
+            : {
+                total: 1,
+                used: 0,
+                inProgress: 0,
+                remaining: state === "exhausted" ? 0 : 1,
+                invalid: 0,
+              };
+        expect(store.canStart).toBe(false);
+        expect(store.canRetry).toBe(false);
+        await store[action]("COM31");
+        expect(invoke).not.toHaveBeenCalled();
+        expect(store.slots[0].status).toBe("failed");
+      }
+    },
+  );
+
+  it("allows a single failed port retry while another port is active", async () => {
+    const { store, pm } = await setup();
+    store.firmwarePath = "/fw.bin";
+    store.slots[0].status = "failed";
+    store.addPorts(["COM33"]);
+    store.slots[1].status = "authorizing";
+    expect(store.canStart).toBe(false);
+    expect(store.canRetry).toBe(false);
+    await store.retryPort("COM31");
+    expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
+      ports: ["COM31"],
+      config: expect.objectContaining({
+        firmwarePath: "/fw.bin",
+        authorizeEnabled: true,
+      }),
+    });
+    expect(store.slots[1].status).toBe("authorizing");
+    expect(pm.currentOwner("COM31")).toBe("batch-auth");
+    store.cleanup();
+  });
+
+  it.each(["other", "gd32vw553", "esp32"])(
+    "keeps true auth-only %s starts available without firmware",
+    async (chip) => {
+      const { store } = await setup();
+      store.chipId = chip;
+      if (chip === "esp32") store.flashFirmware = false;
+      expect(store.opMode).toBe("auth-only");
+      expect(store.canStart).toBe(true);
+      await store.startBatch();
+      expect(invoke).toHaveBeenCalledWith("batch_auth_start", {
+        ports: ["COM31"],
+        config: expect.objectContaining({
+          firmwarePath: undefined,
+          authorizeEnabled: true,
+        }),
+      });
+      store.cleanup();
+    },
+  );
+
+  it("still permits a read probe without firmware or Excel", async () => {
+    const { store } = await setup();
+    store.authConfig.excelPath = "";
+    await nextTick();
+    invoke.mockClear();
+    expect(store.canReadAll).toBe(true);
+    await store.readAll();
+    expect(invoke).toHaveBeenCalledWith("batch_auth_read_ports", {
+      ports: ["COM31"],
+      config: expect.objectContaining({ chipId: "esp32" }),
+    });
+    store.cleanup();
   });
 });

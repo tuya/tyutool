@@ -130,7 +130,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   const opMode = computed<BatchOpMode>(() => {
     if (!authorizeEnabled.value) return "flash-only";
-    return canFlash.value && flashFirmware.value && !!firmwarePath.value
+    return canFlash.value && flashFirmware.value
       ? "flash-then-auth"
       : "auth-only";
   });
@@ -143,49 +143,69 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     skipped: slots.value.filter((s) => s.status === "skipped").length,
   }));
 
-  const inputsValid = computed(() =>
-    authorizeEnabled.value
-      ? !!authConfig.value.excelPath
-      : canFlash.value && flashFirmware.value && !!firmwarePath.value,
+  const firmwareReady = computed(
+    () => canFlash.value && flashFirmware.value && !!firmwarePath.value,
+  );
+  const inputsValid = computed(
+    () =>
+      (opMode.value === "auth-only" || firmwareReady.value) &&
+      (!authorizeEnabled.value || !!authConfig.value.excelPath),
   );
 
   const isBusy = computed(() => currentStats.value.active > 0);
   const commandPrefix = computed(() => resolveCommandPrefix(authConfig.value));
   const commandPrefixValid = computed(() => commandPrefix.value !== null);
-  const canStart = computed(() => {
-    if (
-      isBusy.value ||
-      !slots.value.some((slot) => !isQuarantinedSlot(slot)) ||
-      !inputsValid.value
-    )
-      return false;
+  /** Configuration checks apply to both batch starts and individual retries. */
+  const configurationDisabledReason = computed(() => {
+    if (opMode.value !== "auth-only" && !firmwareReady.value)
+      return "batchFlashAuth.toolbar.selectFirmwareFirst";
     // Flash-only batch: the Excel sheet is not used, so its checks don't apply.
-    if (!authorizeEnabled.value) return true;
-    if (!commandPrefixValid.value) return false;
-    return (
-      !excelError.value &&
-      excelStats.value !== null &&
+    if (authorizeEnabled.value) {
+      if (!commandPrefixValid.value)
+        return "batchFlashAuth.toolbar.invalidCommandPrefix";
+      if (!authConfig.value.excelPath)
+        return "batchFlashAuth.toolbar.selectExcelFirst";
+      if (excelError.value) return "batchFlashAuth.toolbar.excelInvalid";
+      if (!excelStats.value)
+        return "batchFlashAuth.toolbar.excelValidationPending";
       // Only NEW devices need an Available row ("remaining"). Devices already
       // recorded in the sheet (in-progress or used rows) are matched by MAC
       // and reuse their own row — recovery after KV loss or a retry works
       // with remaining = 0, and unrecorded devices surface per-slot as
       // no_code. Block start only when the sheet offers neither codes to
       // allocate nor history to recover.
-      excelStats.value.remaining +
-        excelStats.value.inProgress +
-        excelStats.value.used >
+      if (
+        excelStats.value.remaining +
+          excelStats.value.inProgress +
+          excelStats.value.used <=
         0
-    );
+      )
+        return "batchFlashAuth.toolbar.excelExhausted";
+    }
+    return null;
   });
+  /** Batch-only availability; single-port retries may run beside active ports. */
+  const startDisabledReason = computed(() => {
+    if (isBusy.value) return "batchFlashAuth.toolbar.batchInProgress";
+    if (configurationDisabledReason.value)
+      return configurationDisabledReason.value;
+    if (!slots.value.some((slot) => !isQuarantinedSlot(slot)))
+      return "batchFlashAuth.toolbar.noIdlePorts";
+    return null;
+  });
+  const canStart = computed(() => startDisabledReason.value === null);
   const canCancel = computed(() => isBusy.value);
-  const canRetry = computed(() =>
-    slots.value.some(
-      (s) =>
-        (s.status === "failed" &&
-          !s.cancelledAfterWrite &&
-          !s.writeUncertain) ||
-        s.status === "no_code",
-    ),
+  const canRetry = computed(
+    () =>
+      !isBusy.value &&
+      configurationDisabledReason.value === null &&
+      slots.value.some(
+        (s) =>
+          (s.status === "failed" &&
+            !s.cancelledAfterWrite &&
+            !s.writeUncertain) ||
+          s.status === "no_code",
+      ),
   );
   const canReadAll = computed(
     () => !isBusy.value && slots.value.length > 0 && commandPrefixValid.value,
@@ -601,7 +621,6 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   async function retryFailed() {
     if (!canRetry.value) return;
-    if (authorizeEnabled.value && !commandPrefixValid.value) return;
     completionBanner.value = null;
     for (const slot of slots.value.filter(
       (s) =>
@@ -624,6 +643,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   }
 
   async function retryPort(port: string) {
+    if (configurationDisabledReason.value) return;
     if (!isTauriRuntime()) return;
     const resolvedPrefix = authorizeEnabled.value ? commandPrefix.value : "";
     if (resolvedPrefix === null) return;
@@ -1370,6 +1390,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     inputsValid,
     isBusy,
     canStart,
+    startDisabledReason,
     canCancel,
     canRetry,
     canReadAll,

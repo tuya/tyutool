@@ -52,4 +52,18 @@ describe("BatchAuthConfig command prefix controls", () => {
         ?.disabled,
     ).toBe(true);
   });
+
+  it("associates the Excel path with its visible label", () => {
+    app = createApp(BatchAuthConfig).use(pinia).use(i18n);
+    app.component(
+      "FontAwesomeIcon",
+      defineComponent({ setup: () => () => h("i") }),
+    );
+    app.mount(host);
+    const label = host.querySelector<HTMLLabelElement>(
+      'label[for="batch-auth-excel-path"]',
+    );
+    expect(label?.control).toBe(host.querySelector("#batch-auth-excel-path"));
+    expect(label?.control).not.toBeNull();
+  });
 });

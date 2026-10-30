@@ -1,15 +1,25 @@
 <!-- src/features/batch-flash/components/BatchPortFilterModal.vue -->
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, useId } from "vue";
+import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
 
 const { t } = useI18n();
 
-defineProps<{ open: boolean }>();
-defineEmits<{ close: [] }>();
+const props = defineProps<{ open: boolean }>();
+const emit = defineEmits<{ close: [] }>();
 const store = useBatchFlashAuthStore();
 const newPort = ref("");
+const dialogRef = ref<HTMLElement | null>(null);
+const inputRef = ref<HTMLInputElement | null>(null);
+const titleId = `port-filter-${useId()}`;
+useModalFocus(
+  dialogRef,
+  () => props.open,
+  () => emit("close"),
+  () => inputRef.value,
+);
 
 function addPort() {
   const p = newPort.value.trim();
@@ -28,10 +38,18 @@ function addPort() {
       @click.self="$emit('close')"
     >
       <div
+        ref="dialogRef"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="titleId"
+        tabindex="-1"
         class="w-full max-w-md rounded-2xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-5 shadow-xl"
       >
         <div class="mb-4 flex items-center justify-between">
-          <h2 class="text-base font-semibold text-[var(--ty-text)]">
+          <h2
+            :id="titleId"
+            class="text-base font-semibold text-[var(--ty-text)]"
+          >
             {{ t("batchFlashAuth.filter.title") }}
           </h2>
           <button
@@ -51,8 +69,10 @@ function addPort() {
         <!-- Add port input -->
         <div class="mb-4 flex gap-2">
           <input
+            ref="inputRef"
             v-model="newPort"
             type="text"
+            :aria-label="t('batchFlashAuth.slot.port')"
             :placeholder="t('batchFlashAuth.filter.placeholder')"
             class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 py-1.5 text-sm text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
             @keydown.enter="addPort"

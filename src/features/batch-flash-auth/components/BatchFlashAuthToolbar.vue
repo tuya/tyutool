@@ -10,32 +10,19 @@ const { t } = useI18n();
 const store = useBatchFlashAuthStore();
 const filterOpen = ref(false);
 
-/** Why the Start button is disabled (tooltip); undefined when it is enabled. */
-const startDisabledHint = computed(() => {
-  if (store.canStart) return undefined;
-  if (store.isBusy) return t("batchFlashAuth.toolbar.batchInProgress");
-  if (store.opMode === "flash-only") {
-    if (!store.firmwarePath)
-      return t("batchFlashAuth.toolbar.selectFirmwareFirst");
-    return t("batchFlashAuth.toolbar.noIdlePorts");
-  }
-  if (!store.commandPrefixValid)
-    return t("batchFlashAuth.toolbar.invalidCommandPrefix");
-  if (!store.authConfig.excelPath)
-    return t("batchFlashAuth.toolbar.selectExcelFirst");
-  if (store.excelError) return t("batchFlashAuth.toolbar.excelInvalid");
-  if (
-    store.excelStats &&
-    store.excelStats.remaining +
-      store.excelStats.used +
-      store.excelStats.inProgress ===
-      0
-  )
-    return t("batchFlashAuth.toolbar.excelExhausted");
-  return t("batchFlashAuth.toolbar.noIdlePorts");
+const startDisabledHint = computed(() =>
+  store.startDisabledReason ? t(store.startDisabledReason) : undefined,
+);
+const currentModeLabel = computed(() => {
+  if (store.opMode === "flash-only")
+    return t("batchFlashAuth.toolbar.modeFlashOnly");
+  if (store.opMode === "auth-only")
+    return t("batchFlashAuth.toolbar.modeAuthOnly");
+  return t("batchFlashAuth.toolbar.modeFlashThenAuth");
 });
 
 async function handleStart() {
+  if (!store.canStart) return;
   const idleCount = store.slots.length - store.currentStats.active;
   if (idleCount > 8) {
     const parts: string[] = [
@@ -74,9 +61,9 @@ async function handleAutoAssign() {
 </script>
 
 <template>
-  <div class="flex items-center gap-2">
+  <div class="flex flex-wrap items-center gap-2">
     <!-- Left: functional controls -->
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <button
         type="button"
         class="ty-btn-secondary flex items-center gap-1.5 text-sm"
@@ -125,10 +112,8 @@ async function handleAutoAssign() {
       </button>
     </div>
 
-    <div class="flex-1" />
-
     <!-- Right: action buttons -->
-    <div class="flex items-center gap-2">
+    <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
       <button
         type="button"
         class="ty-btn-secondary text-sm"
@@ -144,7 +129,7 @@ async function handleAutoAssign() {
         :disabled="!store.canRetry"
         :title="
           !store.canRetry
-            ? t('batchFlashAuth.toolbar.noFailedPorts')
+            ? (startDisabledHint ?? t('batchFlashAuth.toolbar.noFailedPorts'))
             : undefined
         "
         @click="store.retryFailed()"
@@ -157,11 +142,33 @@ async function handleAutoAssign() {
         class="ty-btn-primary-solid text-sm"
         :disabled="!store.canStart"
         :title="startDisabledHint"
+        :aria-describedby="
+          startDisabledHint
+            ? 'batch-current-mode batch-start-prerequisite'
+            : 'batch-current-mode'
+        "
         @click="handleStart"
       >
         <FontAwesomeIcon :icon="['fas', 'play']" class="mr-1 size-3" />
         {{ t("batchFlashAuth.toolbar.start") }}
       </button>
+    </div>
+    <div
+      class="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs"
+      aria-live="polite"
+    >
+      <p id="batch-current-mode" class="font-medium text-[var(--ty-text)]">
+        {{
+          t("batchFlashAuth.toolbar.currentMode", { mode: currentModeLabel })
+        }}
+      </p>
+      <p
+        v-if="startDisabledHint"
+        id="batch-start-prerequisite"
+        class="text-[var(--ty-text-muted)]"
+      >
+        {{ startDisabledHint }}
+      </p>
     </div>
   </div>
 

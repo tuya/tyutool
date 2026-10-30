@@ -153,4 +153,27 @@ describe("BatchFlashAuthPage serial port indicators", () => {
     expect(indicator).not.toBeNull();
     expect(indicator?.textContent?.includes("3")).toBe(true);
   });
+
+  it("places batch actions before expanded configuration and keeps them sticky", async () => {
+    app = createApp(BatchFlashAuthPage);
+    app.component(
+      "FontAwesomeIcon",
+      defineComponent({ setup: () => () => h("i") }),
+    );
+    app.mount(host!);
+    await nextTick();
+    const toolbar = Array.from(host!.querySelectorAll("div")).find(
+      (el) => el.textContent === "toolbar",
+    );
+    const config = host!.querySelector("#batch-config-panel")!;
+    expect(
+      toolbar!.compareDocumentPosition(config) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(toolbar!.closest(".sticky")).not.toBeNull();
+    expect((config as HTMLElement).style.display).not.toBe("none");
+    mockStore.isBusy = true;
+    await nextTick();
+    expect((config as HTMLElement).style.display).toBe("none");
+  });
 });

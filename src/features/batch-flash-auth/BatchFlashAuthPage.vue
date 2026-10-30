@@ -88,8 +88,10 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <div class="sticky top-0 z-10 bg-[var(--ty-canvas)] pb-2 pt-1">
-      <BatchFlashAuthDashboard />
+    <BatchFlashAuthDashboard />
+
+    <div class="sticky top-0 z-10 bg-[var(--ty-canvas)] py-2">
+      <BatchFlashAuthToolbar />
     </div>
 
     <!-- Collapsible configuration disclosure: shrinks out of the way once
@@ -135,14 +137,13 @@ onUnmounted(() => {
       <div
         v-show="configOpen"
         id="batch-config-panel"
-        class="space-y-3 border-t border-[var(--ty-border)] p-3.5"
+        class="space-y-2 border-t border-[var(--ty-border)] p-2.5"
       >
         <BatchFlashAuthConfig />
         <BatchAuthConfig />
       </div>
     </section>
 
-    <BatchFlashAuthToolbar />
     <BatchFlashAuthSlotList />
   </div>
 </template>
