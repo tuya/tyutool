@@ -1,0 +1,638 @@
+[
+  {
+    "state": "flash-running",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-flash-running-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-success",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-flash-success-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-error",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-flash-error-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "danger-confirm",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-danger-confirm-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "command-history",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-command-history-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "serial-settings",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-serial-settings-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "batch-quarantine",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-batch-quarantine-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "diagnostic-list",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-diagnostic-list-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-search",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-diagnostic-search-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-open-with",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-diagnostic-open-with-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      },
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-failure",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-update-failure-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-available",
+    "theme": "light",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-update-available-light-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "flash-running",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-flash-running-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-success",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-flash-success-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-error",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-flash-error-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "danger-confirm",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-danger-confirm-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "command-history",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-command-history-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "serial-settings",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-serial-settings-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "batch-quarantine",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-batch-quarantine-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "diagnostic-list",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-diagnostic-list-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-search",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-diagnostic-search-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-open-with",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-diagnostic-open-with-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      },
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-failure",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-update-failure-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-available",
+    "theme": "dark",
+    "width": 1280,
+    "height": 800,
+    "lang": "zh-CN",
+    "filename": "state-update-available-dark-1280-zh-CN.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "flash-running",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-flash-running-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-success",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-flash-success-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-error",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-flash-error-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "danger-confirm",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-danger-confirm-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "command-history",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-command-history-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "serial-settings",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-serial-settings-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "batch-quarantine",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-batch-quarantine-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "diagnostic-list",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-diagnostic-list-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-search",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-diagnostic-search-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-open-with",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-diagnostic-open-with-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      },
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-failure",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-update-failure-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-available",
+    "theme": "light",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-update-available-light-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "flash-running",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-flash-running-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-success",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-flash-success-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "flash-error",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-flash-error-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "danger-confirm",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-danger-confirm-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "command-history",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-command-history-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "serial-settings",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-serial-settings-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "batch-quarantine",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-batch-quarantine-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": []
+  },
+  {
+    "state": "diagnostic-list",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-diagnostic-list-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-search",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-diagnostic-search-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "diagnostic-open-with",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-diagnostic-open-with-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      },
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-failure",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-update-failure-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  },
+  {
+    "state": "update-available",
+    "theme": "dark",
+    "width": 1024,
+    "height": 680,
+    "lang": "en",
+    "filename": "state-update-available-dark-1024-en.png",
+    "documentOverflow": 0,
+    "mainOverflow": 0,
+    "dialogs": [
+      {
+        "insideWindow": true
+      }
+    ]
+  }
+]

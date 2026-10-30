@@ -1,0 +1,116 @@
+{
+  "branch": "yj/ui-theme-overhaul",
+  "base": "4ae3f0d96d85eebe65dc63a386a8781d88dbc5c4",
+  "delivery": "Thematic commits on yj/ui-theme-overhaul",
+  "frontend": [
+    {
+      "command": "pnpm run lint",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run typecheck:scripts",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run typecheck:ui",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run check:tauri-versions",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run test:coverage",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run build",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    }
+  ],
+  "ui": {
+    "command": "Playwright confirmed suite with reuseExistingServer=true",
+    "passed": 129,
+    "failed": 0
+  },
+  "coverage": {
+    "files": 86,
+    "tests": 1180,
+    "statements": 84.83,
+    "branches": 78.06,
+    "functions": 88.98,
+    "lines": 85.7
+  },
+  "rust": [
+    {
+      "command": "cargo fmt --all --check",
+      "exitCode": 0,
+      "seconds": 0.72
+    },
+    {
+      "command": "cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D warnings",
+      "exitCode": 0,
+      "seconds": 1.57
+    },
+    {
+      "command": "cargo clippy -p tyutool_gui --all-targets -- -D warnings",
+      "exitCode": 0,
+      "seconds": 1.14
+    },
+    {
+      "command": "cargo clippy -p tyutool-bridge --all-targets -- -D warnings",
+      "exitCode": 0,
+      "seconds": 0.56
+    },
+    {
+      "command": "cargo test -p tyutool-core -p tyutool-cli -p tyutool-serve",
+      "exitCode": 0,
+      "note": "Local loopback tests passed after rerunning with local communication allowed."
+    },
+    {
+      "command": "cargo test -p tyutool_gui",
+      "exitCode": 0,
+      "seconds": 4.21
+    },
+    {
+      "command": "cargo test -p tyutool-bridge",
+      "exitCode": 0,
+      "note": "Local loopback tests passed after rerunning with local communication allowed."
+    },
+    {
+      "command": "cargo test -p tyutool-core --features ts-rs",
+      "exitCode": 0,
+      "seconds": 13.48
+    },
+    {
+      "command": "git diff --exit-code -- src/bindings/",
+      "exitCode": 0,
+      "seconds": 0.01
+    },
+    {
+      "command": "cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download -- -D warnings",
+      "exitCode": 0,
+      "seconds": 0.49
+    },
+    {
+      "command": "cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download",
+      "exitCode": 0,
+      "seconds": 23.25
+    }
+  ],
+  "validationBoundary": "Chromium and software tests; native Tauri and physical hardware not validated",
+  "gallery": {
+    "combinations": 88,
+    "failed": 0,
+    "directFileOpen": "passed",
+    "command": "node docs/design/ui-theme-overhaul-2026-10-30/implementation/verify-gallery.mjs"
+  },
+  "screenshots": {
+    "pages": 40,
+    "states": 48
+  }
+}
