@@ -300,6 +300,19 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
   const sendAppendCrlf = ref(true);
   const sendInput = ref("");
   const sendHistory = ref<string[]>([]);
+  const sending = ref(false);
+  const sendError = ref<
+    { kind: "invalidHex" } | { kind: "failed"; message: string } | null
+  >(null);
+  let sendDraftRevision = 0;
+  watch(
+    [sendInput, sendMode, sendAppendCrlf],
+    () => {
+      sendDraftRevision += 1;
+      sendError.value = null;
+    },
+    { flush: "sync" },
+  );
 
   // ── hex popup ────────────────────────────────────────────────────────
   const hexPopup = ref<{
@@ -1292,25 +1305,33 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     }
   }
 
-  async function send(): Promise<void> {
-    if (!open.value) return;
+  async function send(): Promise<boolean> {
+    if (!open.value || sending.value) return false;
     const raw = sendInput.value;
-    if (!raw) return;
-    let bytes: Uint8Array;
-    if (sendMode.value === "hex") {
-      const r = parseHexInput(raw);
-      bytes = r.bytes;
-      if (r.ignoredCount > 0) {
-        await appendSysLine(
-          t("serialDebug.send.hexParseIgnored", { n: r.ignoredCount }),
-        );
-      }
-      if (bytes.length === 0) return;
-    } else {
-      const withTail = sendAppendCrlf.value ? raw + "\r\n" : raw;
-      bytes = new TextEncoder().encode(withTail);
-    }
+    if (!raw) return false;
+    const draftRevision = sendDraftRevision;
+    sending.value = true;
+    sendError.value = null;
     try {
+      let bytes: Uint8Array;
+      if (sendMode.value === "hex") {
+        const r = parseHexInput(raw);
+        bytes = r.bytes;
+        if (r.ignoredCount > 0) {
+          await appendSysLine(
+            t("serialDebug.send.hexParseIgnored", { n: r.ignoredCount }),
+          );
+        }
+        if (bytes.length === 0) {
+          if (sendDraftRevision === draftRevision) {
+            sendError.value = { kind: "invalidHex" };
+          }
+          return false;
+        }
+      } else {
+        const withTail = sendAppendCrlf.value ? raw + "\r\n" : raw;
+        bytes = new TextEncoder().encode(withTail);
+      }
       await transport.send(bytes);
       const idx = sendHistory.value.indexOf(raw);
       if (idx >= 0) sendHistory.value.splice(idx, 1);
@@ -1318,9 +1339,16 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
       if (sendHistory.value.length > MAX_SEND_HISTORY) {
         sendHistory.value.length = MAX_SEND_HISTORY;
       }
+      if (sendDraftRevision === draftRevision) sendInput.value = "";
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (sendDraftRevision === draftRevision)
+        sendError.value = { kind: "failed", message: msg };
       await appendSysLine(t("serialDebug.err.sendFailed", { msg }));
+      return false;
+    } finally {
+      sending.value = false;
     }
   }
 
@@ -1732,6 +1760,8 @@ export const useSerialDebugStore = defineStore("serial-debug", () => {
     sendAppendCrlf,
     sendInput,
     sendHistory,
+    sending,
+    sendError,
     hexPopup,
     watchChips,
     activeChipId,

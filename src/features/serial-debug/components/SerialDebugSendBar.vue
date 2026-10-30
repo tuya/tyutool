@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, ref, useId, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 
@@ -8,6 +8,16 @@ const { t } = useI18n();
 const historyIndex = ref(-1);
 const historyOpen = ref(false);
 const historyWrapRef = ref<HTMLElement | null>(null);
+const composing = ref(false);
+const sendErrorId = useId();
+const sendErrorText = computed(() => {
+  if (s.sendError?.kind === "invalidHex")
+    return t("serialDebug.send.invalidHex");
+  if (s.sendError?.kind === "failed") {
+    return t("serialDebug.send.failed", { msg: s.sendError.message });
+  }
+  return "";
+});
 
 function onDocMousedown(e: MouseEvent): void {
   if (!historyWrapRef.value?.contains(e.target as Node)) {
@@ -23,12 +33,15 @@ onUnmounted(() => {
   document.removeEventListener("mousedown", onDocMousedown);
 });
 
+async function submit(): Promise<void> {
+  if (await s.send()) historyIndex.value = -1;
+}
+
 function onKey(ev: KeyboardEvent): void {
+  if (composing.value || ev.isComposing || ev.keyCode === 229) return;
   if (ev.key === "Enter") {
     ev.preventDefault();
-    void s.send();
-    s.sendInput = "";
-    historyIndex.value = -1;
+    void submit();
     return;
   }
   if (ev.key === "ArrowUp") {
@@ -67,6 +80,7 @@ function selectHistory(item: string): void {
       <button
         type="button"
         :class="{ active: s.sendMode === 'ascii' }"
+        :aria-pressed="s.sendMode === 'ascii'"
         class="mode-btn"
         @click="s.sendMode = 'ascii'"
       >
@@ -75,20 +89,31 @@ function selectHistory(item: string): void {
       <button
         type="button"
         :class="{ active: s.sendMode === 'hex' }"
+        :aria-pressed="s.sendMode === 'hex'"
         class="mode-btn"
         @click="s.sendMode = 'hex'"
       >
         Hex
       </button>
     </div>
-    <input
-      type="text"
-      class="input flex-1"
-      :placeholder="t('serialDebug.send.placeholder')"
-      :disabled="!s.open"
-      v-model="s.sendInput"
-      @keydown="onKey"
-    />
+    <div class="min-w-0 flex-1">
+      <input
+        type="text"
+        class="input w-full"
+        :aria-label="t('serialDebug.send.inputLabel')"
+        :aria-invalid="s.sendError?.kind === 'invalidHex'"
+        :aria-describedby="sendErrorText ? sendErrorId : undefined"
+        :placeholder="t('serialDebug.send.placeholder')"
+        :disabled="!s.open"
+        v-model="s.sendInput"
+        @keydown="onKey"
+        @compositionstart="composing = true"
+        @compositionend="composing = false"
+      />
+      <p v-if="sendErrorText" :id="sendErrorId" role="alert">
+        {{ sendErrorText }}
+      </p>
+    </div>
 
     <!-- history button + dropdown -->
     <div ref="historyWrapRef" class="history-wrap relative">
@@ -129,14 +154,8 @@ function selectHistory(item: string): void {
     <button
       type="button"
       class="btn-primary"
-      :disabled="!s.open || !s.sendInput"
-      @click="
-        () => {
-          void s.send();
-          s.sendInput = '';
-          historyIndex = -1;
-        }
-      "
+      :disabled="!s.open || !s.sendInput || s.sending"
+      @click="submit"
     >
       {{ t("serialDebug.send.sendBtn") }}
     </button>
@@ -165,7 +184,7 @@ function selectHistory(item: string): void {
 }
 .mode-btn.active {
   background: var(--ty-primary);
-  color: white;
+  color: var(--ty-on-primary);
 }
 /* Parent .mode-toggle has overflow:hidden, which clips the global box-shadow
    focus ring — use an inset outline so keyboard focus stays visible. */
@@ -177,7 +196,7 @@ function selectHistory(item: string): void {
 .btn-primary {
   padding: 0.5rem 1rem;
   background: var(--ty-primary);
-  color: white;
+  color: var(--ty-on-primary);
   border-radius: 0.5rem;
   font-weight: 600;
   cursor: pointer;
