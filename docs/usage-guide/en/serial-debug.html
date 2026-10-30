@@ -98,7 +98,8 @@
       <ul>
         <li><strong>ASCII or Hex mode</strong>: ASCII mode sends as text; Hex mode sends as hexadecimal bytes (for binary commands).</li>
         <li><strong>Optional <code>\r\n</code></strong>: choose whether to append a CR/LF on send, per the target device's protocol.</li>
-        <li><strong>Enter to send</strong>: press <kbd>Enter</kbd> to send the current input.</li>
+        <li><strong>Enter to send</strong>: press <kbd>Enter</kbd> to send the current input. Enter used to confirm input-method composition does not send.</li>
+        <li><strong>Input retention</strong>: input clears only after a successful send. Invalid Hex or a send failure keeps your draft and shows an inline error; edits made while sending are also preserved.</li>
         <li><strong>Send history</strong>: keeps up to <strong>20 entries</strong>; use <kbd>↑</kbd> / <kbd>↓</kbd> to flip through history without retyping.</li>
       </ul>
       <figure class="shot">

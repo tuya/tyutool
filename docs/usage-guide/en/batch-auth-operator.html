@@ -46,7 +46,7 @@
       <p>It processes <strong>many devices at once</strong>: plug multiple devices into your computer's serial ports, click <strong>"Start All"</strong>, and tyutool <strong>simultaneously</strong> flashes firmware and writes the credentials each device needs to connect to the cloud. You never type the credentials by hand — they're read row-by-row from an Excel spreadsheet.</p>
       <figure class="shot">
         <img src="../assets/images/batch-overview.png" alt="Batch Flash &amp; Auth overview: config area, dashboard, toolbar and port list" loading="lazy">
-        <figcaption>Top to bottom: the <strong>completion banner</strong> (appears when a batch finishes), the <strong>dashboard</strong> (flash cumulative / auth cumulative / current batch), the collapsible <strong>Config panel</strong> (shared config + batch auth config), the <strong>toolbar</strong> (Auto-assign / port filter / Read All / Start All), and the <strong>port list</strong> (one row per device).</figcaption>
+        <figcaption>Batch page: the <strong>completion banner</strong> (appears when a batch finishes), the <strong>dashboard</strong>, the <strong>toolbar</strong>, the collapsible <strong>Config panel</strong>, and the <strong>port list</strong> (one row per device). The toolbar sits above configuration and remains available while scrolling.</figcaption>
       </figure>
 
       <h2 id="prepare">2. Pre-flight checklist</h2>
@@ -118,6 +118,7 @@
         <li>⑤ <strong>Firmware file</strong>: local file / default auth firmware — pick one.</li>
         <li>⑥ Local file: <strong>pick the firmware path</strong>; default auth firmware: <strong>pick a version</strong> (latest recommended) — "firmware ready" appears once the download completes.</li>
       </ul>
+      <p>The toolbar shows the configured mode and any missing prerequisite beside <strong>Start All</strong>. With flashing enabled, you must select a local firmware or finish downloading the default firmware; a missing file blocks Start instead of changing to auth-only. To authorize only, explicitly turn off <strong>Flash firmware</strong>.</p>
       <figure class="shot">
         <img src="../assets/images/batch-config.png" alt="Config area close-up: chip, flash/auth baud rates, flash-firmware switch and firmware source" loading="lazy">
         <figcaption>The config area (shared config)</figcaption>

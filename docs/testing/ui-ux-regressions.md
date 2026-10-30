@@ -9,14 +9,19 @@ Playwright UI specs run against the existing Vite preview. They inject synthetic
 | UI-01  | `serial-debug-layout.spec.ts` — English 1024×680 controls, no port and mock port | Connection fields and action controls have no intersecting bounding rectangles.                                                                                                                                                                                                                                                                            |
 | UI-02  | `serial-debug-layout.spec.ts` — firmware Browse discoverability                  | Default viewport hit-tests to Browse and clicking opens the browser file chooser. If product chooses a visible horizontal-scroll cue instead, replace the direct-visibility assertion with a test for the cue and successful scroll-to-Browse; record that acceptance decision here. Do not report the present default view as passing before that change. |
 | UI-03  | `serial-debug-layout.spec.ts` — modal focus                                      | Independent tests cover focus entering, Tab wrap, Shift+Tab wrap, Escape close/restore, and close-button restore.                                                                                                                                                                                                                                          |
+| UI-05  | `serial-debug-layout.spec.ts` — erase confirmation | Cancel receives initial focus; Tab wraps and Escape restores the opener. |
+| UI-06  | `serial-debug-layout.spec.ts` — batch workflow | Start and Port Filter remain visible at 1024×680; filter focus and field names work; missing firmware blocks the configured flash mode, and supplying it enables Start. |
+| UI-07  | `serial-debug-layout.spec.ts` — invalid Hex draft | Sending invalid Hex preserves the input and shows an inline error. Store/component tests cover failed sends, pending duplicates, edited drafts and composition Enter. |
+| UI-08  | `serial-debug-layout.spec.ts` — operation prerequisites | Disabled reasons appear beside operation buttons; malformed credentials have associated inline errors; correcting values enables authorization. |
+| UI-09  | `serial-debug-layout.spec.ts` — primary text contrast | Light/dark enabled flash buttons have at least 4.5:1 text contrast at both gradient endpoints, including the hover brightness filter. |
 | LOG-01 | `serial-log-regressions.spec.ts` — virtual row geometry                          | Alternating real blank/nonblank store lines, two desktop sizes, all timestamp/badge combinations, font sizes 10/12/18; actual `appendChunk` newline splitting; probe/row alignment, bottom gap, middle scroll, tail return, normal-line control, and cached-page return.                                                                                   |
 | LOG-02 | `serial-log-regressions.spec.ts` — display-toggle state                          | `aria-pressed` follows timestamp/direction toggles independently.                                                                                                                                                                                                                                                                                          |
 | LOG-03 | `serial-log-regressions.spec.ts` — proposal test                                 | Prefix remains in pane while horizontally scrolling. This is a proposed experience improvement, not an approved design requirement; confirm the fixed-prefix interaction with product/design before treating this assertion as a release gate.                                                                                                             |
 | LOG-04 | `serial-log-regressions.spec.ts` — search behavior guard                         | Query keeps prev/next and whole-session search available; persistent filter-chip creation remains distinguishable in the DOM. Label wording is evaluated manually below.                                                                                                                                                                                   |
-| LOG-05 | Manual checklist below                                                           | Timestamp and direction marker readability at real display scale. No arbitrary pixel threshold is encoded.                                                                                                                                                                                                                                                 |
+| LOG-05 | Manual checklist below                                                           | Timestamp and direction marker readability at real display scale; metadata minimum sizes preserve the existing LOG-01 row geometry. |
 | UI-04  | Manual checklist below                                                           | Update Center copy usefulness. No exact sentence lock-in.                                                                                                                                                                                                                                                                                                  |
 
-Default locator/expect polling timeouts are at most 2.5 seconds; each spec test has a 15-second ceiling. Specs use `.spec.ts` so Vitest does not collect them.
+Default locator/expect polling timeouts are at most 3 seconds; each spec test has a 15-second ceiling. Specs use `.spec.ts` so Vitest does not collect them.
 
 ## Manual acceptance items
 
@@ -31,7 +36,7 @@ Default locator/expect polling timeouts are at most 2.5 seconds; each spec test 
 
 1. Use representative RX, TX, and SYS lines at 1024×680 and 1280×800, with light and dark themes.
 2. Check default 12px body text, then use the existing 10–18px font controls. Judge whether timestamps and RX/TX/SYS markers can be read quickly without competing with payload text.
-3. Record tested OS scaling, display scale and reviewer decision before setting a minimum size. No fixed pixel threshold is approved. Test does not substitute a screenshot for a contrast measurement or screen-reader check.
+3. The October 30 review approved minimum metadata sizes: timestamps use at least 11px and direction markers at least 10px at the default root size, while scaling with larger log text. Record OS/display scaling when reviewing readability. Synthetic browser checks do not replace real-display or screen-reader acceptance.
 
 ### LOG-03 — inspecting and copying long log lines (manual proposal review)
 
@@ -82,14 +87,27 @@ LOG-01 currently asserts fixed-row geometry (real line heights within 1px of the
 
 Playwright overwrites its local reports on subsequent runs, including filtered runs and test listing. Preserve reports from a completed full run when comparing this baseline with a later repair. The counts above describe a completed execution, not a test listing.
 
-## Repair verification (2026-10-30)
+## Earlier repair verification (2026-10-30)
 
 - The confirmed suite now contains 40 cases, including an additional regression for closing a settings dropdown with Escape before closing its parent modal. The original 40-case red baseline above remains historical.
 - Empty and non-empty ASCII rows share a font-relative minimum height, preserving the fixed-row virtualizer at all tested sizes without dropping blank lines. Cached-page navigation restores the saved model offset before enabling scroll handling again.
 - Narrow connection fields/actions wrap, and firmware segments select their layout from the operation card width so Browse remains visible. Settings focus enters, cycles in both directions, and returns to its opener; handled dropdown Escape events do not also dismiss the modal.
 - Display toggles expose their pressed state. Their browser locators now use exact accessible names to distinguish the direction toggle from the renamed add-filter-tab button. No state assertions were relaxed.
 - English and Chinese copy distinguishes transient Find from persistent filter tabs and explains Update Center actions directly.
-- The optional sticky-prefix proposal and typography review remain separate from confirmed-defect verification. No minimum metadata font size has been approved, and no variable-height wrapping or new long-line detail interaction is introduced.
+- At this earlier checkpoint, typography remained under review. The optional sticky-prefix proposal remains separate from confirmed-defect verification; no variable-height wrapping or new long-line detail interaction is introduced.
 - Verification uses synthetic serial data in Chromium. Native Tauri dialogs and physical serial devices are outside this validation.
 
 Confirmed verification: `pnpm test:ui:confirmed` completed with **40 passed, 0 failed, 0 skipped, 0 flaky**. The full Vitest coverage suite passed **1070 tests**; lint, UI/script type checks, Tauri package parity, and production build also passed. Build and browser execution were run separately to prevent Vite reloads from generated HTML.
+
+## UI/UX follow-up verification (2026-10-30)
+
+The user approved the follow-up review changes. Eight new browser cases failed before implementation; a ninth integration case covers the batch mode/file correction path. The final confirmed run completed with **49 passed, 0 failed, 0 skipped, 0 flaky**. Vitest coverage completed with **1122 tests across 76 files** and passed the configured coverage gates.
+
+- Send input clears after success only; a newer draft survives completion or rejection of an older request. Failures remain in the log, and pending submissions are guarded.
+- Batch mode follows explicit switches. Firmware, Excel and command-prefix prerequisites apply before start/retry. Retry All waits for active work to finish without discarding diagnostics; a single-port retry may run beside another active port. Read and used/in-progress credential recovery remain supported.
+- Shared modal focus behavior covers confirmations, port filtering, serial settings, updates, log viewing and the nested log opener. Tests cover handled dropdown Escape, background inert restoration and full-tree unwind.
+- Metadata minimum sizes were checked against the existing 24-case virtual-row matrix without relaxing the 1px tolerance. Prefix line height prevents metadata from enlarging the probe at the 10px body setting.
+
+Lint, frontend/UI/script type checks, Tauri package parity, production build, Rust formatting, all crate Clippy checks, Rust tests (including optional core features), and generated binding drift checks passed. The production preview was also inspected in Chinese/light at 1280×800 and English/dark at 1024×680 across Flash, Serial Debug, Batch Flash & Auth, and Settings. A production interaction check verified the sticky batch toolbar, port-filter focus restoration and serial settings dropdown Escape handling.
+
+Validation uses synthetic state in Chromium. Native Tauri, physical serial devices, native input methods and screen-reader acceptance remain outside this run.
