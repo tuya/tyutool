@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Precision Workbench 正式界面验收画廊</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f1f2ef;
+        --surface: #fff;
+        --text: #202b28;
+        --muted: #56665f;
+        --border: #7a8780;
+        --primary: #006b5e;
+      }
+      :root.dark {
+        color-scheme: dark;
+        --canvas: #111518;
+        --surface: #1a2024;
+        --text: #edf2f2;
+        --muted: #a0adb3;
+        --border: #607077;
+        --primary: #74ddc9;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--text);
+        font:
+          14px/1.6 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1440px;
+        margin: auto;
+        padding: 24px;
+      }
+      h1 {
+        font-size: 24px;
+        line-height: 1.3;
+        margin: 0 0 8px;
+      }
+      p {
+        color: var(--muted);
+        margin: 0 0 16px;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin: 24px 0 16px;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 12px;
+      }
+      select {
+        min-height: 36px;
+        min-width: 140px;
+        max-width: 100%;
+        padding: 5px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        background: var(--surface);
+        font: inherit;
+      }
+      a {
+        color: var(--primary);
+        text-underline-offset: 3px;
+      }
+      :focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 3px;
+      }
+      figure {
+        margin: 0;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      figcaption {
+        padding: 12px 16px;
+        color: var(--muted);
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      @media (max-width: 640px) {
+        main {
+          padding: 16px;
+        }
+        h1 {
+          font-size: 20px;
+        }
+        .controls {
+          gap: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Precision Workbench · 正式界面验收画廊</h1>
+      <p>
+        切换页面、状态、主题与窗口组合查看正式组件截图。设备、日志、任务与更新数据来自本地测试；实际交互在正式应用中体验。
+      </p>
+      <div class="links">
+        <a href="./README.md">实施与验收记录</a
+        ><a href="/flash" id="app-link">打开正式应用</a
+        ><a id="original" target="_blank" rel="noopener">查看原始尺寸截图</a>
+      </div>
+      <div class="controls">
+        <label
+          >内容类型<select id="kind">
+            <option value="page">页面</option>
+            <option value="state">交互与状态</option>
+          </select></label
+        >
+        <label>页面 / 状态<select id="case"></select></label>
+        <label
+          >主题<select id="theme">
+            <option value="dark">石墨深色</option>
+            <option value="light">纸白浅色</option>
+          </select></label
+        >
+        <label>窗口与语言<select id="profile"></select></label>
+      </div>
+      <figure>
+        <img id="preview" alt="" />
+        <figcaption id="caption" aria-live="polite"></figcaption>
+      </figure>
+      <p style="margin-top: 16px">
+        页面矩阵覆盖全部 40 组组合；状态截图覆盖中文 1280×800 与英文 1024×680
+        的明暗主题，共 48 张。
+      </p>
+    </main>
+    <script type="module">
+      const labels = {
+        flash: "固件工具",
+        "serial-debug": "串口调试",
+        toolbox: "工具箱",
+        "toolbox/batch-flash-auth": "批量烧录授权",
+        settings: "设置",
+        "flash-running": "固件 · 运行",
+        "flash-success": "固件 · 完成",
+        "flash-error": "固件 · 失败",
+        "danger-confirm": "危险操作确认",
+        "command-history": "命令历史",
+        "serial-settings": "串口设置",
+        "batch-quarantine": "批量任务隔离",
+        "diagnostic-list": "诊断日志列表",
+        "diagnostic-search": "诊断日志搜索",
+        "diagnostic-open-with": "日志打开方式",
+        "update-failure": "更新检查失败",
+        "update-available": "更新可用",
+      };
+      const profiles = [
+        { width: 1280, height: 800, lang: "zh-CN" },
+        { width: 1024, height: 680, lang: "en" },
+        { width: 1280, height: 800, lang: "en" },
+        { width: 1024, height: 680, lang: "zh-CN" },
+      ];
+      const cases = {
+        page: Object.keys(labels).slice(0, 5),
+        state: Object.keys(labels).slice(5),
+      };
+      const kind = document.querySelector("#kind"),
+        selectedCase = document.querySelector("#case"),
+        theme = document.querySelector("#theme"),
+        profile = document.querySelector("#profile");
+      function options(select, values) {
+        const previous = select.value;
+        select.replaceChildren(
+          ...values.map(([value, text]) => new Option(text, value)),
+        );
+        if (values.some(([value]) => value === previous))
+          select.value = previous;
+      }
+      function updateControls() {
+        options(
+          selectedCase,
+          cases[kind.value].map((value) => [value, labels[value]]),
+        );
+        options(
+          profile,
+          (kind.value === "state" ? profiles.slice(0, 2) : profiles).map(
+            (p) => [
+              `${p.width}-${p.lang}`,
+              `${p.width}×${p.height} · ${p.lang === "en" ? "英文" : "中文"}`,
+            ],
+          ),
+        );
+        render();
+      }
+      function render() {
+        const entry = profiles.find(
+          (p) => `${p.width}-${p.lang}` === profile.value,
+        );
+        const id = selectedCase.value;
+        const filename =
+          kind.value === "state"
+            ? `state-${id}-${theme.value}-${entry.width}-${entry.lang}.png`
+            : `${id.replaceAll("/", "-")}-${theme.value}-${entry.width}-${entry.lang}.png`;
+        const caption = `${labels[id]} · ${theme.value === "dark" ? "石墨深色" : "纸白浅色"} · ${entry.width}×${entry.height} · ${entry.lang === "en" ? "英文" : "中文"}`;
+        const image = document.querySelector("#preview");
+        image.src = filename;
+        image.alt = caption;
+        image.width = entry.width;
+        image.height = entry.height;
+        document.querySelector("#caption").textContent = caption;
+        document.querySelector("#original").href = filename;
+        document.documentElement.classList.toggle(
+          "dark",
+          theme.value === "dark",
+        );
+      }
+      kind.addEventListener("change", updateControls);
+      for (const select of [selectedCase, theme, profile])
+        select.addEventListener("change", render);
+      updateControls();
+      if (location.protocol === "file:") {
+        document.querySelector("#app-link").href =
+          "http://127.0.0.1:1430/flash";
+      }
+    </script>
+  </body>
+</html>
