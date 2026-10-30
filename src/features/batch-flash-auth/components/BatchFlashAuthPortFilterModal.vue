@@ -34,7 +34,7 @@ function addPort() {
   <Teleport to="body">
     <div
       v-if="open"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ty-scrim)]"
       @click.self="$emit('close')"
     >
       <div
@@ -43,7 +43,7 @@ function addPort() {
         aria-modal="true"
         :aria-labelledby="titleId"
         tabindex="-1"
-        class="flex flex-col max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md rounded-2xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-5 shadow-xl"
+        class="flex flex-col max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md rounded-[var(--ty-radius)] border border-[var(--ty-border)] bg-[var(--ty-surface)] p-5 shadow-[var(--ty-overlay-shadow)]"
       >
         <div class="mb-4 flex items-center justify-between">
           <h2
@@ -74,7 +74,7 @@ function addPort() {
             type="text"
             :aria-label="t('batchFlashAuth.slot.port')"
             :placeholder="t('batchFlashAuth.filter.placeholder')"
-            class="min-w-0 flex-1 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] px-2.5 py-1.5 text-sm text-[var(--ty-text)] placeholder:text-[var(--ty-text-muted)]"
+            class="ty-input min-w-0 flex-1 text-sm"
             @keydown.enter="
               (e) => {
                 if (!e.isComposing) {

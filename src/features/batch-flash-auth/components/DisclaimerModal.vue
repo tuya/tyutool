@@ -38,7 +38,7 @@ watch(
   <Teleport to="body">
     <dialog
       ref="dialogRef"
-      class="m-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-0 shadow-xl backdrop:bg-black/50"
+      class="m-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[var(--ty-radius)] border border-[var(--ty-border)] bg-[var(--ty-surface)] p-0 shadow-[var(--ty-overlay-shadow)] backdrop:bg-[var(--ty-scrim)]"
       :aria-labelledby="titleId"
       @cancel.prevent="emit('cancel')"
     >

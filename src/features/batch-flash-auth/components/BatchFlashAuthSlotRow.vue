@@ -142,8 +142,7 @@ const BORDER_COLORS: Record<string, string> = {
 const borderColor = computed(() => BORDER_COLORS[props.portSlot.status]);
 
 const rowBg = computed(() => {
-  const stripedRowBg =
-    "color-mix(in srgb, var(--ty-primary) 10%, var(--ty-surface-muted))";
+  const stripedRowBg = "var(--ty-surface-muted)";
   const base =
     (props.rowIndex ?? 0) % 2 === 1 ? stripedRowBg : "var(--ty-surface)";
   if (isQuarantineRequired.value)
@@ -276,7 +275,7 @@ function showExcelError(): void {
     >
       <span
         v-if="isActive"
-        class="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+        class="mr-1 inline-block h-1.5 w-1.5 rounded-full"
         :style="{ backgroundColor: statusColor }"
       />
       {{ statusLabel }}

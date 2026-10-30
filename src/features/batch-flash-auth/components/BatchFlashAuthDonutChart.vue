@@ -32,7 +32,7 @@ const pct = computed(() =>
 </script>
 
 <template>
-  <svg viewBox="0 0 120 120" class="w-20 h-20 shrink-0" aria-hidden="true">
+  <svg viewBox="0 0 120 120" class="w-14 h-14 shrink-0" aria-hidden="true">
     <!-- Background ring -->
     <circle
       cx="60"
