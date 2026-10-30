@@ -9,6 +9,8 @@ import {
   useId,
 } from "vue";
 
+import { useFloatingPanel } from "@/composables/useFloatingPanel";
+
 /** Fixed-position hint near hovered option (avoids list overflow + paint-order clipping). */
 type FloatingOptionTip = { text: string; top: number; left: number };
 
@@ -66,9 +68,8 @@ function scheduleHideFloatingTip() {
   }, 120);
 }
 
-function showFloatingOptionTip(e: MouseEvent, text: string) {
+function showFloatingOptionTip(el: HTMLElement | null, text: string) {
   clearFloatingTipHideTimer();
-  const el = e.currentTarget as HTMLElement | null;
   if (!el) {
     return;
   }
@@ -96,7 +97,7 @@ function onOptionLiMouseEnter(e: MouseEvent, opt: TySelectOption, idx: number) {
   }
   activeIndex.value = idx;
   if (opt.optionTooltip) {
-    showFloatingOptionTip(e, opt.optionTooltip);
+    showFloatingOptionTip(e.currentTarget as HTMLElement, opt.optionTooltip);
   } else {
     floatingOptionTip.value = null;
   }
@@ -119,18 +120,13 @@ function onListScroll() {
   floatingOptionTip.value = null;
 }
 
-// 下拉列表的定位（fixed，避免影响父布局）
-const listStyle = ref({ top: "0px", left: "0px", minWidth: "0px" });
-
-function updateListPosition() {
-  const rect = triggerRef.value?.getBoundingClientRect();
-  if (!rect) return;
-  listStyle.value = {
-    top: `${rect.bottom + 4}px`,
-    left: `${rect.left}px`,
-    minWidth: `${rect.width}px`,
-  };
-}
+const { style: listStyle } = useFloatingPanel(
+  listRef,
+  () => open.value,
+  () => triggerRef.value?.getBoundingClientRect() ?? null,
+);
+let typeahead = "";
+let typeaheadTime = 0;
 
 const selectedLabel = computed(() => {
   const opt = props.options.find((o) => o.value === props.modelValue);
@@ -140,7 +136,6 @@ const selectedLabel = computed(() => {
 function toggle() {
   if (props.disabled) return;
   if (!open.value) {
-    updateListPosition();
     emit("open");
   }
   open.value = !open.value;
@@ -179,7 +174,12 @@ function onClickOutside(e: MouseEvent) {
 function onKeydown(e: KeyboardEvent) {
   if (props.disabled) return;
   if (!open.value) {
-    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+    if (
+      e.key === "Enter" ||
+      e.key === " " ||
+      e.key === "ArrowDown" ||
+      e.key === "ArrowUp"
+    ) {
       e.preventDefault();
       toggle();
     }
@@ -205,8 +205,40 @@ function onKeydown(e: KeyboardEvent) {
     if (activeIndex.value >= 0 && activeIndex.value < props.options.length) {
       select(props.options[activeIndex.value]);
     }
+  } else if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    const indices = props.options.flatMap((o, i) => (o.disabled ? [] : [i]));
+    activeIndex.value =
+      (e.key === "Home" ? indices[0] : indices[indices.length - 1]) ?? -1;
   } else if (e.key === "Tab") {
     close();
+  } else if (
+    e.key.length === 1 &&
+    !e.ctrlKey &&
+    !e.altKey &&
+    !e.metaKey &&
+    !e.isComposing
+  ) {
+    e.preventDefault();
+    const now = Date.now();
+    typeahead = now - typeaheadTime > 700 ? e.key : typeahead + e.key;
+    typeaheadTime = now;
+    const query = [...typeahead].every((c) => c === typeahead[0])
+      ? typeahead[0]
+      : typeahead;
+    const options = props.options;
+    for (let offset = 1; offset <= options.length; offset++) {
+      const idx = (activeIndex.value + offset) % options.length;
+      if (
+        !options[idx].disabled &&
+        options[idx].label
+          .toLocaleLowerCase()
+          .startsWith(query.toLocaleLowerCase())
+      ) {
+        activeIndex.value = idx;
+        break;
+      }
+    }
   }
 }
 
@@ -217,6 +249,7 @@ watch(open, async (val) => {
     floatingOptionTip.value = null;
   }
   if (val) {
+    typeahead = "";
     activeIndex.value = props.options.findIndex(
       (o) => o.value === props.modelValue,
     );
@@ -230,31 +263,23 @@ watch(open, async (val) => {
   }
 });
 
-watch(activeIndex, async () => {
+watch([activeIndex, open], async () => {
   await nextTick();
   const li =
     listRef.value?.querySelectorAll<HTMLElement>('[role="option"]')[
       activeIndex.value
     ];
   li?.scrollIntoView({ block: "nearest" });
+  const tip = props.options[activeIndex.value]?.optionTooltip;
+  if (open.value && tip && li) showFloatingOptionTip(li, tip);
+  else floatingOptionTip.value = null;
 });
-
-// 滚动/resize 时更新位置（并关闭悬浮提示，避免坐标错位）
-function onScrollOrResize() {
-  clearFloatingTipHideTimer();
-  floatingOptionTip.value = null;
-  if (open.value) updateListPosition();
-}
 
 onMounted(() => {
   document.addEventListener("mousedown", onClickOutside);
-  window.addEventListener("scroll", onScrollOrResize, true);
-  window.addEventListener("resize", onScrollOrResize);
 });
 onBeforeUnmount(() => {
   document.removeEventListener("mousedown", onClickOutside);
-  window.removeEventListener("scroll", onScrollOrResize, true);
-  window.removeEventListener("resize", onScrollOrResize);
   clearFloatingTipHideTimer();
 });
 </script>
@@ -279,9 +304,17 @@ onBeforeUnmount(() => {
       "
       :aria-label="ariaLabel"
       :aria-labelledby="ariaLabelledby"
-      :aria-describedby="ariaDescribedby"
+      :aria-describedby="
+        [
+          ariaDescribedby,
+          open && floatingOptionTip ? `${listId}-tip` : undefined,
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined
+      "
       @click="toggle"
       @keydown="onKeydown"
+      @blur="close"
     >
       <span class="ty-select-value">{{ selectedLabel }}</span>
       <span class="ty-select-arrow" aria-hidden="true">
@@ -324,7 +357,7 @@ onBeforeUnmount(() => {
             }"
             :aria-selected="opt.value === modelValue"
             :aria-disabled="opt.disabled"
-            :title="opt.optionTooltip || undefined"
+            :title="opt.optionTooltip || opt.label"
             @mouseenter="onOptionLiMouseEnter($event, opt, idx)"
             @mouseleave="onOptionLiMouseLeave"
             @mousedown.prevent="select(opt)"
@@ -340,6 +373,7 @@ onBeforeUnmount(() => {
         v-if="floatingOptionTip"
         class="ty-select-floating-tip"
         role="tooltip"
+        :id="`${listId}-tip`"
         :style="{
           top: `${floatingOptionTip.top}px`,
           left: `${floatingOptionTip.left}px`,

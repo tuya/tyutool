@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { createApp, h, nextTick } from "vue";
 import { createI18n } from "vue-i18n";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TyConfirmDialog from "./TyConfirmDialog.vue";
 import {
   confirmDialogState,
@@ -153,5 +153,34 @@ describe("TyConfirmDialog keyboard focus", () => {
     app.unmount();
     await settle();
     expect(document.activeElement).toBe(opener);
+  });
+  it("reports extra copy failure and retry success without closing", async () => {
+    const copy = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Denied"))
+      .mockResolvedValue(undefined);
+    void showConfirmDialog({
+      title: "Error",
+      message: "Detail",
+      extraActionLabel: "Copy",
+      onExtraAction: copy,
+      showCancel: false,
+    });
+    await settle();
+    const button = document.querySelector<HTMLButtonElement>(
+      ".ty-dialog-btn-cancel",
+    )!;
+    button.click();
+    await settle();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      en.common.copyFailed,
+    );
+    expect(confirmDialogState.visible).toBe(true);
+    button.click();
+    await settle();
+    expect(document.querySelector('[role="status"]')?.textContent).toContain(
+      en.common.copied,
+    );
+    expect(copy).toHaveBeenCalledTimes(2);
   });
 });

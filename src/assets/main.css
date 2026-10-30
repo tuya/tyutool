@@ -341,7 +341,7 @@
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--ty-on-primary);
     cursor: pointer;
     border: 1px solid var(--ty-primary);
     background-color: var(--ty-primary);

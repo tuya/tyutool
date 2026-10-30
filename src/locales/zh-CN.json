@@ -11,7 +11,12 @@
     "dialogIconPurposeDanger": "对话框类型图标：危险操作，请谨慎确认",
     "dialogKindBadgeInfo": "信息",
     "dialogKindBadgeWarning": "警告",
-    "dialogKindBadgeDanger": "危险"
+    "dialogKindBadgeDanger": "危险",
+    "loading": "加载中…",
+    "copyFailed": "复制失败，请选中文字手动复制。",
+    "copyField": "复制{field}",
+    "cancel": "取消",
+    "refresh": "刷新"
   },
   "app": {
     "tagline": "嵌入式工具",
@@ -29,7 +34,8 @@
     "quickThemeOnSystem": "切换到亮色主题",
     "quickLang": "切换语言",
     "quickLangOnZh": "切换到 English",
-    "quickLangOnEn": "切换到简体中文"
+    "quickLangOnEn": "切换到简体中文",
+    "skipToContent": "跳到主要内容"
   },
   "settings": {
     "section": "偏好",
@@ -125,14 +131,16 @@
       "restartNow": "立即重启",
       "installing": "正在安装…",
       "toastNew": "发现新版本 v{version}，前往设置页更新",
-      "toastAction": "前往设置",
+      "toastAction": "打开更新中心",
       "toastClose": "关闭",
       "sourceGithub": "GitHub Releases",
       "sourceTuya": "Tuya OSS",
       "sourceGitee": "Gitee Releases",
       "portableHint": "当前安装方式不支持应用内更新，请到发行页下载与系统匹配的安装包（如 .deb / 便携版等）。",
       "portableDownload": "打开发行页",
-      "toastPortable": "发现新版本 v{version}。当前方式无法应用内更新，请打开发行页下载安装包。"
+      "toastPortable": "发现新版本 v{version}。当前方式无法应用内更新，请打开发行页下载安装包。",
+      "operationFailed": "更新失败：{msg}。请重试或手动下载。",
+      "installFailed": "安装失败：{msg}。请重试或手动下载。"
     },
     "viewLogs": "查看日志",
     "viewLogsHint": "直接在应用内浏览当前和历史日志文件。",
@@ -155,7 +163,9 @@
       "openWith": "打开方式...",
       "openWithTitle": "选择文本阅读器",
       "systemDefault": "系统默认程序",
-      "noOpeners": "当前未检测到可用的文本阅读器。"
+      "noOpeners": "当前未检测到可用的文本阅读器。",
+      "previousMatch": "上一个匹配",
+      "nextMatch": "下一个匹配"
     },
     "reportIssue": {
       "title": "报告问题",
@@ -485,7 +495,11 @@
         "auth_write_skipped": "设备授权信息与待写入内容一致，无需重复写入。",
         "auth_write_sent": "授权写入命令已发送到设备。"
       }
-    }
+    },
+    "rangeExplanation": "终止地址不包含在范围内，起始和终止地址可独立修改。",
+    "segmentSummary": "文件：{size} · 范围：{range} 字节",
+    "sizeUnknown": "尚未测量",
+    "byteCount": "{count} 字节"
   },
   "serialDebug": {
     "tool": "工具",
@@ -522,7 +536,12 @@
       "changeRebootTarget": "更改",
       "rebootTargetDialogTitle": "选择重启控制口和芯片",
       "rebootTargetChip": "芯片类型",
-      "rebootTargetConfirm": "确认"
+      "rebootTargetConfirm": "确认",
+      "invalidCustomBaud": "请输入 1 至 4294967295 之间的整数波特率。",
+      "portUnavailable": "当前不可用",
+      "rememberedUnavailable": "记住的端口 {port} 当前不可用，请连接设备或选择可用端口。",
+      "noDevicesHint": "未发现串口设备，请连接设备后刷新端口。",
+      "portsFailed": "获取串口失败：{msg}"
     },
     "send": {
       "inputLabel": "发送内容",
@@ -577,7 +596,9 @@
       "deviceResetCurrentPortClosed": "当前日志口未打开，请重新选择控制口或先打开串口调试",
       "deviceResetOk": "设备复位（DTR/RTS）已发送：{port}",
       "deviceResetFailed": "设备复位失败：{msg}",
-      "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（缺少重启相关消息支持），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。"
+      "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（缺少重启相关消息支持），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。",
+      "selectionHint": "文字选择仅覆盖已显示的行，跨屏日志请使用导出；文本转换包含显示的时间戳和标签。",
+      "selectionActions": "选中文字操作"
     },
     "autoSave": {
       "label": "自动保存日志",
@@ -606,8 +627,9 @@
       "titleHex": "十六进制视图",
       "titleAscii": "ASCII 视图",
       "copy": "复制",
-      "toHex": "以 Hex 查看",
-      "toAscii": "以 ASCII 查看"
+      "toHex": "文本转 Hex",
+      "toAscii": "以文本查看",
+      "bytesPerRow": "每行 {count} 字节"
     },
     "confirm": {
       "releaseForFlashTitle": "端口冲突",
@@ -640,7 +662,9 @@
       "reset": "重置",
       "elapsed": "已用时",
       "total": "总计",
-      "successRate": "成功率"
+      "successRate": "成功率",
+      "resetGroup": "清零{group}",
+      "resetConfirm": "确定清零累计{group}吗？当前批次结果会保留。"
     },
     "config": {
       "sharedConfig": "共享配置",
@@ -741,7 +765,9 @@
       "cancelledAfterWriteBadge": "授权写入状态不确定",
       "cancelledAfterWriteLabel": "授权命令可能已发往设备，也可能尚未发送；写入结果未经验证。KV 可覆盖、OTP 永久写入。请物理隔离并人工核查。",
       "cancelledAfterWriteError": "取消时授权命令可能已发送 — 设备状态未经验证",
-      "emptyHintNoPorts": "未检测到串口；请插入设备后点击自动分配"
+      "emptyHintNoPorts": "未检测到串口；请插入设备后点击自动分配",
+      "scanRetry": "请刷新端口重试，已有端口列表会保留。",
+      "emptyFiltered": "当前可用端口已被屏蔽，请检查屏蔽列表后重新分配。"
     },
     "defaultMacError": "设备 MAC 未烧写（出厂默认值），请先烧写 MAC 再授权",
     "errors": {

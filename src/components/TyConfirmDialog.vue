@@ -13,6 +13,8 @@ const okBtnRef = ref<HTMLButtonElement | null>(null);
 const cancelBtnRef = ref<HTMLButtonElement | null>(null);
 const dialogRef = ref<HTMLElement | null>(null);
 const extraActionBusy = ref(false);
+const extraActionResult = ref<"" | "copied" | "failed">("");
+let extraActionGeneration = 0;
 
 useModalFocus(
   dialogRef,
@@ -33,24 +35,30 @@ function handleCancel(): void {
 }
 
 async function handleExtraAction(): Promise<void> {
-  if (!confirmDialogState.onExtraAction || extraActionBusy.value) {
-    return;
-  }
+  const action = confirmDialogState.onExtraAction;
+  if (!action || extraActionBusy.value) return;
+  const generation = ++extraActionGeneration;
+  extraActionBusy.value = true;
+  extraActionResult.value = "";
   try {
-    extraActionBusy.value = true;
-    await confirmDialogState.onExtraAction();
+    await action();
+    if (generation === extraActionGeneration)
+      extraActionResult.value = "copied";
+  } catch {
+    if (generation === extraActionGeneration)
+      extraActionResult.value = "failed";
   } finally {
-    extraActionBusy.value = false;
+    if (generation === extraActionGeneration) extraActionBusy.value = false;
   }
 }
-
 watch(
-  () => confirmDialogState.visible,
-  (visible) => {
-    if (!visible) {
-      extraActionBusy.value = false;
-    }
+  () => [confirmDialogState.visible, confirmDialogState.onExtraAction],
+  () => {
+    extraActionGeneration++;
+    extraActionBusy.value = false;
+    extraActionResult.value = "";
   },
+  { flush: "sync" },
 );
 
 const kindIcon: Record<string, [string, string]> = {
@@ -166,6 +174,24 @@ const dialogKindBadge = computed(() => {
             </p>
           </div>
 
+          <p
+            v-if="extraActionResult"
+            :role="extraActionResult === 'failed' ? 'alert' : 'status'"
+            class="px-6 pt-2 text-xs"
+            :class="
+              extraActionResult === 'failed'
+                ? 'text-[var(--ty-danger)]'
+                : 'text-[var(--ty-success)]'
+            "
+          >
+            {{
+              t(
+                extraActionResult === "failed"
+                  ? "common.copyFailed"
+                  : "common.copied",
+              )
+            }}
+          </p>
           <!-- ── Footer ── -->
           <div
             class="ty-dialog-footer"
@@ -454,7 +480,7 @@ const dialogKindBadge = computed(() => {
 /* OK button */
 .ty-dialog-btn-ok {
   border: none;
-  color: #fff;
+  color: var(--ty-on-primary);
 }
 
 .ty-dialog-btn-ok:hover {
@@ -462,6 +488,7 @@ const dialogKindBadge = computed(() => {
 }
 
 .ty-dialog-btn-ok-danger {
+  color: #fff;
   background: linear-gradient(
     135deg,
     var(--ty-danger) 0%,
