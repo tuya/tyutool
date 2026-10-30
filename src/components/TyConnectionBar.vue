@@ -2,8 +2,7 @@
 /**
  * Shared connection bar shell used by firmware-flash and serial-debug.
  *
- * Owns the .conn-bar visual treatment (left primary stripe, bg gradient,
- * divider) and gives features three named slots:
+ * Gives both features the same surface, spacing and named slots:
  *   - icon    optional 40×40 icon wrapped in .conn-icon-wrap
  *   - status  label + status dot + text (left side, after icon)
  *   - fields  main form area (grows to fill)
@@ -21,14 +20,9 @@ defineProps<{
 
 <template>
   <section
-    class="conn-bar relative flex min-w-0 flex-wrap items-center gap-3 overflow-hidden rounded-2xl p-2.5 sm:gap-4 sm:p-3"
+    class="conn-bar flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-3 p-3"
     :aria-label="ariaLabel"
   >
-    <div
-      class="conn-bar-bg pointer-events-none absolute inset-0"
-      aria-hidden="true"
-    />
-
     <!-- Status block (icon + label + dot + text + divider) -->
     <div class="relative flex shrink-0 items-center gap-3">
       <slot name="icon" />
@@ -43,7 +37,7 @@ defineProps<{
 
     <!-- Fields (grows) -->
     <div
-      class="relative flex min-w-0 flex-[1_1_20rem] flex-wrap items-center gap-x-3 gap-y-2"
+      class="conn-fields flex min-w-0 flex-[1_1_20rem] flex-wrap items-center gap-x-3 gap-y-2"
     >
       <slot name="fields" />
     </div>
@@ -51,7 +45,7 @@ defineProps<{
     <!-- Actions (optional, right-aligned) -->
     <div
       v-if="$slots.actions"
-      class="relative ml-auto flex shrink-0 flex-wrap items-center gap-2"
+      class="conn-actions ml-auto flex min-w-0 flex-wrap items-center gap-2"
     >
       <slot name="actions" />
     </div>

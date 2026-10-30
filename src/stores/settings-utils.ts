@@ -129,4 +129,5 @@ export function applyThemeToDom(pref: ThemePreference): void {
     mode = pref;
   }
   root.classList.toggle("dark", mode === "dark");
+  root.dataset.theme = mode;
 }

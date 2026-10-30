@@ -35,7 +35,8 @@
     "quickLang": "切换语言",
     "quickLangOnZh": "切换到 English",
     "quickLangOnEn": "切换到简体中文",
-    "skipToContent": "跳到主要内容"
+    "skipToContent": "跳到主要内容",
+    "workbench": "设备工作台"
   },
   "settings": {
     "section": "偏好",
@@ -175,7 +176,8 @@
       "linkCopied": "反馈页链接已复制到剪贴板。若浏览器未自动打开，请新建标签页粘贴访问；提交时把刚保存的日志压缩包拖入 issue 即可。",
       "privacyReminder": "日志中的授权凭据已自动掩码。提交前请再次确认压缩包内无其它敏感信息。",
       "webHint": "日志导出仅在桌面版中可用。"
-    }
+    },
+    "updateNav": "应用更新"
   },
   "flash": {
     "tool": "工具",
@@ -926,6 +928,7 @@
     "batchFlashAuth": {
       "name": "批量烧录授权",
       "desc": "同时向多个串口并行烧录固件并写入授权码，最多 32 个"
-    }
+    },
+    "openTool": "进入工作台"
   }
 }

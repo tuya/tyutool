@@ -78,19 +78,21 @@ function onKeydown(event: KeyboardEvent): void {
     var(--ty-text-muted) 28%,
     var(--ty-surface-muted)
   );
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--ty-border) 84%, transparent),
-    0 1px 2px rgba(15, 23, 42, 0.1);
+  box-shadow: inset 0 0 0 1px var(--ty-border-strong);
   transition:
     background-color 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+.ty-switch--off .ty-switch__thumb {
+  background: var(--ty-text-muted);
 }
 
 .ty-switch__thumb {
   position: absolute;
   left: 0.1875rem;
   border-radius: 9999px;
-  background: #fff;
+  background: var(--ty-on-primary);
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.2),
     0 0 0 1px rgba(255, 255, 255, 0.25);
@@ -129,14 +131,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .ty-switch--on .ty-switch__track {
-  background: linear-gradient(
-    135deg,
-    var(--ty-primary) 0%,
-    var(--ty-primary-hover) 100%
-  );
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--ty-primary) 36%, transparent),
-    0 3px 10px color-mix(in srgb, var(--ty-primary) 22%, transparent);
+  background: var(--ty-primary);
+  box-shadow: none;
 }
 
 .ty-switch:focus-visible {

@@ -402,9 +402,9 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 2.125rem;
   padding: 0 0.625rem;
-  border-radius: 0.5rem;
-  border: 1px solid color-mix(in srgb, var(--ty-primary) 25%, var(--ty-border));
-  background-color: var(--ty-surface-muted);
+  border-radius: var(--ty-control-radius);
+  border: 1px solid var(--ty-border-strong);
+  background-color: var(--ty-field);
   color: var(--ty-text);
   font-size: 0.8125rem;
   font-weight: 500;
