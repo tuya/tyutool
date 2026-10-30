@@ -570,7 +570,13 @@
       "count": "{current} / {total}",
       "noMatch": "No matches",
       "scopeHistory": "Loaded history window only",
-      "wholeSession": "Search whole session"
+      "wholeSession": "Search whole session",
+      "scopeWindow": "Current window",
+      "scopeFilter": "Loaded filter results",
+      "context": "View context",
+      "backToResults": "Back to results",
+      "contextHint": "Showing surrounding session lines.",
+      "failed": "Could not search the session: {msg}"
     },
     "log": {
       "archiveCapped": "[tyutool] The session archive reached its {mib} MiB limit. Lines from here on are shown live but not archived, so history, filters and export stop at this point.",
@@ -598,7 +604,20 @@
       "deviceResetFailed": "Device reset failed: {msg}",
       "deviceResetServeOutdated": "Device reset failed: the browser is still connected to an old tyutool-cli serve that lacks the required reset messages. Close the process holding port 9527 and restart serve.",
       "selectionHint": "Text selection covers visible rows only. Export for logs beyond the viewport; text conversion includes displayed timestamps and labels.",
-      "selectionActions": "Selected text actions"
+      "selectionActions": "Selected text actions",
+      "history": "History",
+      "historyReading": "Reading history",
+      "historyRange": "Lines {start}–{end} / {total} at last read",
+      "sessionStart": "Jump to start",
+      "receiving": "Receiving continues",
+      "sessionClosed": "Port closed",
+      "newLines": "{count} new lines",
+      "historyEmpty": "No archived lines in this session yet.",
+      "retry": "Retry",
+      "archiveStopped": "This session reached its archive limit and some later lines were not archived. Raise the limit in settings to continue archiving; missing data cannot be recovered.",
+      "historyReady": "Scroll to browse history. Use Back to live to follow new data.",
+      "historyLoading": "Loading history…",
+      "filterReadFailed": "Could not read filter results: {msg}"
     },
     "autoSave": {
       "label": "Auto-save logs",

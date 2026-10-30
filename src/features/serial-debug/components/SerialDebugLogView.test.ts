@@ -385,6 +385,24 @@ describe("SerialDebugLogView auto-scroll", () => {
     expect(s.showDirBadge).toBe(false);
   });
 
+  it("keeps the same rendered live lines while paused even after the ring buffer trims them", async () => {
+    const s = useSerialDebugStore();
+    s.logWindowLines = 500;
+    for (let i = 0; i < 500; i++) appendLine(s, i);
+    mountComponent();
+    await flush();
+    const el = pane();
+    stubGeometry(el);
+    await scrollTo(el, 2400);
+    const before = renderedRows().map((row) => row.textContent);
+    for (let i = 500; i < 1100; i++) appendLine(s, i);
+    await flush();
+    expect(renderedRows().map((row) => row.textContent)).toEqual(before);
+    host!.querySelector<HTMLElement>(".paused-badge")!.click();
+    await flush();
+    expect(host!.textContent).toContain("L1099");
+  });
+
   it("renders appendChunk previews in ASCII and Hex, then completes them once", async () => {
     const s = useSerialDebugStore();
     mountComponent();
@@ -740,13 +758,14 @@ describe("SerialDebugLogView auto-scroll", () => {
 
     // User scrolls up: no more scrollTop writes, and the head of the buffer is
     // what is mounted.
+    const pausedRows = fullDumpRows(s.lines);
     await scrollTo(el, 0);
     writes.length = 0;
     for (let i = 210; i < 220; i++) appendLine(s, i);
     await flush();
 
     expect(writes).toEqual([]);
-    expect(mountedWindowStartRow(fullDumpRows(s.lines))).toBe(0);
+    expect(mountedWindowStartRow(pausedRows)).toBe(0);
   });
 
   it("re-measures the hex row height when the font size changes", async () => {
@@ -956,7 +975,7 @@ describe("SerialDebugLogView auto-scroll", () => {
     expect(host!.textContent).toContain("L199");
   });
 
-  it("leaves history mode again when scrolled back to the end of the archive", async () => {
+  it("keeps history pinned at its end until the user explicitly returns to live", async () => {
     const { s, el } = await mountWithArchive(200, 5000);
     await scrollTo(el, 0);
     await flush();
@@ -966,6 +985,9 @@ describe("SerialDebugLogView auto-scroll", () => {
     await scrollTo(el, Number.MAX_SAFE_INTEGER);
     await flush();
 
+    expect(s.historyMode).toBe(true);
+    host!.querySelector<HTMLElement>(".paused-badge")!.click();
+    await flush();
     expect(s.historyMode).toBe(false);
     expect(host!.textContent).toContain("L199");
   });

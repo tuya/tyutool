@@ -15,6 +15,7 @@ export function archiveLineToLogLine(
 ): DebugLogLine {
   return {
     id,
+    archiveLineNo: line.lineNo,
     tsMs: line.tsMs,
     direction: line.direction,
     text: line.text,

@@ -570,7 +570,13 @@
       "count": "{current} / {total}",
       "noMatch": "无匹配",
       "scopeHistory": "仅搜索已加载的历史窗口",
-      "wholeSession": "搜索整个会话"
+      "wholeSession": "搜索整个会话",
+      "scopeWindow": "当前窗口",
+      "scopeFilter": "已加载的筛选结果",
+      "context": "查看上下文",
+      "backToResults": "返回搜索结果",
+      "contextHint": "正在查看结果附近的会话日志。",
+      "failed": "无法搜索整个会话：{msg}"
     },
     "log": {
       "archiveCapped": "[tyutool] 会话归档已达到 {mib} MiB 上限，之后的日志仅实时显示、不再归档，历史、筛选和导出到此为止。",
@@ -598,7 +604,20 @@
       "deviceResetFailed": "设备复位失败：{msg}",
       "deviceResetServeOutdated": "设备复位失败：连到的仍是旧版 tyutool-cli serve（缺少重启相关消息支持），常见于 9527 被占用导致新 serve 启动失败。请关闭占用该端口的进程后重启 serve。",
       "selectionHint": "文字选择仅覆盖已显示的行，跨屏日志请使用导出；文本转换包含显示的时间戳和标签。",
-      "selectionActions": "选中文字操作"
+      "selectionActions": "选中文字操作",
+      "history": "历史回看",
+      "historyReading": "正在回看历史",
+      "historyRange": "第 {start}–{end} 行 / 上次读取共 {total} 行",
+      "sessionStart": "跳到开头",
+      "receiving": "继续接收中",
+      "sessionClosed": "串口已关闭",
+      "newLines": "新增 {count} 行",
+      "historyEmpty": "当前会话还没有已归档的日志。",
+      "retry": "重试",
+      "archiveStopped": "本会话曾达到归档上限，之后存在未归档的数据。可在设置中提高上限继续归档，但已有缺口无法补回。",
+      "historyReady": "滚动浏览历史；点击“返回实时”跟随新数据。",
+      "historyLoading": "正在加载历史…",
+      "filterReadFailed": "无法读取筛选结果：{msg}"
     },
     "autoSave": {
       "label": "自动保存日志",
