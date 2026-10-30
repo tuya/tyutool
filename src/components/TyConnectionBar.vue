@@ -43,7 +43,7 @@ defineProps<{
 
     <!-- Fields (grows) -->
     <div
-      class="relative flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2"
+      class="relative flex min-w-0 flex-[1_1_20rem] flex-wrap items-center gap-x-3 gap-y-2"
     >
       <slot name="fields" />
     </div>
@@ -51,7 +51,7 @@ defineProps<{
     <!-- Actions (optional, right-aligned) -->
     <div
       v-if="$slots.actions"
-      class="relative flex shrink-0 items-center gap-2"
+      class="relative ml-auto flex shrink-0 flex-wrap items-center gap-2"
     >
       <slot name="actions" />
     </div>
