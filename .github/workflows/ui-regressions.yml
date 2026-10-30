@@ -1,9 +1,16 @@
-name: UI regression baseline
+name: UI regressions
 
-# Known defects deliberately fail these assertions until the product is fixed.
-# Run on demand while collecting the red baseline; enable PR gating once the
-# confirmed-defect suite is green. See docs/testing/ui-ux-regressions.md.
+# Exercise real browser geometry and focus independently of Vitest's DOM mocks.
+# Optional interaction proposals remain outside this check.
 on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/ui/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "playwright.config.ts"
+      - ".github/workflows/ui-regressions.yml"
   workflow_dispatch:
 
 permissions:

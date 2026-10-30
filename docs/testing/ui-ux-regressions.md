@@ -1,6 +1,6 @@
 # UI/UX regression coverage and review checklist
 
-Playwright UI specs run against the existing Vite preview. They inject synthetic Pinia state only; no serial hardware, flash, erase, or authorization action is performed. Defect-target assertions are intentionally ordinary assertions: the current confirmed defects should fail until fixed.
+Playwright UI specs run against the existing Vite preview. They inject synthetic Pinia state only; no serial hardware, flash, erase, or authorization action is performed. Defect-target assertions are ordinary assertions of the required behavior; the original failing baseline is preserved below for comparison with repairs.
 
 ## Automated coverage map
 
@@ -61,13 +61,15 @@ pnpm run typecheck:ui
 pnpm test:ui
 ```
 
-`pnpm test:ui` runs all tests, including `@proposal`. `pnpm test:ui:confirmed` excludes proposal-tagged tests and is the current manual-CI command. A nonzero exit from `pnpm test:ui` is expected for the recorded baseline because 36 target assertions fail; the completed run itself reached all 40 tests with 0 skipped and 0 flaky. This is a test-failure result, not a successful green run or a runner/setup failure. LOG-03 is an optional, unapproved interaction proposal; it is not a confirmed release gate. The workflow is currently `workflow_dispatch` only, so it does not yet block pull requests. Playwright writes JSON to `test-results/ui-results.json`, HTML to `playwright-report/`, and failure screenshots/traces under `test-results/ui/`.
+`pnpm test:ui` runs all tests, including `@proposal`. Use `pnpm test:ui:confirmed` to exclude the optional sticky-prefix interaction proposal from required repair verification. The UI workflow runs confirmed-defect assertions for pull requests changing UI code, tests, or their configuration, and supports manual dispatch. Repository branch-protection settings determine whether the check is required to merge.
+
+Playwright writes JSON to `test-results/ui-results.json`, HTML to `playwright-report/`, and failure screenshots/traces under `test-results/ui/`. The original red baseline below is historical: its nonzero exit recorded genuine assertion failures, rather than a runner/setup failure.
 
 LOG-01 currently asserts fixed-row geometry (real line heights within 1px of the measured probe) because that is the active fixed-height virtualizer contract and currently confirmed defect. If the product later adopts a variable-height virtualizer, replace that implementation-specific assertion with equivalent end-to-end scroll geometry coverage (no cumulative blank space, stable middle anchor, correct tail/re-entry across size and viewport changes); do not relax this test while the fixed-height renderer remains.
 
 ## Additional observation outside the original nine findings
 
-`LOG-01 paused middle reading position is preserved after cached-page navigation` is a separate follow-up control: after the test scrolls to the middle, observes the paused-follow control, navigates to Toolbox, waits for Toolbox heading and verifies the old pane is detached, then returns, the first mounted line changed from ID 171 to 334. This remains an additional observation requiring diagnosis, outside the original nine audit findings; the strict test is retained to collect evidence during repair review.
+`LOG-01 paused middle reading position is preserved after cached-page navigation` is a separate follow-up control: after the test scrolls to the middle, observes the paused-follow control, navigates to Toolbox, waits for Toolbox heading and verifies the old pane is detached, then returns, the first mounted line changed from ID 171 to 334. This was traced to DOM scrollTop resetting during KeepAlive deactivation and temporary activation scroll events overwriting the saved reading position. The repair saves the model offset and resumes scroll handling only after restoring it; the strict test remains in the confirmed suite.
 
 ## Latest completed baseline (2026-10-29)
 
@@ -79,3 +81,15 @@ LOG-01 currently asserts fixed-row geometry (real line heights within 1px of the
 - **Passed controls — 4:** non-empty virtual rows, repeated-newline appendChunk split, follow-tail cached return, and LOG-04 search navigation (match count, next/previous return, and whole-session action present).
 
 Playwright overwrites its local reports on subsequent runs, including filtered runs and test listing. Preserve reports from a completed full run when comparing this baseline with a later repair. The counts above describe a completed execution, not a test listing.
+
+## Repair verification (2026-10-30)
+
+- The confirmed suite now contains 40 cases, including an additional regression for closing a settings dropdown with Escape before closing its parent modal. The original 40-case red baseline above remains historical.
+- Empty and non-empty ASCII rows share a font-relative minimum height, preserving the fixed-row virtualizer at all tested sizes without dropping blank lines. Cached-page navigation restores the saved model offset before enabling scroll handling again.
+- Narrow connection fields/actions wrap, and firmware segments select their layout from the operation card width so Browse remains visible. Settings focus enters, cycles in both directions, and returns to its opener; handled dropdown Escape events do not also dismiss the modal.
+- Display toggles expose their pressed state. Their browser locators now use exact accessible names to distinguish the direction toggle from the renamed add-filter-tab button. No state assertions were relaxed.
+- English and Chinese copy distinguishes transient Find from persistent filter tabs and explains Update Center actions directly.
+- The optional sticky-prefix proposal and typography review remain separate from confirmed-defect verification. No minimum metadata font size has been approved, and no variable-height wrapping or new long-line detail interaction is introduced.
+- Verification uses synthetic serial data in Chromium. Native Tauri dialogs and physical serial devices are outside this validation.
+
+Confirmed verification: `pnpm test:ui:confirmed` completed with **40 passed, 0 failed, 0 skipped, 0 flaky**. The full Vitest coverage suite passed **1070 tests**; lint, UI/script type checks, Tauri package parity, and production build also passed. Build and browser execution were run separately to prevent Vite reloads from generated HTML.
