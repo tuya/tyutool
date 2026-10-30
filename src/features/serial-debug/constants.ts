@@ -56,7 +56,8 @@ export const AUTO_SAVE_FLUSH_MAX_APPENDS_PER_TASK = 16;
 // Same order of magnitude as EXPORT_PAGE_SIZE: one page is read, formatted and
 // appended before the next is requested, so peak memory is one page.
 export const AUTO_SAVE_BACKFILL_PAGE_SIZE = 1000;
-export const MAX_SEND_HISTORY = 20;
+export const MAX_SEND_HISTORY = 100;
+export const MAX_FAVORITE_COMMANDS = 50;
 
 // Six distinct colors that cycle when chips are added
 export const CHIP_COLORS = [

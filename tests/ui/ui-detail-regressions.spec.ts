@@ -408,18 +408,19 @@ test("focused long send history reveals the entire command", async ({
   await seed(
     page,
     "serial-debug",
-    "s.sendHistory=['CMD '+('argument_'.repeat(70))+' DISTINCT_END'];",
+    "s.sendHistory=[{text: 'CMD '+('argument_'.repeat(70))+' DISTINCT_END', mode:null, appendCrlf:null, lastSentAt:null, sendCount:0, favorite:false, name:''}];",
   );
   await page
     .getByRole("button", { name: "Send history", exact: true })
     .press("ArrowDown");
+  await page.locator(".history-search").press("Tab");
   const item = page.locator(".history-item");
   await expect(item).toBeFocused();
-  const metrics = await item.evaluate((el) => ({
+  const metrics = await item.locator(".history-command").evaluate((el) => ({
     overflow: getComputedStyle(el).whiteSpace,
     scroll: el.scrollWidth,
     width: el.clientWidth,
-    title: el.getAttribute("title"),
+    title: el.parentElement?.getAttribute("title"),
   }));
   expect(metrics.overflow).toBe("pre-wrap");
   expect(metrics.scroll).toBeLessThanOrEqual(metrics.width);

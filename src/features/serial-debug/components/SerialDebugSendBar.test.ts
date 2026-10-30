@@ -15,7 +15,7 @@ const { t } = vi.hoisted(() => ({
   },
 }));
 vi.mock("vue-i18n", () => ({
-  useI18n: () => ({ t }),
+  useI18n: () => ({ t, locale: { value: "en" } }),
   createI18n: () => ({
     global: { t, te: () => true, locale: { value: "en" } },
   }),
@@ -25,6 +25,7 @@ vi.mock("@/runtime", () => ({
   getRuntime: () => "web",
 }));
 
+import { parseSendHistory, recordSendHistory } from "../send-history";
 import { serialDebugTransport } from "@/features/serial-debug/transport";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import SerialDebugSendBar from "./SerialDebugSendBar.vue";
@@ -90,8 +91,77 @@ describe("SerialDebugSendBar recovery", () => {
     expect(hex.getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("previews without replacing a draft, then restores send settings and the original draft", async () => {
+    s.sendHistory = recordSendHistory([], "55 AA", "hex", false, 1000);
+    await enterDraft("UNSENT");
+    s.sendMode = "ascii";
+    s.sendAppendCrlf = true;
+    host.querySelector<HTMLButtonElement>(".history-wrap > button")!.click();
+    await nextTick();
+    expect(document.querySelector(".history-preview pre")?.textContent).toBe(
+      "55 AA",
+    );
+    expect(s.sendInput).toBe("UNSENT");
+    document.querySelector<HTMLButtonElement>(".history-fill")!.click();
+    await nextTick();
+    expect(s.sendInput).toBe("55 AA");
+    expect(s.sendMode).toBe("hex");
+    expect(s.sendAppendCrlf).toBe(false);
+    expect(write).not.toHaveBeenCalled();
+    host.querySelector<HTMLButtonElement>(".restore-draft")!.click();
+    await nextTick();
+    expect(s.sendInput).toBe("UNSENT");
+    expect(s.sendMode).toBe("ascii");
+    expect(s.sendAppendCrlf).toBe(true);
+  });
+
+  it("keeps current settings when filling a migrated entry and can prepare input offline", async () => {
+    s.sendHistory = parseSendHistory(["OLD"]);
+    s.open = false;
+    s.sendMode = "hex";
+    await nextTick();
+    host.querySelector<HTMLButtonElement>(".history-wrap > button")!.click();
+    await nextTick();
+    document.querySelector<HTMLButtonElement>(".history-fill")!.click();
+    await nextTick();
+    expect(s.sendMode).toBe("hex");
+    expect(input().disabled).toBe(false);
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it("does not save a command name while confirming IME text", async () => {
+    s.sendHistory = recordSendHistory([], "AT", "ascii", true, 1000);
+    host.querySelector<HTMLButtonElement>(".history-wrap > button")!.click();
+    await nextTick();
+    const name = document.querySelector<HTMLInputElement>(
+      ".history-name input",
+    )!;
+    name.value = "查询版本";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    await nextTick();
+    const compositionEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    name.dispatchEvent(compositionEnter);
+    await nextTick();
+    expect(s.sendHistory[0].name).toBe("");
+    expect(compositionEnter.defaultPrevented).toBe(false);
+    name.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await nextTick();
+    expect(s.sendHistory[0].name).toBe("查询版本");
+  });
+
   it("restores the unsent draft after browsing history and leaves Down alone outside history", async () => {
-    s.sendHistory = ["OLD", "OLDER"];
+    s.sendHistory = parseSendHistory(["OLD", "OLDER"]);
     await enterDraft("UNSENT");
     const key = async (key: string) => {
       input().dispatchEvent(
@@ -114,14 +184,14 @@ describe("SerialDebugSendBar recovery", () => {
   });
 
   it("closes history on Escape and restores the trigger", async () => {
-    s.sendHistory = ["OLD"];
+    s.sendHistory = parseSendHistory(["OLD"]);
     await nextTick();
     const trigger = host.querySelector<HTMLButtonElement>(
       ".history-wrap > button",
     )!;
     trigger.click();
     await nextTick();
-    const item = host.querySelector<HTMLButtonElement>(".history-item")!;
+    const item = document.querySelector<HTMLButtonElement>(".history-item")!;
     item.focus();
     item.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -131,7 +201,7 @@ describe("SerialDebugSendBar recovery", () => {
       }),
     );
     await nextTick();
-    expect(host.querySelector(".history-dropdown")).toBeNull();
+    expect(document.querySelector(".history-dropdown")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -250,7 +320,7 @@ describe("SerialDebugSendBar recovery", () => {
           finish = resolve;
         }),
     );
-    s.sendHistory = ["OLD"];
+    s.sendHistory = parseSendHistory(["OLD"]);
     await enterDraft("AT");
     sendButton().click();
     await nextTick();

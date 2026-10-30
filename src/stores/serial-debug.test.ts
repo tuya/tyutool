@@ -544,7 +544,7 @@ describe("useSerialDebugStore.send", () => {
     await pending;
     expect(s.sending).toBe(false);
     expect(s.sendInput).toBe("");
-    expect(s.sendHistory).toEqual(["AT"]);
+    expect(s.sendHistory.map((entry) => entry.text)).toEqual(["AT"]);
   });
 
   it.each(["NEXT", "AT"])(
@@ -566,7 +566,7 @@ describe("useSerialDebugStore.send", () => {
       finish();
       await pending;
       expect(s.sendInput).toBe(draft);
-      expect(s.sendHistory).toEqual(["AT"]);
+      expect(s.sendHistory.map((entry) => entry.text)).toEqual(["AT"]);
     },
   );
 
@@ -641,7 +641,7 @@ describe("useSerialDebugStore.send", () => {
     expect(s.sendHistory).toEqual([]);
     expect(s.sending).toBe(false);
     await s.send();
-    expect(s.sendHistory).toEqual(["NEXT"]);
+    expect(s.sendHistory.map((entry) => entry.text)).toEqual(["NEXT"]);
     expect(s.sendInput).toBe("");
     expect(s.sendError).toBeNull();
   });
@@ -657,7 +657,32 @@ describe("useSerialDebugStore.send", () => {
     await s.send();
     s.sendInput = "A";
     await s.send(); // duplicate should move to front, not add a new entry
-    expect(s.sendHistory).toEqual(["A", "B"]);
+    expect(s.sendHistory.map((entry) => entry.text)).toEqual(["A", "B"]);
+  });
+
+  it("records the settings used for a pending send rather than the newer draft settings", async () => {
+    let finish!: () => void;
+    vi.spyOn(fake, "send").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const s = useSerialDebugStore();
+    s.open = true;
+    s.sendInput = "AT";
+    s.sendMode = "ascii";
+    s.sendAppendCrlf = true;
+    const pending = s.send();
+    s.sendMode = "hex";
+    s.sendAppendCrlf = false;
+    finish();
+    await pending;
+    expect(s.sendHistory[0]).toMatchObject({
+      text: "AT",
+      mode: "ascii",
+      appendCrlf: true,
+    });
   });
 });
 
