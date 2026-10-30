@@ -36,6 +36,7 @@ export async function openUi(
   path: string,
   locale = "en",
   mockPorts: string[] = [],
+  archive: { total: number; failOnceAt?: number } = { total: 0 },
 ) {
   await page.addInitScript(
     ({ locale }) => {
@@ -47,6 +48,7 @@ export async function openUi(
   await page.routeWebSocket(
     new RegExp("^ws://127[.]0[.]0[.]1:9527/?$"),
     (socket) => {
+      let failed = false;
       socket.onMessage((message) => {
         if (typeof message !== "string") return;
         let request: {
@@ -63,11 +65,42 @@ export async function openUi(
         if (request.type === "list_ports") {
           socket.send(JSON.stringify({ type: "ports", ports: mockPorts }));
         } else if (request.type === "serial_debug_session_read_page") {
+          const start = Math.min(archive.total, request.start ?? 0);
+          if (!failed && archive.failOnceAt === start) {
+            failed = true;
+            socket.send(
+              JSON.stringify({
+                type: "error",
+                request_id: request.request_id,
+                message: "temporary archive failure",
+              }),
+            );
+            return;
+          }
           socket.send(
             JSON.stringify({
               type: "serial_debug_session_page",
               request_id: request.request_id,
-              page: { totalLines: 0, start: request.start ?? 0, items: [] },
+              page: {
+                totalLines: archive.total,
+                start,
+                items: Array.from(
+                  {
+                    length: Math.min(request.limit ?? 0, archive.total - start),
+                  },
+                  (_, i) => ({
+                    lineNo: start + i + 1,
+                    tsMs: 1_700_000_000_000 + start + i,
+                    direction: "rx",
+                    text: `archive-${start + i + 1}`,
+                    rawBytes: [
+                      ...new TextEncoder().encode(
+                        `archive-${start + i + 1}\r\n`,
+                      ),
+                    ],
+                  }),
+                ),
+              },
             }),
           );
         }
