@@ -9,34 +9,59 @@ const { t } = useI18n({ useScope: "global" });
 const router = useRouter();
 
 const visible = ref(false);
+const toastRef = ref<HTMLElement | null>(null);
 let timer: ReturnType<typeof setTimeout> | null = null;
-
-watch(
-  () => toastState.visible,
-  (val) => {
-    if (val) {
-      visible.value = true;
-      timer = setTimeout(() => {
-        dismiss();
-      }, 6000);
-    }
-  },
-);
-
-function dismiss(): void {
-  visible.value = false;
-  toastState.visible = false;
+let deadline = 0;
+let remaining = 6000;
+let hovered = false;
+let focused = false;
+function stopTimer(): void {
   if (timer) {
     clearTimeout(timer);
     timer = null;
+    remaining = Math.max(0, deadline - Date.now());
   }
 }
-
+function resumeTimer(): void {
+  if (!visible.value || hovered || focused || timer) return;
+  deadline = Date.now() + remaining;
+  timer = setTimeout(dismiss, remaining);
+}
+function onHover(value: boolean) {
+  hovered = value;
+  if (value) stopTimer();
+  else resumeTimer();
+}
+function onFocusout(event: FocusEvent) {
+  focused =
+    !!event.relatedTarget &&
+    !!toastRef.value?.contains(event.relatedTarget as Node);
+  if (!focused) resumeTimer();
+}
+watch(
+  () => toastState.visible,
+  (val) => {
+    stopTimer();
+    visible.value = val;
+    if (!val) {
+      hovered = false;
+      focused = false;
+    }
+    if (val) {
+      remaining = 6000;
+      resumeTimer();
+    }
+  },
+  { immediate: true },
+);
+function dismiss(): void {
+  stopTimer();
+  visible.value = false;
+  toastState.visible = false;
+}
 function goToSettings(): void {
   dismiss();
-  router.push("/settings");
-  // Note: auto-opening UpdateDialog from here is complex (cross-component);
-  // The toast just navigates to settings, user clicks the button there.
+  void router.push({ path: "/settings", query: { update: "1" } });
 }
 
 async function openPortableDownload(): Promise<void> {
@@ -63,7 +88,19 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <Transition name="ty-toast">
-      <div v-if="visible" class="ty-toast" role="alert" aria-live="polite">
+      <div
+        v-if="visible"
+        ref="toastRef"
+        class="ty-toast"
+        role="status"
+        @mouseenter="onHover(true)"
+        @mouseleave="onHover(false)"
+        @focusin="
+          focused = true;
+          stopTimer();
+        "
+        @focusout="onFocusout"
+      >
         <span class="ty-toast-text">
           <template v-if="toastState.isPortable">
             {{
@@ -112,7 +149,7 @@ onUnmounted(() => {
   border: 1px solid var(--ty-border);
   border-radius: 0.75rem;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  max-width: 28rem;
+  max-width: min(28rem, calc(100vw - 2rem));
   min-width: 16rem;
 }
 

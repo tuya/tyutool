@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick, useId } from "vue";
+import { ref, watch, computed, nextTick, useId, onBeforeUnmount } from "vue";
+import { useCopyFeedback } from "@/composables/useCopyFeedback";
 import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { isTauriRuntime } from "@/runtime";
@@ -44,8 +45,12 @@ const view = ref<"list" | "content">("list");
 const fileList = ref<LogFileInfo[]>([]);
 const listLoading = ref(false);
 const listError = ref("");
+let listGeneration = 0;
+let contentGeneration = 0;
+let openerGeneration = 0;
 
 async function loadFileList(): Promise<void> {
+  const generation = ++listGeneration;
   if (!isTauriRuntime()) {
     fileList.value = [];
     return;
@@ -54,11 +59,13 @@ async function loadFileList(): Promise<void> {
   listError.value = "";
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    fileList.value = await invoke<LogFileInfo[]>("list_log_files");
+    const files = await invoke<LogFileInfo[]>("list_log_files");
+    if (generation === listGeneration && props.open) fileList.value = files;
   } catch (e) {
-    listError.value = String(e);
+    if (generation === listGeneration && props.open)
+      listError.value = String(e);
   } finally {
-    listLoading.value = false;
+    if (generation === listGeneration && props.open) listLoading.value = false;
   }
 }
 
@@ -73,41 +80,64 @@ const contentError = ref("");
 const isTruncated = ref(false);
 const contentEl = ref<HTMLElement | null>(null);
 
-async function openFile(file: LogFileInfo): Promise<void> {
+async function openFile(file: LogFileInfo, refresh = false): Promise<void> {
   if (!isTauriRuntime()) return;
+  const generation = ++contentGeneration;
+  const current = () =>
+    generation === contentGeneration && props.open && view.value === "content";
+  const oldOffset = contentEl.value?.scrollTop ?? 0;
+  const follow =
+    !refresh ||
+    !contentEl.value ||
+    contentEl.value.scrollHeight - oldOffset - contentEl.value.clientHeight <=
+      2;
   selectedFile.value = file;
-  searchQuery.value = "";
-  currentMatchIndex.value = 0;
-  rawContent.value = "";
+  if (!refresh) {
+    searchQuery.value = "";
+    currentMatchIndex.value = 0;
+    rawContent.value = "";
+  }
   contentError.value = "";
-  isTruncated.value = false;
+  if (!refresh) isTruncated.value = false;
   contentLoading.value = true;
   view.value = "content";
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    rawContent.value = await invoke<string>("read_log_tail", {
+    const content = await invoke<string>("read_log_tail", {
       maxBytes: MAX_TAIL_BYTES,
       filename: file.name,
     });
+    if (!current()) return;
+    rawContent.value = content;
+    currentMatchIndex.value = clampIndex(currentMatchIndex.value);
     isTruncated.value = file.sizeBytes > MAX_TAIL_BYTES;
   } catch (e) {
-    contentError.value = String(e);
+    if (current()) contentError.value = String(e);
   } finally {
-    contentLoading.value = false;
-    await nextTick();
-    scrollToBottom();
+    if (current()) {
+      contentLoading.value = false;
+      await nextTick();
+      if (current() && contentEl.value)
+        contentEl.value.scrollTop = follow
+          ? contentEl.value.scrollHeight
+          : oldOffset;
+    }
   }
 }
 
 function backToList(): void {
+  contentGeneration++;
+  contentLoading.value = false;
   view.value = "list";
   searchQuery.value = "";
-}
-
-function scrollToBottom(): void {
-  if (contentEl.value) {
-    contentEl.value.scrollTop = contentEl.value.scrollHeight;
-  }
+  void nextTick(() => {
+    const row = Array.from(
+      dialogRef.value?.querySelectorAll<HTMLButtonElement>(
+        ".log-file-button",
+      ) ?? [],
+    ).find((button) => button.dataset.filename === selectedFile.value?.name);
+    row?.focus();
+  });
 }
 
 // ── Search state ───────────────────────────────────────────────────────────────
@@ -129,8 +159,8 @@ const LEVEL_CLASS: Record<LogLevel, string> = {
   error: "text-red-400",
   warn: "text-yellow-400",
   info: "text-green-200",
-  debug: "text-gray-500",
-  trace: "text-gray-600",
+  debug: "text-slate-300",
+  trace: "text-slate-400",
   default: "text-green-200",
 };
 
@@ -201,17 +231,17 @@ watch(searchQuery, () => {
 
 // ── Copy ───────────────────────────────────────────────────────────────────────
 
-const copied = ref(false);
-
-async function copy(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(rawContent.value);
-    copied.value = true;
-    setTimeout(() => (copied.value = false), 1500);
-  } catch {
-    /* ignore */
-  }
+const {
+  state: copyState,
+  message: copyMessage,
+  copy: copyText,
+  reset: resetCopy,
+} = useCopyFeedback();
+const copied = computed(() => copyState.value === "copied");
+function copy(): void {
+  void copyText(rawContent.value);
 }
+watch(selectedFile, resetCopy);
 
 // ── Open with ─────────────────────────────────────────────────────────────────
 
@@ -240,29 +270,54 @@ async function showOpenWithDialog(): Promise<void> {
   openerDialogOpen.value = true;
   openersLoading.value = true;
   openersError.value = "";
+  const generation = ++openerGeneration;
   try {
-    openers.value = await listLogFileOpeners();
+    const result = await listLogFileOpeners();
+    if (generation === openerGeneration && props.open && openerDialogOpen.value)
+      openers.value = result;
   } catch (e) {
+    if (
+      generation !== openerGeneration ||
+      !props.open ||
+      !openerDialogOpen.value
+    )
+      return;
     openers.value = [];
     openersError.value = e instanceof Error ? e.message : String(e);
   } finally {
-    openersLoading.value = false;
+    if (generation === openerGeneration) openersLoading.value = false;
   }
 }
 
 async function openWith(openerId: string): Promise<void> {
-  if (!selectedFile.value) return;
+  if (!selectedFile.value || openingEditorId.value) return;
+  const generation = ++openerGeneration;
   openingEditorId.value = openerId;
   openersError.value = "";
   try {
     await openLogFileInEditor(selectedFile.value.name, openerId);
-    openerDialogOpen.value = false;
+    if (generation === openerGeneration && props.open)
+      openerDialogOpen.value = false;
   } catch (e) {
+    if (
+      generation !== openerGeneration ||
+      !props.open ||
+      !openerDialogOpen.value
+    )
+      return;
     openersError.value = e instanceof Error ? e.message : String(e);
   } finally {
-    openingEditorId.value = "";
+    if (generation === openerGeneration) openingEditorId.value = "";
   }
 }
+
+watch(openerDialogOpen, (open) => {
+  if (!open) {
+    openerGeneration++;
+    openersLoading.value = false;
+    openingEditorId.value = "";
+  }
+});
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
 
@@ -285,6 +340,11 @@ function fileStem(name: string): string {
 watch(
   () => props.open,
   (open) => {
+    resetCopy();
+    contentGeneration++;
+    listGeneration++;
+    openerGeneration++;
+    contentLoading.value = false;
     if (open) {
       view.value = "list";
       openerDialogOpen.value = false;
@@ -292,7 +352,13 @@ watch(
       void loadFileList();
     }
   },
+  { immediate: true },
 );
+onBeforeUnmount(() => {
+  contentGeneration++;
+  listGeneration++;
+  openerGeneration++;
+});
 </script>
 
 <template>
@@ -309,6 +375,18 @@ watch(
       tabindex="-1"
       class="ty-card flex max-h-[85vh] w-full max-w-3xl flex-col gap-3 rounded-xl p-4 sm:p-5"
     >
+      <p
+        v-if="copyMessage"
+        :role="copyState === 'failed' ? 'alert' : 'status'"
+        class="text-xs"
+        :class="
+          copyState === 'failed'
+            ? 'text-[var(--ty-danger)]'
+            : 'text-[var(--ty-success)]'
+        "
+      >
+        {{ copyMessage }}
+      </p>
       <!-- ── Header ── -->
       <div class="flex items-center justify-between">
         <h2 :id="titleId" class="ty-section-title">
@@ -328,6 +406,8 @@ watch(
         <!-- Loading -->
         <div
           v-if="listLoading"
+          role="status"
+          :aria-label="t('common.loading')"
           class="flex flex-1 items-center justify-center py-8"
         >
           <span class="loading loading-spinner loading-md opacity-60" />
@@ -336,6 +416,7 @@ watch(
         <!-- Error -->
         <div
           v-else-if="listError"
+          role="alert"
           class="rounded-lg bg-red-950/40 p-3 text-sm text-red-400"
         >
           {{ listError }}
@@ -370,10 +451,16 @@ watch(
                 v-for="(file, idx) in fileList"
                 :key="file.name"
                 class="cursor-pointer border-b border-white/5 hover:bg-white/5"
-                @click="openFile(file)"
               >
                 <td class="py-1.5 pr-4 font-mono text-xs">
-                  {{ fileStem(file.name) }}
+                  <button
+                    type="button"
+                    class="log-file-button text-left hover:underline"
+                    :data-filename="file.name"
+                    @click="openFile(file)"
+                  >
+                    {{ fileStem(file.name) }}
+                  </button>
                   <span
                     v-if="idx === 0"
                     class="log-current-session-badge ml-1.5 rounded px-1 py-0.5 text-[10px]"
@@ -444,6 +531,7 @@ watch(
             type="text"
             class="ty-input flex-1 font-mono text-xs"
             :placeholder="t('settings.logViewer.searchPlaceholder')"
+            :aria-label="t('settings.logViewer.searchPlaceholder')"
           />
           <span v-if="searchQuery" class="shrink-0 text-xs opacity-60">
             <template v-if="matchTotal === 0">{{
@@ -464,6 +552,7 @@ watch(
             class="ty-btn-sm ty-btn-secondary px-2"
             :disabled="matchTotal === 0"
             @click="jumpPrev"
+            :aria-label="t('settings.logViewer.previousMatch')"
           >
             ↑
           </button>
@@ -473,29 +562,33 @@ watch(
             class="ty-btn-sm ty-btn-secondary px-2"
             :disabled="matchTotal === 0"
             @click="jumpNext"
+            :aria-label="t('settings.logViewer.nextMatch')"
           >
             ↓
           </button>
         </div>
 
+        <p
+          v-if="contentError"
+          role="alert"
+          class="text-xs text-[var(--ty-danger)]"
+        >
+          {{ contentError }}
+        </p>
         <!-- Log content -->
         <div
-          v-if="contentLoading"
+          v-if="contentLoading && !rawContent"
+          role="status"
+          :aria-label="t('common.loading')"
           class="flex flex-1 items-center justify-center py-8"
         >
           <span class="loading loading-spinner loading-md opacity-60" />
         </div>
 
         <div
-          v-else-if="contentError"
-          class="min-h-0 flex-1 overflow-auto rounded-lg bg-black/80 p-3 font-mono text-xs text-red-400"
-        >
-          {{ contentError }}
-        </div>
-
-        <div
-          v-else
+          v-else-if="rawContent || !contentError"
           ref="contentEl"
+          :aria-busy="contentLoading"
           class="min-h-0 flex-1 overflow-auto rounded-lg bg-black/80 p-3 font-mono text-xs leading-relaxed"
         >
           <div v-if="displayLines.length === 0" class="opacity-40">
@@ -525,7 +618,7 @@ watch(
             type="button"
             class="ty-btn-sm ty-btn-secondary"
             :disabled="contentLoading"
-            @click="openFile(selectedFile!)"
+            @click="openFile(selectedFile!, true)"
           >
             {{ t("settings.logViewer.refresh") }}
           </button>
@@ -533,6 +626,7 @@ watch(
             type="button"
             class="ty-btn-sm ty-btn-secondary"
             @click="copy"
+            :disabled="contentLoading || !rawContent"
           >
             {{
               copied

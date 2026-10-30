@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useModalFocus } from "@/composables/useModalFocus";
+import { rLog } from "@/utils/log";
 import { useI18n } from "vue-i18n";
 import { APP_VERSION } from "@/config/app";
 import { isTauriRuntime } from "@/runtime";
@@ -57,6 +58,8 @@ const totalBytes = ref(0);
 const downloadingSource = ref("");
 const downloadingVersion = ref("");
 const installing = ref(false);
+const operationError = ref("");
+let checkGeneration = 0;
 
 const manualUpdateOnly = ref(false);
 const debRpmInstall = ref(false);
@@ -69,6 +72,7 @@ function formatBytes(bytes: number): string {
 }
 
 function resetState(): void {
+  operationError.value = "";
   sourceStates.value = UPDATE_SOURCES.map((source) =>
     makeSourceState(source, "checking"),
   );
@@ -88,10 +92,12 @@ function resetState(): void {
 async function checkSource(
   source: (typeof UPDATE_SOURCES)[number],
   idx: number,
+  generation: number,
 ): Promise<void> {
   const start = Date.now();
   try {
     const manifest = await fetchLatestJson(source.url);
+    if (generation !== checkGeneration || !props.open) return;
     const elapsed = parseFloat(((Date.now() - start) / 1000).toFixed(1));
     const newer = isNewerVersion(manifest.version, APP_VERSION);
     sourceStates.value[idx] = {
@@ -104,6 +110,7 @@ async function checkSource(
       error: "",
     };
   } catch (error: unknown) {
+    if (generation !== checkGeneration || !props.open) return;
     const elapsed = parseFloat(((Date.now() - start) / 1000).toFixed(1));
     sourceStates.value[idx] = {
       id: source.id,
@@ -117,9 +124,9 @@ async function checkSource(
   }
 }
 
-async function runChecks(): Promise<void> {
+async function runChecks(generation = checkGeneration): Promise<void> {
   await Promise.all(
-    UPDATE_SOURCES.map((source, idx) => checkSource(source, idx)),
+    UPDATE_SOURCES.map((source, idx) => checkSource(source, idx, generation)),
   );
 }
 
@@ -319,21 +326,26 @@ function sourceStatusCopy(source: SourceState): string {
 watch(
   () => props.open,
   (open, previousOpen) => {
+    const generation = ++checkGeneration;
     if (open && !previousOpen) {
       resetState();
       void getManualUpdateFlags().then(({ manualOnly, debRpm }) => {
+        if (generation !== checkGeneration || !props.open) return;
         manualUpdateOnly.value = manualOnly;
         debRpmInstall.value = debRpm;
         installTypeReady.value = true;
       });
-      void runChecks();
+      void runChecks(generation);
     }
   },
+  { immediate: true },
 );
 
 async function startDownload(sourceState: SourceState): Promise<void> {
   if (!isTauriRuntime()) return;
   if (!inAppUpdateSupported.value) return;
+  if (downloading.value || installing.value) return;
+  operationError.value = "";
 
   downloading.value = true;
   downloadReady.value = false;
@@ -343,23 +355,29 @@ async function startDownload(sourceState: SourceState): Promise<void> {
   downloadingSource.value = t(sourceState.labelKey);
   downloadingVersion.value = sourceState.version;
 
-  const { info, error: logError } = await import("@tauri-apps/plugin-log");
-
   try {
-    await info(
+    rLog.info(
       `[Update] startDownload: source=${sourceState.id}, version=${sourceState.version}`,
     );
     const update = await updateCheck(sourceState.id);
-    await info(
+    rLog.info(
       `[Update] update_check returned: available=${update.available}, version=${update.version}, currentVersion=${update.currentVersion}`,
     );
     if (update.available) {
-      await info(
+      rLog.info(
         `[Update] update details: date=${update.date}, body=${update.body?.substring(0, 200)}`,
       );
     } else {
-      await info("[Update] no update available from update_check");
+      rLog.info("[Update] no update available from update_check");
       downloading.value = false;
+      sourceStates.value[
+        sourceStates.value.findIndex((source) => source.id === sourceState.id)
+      ] = {
+        ...sourceState,
+        status: "upToDate",
+        version: update.version,
+        manifest: null,
+      };
       return;
     }
 
@@ -382,23 +400,28 @@ async function startDownload(sourceState: SourceState): Promise<void> {
     downloadReady.value = true;
     downloadPercent.value = 100;
   } catch (error: unknown) {
+    operationError.value = t("settings.update.operationFailed", {
+      msg: error instanceof Error ? error.message : String(error),
+    });
     const errMsg =
       error instanceof Error
         ? `${error.message}\n${error.stack}`
         : String(error);
-    await logError(`[Update] startDownload failed: ${errMsg}`);
+    rLog.error(`[Update] startDownload failed: ${errMsg}`);
     console.error("[Update] startDownload failed:", error);
+  } finally {
     downloading.value = false;
   }
 }
 
 async function restartNow(): Promise<void> {
   if (!isTauriRuntime()) return;
+  if (installing.value) return;
+  operationError.value = "";
   installing.value = true;
-  const { info, error: logError } = await import("@tauri-apps/plugin-log");
 
   try {
-    await info("[Update] restartNow: starting install...");
+    rLog.info("[Update] restartNow: starting install...");
     if (downloadReady.value) {
       await updateInstall();
       downloadReady.value = false;
@@ -406,12 +429,16 @@ async function restartNow(): Promise<void> {
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   } catch (error: unknown) {
+    operationError.value = t("settings.update.installFailed", {
+      msg: error instanceof Error ? error.message : String(error),
+    });
     const errMsg =
       error instanceof Error
         ? `${error.message}\n${error.stack}`
         : String(error);
-    await logError(`[Update] restartNow failed: ${errMsg}`);
+    rLog.error(`[Update] restartNow failed: ${errMsg}`);
     console.error("[Update] restartNow failed:", error);
+  } finally {
     installing.value = false;
   }
 }
@@ -511,6 +538,13 @@ async function openManualReleaseDownload(
           </div>
 
           <div class="ud-layout">
+            <p
+              v-if="operationError"
+              role="alert"
+              class="rounded-lg border border-[var(--ty-danger)] p-3 text-sm text-[var(--ty-danger)]"
+            >
+              {{ operationError }}
+            </p>
             <section
               class="ud-overview-card"
               :class="`ud-overview-card--${summaryState.kind}`"
@@ -1239,7 +1273,7 @@ async function openManualReleaseDownload(
 
 .ud-btn-primary {
   border: none;
-  color: #fff;
+  color: var(--ty-on-primary);
   background: linear-gradient(
     135deg,
     var(--ty-primary) 0%,
@@ -1529,7 +1563,7 @@ async function openManualReleaseDownload(
 }
 
 .ud-spinner--light {
-  border-top-color: #fff;
+  border-top-color: currentColor;
 }
 
 .ud-spinner--sm {

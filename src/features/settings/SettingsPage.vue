@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { APP_VERSION } from "@/config/app";
 import { useSettingsStore, resolveLocale } from "@/stores/settings";
@@ -28,6 +29,55 @@ const sd = useSerialDebugStore();
 
 const appVersion = APP_VERSION;
 const showUpdateDialog = ref(false);
+const route = useRoute();
+const router = useRouter();
+watch(
+  () => route.query.update,
+  (value) => {
+    if (value === "1") {
+      showUpdateDialog.value = true;
+      const query = { ...route.query };
+      delete query.update;
+      void router.replace({ path: route.path, query });
+    }
+  },
+  { immediate: true },
+);
+function onThemeKey(event: KeyboardEvent): void {
+  if (
+    ![
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+      "Home",
+      "End",
+    ].includes(event.key)
+  )
+    return;
+  event.preventDefault();
+  const buttons = [
+    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>(
+      "[role=radio]",
+    ),
+  ];
+  const index = buttons.findIndex(
+    (button) => button.dataset.theme === settings.theme,
+  );
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? buttons.length - 1
+        : (index +
+            (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) +
+            buttons.length) %
+          buttons.length;
+  const theme = buttons[next]?.dataset.theme;
+  if (theme === "light" || theme === "dark" || theme === "system")
+    settings.setTheme(theme);
+  buttons[next]?.focus();
+}
 const showLogViewer = ref(false);
 const updateEntryModel = buildUpdateEntryModel(appVersion);
 
@@ -242,7 +292,7 @@ function resetBatchAuthDisclaimer(): void {
             </p>
           </div>
           <div class="update-entry-card__arrow" aria-hidden="true">
-            <FontAwesomeIcon :icon="['fas', 'angle-right']" class="size-4" />
+            <FontAwesomeIcon :icon="['fas', 'chevron-right']" class="size-4" />
           </div>
         </button>
 
@@ -292,6 +342,7 @@ function resetBatchAuthDisclaimer(): void {
           <div
             class="inline-flex w-full max-w-md rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface-muted)] p-1"
             role="radiogroup"
+            @keydown="onThemeKey"
             :aria-label="t('settings.themeLegend')"
           >
             <button
@@ -307,6 +358,8 @@ function resetBatchAuthDisclaimer(): void {
               :key="opt.v"
               type="button"
               role="radio"
+              :data-theme="opt.v"
+              :tabindex="settings.theme === opt.v ? 0 : -1"
               :aria-checked="settings.theme === opt.v"
               class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
               :class="
@@ -393,15 +446,18 @@ function resetBatchAuthDisclaimer(): void {
 
           <div class="settings-row">
             <div class="settings-row__copy">
-              <span class="settings-row__title">{{
+              <label for="settings-log-level" class="settings-row__title">{{
                 t("settings.logLevel")
-              }}</span>
-              <p class="settings-row__hint">
+              }}</label>
+              <p id="settings-log-level-hint" class="settings-row__hint">
                 {{ t("settings.logLevelHint") }}
               </p>
             </div>
             <TySelect
               :model-value="settings.logLevel"
+              :aria-label="t('settings.logLevel')"
+              aria-describedby="settings-log-level-hint"
+              id="settings-log-level"
               :options="logLevelOptions"
               :disabled="!settings.logEnabled"
               class="settings-row__control settings-row__control--select"
@@ -520,15 +576,19 @@ function resetBatchAuthDisclaimer(): void {
         </div>
         <div class="settings-row">
           <div class="settings-row__copy">
-            <span class="settings-row__title">{{
-              t("serialDebug.logWindow.label")
-            }}</span>
-            <p class="settings-row__hint">
+            <label
+              for="settings-serial-log-window"
+              class="settings-row__title"
+              >{{ t("serialDebug.logWindow.label") }}</label
+            >
+            <p id="settings-serial-log-window-hint" class="settings-row__hint">
               {{ t("serialDebug.logWindow.hint") }}
             </p>
           </div>
           <TySelect
             id="settings-serial-log-window"
+            :aria-label="t('serialDebug.logWindow.label')"
+            aria-describedby="settings-serial-log-window-hint"
             v-model="logWindowValue"
             :options="logWindowOptions"
             :placeholder="
@@ -540,15 +600,22 @@ function resetBatchAuthDisclaimer(): void {
         </div>
         <div class="settings-row">
           <div class="settings-row__copy">
-            <span class="settings-row__title">{{
-              t("serialDebug.archiveLimit.label")
-            }}</span>
-            <p class="settings-row__hint">
+            <label
+              for="settings-serial-archive-limit"
+              class="settings-row__title"
+              >{{ t("serialDebug.archiveLimit.label") }}</label
+            >
+            <p
+              id="settings-serial-archive-limit-hint"
+              class="settings-row__hint"
+            >
               {{ t("serialDebug.archiveLimit.hint") }}
             </p>
           </div>
           <TySelect
             id="settings-serial-archive-limit"
+            :aria-label="t('serialDebug.archiveLimit.label')"
+            aria-describedby="settings-serial-archive-limit-hint"
             v-model="archiveLimitValue"
             :options="archiveLimitOptions"
             :placeholder="
