@@ -41,7 +41,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
 
 <template>
   <div
-    class="ops-range-block rounded-xl p-3"
+    class="ops-range-block @container rounded-xl p-3"
     aria-labelledby="flash-segments-title"
   >
     <p id="flash-segments-title" class="ty-block-label mb-2.5">
@@ -51,8 +51,8 @@ const segmentErrors = computed<Record<string, string>>(() => {
       {{ t("flash.hexHint") }}
     </p>
 
-    <!-- md+: table layout -->
-    <div class="hidden overflow-x-auto md:block">
+    <!-- Use the table only when the operation card has enough room for every field. -->
+    <div class="hidden overflow-x-auto @min-[600px]:block">
       <table class="w-full border-collapse text-left text-sm">
         <thead>
           <tr class="border-b border-[var(--ty-border)]">
@@ -176,7 +176,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
     </div>
 
     <!-- Narrow screen: card layout -->
-    <div class="space-y-3 md:hidden">
+    <div class="space-y-3 @min-[600px]:hidden">
       <div
         v-for="(seg, index) in ctx.flashSegments"
         :key="seg.id"
