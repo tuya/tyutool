@@ -877,9 +877,7 @@ async function openManualReleaseDownload(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: var(--ty-scrim);
   padding: 1.25rem;
 }
 
@@ -889,25 +887,11 @@ async function openManualReleaseDownload(
   max-height: min(90vh, 54rem);
   width: min(100%, 43rem);
   flex-direction: column;
-  border-radius: 1.125rem;
+  border-radius: var(--ty-radius);
   border: 1px solid var(--ty-border);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--ty-surface) 94%, white 6%) 0%,
-    var(--ty-surface) 100%
-  );
-  box-shadow:
-    0 24px 60px rgba(15, 23, 42, 0.2),
-    0 8px 24px rgba(15, 23, 42, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: var(--ty-surface);
+  box-shadow: var(--ty-overlay-shadow);
   overflow: hidden;
-}
-
-.dark .ty-dialog-container {
-  box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.58),
-    0 8px 24px rgba(0, 0, 0, 0.36),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .ty-dialog-accent-bar {
@@ -916,11 +900,7 @@ async function openManualReleaseDownload(
 }
 
 .ty-dialog-accent-info {
-  background: linear-gradient(
-    90deg,
-    var(--ty-primary),
-    color-mix(in srgb, var(--ty-primary) 60%, transparent)
-  );
+  background: var(--ty-primary);
 }
 
 .ty-dialog-header {
@@ -994,13 +974,7 @@ async function openManualReleaseDownload(
 .ud-details-section {
   border-radius: 1rem;
   border: 1px solid var(--ty-border);
-  background-color: color-mix(in srgb, var(--ty-surface-muted) 82%, white 18%);
-}
-
-.dark .ud-overview-card,
-.dark .ud-notes-card,
-.dark .ud-details-section {
-  background-color: color-mix(in srgb, var(--ty-surface-muted) 92%, black 8%);
+  background-color: var(--ty-field);
 }
 
 .ud-overview-card {
@@ -1012,11 +986,7 @@ async function openManualReleaseDownload(
 
 .ud-overview-card--available {
   border-color: color-mix(in srgb, var(--ty-primary) 34%, var(--ty-border));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ty-primary) 9%, var(--ty-surface-muted)) 0%,
-    color-mix(in srgb, var(--ty-surface) 92%, white 8%) 100%
-  );
+  background: var(--ty-field);
 }
 
 .ud-overview-card--upToDate,
@@ -1034,11 +1004,7 @@ async function openManualReleaseDownload(
 
 .ud-overview-card--installing {
   border-color: color-mix(in srgb, var(--ty-primary) 34%, var(--ty-border));
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--ty-primary) 12%, var(--ty-surface-muted)) 0%,
-    color-mix(in srgb, var(--ty-primary-hover) 16%, var(--ty-surface)) 100%
-  );
+  background: var(--ty-primary-soft);
 }
 
 .ud-overview-top {
@@ -1089,8 +1055,8 @@ async function openManualReleaseDownload(
 }
 
 .ud-overview-icon--installing {
-  color: #fff;
-  background-color: color-mix(in srgb, var(--ty-primary) 50%, transparent);
+  color: var(--ty-primary);
+  background-color: color-mix(in srgb, var(--ty-primary) 10%, transparent);
   border-color: color-mix(in srgb, var(--ty-primary) 34%, transparent);
 }
 
@@ -1182,18 +1148,14 @@ async function openManualReleaseDownload(
   height: 0.5rem;
   overflow: hidden;
   border-radius: 9999px;
-  background-color: color-mix(in srgb, var(--ty-border) 88%, white 12%);
+  background-color: var(--ty-border);
 }
 
 .ud-progress-bar {
   height: 100%;
   border-radius: 9999px;
-  background: linear-gradient(
-    90deg,
-    var(--ty-primary),
-    var(--ty-primary-hover)
-  );
-  transition: width 0.3s ease;
+  background: var(--ty-primary);
+  transition: width 120ms ease;
 }
 
 .ud-progress-copy {
@@ -1238,26 +1200,19 @@ async function openManualReleaseDownload(
 .ud-btn-secondary,
 .ud-btn-primary {
   display: inline-flex;
-  min-height: 2.5rem;
+  min-height: 2.125rem;
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
   flex: 1;
-  border-radius: 0.75rem;
-  padding: 0.55rem 0.95rem;
-  font-size: 0.86rem;
-  font-weight: 700;
+  border-radius: var(--ty-control-radius);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
   cursor: pointer;
   transition:
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    filter 0.18s ease,
-    transform 0.12s ease;
-}
-
-.ud-btn-secondary:active,
-.ud-btn-primary:active {
-  transform: scale(0.98);
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 
 .ud-btn-secondary {
@@ -1272,20 +1227,13 @@ async function openManualReleaseDownload(
 }
 
 .ud-btn-primary {
-  border: none;
+  border: 1px solid var(--ty-primary);
   color: var(--ty-on-primary);
-  background: linear-gradient(
-    135deg,
-    var(--ty-primary) 0%,
-    var(--ty-primary-hover) 100%
-  );
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.12),
-    0 6px 18px color-mix(in srgb, var(--ty-primary) 28%, transparent);
+  background: var(--ty-primary);
 }
 
 .ud-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.06);
+  background: var(--ty-primary-hover);
 }
 
 .ud-btn-secondary:disabled,
