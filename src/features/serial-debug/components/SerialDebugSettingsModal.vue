@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import TySelect from "@/components/TySelect.vue";
@@ -8,6 +8,8 @@ import TySwitch from "@/components/TySwitch.vue";
 const emit = defineEmits<{ close: [] }>();
 const s = useSerialDebugStore();
 const { t } = useI18n();
+const dialogRef = ref<HTMLElement | null>(null);
+let opener: HTMLElement | null = null;
 
 const dataBitsOptions = computed(() => [
   { value: "five", label: "5" },
@@ -26,20 +28,69 @@ const stopBitsOptions = computed(() => [
   { value: "two", label: "2" },
 ]);
 
-function onKeydown(e: KeyboardEvent): void {
-  if (e.key === "Escape") emit("close");
+function focusableElements(): HTMLElement[] {
+  return Array.from(
+    dialogRef.value?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"]):not([disabled])',
+    ) ?? [],
+  ).filter((element) => element.getClientRects().length > 0);
 }
-onMounted(() => window.addEventListener("keydown", onKeydown));
-onUnmounted(() => window.removeEventListener("keydown", onKeydown));
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.defaultPrevented) return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+    return;
+  }
+  if (e.key !== "Tab") return;
+  const elements = focusableElements();
+  if (elements.length === 0) {
+    e.preventDefault();
+    return;
+  }
+  const first = elements[0];
+  const last = elements[elements.length - 1];
+  if (
+    e.shiftKey &&
+    (document.activeElement === first ||
+      !dialogRef.value?.contains(document.activeElement))
+  ) {
+    e.preventDefault();
+    last.focus();
+  } else if (
+    !e.shiftKey &&
+    (document.activeElement === last ||
+      !dialogRef.value?.contains(document.activeElement))
+  ) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+function close(): void {
+  emit("close");
+  void nextTick(() => opener?.focus());
+}
+onMounted(() => {
+  opener =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  void nextTick(() => focusableElements()[0]?.focus());
+});
 </script>
 
 <template>
   <div
+    ref="dialogRef"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
     role="dialog"
     aria-modal="true"
     :aria-label="t('serialDebug.conn.settings')"
-    @click.self="emit('close')"
+    @keydown="onKeydown"
+    @click.self="close"
   >
     <div class="ty-card w-[min(90vw,400px)] overflow-hidden">
       <div
@@ -52,7 +103,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
           type="button"
           class="page-header-btn flex size-8 items-center justify-center rounded-lg"
           :aria-label="t('common.closeDialog')"
-          @click="emit('close')"
+          @click="close"
         >
           <FontAwesomeIcon :icon="['fas', 'xmark']" class="size-3.5" />
         </button>
