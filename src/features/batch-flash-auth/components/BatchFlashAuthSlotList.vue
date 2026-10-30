@@ -44,7 +44,7 @@ async function onRead(port: string) {
 
 <template>
   <div
-    class="flex flex-col overflow-x-auto rounded-xl border border-[var(--ty-border)]"
+    class="flex flex-col overflow-x-auto rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)]"
   >
     <p
       v-if="store.portsLoading"

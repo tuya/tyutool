@@ -1,5 +1,6 @@
 <!-- src/features/toolbox/ToolboxPage.vue -->
 <script setup lang="ts">
+import TyPageHeader from "@/components/TyPageHeader.vue";
 import { computed, unref } from "vue";
 import { useI18n } from "vue-i18n";
 import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
@@ -23,33 +24,11 @@ const tools = computed(() =>
 
 <template>
   <div class="flex min-w-0 flex-col gap-3 sm:gap-4">
-    <header
-      class="page-header relative flex min-w-0 flex-col gap-3 overflow-hidden p-3 sm:flex-row sm:items-center sm:p-3.5"
-    >
-      <div
-        class="page-header-bg pointer-events-none absolute inset-0"
-        aria-hidden="true"
-      />
-      <div class="relative flex min-w-0 flex-1 items-center gap-3">
-        <div
-          class="page-header-icon flex size-10 shrink-0 items-center justify-center rounded-xl"
-          aria-hidden="true"
-        >
-          <FontAwesomeIcon :icon="['fas', 'toolbox']" class="size-5" />
-        </div>
-        <div class="min-w-0">
-          <p class="page-header-section">{{ t("toolbox.section") }}</p>
-          <h1 class="page-header-title mt-0.5">{{ t("app.nav.toolbox") }}</h1>
-        </div>
-        <div
-          class="page-header-divider ml-1 hidden h-8 w-px shrink-0 sm:block"
-          aria-hidden="true"
-        />
-        <p class="page-header-desc relative hidden max-w-[26rem] sm:block">
-          {{ t("toolbox.subtitle") }}
-        </p>
-      </div>
-    </header>
+    <TyPageHeader
+      :title="t('app.nav.toolbox')"
+      :section="t('toolbox.section')"
+      :description="t('toolbox.subtitle')"
+    />
 
     <div
       class="grid min-w-0 gap-3 sm:gap-4"
@@ -62,20 +41,20 @@ const tools = computed(() =>
         :key="tool.to"
         :to="tool.to"
         :data-tool-id="tool.id"
-        class="ty-card group flex cursor-pointer items-center gap-4 rounded-xl p-4 transition-colors hover:bg-[var(--ty-surface-muted)]"
+        class="ty-card tool-card group flex cursor-pointer items-center gap-6 p-6 transition-colors hover:bg-[var(--ty-field)]"
       >
         <div
-          class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--ty-primary)_12%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--ty-primary)_22%,transparent)]"
+          class="tool-card-icon flex size-14 shrink-0 items-center justify-center text-[var(--ty-primary)]"
         >
           <TyBatchFlashAuthIcon
             v-if="tool.icon === 'batch-flash-auth'"
-            class="size-5 text-[var(--ty-primary)]"
+            class="size-8 text-[var(--ty-primary)]"
           />
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-2">
             <p
-              class="min-w-0 flex-1 text-sm font-semibold text-[var(--ty-text)]"
+              class="min-w-0 flex-1 text-lg font-semibold text-[var(--ty-text)]"
             >
               {{ tool.name }}
             </p>
@@ -88,9 +67,18 @@ const tools = computed(() =>
               surface="toolbox-card"
             />
           </div>
-          <p class="mt-0.5 text-xs leading-snug text-[var(--ty-text-muted)]">
+          <p
+            class="mt-2 max-w-xl text-[13px] leading-relaxed text-[var(--ty-text-muted)]"
+          >
             {{ tool.desc }}
           </p>
+          <span
+            class="mt-5 inline-flex items-center gap-2 rounded-md bg-[var(--ty-primary-soft)] px-3 py-2 text-xs font-semibold text-[var(--ty-primary)]"
+            >{{ t("toolbox.openTool")
+            }}<FontAwesomeIcon
+              :icon="['fas', 'arrow-right']"
+              aria-hidden="true"
+          /></span>
         </div>
         <FontAwesomeIcon
           :icon="['fas', 'chevron-right']"
@@ -101,3 +89,19 @@ const tools = computed(() =>
     </div>
   </div>
 </template>
+
+<style scoped>
+.tool-card {
+  min-height: 220px;
+}
+@media (max-width: 600px) {
+  .tool-card {
+    min-height: 180px;
+    gap: 16px;
+    padding: 20px;
+  }
+  .tool-card-icon {
+    width: 32px;
+  }
+}
+</style>

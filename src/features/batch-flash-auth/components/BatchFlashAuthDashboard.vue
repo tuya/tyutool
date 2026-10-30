@@ -55,14 +55,16 @@ const bannerBg = computed(() => {
     return "color-mix(in srgb, var(--ty-success) 10%, transparent)";
   if (k === "all-failed")
     return "color-mix(in srgb, var(--ty-danger) 10%, transparent)";
-  return "color-mix(in srgb, var(--ty-accent) 10%, transparent)";
+  if (k === "all-skipped") return "var(--ty-surface-muted)";
+  return "color-mix(in srgb, var(--ty-warning) 8%, transparent)";
 });
 
 const bannerTextColor = computed(() => {
   const k = store.completionBanner?.kind;
   if (k === "all-success") return "var(--ty-success)";
   if (k === "all-failed") return "var(--ty-danger)";
-  return "var(--ty-accent)";
+  if (k === "all-skipped") return "var(--ty-text-muted)";
+  return "var(--ty-warning)";
 });
 
 const bannerText = computed(() => {
@@ -145,10 +147,10 @@ const bannerText = computed(() => {
       </button>
     </div>
     <!-- Stats row -->
-    <div class="flex flex-wrap gap-3">
+    <div class="batch-stats grid grid-cols-1 gap-3 md:grid-cols-3">
       <!-- Flash cumulative stats -->
       <div
-        class="flex min-w-0 flex-1 items-center gap-4 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-4 py-3"
+        class="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-3"
       >
         <BatchFlashAuthDonutChart
           :total="store.cumulativeStats.flash.total"
@@ -198,7 +200,7 @@ const bannerText = computed(() => {
 
       <!-- Auth cumulative stats -->
       <div
-        class="flex min-w-0 flex-1 items-center gap-4 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-4 py-3"
+        class="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-3"
       >
         <BatchFlashAuthDonutChart
           :total="store.cumulativeStats.auth.total"
@@ -248,7 +250,7 @@ const bannerText = computed(() => {
 
       <!-- Current batch stats -->
       <div
-        class="flex min-w-0 flex-1 flex-col justify-center gap-1.5 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-4 py-3 text-sm"
+        class="flex min-w-0 flex-1 flex-col justify-center gap-1.5 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] px-3 py-3 text-sm"
       >
         <span class="font-medium text-[var(--ty-text)]">{{
           t("batchFlashAuth.dashboard.currentBatch")
