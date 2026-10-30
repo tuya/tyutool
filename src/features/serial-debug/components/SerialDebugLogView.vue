@@ -10,6 +10,8 @@ import {
   watch,
   watchEffect,
 } from "vue";
+import { useFloatingPanel } from "@/composables/useFloatingPanel";
+import { useCopyFeedback } from "@/composables/useCopyFeedback";
 import { useI18n } from "vue-i18n";
 import { faCircleNotch, faFloppyDisk } from "@fortawesome/free-solid-svg-icons";
 import { useSerialDebugStore } from "@/stores/serial-debug";
@@ -522,6 +524,55 @@ function spanStyle(style: AnsiStyle): Record<string, string | undefined> {
 }
 
 const ctxMenu = ref<{ x: number; y: number; selected: string } | null>(null);
+const ctxMenuRef = ref<HTMLElement | null>(null);
+const {
+  state: copyState,
+  message: copyMessage,
+  copy: copyText,
+} = useCopyFeedback();
+const { style: ctxMenuStyle } = useFloatingPanel(
+  ctxMenuRef,
+  () => ctxMenu.value !== null,
+  () =>
+    ctxMenu.value
+      ? {
+          left: ctxMenu.value.x,
+          right: ctxMenu.value.x,
+          top: ctxMenu.value.y,
+          bottom: ctxMenu.value.y,
+        }
+      : null,
+);
+watch(ctxMenu, async (menu) => {
+  if (menu) {
+    await nextTick();
+    if (ctxMenu.value)
+      ctxMenuRef.value?.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+});
+function onMenuKey(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    dismissCtx(true);
+    return;
+  }
+  const buttons = [
+    ...(ctxMenuRef.value?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+  ];
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? buttons.length - 1
+          : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) %
+            buttons.length;
+    buttons[next]?.focus();
+  }
+}
 
 // Known limitation of the virtualized pane: the native selection can only cover
 // mounted rows, so a selection dragged past the viewport stops at the rows that
@@ -540,19 +591,20 @@ function onContextMenu(ev: MouseEvent): void {
 
 function copy(): void {
   if (!ctxMenu.value) return;
-  void navigator.clipboard.writeText(ctxMenu.value.selected);
-  ctxMenu.value = null;
+  void copyText(ctxMenu.value.selected);
+  dismissCtx(true);
 }
 
 function showCtxPopup(mode: "hex" | "ascii"): void {
   if (!ctxMenu.value) return;
   const bytes = new TextEncoder().encode(ctxMenu.value.selected);
+  dismissCtx(true);
   s.showHexPopup(bytes, mode);
-  ctxMenu.value = null;
 }
 
-function dismissCtx(): void {
+function dismissCtx(restore = false): void {
   ctxMenu.value = null;
+  if (restore) containerRef.value?.focus();
 }
 
 let savedScrollTop: number | null = null;
@@ -704,7 +756,18 @@ async function scrollToMatch(): Promise<void> {
 }
 
 function onContainerKeydown(ev: KeyboardEvent): void {
-  if (ev.ctrlKey && ev.key === "f") {
+  if (ev.key === "ContextMenu" || (ev.key === "F10" && ev.shiftKey)) {
+    const selected = window.getSelection()?.toString() ?? "";
+    if (selected) {
+      ev.preventDefault();
+      const rect = containerRef.value!.getBoundingClientRect();
+      ctxMenu.value = {
+        x: rect.left + 12,
+        y: Math.min(rect.bottom - 12, window.innerHeight - 16),
+        selected,
+      };
+    }
+  } else if (ev.ctrlKey && ev.key === "f") {
     ev.preventDefault();
     void openSearch();
   }
@@ -883,6 +946,18 @@ async function saveLog(): Promise<void> {
     >
       {{ exportNotice }}
     </div>
+    <p
+      v-if="copyMessage"
+      :role="copyState === 'failed' ? 'alert' : 'status'"
+      class="px-3 py-1 text-xs"
+      :class="
+        copyState === 'failed'
+          ? 'text-[var(--ty-danger)]'
+          : 'text-[var(--ty-success)]'
+      "
+    >
+      {{ copyMessage }}
+    </p>
     <!-- toolbar -->
     <div
       class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5"
@@ -1233,29 +1308,59 @@ async function saveLog(): Promise<void> {
       </div>
     </div>
 
-    <!-- right-click context menu -->
-    <div
-      v-if="ctxMenu"
-      class="ctx-menu fixed z-50 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1 shadow-lg"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
+    <p
+      class="border-t border-[var(--ty-border)] px-3 py-1 text-[11px] leading-snug text-[var(--ty-text-muted)]"
     >
-      <button type="button" class="menu-item" @click="copy">
-        {{ t("serialDebug.hexPopup.copy") }}
-      </button>
-      <button type="button" class="menu-item" @click="showCtxPopup('hex')">
-        {{ t("serialDebug.hexPopup.toHex") }}
-      </button>
-      <button type="button" class="menu-item" @click="showCtxPopup('ascii')">
-        {{ t("serialDebug.hexPopup.toAscii") }}
-      </button>
-    </div>
-    <div
-      v-if="ctxMenu"
-      class="fixed inset-0 z-40"
-      @click="dismissCtx"
-      @contextmenu.prevent="dismissCtx"
-    />
+      {{ t("serialDebug.log.selectionHint") }}
+    </p>
+    <!-- right-click context menu -->
+    <Teleport to="body">
+      <div
+        v-if="ctxMenu"
+        ref="ctxMenuRef"
+        role="menu"
+        :aria-label="t('serialDebug.log.selectionActions')"
+        @keydown="onMenuKey"
+        @focusout="
+          (e) => {
+            if (
+              e.relatedTarget &&
+              !ctxMenuRef?.contains(e.relatedTarget as Node)
+            )
+              dismissCtx();
+          }
+        "
+        class="ctx-menu fixed z-50 rounded-lg border border-[var(--ty-border)] bg-[var(--ty-surface)] py-1 shadow-lg"
+        :style="ctxMenuStyle"
+        @click.stop
+      >
+        <button type="button" role="menuitem" class="menu-item" @click="copy">
+          {{ t("serialDebug.hexPopup.copy") }}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="menu-item"
+          @click="showCtxPopup('hex')"
+        >
+          {{ t("serialDebug.hexPopup.toHex") }}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="menu-item"
+          @click="showCtxPopup('ascii')"
+        >
+          {{ t("serialDebug.hexPopup.toAscii") }}
+        </button>
+      </div>
+      <div
+        v-if="ctxMenu"
+        class="fixed inset-0 z-40"
+        @click="dismissCtx()"
+        @contextmenu.prevent="dismissCtx()"
+      />
+    </Teleport>
   </div>
 </template>
 

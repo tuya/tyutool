@@ -564,6 +564,27 @@ export class WsTransport {
     const ws = await this.connect();
     const requestId = this.newSerialDebugRequestId("serial-debug-filter-add");
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        ws.removeEventListener("message", handler);
+        ws.removeEventListener("close", onClose);
+        ws.removeEventListener("error", onError);
+      };
+      const onClose = () => {
+        cleanup();
+        reject(
+          new Error(
+            "WebSocket closed before serial-debug filter creation response",
+          ),
+        );
+      };
+      const onError = () => {
+        cleanup();
+        reject(
+          new Error(
+            "WebSocket error before serial-debug filter creation response",
+          ),
+        );
+      };
       const handler = (ev: MessageEvent) => {
         let msg: {
           type: string;
@@ -581,7 +602,7 @@ export class WsTransport {
           return;
         }
         if (msg.type === "error") {
-          ws.removeEventListener("message", handler);
+          cleanup();
           reject(new Error(msg.message ?? "ws error"));
           return;
         }
@@ -590,20 +611,27 @@ export class WsTransport {
           msg.def &&
           msg.stats
         ) {
-          ws.removeEventListener("message", handler);
+          cleanup();
           resolve({ def: msg.def, stats: msg.stats });
         }
       };
       ws.addEventListener("message", handler);
-      ws.send(
-        JSON.stringify({
-          type: "serial_debug_filter_add",
-          keyword,
-          use_regex: useRegex,
-          color,
-          request_id: requestId,
-        }),
-      );
+      ws.addEventListener("close", onClose, { once: true });
+      ws.addEventListener("error", onError, { once: true });
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "serial_debug_filter_add",
+            keyword,
+            use_regex: useRegex,
+            color,
+            request_id: requestId,
+          }),
+        );
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     });
   }
 

@@ -90,6 +90,51 @@ describe("SerialDebugSendBar recovery", () => {
     expect(hex.getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("restores the unsent draft after browsing history and leaves Down alone outside history", async () => {
+    s.sendHistory = ["OLD", "OLDER"];
+    await enterDraft("UNSENT");
+    const key = async (key: string) => {
+      input().dispatchEvent(
+        new KeyboardEvent("keydown", { key, cancelable: true }),
+      );
+      await nextTick();
+    };
+    await key("ArrowDown");
+    expect(input().value).toBe("UNSENT");
+    await key("ArrowUp");
+    expect(input().value).toBe("OLD");
+    await key("ArrowUp");
+    expect(input().value).toBe("OLDER");
+    await key("ArrowDown");
+    await key("ArrowDown");
+    expect(input().value).toBe("UNSENT");
+    await enterDraft("NEW");
+    await key("ArrowDown");
+    expect(input().value).toBe("NEW");
+  });
+
+  it("closes history on Escape and restores the trigger", async () => {
+    s.sendHistory = ["OLD"];
+    await nextTick();
+    const trigger = host.querySelector<HTMLButtonElement>(
+      ".history-wrap > button",
+    )!;
+    trigger.click();
+    await nextTick();
+    const item = host.querySelector<HTMLButtonElement>(".history-item")!;
+    item.focus();
+    item.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await nextTick();
+    expect(host.querySelector(".history-dropdown")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("retains the draft when Enter cannot send on a closed port", async () => {
     await enterDraft("AT");
     s.open = false;
@@ -195,5 +240,32 @@ describe("SerialDebugSendBar recovery", () => {
     await flush();
     expect(write).toHaveBeenCalledTimes(1);
     expect(input().value).toBe("");
+  });
+
+  it("restores a newer history draft after an older send completes", async () => {
+    let finish!: () => void;
+    write.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    s.sendHistory = ["OLD"];
+    await enterDraft("AT");
+    sendButton().click();
+    await nextTick();
+    await enterDraft("NEXT");
+    input().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowUp", cancelable: true }),
+    );
+    await nextTick();
+    expect(input().value).toBe("OLD");
+    finish();
+    await flush();
+    input().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }),
+    );
+    await nextTick();
+    expect(input().value).toBe("NEXT");
   });
 });

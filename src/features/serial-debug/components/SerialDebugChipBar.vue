@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch, useId } from "vue";
+import { useFloatingPanel } from "@/composables/useFloatingPanel";
 import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 
@@ -14,23 +15,25 @@ const addError = ref("");
 const btnRef = ref<HTMLButtonElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
-const popoverPos = ref({ top: "0px", left: "0px" });
+const popoverId = `filter-add-${useId()}`;
+const adding = ref(false);
+let addGeneration = 0;
+const { style: popoverPos } = useFloatingPanel(
+  popoverRef,
+  () => showPopover.value,
+  () => btnRef.value?.getBoundingClientRect() ?? null,
+);
 
 async function openPopover(): Promise<void> {
-  addKeyword.value = "";
-  addUseRegex.value = false;
   addError.value = "";
   showPopover.value = true;
   await nextTick();
-  if (btnRef.value) {
-    const r = btnRef.value.getBoundingClientRect();
-    popoverPos.value = { top: `${r.bottom + 6}px`, left: `${r.left}px` };
-  }
   inputRef.value?.focus();
 }
 
-function closePopover(): void {
+function closePopover(restoreFocus = false): void {
   showPopover.value = false;
+  if (restoreFocus) btnRef.value?.focus();
 }
 
 function onDocMousedown(e: MouseEvent): void {
@@ -47,27 +50,57 @@ watch(showPopover, (open) => {
 });
 
 onUnmounted(() => {
+  addGeneration++;
   document.removeEventListener("mousedown", onDocMousedown);
 });
 
-function submitAdd(): void {
+async function submitAdd(): Promise<void> {
+  if (adding.value || !addKeyword.value.trim()) return;
+  const generation = ++addGeneration;
+  adding.value = true;
   addError.value = "";
-  void s.addChip(addKeyword.value, addUseRegex.value).then((result) => {
+  try {
+    const result = await s.addChip(addKeyword.value, addUseRegex.value);
+    if (generation !== addGeneration) return;
     if (result === "ok") {
-      closePopover();
-    } else if (result === "duplicate") {
-      addError.value = t("serialDebug.chip.dupWarning");
-    } else {
-      addError.value = t("serialDebug.chip.invalidRegex");
-    }
-  });
+      addKeyword.value = "";
+      closePopover(true);
+    } else
+      addError.value = t(
+        result === "duplicate"
+          ? "serialDebug.chip.dupWarning"
+          : "serialDebug.chip.invalidRegex",
+      );
+  } catch (error) {
+    if (generation === addGeneration)
+      addError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (generation === addGeneration) adding.value = false;
+  }
 }
-
 function onInputKey(ev: KeyboardEvent): void {
-  if (ev.key === "Enter") {
+  if (ev.key === "Enter" && !ev.isComposing) {
     ev.preventDefault();
-    submitAdd();
-  } else if (ev.key === "Escape") closePopover();
+    void submitAdd();
+  }
+}
+async function removeChip(id: string, event: MouseEvent): Promise<void> {
+  const wrapper = (event.currentTarget as HTMLElement).closest(".tab-chip");
+  const index = s.watchChips.findIndex((chip) => chip.id === id);
+  const bar = wrapper?.parentElement;
+  const pending = s.removeChip(id);
+  await nextTick();
+  const buttons = bar?.querySelectorAll<HTMLButtonElement>(".tab-activate");
+  (
+    buttons?.[Math.min(index, (buttons?.length ?? 0) - 1)] ??
+    bar?.querySelector<HTMLButtonElement>(".tab-item")
+  )?.focus();
+  try {
+    await pending;
+  } catch (error) {
+    await openPopover();
+    addError.value = String(error);
+  }
 }
 
 // ── tab match counts ──────────────────────────────────────────────────
@@ -92,6 +125,7 @@ const previewCount = computed<number | null>(() =>
     <button
       type="button"
       class="tab-item"
+      :aria-pressed="s.activeChipId === null"
       :class="{ 'tab-active': s.activeChipId === null }"
       @click="s.setActiveChip(null)"
     >
@@ -104,19 +138,27 @@ const previewCount = computed<number | null>(() =>
       :key="chip.id"
       class="tab-item tab-chip"
       :class="{ 'tab-active': s.activeChipId === chip.id }"
-      @click="s.setActiveChip(chip.id)"
     >
-      <span class="tab-dot" :style="{ background: chip.color }" />
-      <span class="tab-keyword" :title="chip.keyword">{{ chip.keyword }}</span>
-      <span v-if="chip.useRegex" class="tab-regex">.*</span>
-      <span class="tab-count" :style="{ color: chip.color }">{{
-        chipMatchCounts.get(chip.id) ?? 0
-      }}</span>
+      <button
+        type="button"
+        class="tab-activate flex min-w-0 items-center gap-1.5"
+        :aria-pressed="s.activeChipId === chip.id"
+        @click="s.setActiveChip(chip.id)"
+      >
+        <span class="tab-dot" :style="{ background: chip.color }" />
+        <span class="tab-keyword" :title="chip.keyword">{{
+          chip.keyword
+        }}</span>
+        <span v-if="chip.useRegex" class="tab-regex">.*</span>
+        <span class="tab-count" :style="{ color: chip.color }">{{
+          chipMatchCounts.get(chip.id) ?? 0
+        }}</span>
+      </button>
       <button
         type="button"
         class="tab-close"
-        @click.stop="s.removeChip(chip.id)"
-        :aria-label="t('serialDebug.chip.removeTab')"
+        @click.stop="removeChip(chip.id, $event)"
+        :aria-label="`${t('serialDebug.chip.removeTab')}: ${chip.keyword}`"
       >
         ×
       </button>
@@ -131,6 +173,9 @@ const previewCount = computed<number | null>(() =>
         :class="{ 'tab-add-active': showPopover }"
         @click="showPopover ? closePopover() : openPopover()"
         :title="t('serialDebug.chip.addBtn')"
+        :aria-label="t('serialDebug.chip.addBtn')"
+        :aria-expanded="showPopover"
+        :aria-controls="showPopover ? popoverId : undefined"
       >
         <FontAwesomeIcon :icon="['fas', 'plus']" class="size-2.5" />
       </button>
@@ -143,7 +188,17 @@ const previewCount = computed<number | null>(() =>
       v-if="showPopover"
       ref="popoverRef"
       class="add-popover"
-      :style="{ top: popoverPos.top, left: popoverPos.left }"
+      :id="popoverId"
+      :style="popoverPos"
+      role="group"
+      :aria-label="t('serialDebug.chip.addBtn')"
+      @keydown.esc.prevent.stop="closePopover(true)"
+      @focusout="
+        (e) => {
+          if (e.relatedTarget && !popoverRef?.contains(e.relatedTarget as Node))
+            closePopover();
+        }
+      "
     >
       <div class="flex items-center gap-1">
         <input
@@ -152,19 +207,33 @@ const previewCount = computed<number | null>(() =>
           type="text"
           class="pop-input"
           :placeholder="t('serialDebug.chip.placeholder')"
+          :aria-label="t('serialDebug.chip.placeholder')"
+          :aria-invalid="!!addError"
+          :aria-describedby="addError ? `${popoverId}-error` : undefined"
+          :disabled="adding"
           @keydown="onInputKey"
         />
         <button
           type="button"
           class="pop-toggle"
           :class="{ active: addUseRegex }"
+          :aria-pressed="addUseRegex"
+          :aria-label="t('serialDebug.chip.regexLabel')"
+          :disabled="adding"
           @click="addUseRegex = !addUseRegex"
           :title="t('serialDebug.chip.regexLabel')"
         >
           .*
         </button>
       </div>
-      <div v-if="addError" class="pop-error">{{ addError }}</div>
+      <div
+        v-if="addError"
+        :id="`${popoverId}-error`"
+        role="alert"
+        class="pop-error"
+      >
+        {{ addError }}
+      </div>
       <div class="flex items-center justify-between gap-2 mt-1.5">
         <span class="pop-preview">
           {{
@@ -174,7 +243,8 @@ const previewCount = computed<number | null>(() =>
         <button
           type="button"
           class="pop-add-btn"
-          :disabled="!addKeyword.trim()"
+          :disabled="adding || !addKeyword.trim()"
+          :aria-busy="adding"
           @click="submitAdd"
         >
           {{ t("serialDebug.chip.addBtn") }}
@@ -322,6 +392,7 @@ const previewCount = computed<number | null>(() =>
   background: var(--ty-surface);
   box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
   width: 16rem;
+  overflow-y: auto;
 }
 .pop-input {
   flex: 1;
