@@ -182,18 +182,21 @@ describe("loadStoredAutoUpdateLastCheckAt", () => {
 describe("applyThemeToDom", () => {
   afterEach(() => {
     document.documentElement.classList.remove("dark");
+    delete document.documentElement.dataset.theme;
     vi.restoreAllMocks();
   });
 
   it("adds dark class for dark theme", () => {
     applyThemeToDom("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("removes dark class for light theme", () => {
     document.documentElement.classList.add("dark");
     applyThemeToDom("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("uses matchMedia for system theme (dark preference)", () => {
@@ -208,6 +211,7 @@ describe("applyThemeToDom", () => {
     });
     applyThemeToDom("system");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("uses matchMedia for system theme (light preference)", () => {
@@ -222,5 +226,6 @@ describe("applyThemeToDom", () => {
     });
     applyThemeToDom("system");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 });
