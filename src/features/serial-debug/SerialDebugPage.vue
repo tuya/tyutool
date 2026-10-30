@@ -1,5 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: "SerialDebugPage" });
+import TyPageHeader from "@/components/TyPageHeader.vue";
+import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import { useSerialAutoSave } from "./useSerialAutoSave";
 import SerialDebugConnectionBar from "./components/SerialDebugConnectionBar.vue";
@@ -7,12 +9,14 @@ import SerialDebugLogView from "./components/SerialDebugLogView.vue";
 import SerialDebugSendBar from "./components/SerialDebugSendBar.vue";
 import SerialDebugRxSelectionHexPopup from "./components/SerialDebugRxSelectionHexPopup.vue";
 
+const { t } = useI18n();
 const s = useSerialDebugStore();
 useSerialAutoSave(s);
 </script>
 
 <template>
-  <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2">
+  <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-3">
+    <TyPageHeader :title="t('serialDebug.pageTitle')" />
     <SerialDebugConnectionBar />
     <SerialDebugLogView
       :hexView="s.hexView"

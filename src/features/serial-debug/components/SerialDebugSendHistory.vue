@@ -313,7 +313,7 @@ onUnmounted(() => document.removeEventListener("mousedown", outside));
   border-radius: 0.75rem;
   background: var(--ty-surface);
   color: var(--ty-text);
-  box-shadow: 0 12px 40px #0003;
+  box-shadow: var(--ty-overlay-shadow);
   overflow: auto;
   font-size: 0.8125rem;
 }
@@ -333,8 +333,8 @@ onUnmounted(() => document.removeEventListener("mousedown", outside));
 }
 button {
   border: 1px solid var(--ty-border);
-  border-radius: 0.375rem;
-  background: var(--ty-canvas);
+  border-radius: var(--ty-control-radius);
+  background: var(--ty-surface);
   padding: 0.35rem 0.6rem;
   cursor: pointer;
 }
@@ -347,11 +347,13 @@ button:disabled {
 }
 button[aria-pressed="true"] {
   border-color: var(--ty-primary);
+  background: var(--ty-primary-soft);
+  color: var(--ty-primary);
 }
 input {
-  border: 1px solid var(--ty-border);
-  border-radius: 0.375rem;
-  background: var(--ty-canvas);
+  border: 1px solid var(--ty-border-strong);
+  border-radius: var(--ty-control-radius);
+  background: var(--ty-field);
   padding: 0.5rem;
   min-width: 0;
 }
@@ -426,8 +428,7 @@ input {
   margin-top: auto;
 }
 .history-fill:hover {
-  background: var(--ty-primary);
-  filter: brightness(0.95);
+  background: var(--ty-primary-hover);
 }
 .history-footer {
   padding: 0.6rem 0.75rem;

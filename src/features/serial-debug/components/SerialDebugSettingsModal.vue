@@ -38,13 +38,15 @@ function close(): void {
   <div
     ref="dialogRef"
     tabindex="-1"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ty-scrim)]"
     role="dialog"
     aria-modal="true"
     :aria-label="t('serialDebug.conn.settings')"
     @click.self="close"
   >
-    <div class="ty-card w-[min(90vw,400px)] overflow-hidden">
+    <div
+      class="ty-card max-h-[calc(100dvh-2rem)] w-[min(90vw,400px)] overflow-y-auto shadow-[var(--ty-overlay-shadow)]"
+    >
       <div
         class="flex items-center justify-between border-b border-[var(--ty-border)] px-4 py-3"
       >

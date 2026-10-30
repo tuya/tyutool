@@ -69,7 +69,7 @@ function copy(): void {
 <template>
   <div
     v-if="s.hexPopup.open"
-    class="overlay fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    class="overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--ty-scrim)]"
     @click.self="s.closeHexPopup()"
   >
     <div
@@ -78,7 +78,7 @@ function copy(): void {
       aria-modal="true"
       :aria-labelledby="titleId"
       tabindex="-1"
-      class="dialog max-h-[calc(100dvh-2rem)] overflow-y-auto w-[min(90vw,640px)] rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-4 shadow-xl"
+      class="dialog max-h-[calc(100dvh-2rem)] overflow-y-auto w-[min(90vw,640px)] rounded-[var(--ty-radius)] border border-[var(--ty-border)] bg-[var(--ty-surface)] p-4 shadow-[var(--ty-overlay-shadow)]"
     >
       <header class="flex items-center justify-between mb-3">
         <h2 :id="titleId" class="text-base font-semibold">{{ title }}</h2>
@@ -168,7 +168,7 @@ function copy(): void {
         readonly
         :aria-label="title"
         spellcheck="false"
-        class="textarea w-full h-[18rem] rounded-md border border-[var(--ty-border)] bg-[var(--ty-canvas)] p-2 font-mono text-xs"
+        class="textarea w-full h-[18rem] rounded-md border border-[var(--ty-border-strong)] bg-[var(--ty-field)] p-2 font-mono text-xs"
       ></textarea>
     </div>
   </div>

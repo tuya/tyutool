@@ -1080,7 +1080,7 @@ async function saveLog(): Promise<void> {
   <div
     ref="containerRef"
     tabindex="0"
-    class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ty-border)] bg-[var(--ty-canvas)] outline-none"
+    class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ty-border)] bg-[var(--ty-log-bg)] outline-none"
     @keydown="onContainerKeydown"
   >
     <div
@@ -1104,7 +1104,7 @@ async function saveLog(): Promise<void> {
     </p>
     <!-- toolbar -->
     <div
-      class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-1.5"
+      class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-2.5"
     >
       <span class="toolbar-title">{{ t("serialDebug.log.title") }}</span>
 
@@ -1160,7 +1160,9 @@ async function saveLog(): Promise<void> {
         {{ t(scrollBadgeKey) }}
       </button>
 
-      <div class="ml-auto flex items-center gap-1">
+      <div
+        class="log-actions ml-auto flex min-w-0 flex-wrap items-center gap-1"
+      >
         <!-- auto-save toggle. Green tracks the *setting*, the label tracks
              whether a file is actually being written (needs an open port). -->
         <button
@@ -1669,6 +1671,8 @@ async function saveLog(): Promise<void> {
 }
 /* toolbar */
 .log-toolbar {
+  flex-wrap: wrap;
+  flex-shrink: 0;
   background: var(--ty-surface);
 }
 .toolbar-title {
@@ -1756,9 +1760,9 @@ async function saveLog(): Promise<void> {
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--ty-accent, #f97316) 15%, transparent);
-  color: var(--ty-accent, #f97316);
-  border: 1px solid var(--ty-accent, #f97316);
+  background: color-mix(in srgb, var(--ty-warning) 15%, transparent);
+  color: var(--ty-warning);
+  border: 1px solid var(--ty-warning);
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -1766,7 +1770,7 @@ async function saveLog(): Promise<void> {
     opacity 0.15s ease;
 }
 .paused-badge:hover {
-  background: color-mix(in srgb, var(--ty-accent, #f97316) 25%, transparent);
+  background: color-mix(in srgb, var(--ty-warning) 25%, transparent);
 }
 .autosave-toggle {
   display: inline-flex;
@@ -1780,7 +1784,7 @@ async function saveLog(): Promise<void> {
   font-size: 0.8125rem;
   white-space: nowrap;
   color: var(--ty-text-muted);
-  opacity: 0.55;
+  opacity: 1;
   transition:
     background-color 0.15s ease,
     color 0.15s ease,
@@ -1868,10 +1872,6 @@ async function saveLog(): Promise<void> {
      keep this in sync with estimateRowHeight() in the script block. */
   line-height: 1.5;
 }
-.line[data-dir="tx"] {
-}
-.line[data-dir="rx"] {
-}
 .line[data-dir="sys"] {
   color: var(--ty-text-muted);
   font-style: italic;
@@ -1909,15 +1909,15 @@ async function saveLog(): Promise<void> {
   text-align: center;
 }
 .line[data-dir="tx"] .dir-badge {
-  background: color-mix(in srgb, var(--ty-primary) 20%, transparent);
+  background: color-mix(in srgb, var(--ty-primary) 8%, transparent);
   color: var(--ty-primary);
 }
 .line[data-dir="rx"] .dir-badge {
-  background: color-mix(in srgb, var(--ty-success) 20%, transparent);
+  background: color-mix(in srgb, var(--ty-success) 8%, transparent);
   color: var(--ty-success);
 }
 .line[data-dir="sys"] .dir-badge {
-  background: color-mix(in srgb, var(--ty-text-muted) 15%, transparent);
+  background: color-mix(in srgb, var(--ty-text-muted) 8%, transparent);
   color: var(--ty-text-muted);
 }
 .text {
