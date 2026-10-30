@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-30",
+  "branch": "yj/ui-ux-improvements",
+  "browser": {
+    "command": "pnpm run test:ui:confirmed",
+    "stats": {
+      "startTime": "2026-10-30T13:56:41.536Z",
+      "duration": 43018.416999999994,
+      "expected": 72,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "newCases": 23,
+    "syntheticState": true,
+    "note": "Final run scopes the Hex contrast assertion to the active dialog."
+  },
+  "unit": {
+    "command": "pnpm run test:coverage",
+    "files": 85,
+    "tests": 1164,
+    "failed": 0,
+    "coveragePercent": {
+      "statements": 84.82,
+      "branches": 78.01,
+      "functions": 89.54,
+      "lines": 85.74
+    }
+  },
+  "checks": {
+    "lint": 0,
+    "typecheckUi": 0,
+    "typecheckScripts": 0,
+    "build": 0,
+    "tauriParity": {
+      "exit": 0,
+      "pairs": 6
+    }
+  },
+  "rust": [
+    {
+      "command": "cargo fmt --all --check",
+      "exit": 0
+    },
+    {
+      "command": "cargo clippy -p tyutool-core -p tyutool-cli -p tyutool-serve --all-targets -- -D warnings",
+      "exit": 0
+    },
+    {
+      "command": "cargo clippy -p tyutool_gui --all-targets -- -D warnings",
+      "exit": 0
+    },
+    {
+      "command": "cargo clippy -p tyutool-bridge --all-targets -- -D warnings",
+      "exit": 0
+    },
+    {
+      "command": "cargo test -p tyutool-core -p tyutool-cli -p tyutool-serve",
+      "exit": 0
+    },
+    {
+      "command": "cargo test -p tyutool_gui",
+      "exit": 0
+    },
+    {
+      "command": "cargo test -p tyutool-bridge",
+      "exit": 0
+    },
+    {
+      "command": "cargo test -p tyutool-core --features ts-rs",
+      "exit": 0
+    },
+    {
+      "command": "git diff --exit-code -- src/bindings/",
+      "exit": 0
+    },
+    {
+      "command": "cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download -- -D warnings",
+      "exit": 0
+    },
+    {
+      "command": "cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download",
+      "exit": 0
+    }
+  ],
+  "limits": [
+    "Synthetic IPC and serial data in Chromium",
+    "No native Tauri or physical serial-device acceptance",
+    "No actual update download, installation or relaunch",
+    "No native IME or screen-reader acceptance",
+    "LOG-03 sticky-prefix proposal excluded"
+  ],
+  "supplementalChecks": [
+    {
+      "command": "pnpm exec vitest run src/features/batch-flash-auth/components/BatchFlashAuthSlotRow.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "note": "Added explicit quarantine retry assertion after the full coverage run; application source unchanged."
+    }
+  ]
+}

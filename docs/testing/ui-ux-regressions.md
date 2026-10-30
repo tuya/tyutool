@@ -111,3 +111,16 @@ The user approved the follow-up review changes. Eight new browser cases failed b
 Lint, frontend/UI/script type checks, Tauri package parity, production build, Rust formatting, all crate Clippy checks, Rust tests (including optional core features), and generated binding drift checks passed. The production preview was also inspected in Chinese/light at 1280×800 and English/dark at 1024×680 across Flash, Serial Debug, Batch Flash & Auth, and Settings. A production interaction check verified the sticky batch toolbar, port-filter focus restoration and serial settings dropdown Escape handling.
 
 Validation uses synthetic state in Chromium. Native Tauri, physical serial devices, native input methods and screen-reader acceptance remain outside this run.
+
+## Detail repair verification (2026-10-30)
+
+The [39-item detail review](./ui-ux-detail-review-2026-10-30.md#本次修复与验收--2026-10-30) records each disposition, the original reproductions and current evidence. The confirmed browser suite completed with **72 passed, 0 failed, 0 skipped, 0 flaky**; 23 new cases live in `ui-detail-regressions.spec.ts`. Vitest coverage passed **1164 tests across 85 files**, including delayed success/error regressions for Excel validation, log reads, update checks and sending, plus filter request cleanup and capped-log follow behavior.
+
+- Popup placement covers bottom triggers, resize, long filter bars, and batch menus at four viewport corners. The height calculation includes borders. Blocked-port dialogs cover 100 entries in English/Chinese and light/dark themes.
+- Read-only Hex, modal focus, field-specific address errors in both layouts, deletion focus, theme/tab navigation, clipboard rejection, long focused history and direct update-task navigation have browser coverage. Existing Browse hit-testing, virtual-row geometry, paused reading and modal assertions remain intact.
+- Batch recovery/configuration guards, persistent Archive controls, cumulative-reset confirmation, custom baud validation and enumeration failures have component/store tests. Refresh retains log search/position and previously loaded text on failure. Newer drafts and history browsing survive an older send completing.
+- The selected-text popup converts displayed UTF-8 text; native selection covers mounted rows only. This does not introduce a byte-level cross-viewport selection contract. The `@proposal` sticky-prefix case remains excluded.
+
+Lint, frontend/UI/script type checks, six Tauri version pairs, production build, Rust formatting, all crate Clippy/tests, optional core feature checks and generated binding drift checks passed. Build and browser execution were separate. The [verification summary](./ui-ux-detail-review-2026-10-30/repair-verification.json) and [full UI result](./ui-ux-detail-review-2026-10-30/repair-ui-results.json) preserve this completed run; earlier counts above describe their own checkpoints.
+
+Validation uses synthetic state and simulated desktop IPC. Native Tauri, hardware operation and long-duration serial stress, actual update download/install/relaunch, clipboard permissions, native input methods and screen readers remain unverified.
