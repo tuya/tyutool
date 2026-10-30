@@ -320,6 +320,56 @@ describe("flash store", () => {
 
   // ── computed: canFlash / canErase / canRead ────────────────────
 
+  describe("operation prerequisites", () => {
+    it("explains missing firmware and updates after selecting it", () => {
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      expect(store.operationDisabledReasons.flash).toBeTruthy();
+      store.flashSegments[0].firmwarePath = "fw.bin";
+      expect(store.operationDisabledReasons.flash).toBe("");
+      expect(store.canFlash).toBe(true);
+    });
+
+    it("blocks malformed addresses before submitting and permits corrections", () => {
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.flashSegments[0].firmwarePath = "fw.bin";
+      store.flashSegments[0].startAddr = "invalid";
+      store.eraseStartAddr = "0x2000";
+      store.eraseEndAddr = "0x1000";
+      store.readEndAddr = "bad address";
+      expect(store.canFlash).toBe(false);
+      expect(store.canErase).toBe(false);
+      expect(store.canRead).toBe(false);
+      expect(store.operationDisabledReasons.flash).toBeTruthy();
+      expect(store.operationDisabledReasons.erase).toBeTruthy();
+      expect(store.operationDisabledReasons.read).toBeTruthy();
+      store.flashSegments[0].startAddr = "0x0";
+      store.eraseEndAddr = "0x3000";
+      store.readEndAddr = "0x1000";
+      expect(store.canFlash).toBe(true);
+      expect(store.canErase).toBe(true);
+      expect(store.canRead).toBe(true);
+    });
+
+    it("requires valid write credentials without blocking read-only authorization", () => {
+      const store = useFlashStore();
+      store.selectedSerialPort = "/dev/ttyUSB0";
+      store.authorizeUuid = "short";
+      store.authorizeAuthKey = "k".repeat(32);
+      expect(store.canAuthorize).toBe(false);
+      expect(store.operationDisabledReasons.authorize).toBeTruthy();
+      expect(store.canReadAuth).toBe(true);
+      store.authorizeUuid = "u".repeat(20);
+      expect(store.canAuthorize).toBe(true);
+      expect(store.operationDisabledReasons.authorize).toBe("");
+      store.authorizeUuid = "";
+      store.authorizeAuthKey = "";
+      expect(store.canAuthorize).toBe(false);
+      expect(store.canReadAuth).toBe(true);
+    });
+  });
+
   describe("canFlash", () => {
     it("is false when no firmware and no port", () => {
       const store = useFlashStore();

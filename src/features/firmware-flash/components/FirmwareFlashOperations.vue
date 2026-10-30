@@ -8,6 +8,7 @@ import { toRef } from "vue";
 import FlashSegmentTable from "./FlashSegmentTable.vue";
 import TySecretInput from "@/components/TySecretInput.vue";
 import { useAddrRangeError } from "../useAddrRangeError";
+import { authorizeCredentialErrors } from "../validate-operation";
 
 const { t, locale } = useI18n();
 const ctx = useFirmwareFlashContext();
@@ -75,6 +76,13 @@ const { message: eraseAddrError } = useAddrRangeError(
 const { message: readAddrError } = useAddrRangeError(
   toRef(ctx, "readStartAddr"),
   toRef(ctx, "readEndAddr"),
+);
+
+const credentialErrors = computed(() =>
+  authorizeCredentialErrors(ctx.authorizeUuid, ctx.authorizeAuthKey),
+);
+const operationHint = computed(
+  () => ctx.operationDisabledReasons[ctx.activeTab],
 );
 </script>
 
@@ -409,7 +417,19 @@ const { message: readAddrError } = useAddrRangeError(
                 :placeholder="t('flash.uuidPh')"
                 :disabled="ctx.busy"
                 no-copy
+                :aria-invalid="!!credentialErrors.uuid"
+                :ariaDescribedby="
+                  credentialErrors.uuid ? 'auth-uuid-error' : undefined
+                "
               />
+              <p
+                v-if="credentialErrors.uuid"
+                id="auth-uuid-error"
+                class="mt-1 text-xs text-[var(--ty-danger)]"
+                role="alert"
+              >
+                {{ credentialErrors.uuid }}
+              </p>
             </div>
             <div>
               <label for="auth-key" class="ops-field-label mb-1.5 block">{{
@@ -421,7 +441,19 @@ const { message: readAddrError } = useAddrRangeError(
                 :placeholder="t('flash.authKeyPh')"
                 :disabled="ctx.busy"
                 no-copy
+                :aria-invalid="!!credentialErrors.authKey"
+                :ariaDescribedby="
+                  credentialErrors.authKey ? 'auth-key-error' : undefined
+                "
               />
+              <p
+                v-if="credentialErrors.authKey"
+                id="auth-key-error"
+                class="mt-1 text-xs text-[var(--ty-danger)]"
+                role="alert"
+              >
+                {{ credentialErrors.authKey }}
+              </p>
             </div>
             <label
               class="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--ty-text-muted)]"
@@ -474,11 +506,20 @@ const { message: readAddrError } = useAddrRangeError(
 
       <!-- 底部操作按钮 -->
       <div class="ops-footer shrink-0 px-3.5 pb-3.5 pt-2.5">
+        <p
+          v-if="operationHint"
+          id="flash-operation-hint"
+          class="mb-2 text-xs leading-snug text-[var(--ty-text-muted)]"
+          role="status"
+        >
+          {{ operationHint }}
+        </p>
         <button
           v-if="ctx.activeTab === 'flash'"
           type="button"
           class="ty-btn-primary-solid w-full"
           :disabled="!ctx.canFlash"
+          :aria-describedby="operationHint ? 'flash-operation-hint' : undefined"
           @click="startOperation('flash')"
         >
           <span
@@ -497,6 +538,7 @@ const { message: readAddrError } = useAddrRangeError(
           type="button"
           class="ty-btn-danger-solid inline-flex min-h-[2.75rem] w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200"
           :disabled="!ctx.canErase"
+          :aria-describedby="operationHint ? 'flash-operation-hint' : undefined"
           @click="startOperation('erase')"
         >
           <span
@@ -515,6 +557,7 @@ const { message: readAddrError } = useAddrRangeError(
           type="button"
           class="ty-btn-primary-solid w-full"
           :disabled="!ctx.canRead"
+          :aria-describedby="operationHint ? 'flash-operation-hint' : undefined"
           @click="startOperation('read')"
         >
           <span
@@ -550,6 +593,9 @@ const { message: readAddrError } = useAddrRangeError(
             type="button"
             class="ty-btn-primary-solid flex-1"
             :disabled="!ctx.canAuthorize"
+            :aria-describedby="
+              operationHint ? 'flash-operation-hint' : undefined
+            "
             @click="startOperation('authorize')"
           >
             <span

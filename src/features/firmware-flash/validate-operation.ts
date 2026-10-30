@@ -34,6 +34,23 @@ export interface ValidationFailure {
   logLine: string;
 }
 
+/** Empty fields are explained by prerequisites; malformed values get field errors. */
+export function authorizeCredentialErrors(
+  uuid: string,
+  authKey: string,
+): { uuid: string; authKey: string } {
+  return {
+    uuid:
+      uuid.trim() && uuid.trim().length !== 20
+        ? t("flash.err.authUuidLen")
+        : "",
+    authKey:
+      authKey.trim() && authKey.trim().length !== 32
+        ? t("flash.err.authKeyLen")
+        : "",
+  };
+}
+
 /** Pre-flight validation for an operation. Returns null when valid.
  *  Order of checks must match the original startOperation flow. */
 export function validateOperation(
@@ -70,12 +87,12 @@ export function validateOperation(
         logLine: t("flash.err.fillAuthLog"),
       };
     }
-    if (hasUuid && input.authorizeUuid.trim().length !== 20) {
-      const msg = t("flash.err.authUuidLen");
-      return { message: msg, logLine: t("flash.err.withMsg", { msg }) };
-    }
-    if (hasKey && input.authorizeAuthKey.trim().length !== 32) {
-      const msg = t("flash.err.authKeyLen");
+    const errors = authorizeCredentialErrors(
+      input.authorizeUuid,
+      input.authorizeAuthKey,
+    );
+    const msg = errors.uuid || errors.authKey;
+    if (msg) {
       return { message: msg, logLine: t("flash.err.withMsg", { msg }) };
     }
   }
