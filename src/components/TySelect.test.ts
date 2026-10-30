@@ -70,4 +70,53 @@ describe("TySelect keyboard semantics", () => {
     expect(onUpdate).toHaveBeenCalledWith("ESP32");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
+  it("supports first/last, closed ArrowUp and prefix search without selecting disabled options", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const update = vi.fn();
+    app = createApp({
+      render: () =>
+        h(TySelect, {
+          modelValue: "a",
+          options: [
+            { value: "x", label: "Excluded", disabled: true },
+            { value: "a", label: "Alpha" },
+            { value: "b", label: "Beta", optionTooltip: "Port purpose" },
+            { value: "c", label: "Charlie" },
+            { value: "z", label: "Zulu", disabled: true },
+          ],
+          "onUpdate:modelValue": update,
+        }),
+    });
+    app.mount(host);
+    const trigger = host.querySelector("button")!;
+    const key = async (k: string) => {
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: k,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await nextTick();
+      await nextTick();
+    };
+    const active = () =>
+      document.getElementById(trigger.getAttribute("aria-activedescendant")!)
+        ?.textContent;
+    await key("ArrowUp");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    await key("End");
+    expect(active()).toContain("Charlie");
+    await key("Home");
+    expect(active()).toContain("Alpha");
+    await key("b");
+    expect(active()).toContain("Beta");
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      "Port purpose",
+    );
+    expect(update).not.toHaveBeenCalled();
+    await key("Enter");
+    expect(update).toHaveBeenCalledWith("b");
+  });
 });

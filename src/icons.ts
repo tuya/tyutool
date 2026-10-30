@@ -1,10 +1,11 @@
-import type { App } from 'vue';
-import { library } from '@fortawesome/fontawesome-svg-core';
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
+import type { App } from "vue";
+import { library } from "@fortawesome/fontawesome-svg-core";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import {
   faArrowDown,
   faArrowsRotate,
   faArrowUpRightFromSquare,
+  faBan,
   faBookOpen,
   faBoxArchive,
   faCheck,
@@ -49,12 +50,13 @@ import {
   faTrashCan,
   faTriangleExclamation,
   faXmark,
-} from '@fortawesome/free-solid-svg-icons';
+} from "@fortawesome/free-solid-svg-icons";
 
 library.add(
   faArrowDown,
   faArrowsRotate,
   faArrowUpRightFromSquare,
+  faBan,
   faBookOpen,
   faBoxArchive,
   faCheck,
@@ -102,5 +104,5 @@ library.add(
 );
 
 export function registerFontAwesome(app: App): void {
-  app.component('FontAwesomeIcon', FontAwesomeIcon);
+  app.component("FontAwesomeIcon", FontAwesomeIcon);
 }

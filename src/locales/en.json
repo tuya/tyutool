@@ -11,7 +11,12 @@
     "dialogIconPurposeDanger": "Dialog type: danger — confirm carefully",
     "dialogKindBadgeInfo": "Info",
     "dialogKindBadgeWarning": "Warning",
-    "dialogKindBadgeDanger": "Danger"
+    "dialogKindBadgeDanger": "Danger",
+    "loading": "Loading…",
+    "copyFailed": "Copy failed. Select the text and copy it manually.",
+    "copyField": "Copy {field}",
+    "cancel": "Cancel",
+    "refresh": "Refresh"
   },
   "app": {
     "tagline": "Embedded utilities",
@@ -29,7 +34,8 @@
     "quickThemeOnSystem": "Switch to light theme",
     "quickLang": "Switch language",
     "quickLangOnZh": "Switch to English",
-    "quickLangOnEn": "Switch to 简体中文"
+    "quickLangOnEn": "Switch to 简体中文",
+    "skipToContent": "Skip to main content"
   },
   "settings": {
     "section": "Preferences",
@@ -125,14 +131,16 @@
       "restartNow": "Restart Now",
       "installing": "Installing…",
       "toastNew": "New version v{version} available. Go to Settings to update.",
-      "toastAction": "Open Settings",
+      "toastAction": "Open update center",
       "toastClose": "Close",
       "sourceGithub": "GitHub Releases",
       "sourceTuya": "Tuya OSS",
       "sourceGitee": "Gitee Releases",
       "portableHint": "This installation does not support in-app updates. Download a matching package from the releases page.",
       "portableDownload": "Open Releases Page",
-      "toastPortable": "New version v{version} available. This install type cannot auto-update—open the releases page to download."
+      "toastPortable": "New version v{version} available. This install type cannot auto-update—open the releases page to download.",
+      "operationFailed": "Update failed: {msg}. Retry or use manual download.",
+      "installFailed": "Installation failed: {msg}. Retry or use manual download."
     },
     "viewLogs": "View Logs",
     "viewLogsHint": "Browse current and historical log files directly inside the app.",
@@ -155,7 +163,9 @@
       "openWith": "Open With...",
       "openWithTitle": "Choose a text editor",
       "systemDefault": "System Default",
-      "noOpeners": "No supported text editor was detected on this machine."
+      "noOpeners": "No supported text editor was detected on this machine.",
+      "previousMatch": "Previous match",
+      "nextMatch": "Next match"
     },
     "reportIssue": {
       "title": "Report an Issue",
@@ -485,7 +495,11 @@
         "auth_write_skipped": "Device already has matching credentials — write skipped.",
         "auth_write_sent": "Authorization write sent to the device."
       }
-    }
+    },
+    "rangeExplanation": "End address is exclusive. Start and end remain independently editable.",
+    "segmentSummary": "File: {size} · Range: {range} bytes",
+    "sizeUnknown": "not measured",
+    "byteCount": "{count} bytes"
   },
   "serialDebug": {
     "tool": "Tool",
@@ -522,7 +536,12 @@
       "changeRebootTarget": "Change",
       "rebootTargetDialogTitle": "Choose reboot control port and chip",
       "rebootTargetChip": "Chip",
-      "rebootTargetConfirm": "Confirm"
+      "rebootTargetConfirm": "Confirm",
+      "invalidCustomBaud": "Enter a whole baud rate from 1 to 4294967295.",
+      "portUnavailable": "Unavailable",
+      "rememberedUnavailable": "Remembered port {port} is unavailable. Connect the device or select an available port.",
+      "noDevicesHint": "No serial devices found. Connect a device and refresh the ports.",
+      "portsFailed": "Could not list ports: {msg}"
     },
     "send": {
       "inputLabel": "Data to send",
@@ -577,7 +596,9 @@
       "deviceResetCurrentPortClosed": "The current log port is not open. Re-select the control port or open Serial Debug first.",
       "deviceResetOk": "Device reset (DTR/RTS) sent on {port}",
       "deviceResetFailed": "Device reset failed: {msg}",
-      "deviceResetServeOutdated": "Device reset failed: the browser is still connected to an old tyutool-cli serve that lacks the required reset messages. Close the process holding port 9527 and restart serve."
+      "deviceResetServeOutdated": "Device reset failed: the browser is still connected to an old tyutool-cli serve that lacks the required reset messages. Close the process holding port 9527 and restart serve.",
+      "selectionHint": "Text selection covers visible rows only. Export for logs beyond the viewport; text conversion includes displayed timestamps and labels.",
+      "selectionActions": "Selected text actions"
     },
     "autoSave": {
       "label": "Auto-save logs",
@@ -606,8 +627,9 @@
       "titleHex": "Hex view",
       "titleAscii": "ASCII view",
       "copy": "Copy",
-      "toHex": "View as Hex",
-      "toAscii": "View as ASCII"
+      "toHex": "Text to Hex",
+      "toAscii": "View selected text",
+      "bytesPerRow": "{count} bytes per row"
     },
     "confirm": {
       "releaseForFlashTitle": "Port conflict",
@@ -640,7 +662,9 @@
       "reset": "Reset",
       "elapsed": "Elapsed",
       "total": "Total",
-      "successRate": "Success rate"
+      "successRate": "Success rate",
+      "resetGroup": "Reset {group}",
+      "resetConfirm": "Reset cumulative {group}? Current batch results will be kept."
     },
     "config": {
       "sharedConfig": "Shared Config",
@@ -741,7 +765,9 @@
       "cancelledAfterWriteBadge": "Authorization state uncertain",
       "cancelledAfterWriteLabel": "The auth command may or may not have been sent; the write is unverified. KV is overwritable, OTP is permanent. Physically isolate this device for manual verification.",
       "cancelledAfterWriteError": "Cancelled while auth may have been sent — device state is unverified",
-      "emptyHintNoPorts": "No serial ports detected; insert a device and click Auto Assign"
+      "emptyHintNoPorts": "No serial ports detected; insert a device and click Auto Assign",
+      "scanRetry": "Refresh the ports to retry enumeration. Existing slots are retained.",
+      "emptyFiltered": "Available ports are blocked by your filter. Review the blocked ports, then assign again."
     },
     "defaultMacError": "Device MAC is factory default (not personalized); flash the MAC before authorizing",
     "errors": {

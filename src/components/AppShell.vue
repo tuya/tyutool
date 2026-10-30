@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, unref } from "vue";
+import { computed, unref, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/stores/settings";
 import appLogo from "@/assets/logo.png";
 
 const route = useRoute();
+const mainRef = ref<HTMLElement | null>(null);
 const { t } = useI18n();
 
 const fullBleedMain = computed(() => route.meta.layout === "fullBleed");
@@ -75,6 +76,12 @@ function navIndicator(name: string) {
     class="flex h-dvh max-h-dvh min-w-0 flex-col overflow-hidden md:flex-row"
     :style="{ color: 'var(--ty-text)', backgroundColor: 'var(--ty-canvas)' }"
   >
+    <a
+      href="#app-main"
+      class="skip-content"
+      @click.prevent="mainRef?.focus()"
+      >{{ t("app.skipToContent") }}</a
+    >
     <aside
       v-if="!hideChrome"
       class="flex w-full min-w-0 shrink-0 flex-col border-[var(--ty-border)] bg-[var(--ty-surface)] md:h-full md:w-[9rem] md:max-h-none md:border-b-0 md:border-r"
@@ -164,6 +171,8 @@ function navIndicator(name: string) {
       </div>
     </aside>
     <main
+      ref="mainRef"
+      id="app-main"
       class="main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden"
       :class="
         fullBleedMain
@@ -203,6 +212,20 @@ function navIndicator(name: string) {
 </template>
 
 <style scoped>
+.skip-content {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10060;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--ty-surface);
+  color: var(--ty-text);
+  transform: translateY(-150%);
+}
+.skip-content:focus {
+  transform: translateY(0);
+}
 .main-scroll {
   scrollbar-gutter: stable;
 }
