@@ -168,14 +168,16 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function highlightMatch(raw: string, query: string): string {
-  const escaped = escapeHtml(raw);
-  if (!query) return escaped;
-  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-  return escaped.replace(
-    re,
-    (m) => `<mark class="log-search-highlight">${m}</mark>`,
-  );
+function highlightMatch(raw: string, matcher: RegExp): string {
+  let html = "";
+  let start = 0;
+  // Match source text before escaping; HTML entities are display encoding.
+  for (const match of raw.matchAll(matcher)) {
+    html += escapeHtml(raw.slice(start, match.index));
+    html += `<mark class="log-search-highlight">${escapeHtml(match[0])}</mark>`;
+    start = match.index + match[0].length;
+  }
+  return html + escapeHtml(raw.slice(start));
 }
 
 interface DisplayLine {
@@ -184,19 +186,33 @@ interface DisplayLine {
   originalIndex: number;
 }
 
+// Parsing and case normalization depend on file content, not each search edit.
+const preparedLines = computed(() =>
+  rawContent.value
+    ? rawContent.value.split("\n").map((raw, originalIndex) => ({
+        raw,
+        lowerText: raw.toLowerCase(),
+        level: getLineLevel(raw),
+        html: escapeHtml(raw),
+        originalIndex,
+      }))
+    : [],
+);
 const displayLines = computed((): DisplayLine[] => {
-  if (!rawContent.value) return [];
-  const lines = rawContent.value.split("\n");
   const q = searchQuery.value;
+  const needle = q.toLowerCase();
+  const matcher = q
+    ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
+    : null;
   const result: DisplayLine[] = [];
-  lines.forEach((raw, i) => {
-    if (q && !raw.toLowerCase().includes(q.toLowerCase())) return;
+  for (const line of preparedLines.value) {
+    if (needle && !line.lowerText.includes(needle)) continue;
     result.push({
-      level: getLineLevel(raw),
-      html: highlightMatch(raw, q),
-      originalIndex: i,
+      level: line.level,
+      html: matcher ? highlightMatch(line.raw, matcher) : line.html,
+      originalIndex: line.originalIndex,
     });
-  });
+  }
   return result;
 });
 
@@ -227,6 +243,7 @@ function scrollToMatch(idx: number): void {
 
 watch(searchQuery, () => {
   currentMatchIndex.value = 0;
+  if (searchQuery.value) scrollToMatch(0);
 });
 
 // ── Copy ───────────────────────────────────────────────────────────────────────
@@ -613,6 +630,7 @@ onBeforeUnmount(() => {
             v-for="(line, idx) in displayLines"
             :key="line.originalIndex"
             data-line
+            class="whitespace-pre-wrap break-words"
             :class="[
               LEVEL_CLASS[line.level],
               idx === currentMatchIndex && searchQuery
