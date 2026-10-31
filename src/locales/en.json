@@ -167,7 +167,10 @@
       "systemDefault": "System Default",
       "noOpeners": "No supported text editor was detected on this machine.",
       "previousMatch": "Previous match",
-      "nextMatch": "Next match"
+      "nextMatch": "Next match",
+      "previousPage": "Previous lines",
+      "nextPage": "Next lines",
+      "lineRange": "Lines {start}–{end} of {total}"
     },
     "reportIssue": {
       "title": "Report an Issue",
