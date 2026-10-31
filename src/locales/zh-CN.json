@@ -819,7 +819,8 @@
       "excelInvalid": "授权表无效，请修复或重新选择文件",
       "readAll": "全部读取",
       "readAllHint": "读取所有串口的 MAC 和授权状态",
-      "readAllBusy": "任务进行中，不可读取"
+      "readAllBusy": "任务进行中，不可读取",
+      "archiveInProgress": "正在归档"
     },
     "slot": {
       "port": "串口",
