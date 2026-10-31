@@ -128,7 +128,7 @@ const bannerText = computed(() => {
     >
       <span
         v-if="store.archiveStatus === 'done'"
-        class="max-w-[40%] truncate text-xs font-normal opacity-80"
+        class="min-w-0 flex-1 break-all text-xs font-normal opacity-80"
         :title="store.lastArchivePath"
         >{{
           t("batchFlashAuth.archive.done", { path: store.lastArchivePath })
@@ -136,7 +136,7 @@ const bannerText = computed(() => {
       >
       <span
         v-else-if="store.archiveStatus === 'error'"
-        class="max-w-[40%] truncate text-xs font-normal text-[var(--ty-danger)]"
+        class="min-w-0 flex-1 break-words text-xs font-normal text-[var(--ty-danger)]"
         :title="store.archiveError"
         >{{
           t("batchFlashAuth.archive.failed", { error: store.archiveError })
@@ -147,6 +147,7 @@ const bannerText = computed(() => {
         type="button"
         class="ty-btn-secondary flex shrink-0 items-center gap-1.5 text-xs"
         :disabled="store.archiveStatus === 'archiving'"
+        :aria-busy="store.archiveStatus === 'archiving'"
         :title="t('batchFlashAuth.archive.hint')"
         @click="store.archiveBatch()"
       >

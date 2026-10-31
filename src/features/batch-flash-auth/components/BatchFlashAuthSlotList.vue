@@ -17,6 +17,8 @@ const allPortsFiltered = computed(
       .length === 0,
 );
 function retryReason(port: string): string | null {
+  if (store.archiveStatus === "archiving")
+    return t("batchFlashAuth.toolbar.archiveInProgress");
   if (store.configurationDisabledReason)
     return t(store.configurationDisabledReason);
   const owner = portManager.currentOwner(port);
