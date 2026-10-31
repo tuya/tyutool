@@ -251,4 +251,27 @@ describe("LogViewerDialog file reads", () => {
     );
     expect(input.value).toBe("INFO");
   });
+
+  it.each(["&", "<device>", ".*[literal]"])(
+    "highlights literal %s without changing log text or interpreting markup",
+    async (query) => {
+      const { reads, choose } = await mount();
+      await choose(0);
+      const text = "INFO a & b <device> .*[literal]  value=1";
+      reads.get(files[0].name)!.resolve(text);
+      await vi.waitFor(() =>
+        expect(host.querySelector("[data-line]")).not.toBeNull(),
+      );
+      const input = host.querySelector<HTMLInputElement>("input[type=text]")!;
+      input.value = query;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await nextTick();
+      const line = host.querySelector("[data-line]")!;
+      expect(line.textContent).toBe(text);
+      expect(
+        [...line.querySelectorAll("mark")].map((mark) => mark.textContent),
+      ).toEqual([query]);
+      expect(line.querySelector("device")).toBeNull();
+    },
+  );
 });
