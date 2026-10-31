@@ -1,6 +1,6 @@
 <!-- src/features/batch-flash/components/BatchFlashDashboard.vue -->
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from "vue";
+import { computed, ref, watch, onUnmounted } from "vue";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import { useI18n } from "vue-i18n";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
@@ -39,14 +39,26 @@ function formatElapsed(ms: number): string {
   return [h, m, sec].map((n) => String(n).padStart(2, "0")).join(":");
 }
 
-onMounted(() => {
-  ticker = setInterval(() => {
-    if (store.batchStartTime !== null) {
-      const end = store.batchEndTime ?? Date.now();
-      elapsedDisplay.value = formatElapsed(end - store.batchStartTime);
-    }
-  }, 1000);
-});
+function updateElapsed(): void {
+  elapsedDisplay.value =
+    store.batchStartTime === null
+      ? "--:--:--"
+      : formatElapsed(
+          (store.batchEndTime ?? Date.now()) - store.batchStartTime,
+        );
+}
+
+watch(
+  [() => store.batchStartTime, () => store.batchEndTime],
+  ([start, end]) => {
+    clearInterval(ticker);
+    ticker = undefined;
+    updateElapsed();
+    if (start !== null && end === null)
+      ticker = setInterval(updateElapsed, 1000);
+  },
+  { immediate: true },
+);
 onUnmounted(() => clearInterval(ticker));
 
 const bannerBg = computed(() => {
