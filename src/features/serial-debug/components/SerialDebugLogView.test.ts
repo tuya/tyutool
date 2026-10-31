@@ -346,6 +346,87 @@ describe("SerialDebugLogView auto-scroll", () => {
     await flush();
   }
 
+  it("leaves find navigation and dismissal alone during IME confirmation", async () => {
+    const s = useSerialDebugStore();
+    s.lines = [1, 2].map((id) => ({
+      id,
+      direction: "rx" as const,
+      tsMs: id,
+      text: `hit-${id}`,
+    }));
+    mountComponent();
+    await searchFor("hit");
+    const input = host!.querySelector<HTMLInputElement>(".search-input")!;
+    const before = host!.textContent;
+    const beforeMatch = host!.querySelector(
+      ".line-search-current",
+    )?.textContent;
+    for (const key of ["Enter", "Escape"]) {
+      for (const options of [{ isComposing: true }, { keyCode: 229 }]) {
+        const event = new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          cancelable: true,
+          ...options,
+        });
+        input.dispatchEvent(event);
+        await flush();
+        expect(event.defaultPrevented).toBe(false);
+        expect(host!.querySelector(".search-input")).toBe(input);
+        expect(host!.textContent).toBe(before);
+        expect(host!.querySelector(".line-search-current")?.textContent).toBe(
+          beforeMatch,
+        );
+      }
+    }
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    await flush();
+    expect(host!.querySelector(".line-search-current")?.textContent).not.toBe(
+      beforeMatch,
+    );
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flush();
+    expect(host!.querySelector(".search-input")).toBeNull();
+  });
+
+  it("locks export before the save dialog and makes a failed write retryable", async () => {
+    tauriMode.value = true;
+    sessionArchiveTotal = 1;
+    useSerialDebugStore().lines = [
+      { id: 1, direction: "rx", tsMs: 1, text: "live" },
+    ];
+    let release!: (path: string | null) => void;
+    saveDialog.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    invokeTauri.mockImplementation(async (cmd) => {
+      if (cmd === "write_text_file") throw new Error("disk full");
+    });
+    mountComponent();
+    const button = host!.querySelector<HTMLButtonElement>(
+      'button[aria-label="serialDebug.log.saveLog"]',
+    )!;
+    button.click();
+    button.click();
+    await vi.waitFor(() => expect(saveDialog).toHaveBeenCalledTimes(1));
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    release("/tmp/log.txt");
+    await vi.waitFor(() =>
+      expect(host!.textContent).toContain("serialDebug.log.exportFailed"),
+    );
+    expect(button.disabled).toBe(false);
+    invokeTauri.mockResolvedValue(undefined);
+    button.click();
+    await vi.waitFor(() =>
+      expect(host!.textContent).toContain("serialDebug.log.exportSuccess"),
+    );
+    expect(saveDialog).toHaveBeenCalledTimes(2);
+  });
+
   /**
    * Hand the component its viewport geometry. happy-dom never fires a scroll
    * event on its own, and the component reads clientHeight from the scroll

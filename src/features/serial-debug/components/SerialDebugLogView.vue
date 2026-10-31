@@ -59,6 +59,8 @@ const { t } = useI18n();
 const lineRenderer = new SerialDebugLogLineRenderer();
 const hexViewRenderer = new SerialDebugHexViewRenderer();
 const exportNotice = ref("");
+const exporting = ref(false);
+const exportFailed = ref(false);
 
 const activeChip = computed(() =>
   s.activeChipId
@@ -918,6 +920,7 @@ function onContainerKeydown(ev: KeyboardEvent): void {
 }
 
 function onSearchKeydown(ev: KeyboardEvent): void {
+  if (ev.isComposing || ev.keyCode === 229) return;
   if (ev.key === "Escape") {
     ev.preventDefault();
     closeSearch();
@@ -933,8 +936,7 @@ async function writeFile(
   _ext: string,
   mimeType: string,
 ): Promise<void> {
-  const content = chunks.join("");
-  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+  const blob = new Blob(chunks, { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -952,6 +954,7 @@ function isExportCurrent(revision: number): boolean {
 }
 
 function showExportCancelled(): void {
+  exportFailed.value = true;
   exportNotice.value = t("serialDebug.log.exportCancelled");
 }
 
@@ -1011,68 +1014,84 @@ async function streamExportChunks(
 }
 
 async function saveLog(): Promise<void> {
+  if (exporting.value) return;
+  exporting.value = true;
+  exportFailed.value = false;
   // Capture the export source before opening an async save dialog. Reactive tab
   // changes while the dialog or a page read is pending must not redirect it.
   const sourceFilterId = activeChip.value?.id ?? null;
   const revision = s.archiveSessionRevision;
   exportNotice.value = "";
   const defaultName = `${props.exportTitle}-${makeStamp()}.txt`;
-  if (isTauriRuntime()) {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    if (!isExportCurrent(revision)) {
-      showExportCancelled();
+  try {
+    if (isTauriRuntime()) {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      if (!isExportCurrent(revision)) {
+        showExportCancelled();
+        return;
+      }
+      const { invoke } = await import("@tauri-apps/api/core");
+      if (!isExportCurrent(revision)) {
+        showExportCancelled();
+        return;
+      }
+      const path = await save({
+        defaultPath: defaultName,
+        filters: [{ name: "TXT", extensions: ["txt"] }],
+      });
+      if (!isExportCurrent(revision)) {
+        showExportCancelled();
+        return;
+      }
+      if (!path) return;
+      // Authorize this dialog-chosen save path for the chunked writes below.
+      await invoke("register_dialog_path", { path });
+      if (!isExportCurrent(revision)) {
+        showExportCancelled();
+        return;
+      }
+      const completed = await streamExportChunks(
+        sourceFilterId,
+        revision,
+        async (chunk, isFirstChunk) => {
+          if (!isExportCurrent(revision)) return;
+          if (isFirstChunk) {
+            await invoke("write_text_file", { path, content: chunk });
+          } else {
+            await invoke("append_text_file", { path, content: chunk });
+          }
+        },
+      );
+      if (!completed || !isExportCurrent(revision)) showExportCancelled();
+      else exportNotice.value = t("serialDebug.log.exportSuccess");
       return;
     }
-    const { invoke } = await import("@tauri-apps/api/core");
-    if (!isExportCurrent(revision)) {
-      showExportCancelled();
-      return;
-    }
-    const path = await save({
-      defaultPath: defaultName,
-      filters: [{ name: "TXT", extensions: ["txt"] }],
-    });
-    if (!isExportCurrent(revision)) {
-      showExportCancelled();
-      return;
-    }
-    if (!path) return;
-    // Authorize this dialog-chosen save path for the chunked writes below.
-    await invoke("register_dialog_path", { path });
-    if (!isExportCurrent(revision)) {
-      showExportCancelled();
-      return;
-    }
+
+    const chunks: string[] = [];
     const completed = await streamExportChunks(
       sourceFilterId,
       revision,
-      async (chunk, isFirstChunk) => {
-        if (!isExportCurrent(revision)) return;
-        if (isFirstChunk) {
-          await invoke("write_text_file", { path, content: chunk });
-        } else {
-          await invoke("append_text_file", { path, content: chunk });
-        }
+      async (chunk) => {
+        chunks.push(chunk);
       },
     );
-    if (!completed || !isExportCurrent(revision)) showExportCancelled();
-    return;
+    if (!completed || !isExportCurrent(revision)) {
+      showExportCancelled();
+      return;
+    }
+    await writeFile(defaultName, chunks, "txt", "text/plain");
+    if (!isExportCurrent(revision)) showExportCancelled();
+    else exportNotice.value = t("serialDebug.log.exportSuccess");
+  } catch (error) {
+    exportFailed.value = true;
+    exportNotice.value = isExportCurrent(revision)
+      ? t("serialDebug.log.exportFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      : t("serialDebug.log.exportCancelled");
+  } finally {
+    exporting.value = false;
   }
-
-  const chunks: string[] = [];
-  const completed = await streamExportChunks(
-    sourceFilterId,
-    revision,
-    async (chunk) => {
-      chunks.push(chunk);
-    },
-  );
-  if (!completed || !isExportCurrent(revision)) {
-    showExportCancelled();
-    return;
-  }
-  await writeFile(defaultName, chunks, "txt", "text/plain");
-  if (!isExportCurrent(revision)) showExportCancelled();
 }
 </script>
 
@@ -1085,8 +1104,11 @@ async function saveLog(): Promise<void> {
   >
     <div
       v-if="exportNotice"
-      class="border-b border-[var(--ty-border)] px-3 py-1 text-xs text-[var(--ty-warning)]"
-      role="alert"
+      class="border-b border-[var(--ty-border)] px-3 py-1 text-xs break-words"
+      :class="
+        exportFailed ? 'text-[var(--ty-warning)]' : 'text-[var(--ty-success)]'
+      "
+      :role="exportFailed ? 'alert' : 'status'"
     >
       {{ exportNotice }}
     </div>
@@ -1243,14 +1265,19 @@ async function saveLog(): Promise<void> {
           type="button"
           class="btn-tool"
           :aria-label="t('serialDebug.log.saveLog')"
-          :disabled="!canSaveLog"
+          :disabled="!canSaveLog || exporting"
+          :aria-busy="exporting"
           @click="saveLog"
         >
           <FontAwesomeIcon
             :icon="['fas', 'download']"
             class="size-3 shrink-0"
           />
-          {{ t("serialDebug.log.saveLog") }}
+          {{
+            exporting
+              ? t("serialDebug.log.exporting")
+              : t("serialDebug.log.saveLog")
+          }}
         </button>
         <button
           type="button"
