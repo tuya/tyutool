@@ -142,7 +142,7 @@ function toggle() {
 }
 
 function select(opt: TySelectOption) {
-  if (opt.disabled) return;
+  if (props.disabled || opt.disabled) return;
   emit("update:modelValue", opt.value);
   open.value = false;
   clearFloatingTipHideTimer();
@@ -172,7 +172,7 @@ function onClickOutside(e: MouseEvent) {
 
 // 键盘操作
 function onKeydown(e: KeyboardEvent) {
-  if (props.disabled) return;
+  if (props.disabled || e.isComposing || e.keyCode === 229) return;
   if (!open.value) {
     if (
       e.key === "Enter" ||
@@ -241,6 +241,35 @@ function onKeydown(e: KeyboardEvent) {
     }
   }
 }
+
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (disabled) close();
+  },
+);
+watch(
+  () =>
+    props.options.map((option) => [option.value, !!option.disabled] as const),
+  (options, previous) => {
+    if (!open.value) return;
+    const value = previous[activeIndex.value]?.[0];
+    const index = options.findIndex(
+      ([key, disabled]) => key === value && !disabled,
+    );
+    const selected = options.findIndex(
+      ([key, disabled]) => key === props.modelValue && !disabled,
+    );
+    activeIndex.value =
+      index >= 0
+        ? index
+        : selected >= 0
+          ? selected
+          : options.findIndex(([, disabled]) => !disabled);
+    clearFloatingTipHideTimer();
+    floatingOptionTip.value = null;
+  },
+);
 
 // 打开时滚动选中项到可见区域
 watch(open, async (val) => {

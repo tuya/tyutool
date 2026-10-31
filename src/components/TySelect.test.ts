@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createApp, h, nextTick } from "vue";
+import { createApp, h, nextTick, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TySelect from "./TySelect.vue";
 
@@ -10,6 +10,99 @@ afterEach(() => {
 });
 
 describe("TySelect keyboard semantics", () => {
+  it("preserves the active value across port refreshes and skips newly disabled options", async () => {
+    const options = ref([
+      { value: "a", label: "Alpha", disabled: false },
+      { value: "b", label: "Beta", disabled: false },
+      { value: "c", label: "Charlie", disabled: false },
+    ]);
+    const host = document.createElement("div");
+    document.body.append(host);
+    app = createApp({
+      render: () => h(TySelect, { modelValue: "a", options: options.value }),
+    });
+    app.mount(host);
+    const trigger = host.querySelector("button")!;
+    const key = async (value: string) => {
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: value,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await nextTick();
+      await nextTick();
+    };
+    const active = () =>
+      document.getElementById(trigger.getAttribute("aria-activedescendant")!)!;
+    await key("ArrowDown");
+    await key("End");
+    options.value.reverse();
+    await nextTick();
+    expect(active().textContent).toContain("Charlie");
+    options.value[0].disabled = true;
+    await nextTick();
+    expect(active().getAttribute("aria-disabled")).not.toBe("true");
+    options.value.splice(0);
+    await nextTick();
+    expect(trigger.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+
+  it("closes an open dropdown when its control becomes disabled", async () => {
+    const disabled = ref(false);
+    const host = document.createElement("div");
+    document.body.append(host);
+    app = createApp({
+      render: () =>
+        h(TySelect, {
+          modelValue: "a",
+          disabled: disabled.value,
+          options: [{ value: "a", label: "Alpha" }],
+        }),
+    });
+    app.mount(host);
+    const trigger = host.querySelector("button")!;
+    trigger.click();
+    await nextTick();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    disabled.value = true;
+    await nextTick();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="listbox"]')).toBeNull(),
+    );
+  });
+
+  it("does not select an option while Enter is confirming IME composition", async () => {
+    const update = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    app = createApp({
+      render: () =>
+        h(TySelect, {
+          modelValue: "a",
+          options: [{ value: "a", label: "Alpha" }],
+          "onUpdate:modelValue": update,
+        }),
+    });
+    app.mount(host);
+    const trigger = host.querySelector("button")!;
+    trigger.click();
+    await nextTick();
+    trigger.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await nextTick();
+    expect(update).not.toHaveBeenCalled();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("names the combobox, refreshes on keyboard open and announces the active option", async () => {
     const onOpen = vi.fn();
     const onUpdate = vi.fn();
