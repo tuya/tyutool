@@ -76,6 +76,14 @@ const { message: readAddrError } = useAddrRangeError(
 
 const tabsRef = ref<HTMLElement | null>(null);
 const tabId = `flash-ops-${useId()}`;
+function focusConfiguration(): void {
+  const tab = tabsRef.value?.querySelector<HTMLButtonElement>(
+    '[aria-selected="true"]',
+  );
+  tab?.focus({ preventScroll: true });
+  tab?.scrollIntoView({ block: "nearest" });
+}
+defineExpose({ focusConfiguration });
 function onTabKey(event: KeyboardEvent): void {
   if (
     !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) ||

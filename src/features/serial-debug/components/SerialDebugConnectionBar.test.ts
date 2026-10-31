@@ -4,7 +4,9 @@ import {
   createApp,
   defineComponent,
   h,
+  KeepAlive,
   nextTick,
+  ref,
   type ComponentPublicInstance,
 } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +37,8 @@ const { t } = vi.hoisted(() => ({
             "serialDebug.conn.rebootTargetChip": "Chip",
             "serialDebug.conn.rebootTargetConfirm": "Confirm",
             "common.closeDialog": "Close",
+            "common.refresh": "Refresh",
+            "common.loading": "Loading…",
             "flash.noPortsPlaceholder": "No ports",
             "flash.chips.t5ai": "T5AI",
             "flash.chips.esp32": "ESP32",
@@ -93,11 +97,14 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     vi.restoreAllMocks();
   });
 
-  function mountComponent(): ComponentPublicInstance {
+  function mountComponent(visible = ref(true)): ComponentPublicInstance {
     app = createApp(
       defineComponent({
         setup() {
-          return () => h(SerialDebugConnectionBar);
+          return () =>
+            h(KeepAlive, () =>
+              visible.value ? h(SerialDebugConnectionBar) : null,
+            );
         },
       }),
     );
@@ -111,6 +118,95 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     );
     return app.mount(host!);
   }
+
+  it("scans once on first activation and again when returning while disconnected", async () => {
+    const visible = ref(true);
+    mountComponent(visible);
+    await flush();
+    expect(wsTransport.listPorts).toHaveBeenCalledTimes(1);
+    visible.value = false;
+    await flush();
+    visible.value = true;
+    await flush();
+    expect(wsTransport.listPorts).toHaveBeenCalledTimes(2);
+    useSerialDebugStore().open = true;
+    visible.value = false;
+    await flush();
+    visible.value = true;
+    await flush();
+    expect(wsTransport.listPorts).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a stale enumeration failure after returning to the page", async () => {
+    let rejectOld!: (error: Error) => void;
+    vi.mocked(wsTransport.listPorts).mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectOld = reject;
+        }),
+    );
+    const visible = ref(true);
+    mountComponent(visible);
+    await flush();
+    visible.value = false;
+    await flush();
+    visible.value = true;
+    await flush();
+    rejectOld(new Error("Old scan failed"));
+    await flush();
+    expect(host!.textContent).not.toContain("Old scan failed");
+    expect(
+      [...host!.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === "Open",
+      )!.disabled,
+    ).toBe(false);
+  });
+
+  it("always exposes refresh and reports loading, failure and retry near the control", async () => {
+    mountComponent();
+    await flush();
+    const refresh = [...host!.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "Refresh",
+    )!;
+    expect(refresh).toBeDefined();
+    let reject!: (error: Error) => void;
+    vi.mocked(wsTransport.listPorts).mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    refresh.click();
+    await flush();
+    expect(refresh.disabled).toBe(true);
+    expect(host!.querySelector("#sd-port-feedback")?.textContent).toContain(
+      "Loading…",
+    );
+    const port = host!.querySelector<HTMLButtonElement>("#sd-port")!;
+    port.click();
+    await flush();
+    expect(wsTransport.listPorts).toHaveBeenCalledTimes(2);
+    expect(refresh.disabled).toBe(true);
+    port.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    reject(new Error("Enumeration denied"));
+    await flush();
+    expect(refresh.disabled).toBe(false);
+    expect(host!.querySelector("#sd-port-feedback")?.textContent).toContain(
+      "Enumeration denied",
+    );
+    refresh.click();
+    await flush();
+    expect(host!.querySelector("#sd-port-feedback")?.textContent).not.toContain(
+      "Enumeration denied",
+    );
+    expect(wsTransport.listPorts).toHaveBeenCalledTimes(3);
+  });
 
   it("shows the currently resolved reboot control port next to the reboot action", async () => {
     const s = useSerialDebugStore();

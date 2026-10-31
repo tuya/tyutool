@@ -6,9 +6,19 @@ import { isTauriRuntime } from "@/runtime";
 import FirmwareFlashAside from "./components/FirmwareFlashAside.vue";
 import FirmwareFlashConnection from "./components/FirmwareFlashConnection.vue";
 import FirmwareFlashOperations from "./components/FirmwareFlashOperations.vue";
+import { nextTick, ref } from "vue";
+import type { OpKind } from "./types";
 
 const { t } = useI18n();
-provideFirmwareFlash();
+const ctx = provideFirmwareFlash();
+const operationsRef = ref<InstanceType<typeof FirmwareFlashOperations> | null>(
+  null,
+);
+async function showConfiguration(op: OpKind): Promise<void> {
+  ctx.activeTab = op;
+  await nextTick();
+  operationsRef.value?.focusConfiguration();
+}
 
 async function resetWindowSize(): Promise<void> {
   if (!isTauriRuntime()) return;
@@ -42,8 +52,8 @@ async function resetWindowSize(): Promise<void> {
     <div
       class="flash-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
     >
-      <FirmwareFlashOperations />
-      <FirmwareFlashAside />
+      <FirmwareFlashOperations ref="operationsRef" />
+      <FirmwareFlashAside @configure="showConfiguration" />
     </div>
   </div>
 </template>

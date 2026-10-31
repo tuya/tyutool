@@ -1,6 +1,7 @@
 import { nextTick, ref, watch } from "vue";
 import { i18n } from "@/i18n";
 import { APP_VERSION } from "@/config/app";
+import { useCopyFeedback } from "@/composables/useCopyFeedback";
 
 const t = i18n.global.t;
 
@@ -13,6 +14,12 @@ export function useFlashLog() {
   const logScrollRef = ref<HTMLDivElement | null>(null);
   const lockAutoScroll = ref(false);
   let pendingScroll: Promise<void> | null = null;
+  const {
+    state: copyState,
+    message: copyMessage,
+    copy,
+    reset: resetCopy,
+  } = useCopyFeedback();
 
   function appendLog(line: string): void {
     const ts = new Date().toLocaleTimeString([], { hour12: false });
@@ -35,16 +42,17 @@ export function useFlashLog() {
   }
 
   function clearLogs(): void {
+    resetCopy();
     logLines.value = [];
     appendLog(t("flash.log.cleared"));
   }
 
   async function copyLogs(): Promise<void> {
-    const text = logLines.value.join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
+    if (copyState.value === "copying") return;
+    await copy(logLines.value.join("\n"));
+    if (copyState.value === "copied") {
       appendLog(t("flash.log.copied"));
-    } catch {
+    } else if (copyState.value === "failed") {
       appendLog(t("flash.log.copyFailed"));
     }
   }
@@ -63,5 +71,7 @@ export function useFlashLog() {
     appendLog,
     clearLogs,
     copyLogs,
+    copyState,
+    copyMessage,
   };
 }

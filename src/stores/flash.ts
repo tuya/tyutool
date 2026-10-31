@@ -150,6 +150,8 @@ export const useFlashStore = defineStore("flash", () => {
     appendLog,
     clearLogs,
     copyLogs,
+    copyState: logCopyState,
+    copyMessage: logCopyMessage,
   } = useFlashLog();
 
   const selectedChipLabel = computed(() => {
@@ -172,6 +174,10 @@ export const useFlashStore = defineStore("flash", () => {
     flashPhase,
     flashMessage,
     runningOp,
+    operationResult,
+    beginOperation,
+    clearOperationResult,
+    recordOperationResult,
     currentBackendPhase,
     phaseProgress,
     phaseIndeterminate,
@@ -201,6 +207,46 @@ export const useFlashStore = defineStore("flash", () => {
       }
     },
   });
+
+  const readOutputOpening = ref(false);
+  const readOutputError = ref("");
+  let readOutputGeneration = 0;
+  watch(
+    operationResult,
+    () => {
+      readOutputGeneration++;
+      readOutputOpening.value = false;
+      readOutputError.value = "";
+    },
+    { flush: "sync" },
+  );
+
+  async function openReadOutput(): Promise<void> {
+    const result = operationResult.value;
+    if (
+      !isTauriRuntime() ||
+      readOutputOpening.value ||
+      result?.op !== "read" ||
+      result.status !== "success" ||
+      !result.outputPath
+    )
+      return;
+    const generation = ++readOutputGeneration;
+    readOutputOpening.value = true;
+    readOutputError.value = "";
+    try {
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      if (generation !== readOutputGeneration) return;
+      await openPath(result.outputPath);
+    } catch (error) {
+      if (generation === readOutputGeneration)
+        readOutputError.value = t("flash.result.openFailed", {
+          msg: error instanceof Error ? error.message : String(error),
+        });
+    } finally {
+      if (generation === readOutputGeneration) readOutputOpening.value = false;
+    }
+  }
 
   const busy = computed(() => flashPhase.value === "running");
 
@@ -440,28 +486,37 @@ export const useFlashStore = defineStore("flash", () => {
     );
   }
 
-  const { serialPortOptions, refreshDevice, connect, disconnect, deviceReset } =
-    useFlashConnection({
-      selectedSerialPort,
-      selectedChipId,
-      connected,
-      autoConnected,
-      busy,
-      appendLog,
-      onCancelRunningOperation: () => {
-        stopFlash();
-        runningOp.value = null;
-        flashPhase.value = "idle";
-        flashProgress.value = 0;
-        phaseProgress.value = 0;
-        currentBackendPhase.value = null;
-        phaseIndeterminate.value = false;
-        cancelIndeterminateCheck();
-        flashMessage.value = "";
-        appendLog(t("flash.log.operationCancelled"));
-        rLog.info("[Flash] Operation cancelled by user");
-      },
-    });
+  const {
+    serialPortOptions,
+    portsRefreshing,
+    portsRefreshError,
+    portsScanned,
+    refreshDevice,
+    connect,
+    disconnect,
+    deviceReset,
+  } = useFlashConnection({
+    selectedSerialPort,
+    selectedChipId,
+    connected,
+    autoConnected,
+    busy,
+    appendLog,
+    onCancelRunningOperation: () => {
+      clearOperationResult();
+      stopFlash();
+      runningOp.value = null;
+      flashPhase.value = "idle";
+      flashProgress.value = 0;
+      phaseProgress.value = 0;
+      currentBackendPhase.value = null;
+      phaseIndeterminate.value = false;
+      cancelIndeterminateCheck();
+      flashMessage.value = "";
+      appendLog(t("flash.log.operationCancelled"));
+      rLog.info("[Flash] Operation cancelled by user");
+    },
+  });
 
   function opTitle(kind: OpKind): string {
     switch (kind) {
@@ -608,6 +663,7 @@ export const useFlashStore = defineStore("flash", () => {
     // ── 1. Input validation ────────────────────────────────────────
     const vErr = validateOperation(kind, operationInput.value);
     if (vErr) {
+      clearOperationResult();
       flashMessage.value = vErr.message;
       flashPhase.value = "error";
       appendLog(vErr.logLine);
@@ -714,6 +770,25 @@ export const useFlashStore = defineStore("flash", () => {
     }
 
     // ── 4. Commit to the operation — gives immediate visual feedback ──
+    beginOperation({
+      op: kind,
+      chipId: selectedChipId.value,
+      port: selectedSerialPort.value,
+      baud:
+        kind === "authorize"
+          ? selectedAuthBaudRate.value
+          : selectedBaudRate.value,
+      outputPath:
+        kind === "read"
+          ? isTauriRuntime()
+            ? readFilePath.value
+            : readFileName.value.trim()
+          : null,
+      authRead:
+        kind === "authorize" &&
+        !authorizeUuid.value.trim() &&
+        !authorizeAuthKey.value.trim(),
+    });
     flashPhase.value = "running";
     operationStartTime = Date.now();
     runningOp.value = kind;
@@ -734,6 +809,10 @@ export const useFlashStore = defineStore("flash", () => {
         // connect() failed (port busy etc.) — error already logged
         flashMessage.value = t("flash.err.portUnavailable");
         flashPhase.value = "error";
+        recordOperationResult(
+          "error",
+          (Date.now() - operationStartTime) / 1000,
+        );
         runningOp.value = null;
         return;
       }
@@ -789,6 +868,8 @@ export const useFlashStore = defineStore("flash", () => {
       try {
         await startOperationTauri(kind);
       } catch (e) {
+        // Done already reduced the outcome and released the port.
+        if (operationResult.value !== null) return;
         cancelIndeterminateCheck();
         currentBackendPhase.value = null;
         phaseIndeterminate.value = false;
@@ -796,6 +877,12 @@ export const useFlashStore = defineStore("flash", () => {
         flashPhase.value = "error";
         const msg = e instanceof Error ? e.message : String(e);
         flashMessage.value = msg;
+        recordOperationResult(
+          "error",
+          operationStartTime === null
+            ? null
+            : (Date.now() - operationStartTime) / 1000,
+        );
         appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
         releaseIfAutoConnected();
@@ -805,6 +892,8 @@ export const useFlashStore = defineStore("flash", () => {
       try {
         await startOperationWs(kind);
       } catch (e) {
+        // A terminal event is followed by rejection for errors and cancellation.
+        if (operationResult.value !== null) return;
         cancelIndeterminateCheck();
         currentBackendPhase.value = null;
         phaseIndeterminate.value = false;
@@ -812,6 +901,12 @@ export const useFlashStore = defineStore("flash", () => {
         flashPhase.value = "error";
         const msg = e instanceof Error ? e.message : String(e);
         flashMessage.value = msg;
+        recordOperationResult(
+          "error",
+          operationStartTime === null
+            ? null
+            : (Date.now() - operationStartTime) / 1000,
+        );
         appendLog(t("flash.err.withMsg", { msg }));
         logOperationDuration();
         releaseIfAutoConnected();
@@ -826,6 +921,7 @@ export const useFlashStore = defineStore("flash", () => {
       return;
     }
     stopFlash();
+    clearOperationResult();
     runningOp.value = null;
     flashPhase.value = "idle";
     flashProgress.value = 0;
@@ -1074,6 +1170,10 @@ export const useFlashStore = defineStore("flash", () => {
     flashProgress,
     flashPhase,
     flashMessage,
+    operationResult,
+    readOutputOpening,
+    readOutputError,
+    openReadOutput,
     runningOp,
     currentBackendPhase,
     phaseProgress,
@@ -1087,6 +1187,8 @@ export const useFlashStore = defineStore("flash", () => {
     appendLog,
     clearLogs,
     copyLogs,
+    logCopyState,
+    logCopyMessage,
     onPickFile,
     onFileChange,
     onPickReadDir,
@@ -1094,6 +1196,9 @@ export const useFlashStore = defineStore("flash", () => {
     addSegment,
     removeSegment,
     refreshDevice,
+    portsRefreshing,
+    portsRefreshError,
+    portsScanned,
     ensureFlashListener,
     connect,
     disconnect,

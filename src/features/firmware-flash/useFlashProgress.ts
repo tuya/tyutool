@@ -3,7 +3,12 @@ import { i18n } from "@/i18n";
 import { showConfirmDialog } from "@/composables/confirmDialog";
 import { rLog } from "@/utils/log";
 import { PHASE_STYLES, phaseKey } from "@/features/firmware-flash/phase-styles";
-import type { FlashPhase, OpKind } from "@/features/firmware-flash/types";
+import type {
+  FlashPhase,
+  OpKind,
+  FlashOperationSnapshot,
+  FlashOperationResult,
+} from "@/features/firmware-flash/types";
 import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
 
 const t = i18n.global.t;
@@ -62,6 +67,32 @@ export function useFlashProgress(deps: FlashProgressDeps) {
   const flashPhase = ref<FlashPhase>("idle");
   const flashMessage = ref("");
   const runningOp = ref<OpKind | null>(null);
+  const operationResult = ref<FlashOperationResult | null>(null);
+  let operationSnapshot: FlashOperationSnapshot | null = null;
+
+  function beginOperation(snapshot: FlashOperationSnapshot): void {
+    operationSnapshot = { ...snapshot };
+    operationResult.value = null;
+  }
+
+  function clearOperationResult(): void {
+    operationSnapshot = null;
+    operationResult.value = null;
+  }
+
+  function recordOperationResult(
+    status: FlashOperationResult["status"],
+    elapsedSecs: number | null,
+  ): void {
+    if (!operationSnapshot) return;
+    operationResult.value = {
+      ...operationSnapshot,
+      status,
+      elapsedSecs,
+      message: flashMessage.value,
+    };
+    operationSnapshot = null;
+  }
 
   // Phase-aware progress tracking
   const currentBackendPhase = ref<string | null>(null);
@@ -222,6 +253,7 @@ export function useFlashProgress(deps: FlashProgressDeps) {
       phaseIndeterminate.value = false;
       currentBackendPhase.value = null;
       const op = runningOp.value;
+      const isAuthRead = operationSnapshot?.authRead ?? authOpIsRead.value;
       runningOp.value = null;
       authOpIsRead.value = false;
 
@@ -239,7 +271,9 @@ export function useFlashProgress(deps: FlashProgressDeps) {
           flashMessage.value = t("flash.msg.readDone");
           deps.appendLog(t("flash.log.readDoneLog"));
         } else if (op === "authorize") {
-          flashMessage.value = t("flash.msg.authDone");
+          flashMessage.value = t(
+            isAuthRead ? "flash.msg.authReadDone" : "flash.msg.authDone",
+          );
           deps.appendLog(t("flash.log.authOkLog"));
         }
         rLog.info(
@@ -258,6 +292,20 @@ export function useFlashProgress(deps: FlashProgressDeps) {
         deps.appendLog(t("flash.err.withMsg", { msg: displayMsg }));
         rLog.error(`[Flash] Operation '${op}' failed: ${flashMessage.value}`);
       }
+      const outcome =
+        "ok" in result
+          ? result.ok
+          : "cancelled" in result
+            ? result.cancelled
+            : result.err;
+      recordOperationResult(
+        "ok" in result
+          ? "success"
+          : "cancelled" in result
+            ? "cancelled"
+            : "error",
+        outcome.elapsed_secs ?? null,
+      );
       deps.logOperationDuration();
       deps.onOperationSettled();
     }
@@ -268,6 +316,10 @@ export function useFlashProgress(deps: FlashProgressDeps) {
     flashPhase,
     flashMessage,
     runningOp,
+    operationResult,
+    beginOperation,
+    clearOperationResult,
+    recordOperationResult,
     currentBackendPhase,
     phaseProgress,
     phaseIndeterminate,

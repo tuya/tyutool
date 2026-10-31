@@ -36,8 +36,24 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
   );
 
   let lastScanFingerprint: string | undefined = undefined;
+  const portsRefreshing = ref(false);
+  const portsRefreshError = ref("");
+  const portsScanned = ref(false);
+  let pendingScan: Promise<void> | null = null;
 
-  async function refreshDevice(): Promise<void> {
+  function refreshDevice(): Promise<void> {
+    if (pendingScan) return pendingScan;
+    portsRefreshing.value = true;
+    portsRefreshError.value = "";
+    pendingScan = scanPorts().finally(() => {
+      pendingScan = null;
+      portsRefreshing.value = false;
+      portsScanned.value = true;
+    });
+    return pendingScan;
+  }
+
+  async function scanPorts(): Promise<void> {
     if (isTauriRuntime()) {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
@@ -92,6 +108,7 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
         }
         lastScanFingerprint = fingerprint;
       } catch {
+        portsRefreshError.value = t("flash.log.portsListFailed");
         deps.appendLog(t("flash.log.portsListFailed"));
         serialPortOptions.value = [];
         deps.selectedSerialPort.value = "";
@@ -145,6 +162,7 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
         }
         lastScanFingerprint = fingerprint;
       } catch {
+        portsRefreshError.value = t("flash.log.wsConnectFailed");
         deps.appendLog(t("flash.log.wsConnectFailed"));
         serialPortOptions.value = [];
         deps.selectedSerialPort.value = "";
@@ -264,5 +282,14 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
     }
   }
 
-  return { serialPortOptions, refreshDevice, connect, disconnect, deviceReset };
+  return {
+    serialPortOptions,
+    portsRefreshing,
+    portsRefreshError,
+    portsScanned,
+    refreshDevice,
+    connect,
+    disconnect,
+    deviceReset,
+  };
 }

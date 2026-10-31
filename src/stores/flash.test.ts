@@ -2,6 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
+import { isTauriRuntime } from "@/runtime";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { i18n } from "@/i18n";
 import {
   __setSerialDebugTransportForTest,
   type SerialDebugTransport,
@@ -15,6 +18,10 @@ vi.mock("@/runtime", async (importOriginal) => {
     isTauriRuntime: vi.fn(() => false),
   };
 });
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openPath: vi.fn(async () => {}),
+}));
 
 // Mock ws-transport: runJob uses setInterval to simulate WS progress so fake timers work
 vi.mock("@/transport/ws-transport", () => {
@@ -176,6 +183,150 @@ describe("flash store", () => {
   const VALID_KEY = "k".repeat(32);
   const OTHER_UUID = "z".repeat(20);
   const OTHER_KEY = "y".repeat(32);
+
+  describe("completed operation actions", () => {
+    afterEach(() => {
+      vi.mocked(isTauriRuntime).mockReturnValue(false);
+      vi.mocked(openPath).mockReset();
+      vi.restoreAllMocks();
+    });
+
+    const readResult = {
+      op: "read" as const,
+      chipId: "t5ai",
+      port: "COM3",
+      baud: 123456,
+      outputPath: "/original.bin",
+      authRead: false,
+      status: "success" as const,
+      elapsedSecs: 1.5,
+      message: "Read complete",
+    };
+
+    it.each(["error", "cancelled"] as const)(
+      "keeps the localized %s terminal result when transport also rejects",
+      async (status) => {
+        const raw =
+          status === "error"
+            ? "T5AI did not answer the download-mode handshake"
+            : "Cancelled";
+        const expected = i18n.global.t(
+          status === "error"
+            ? "flash.err.handshakeNoResponse"
+            : "flash.msg.cancelled",
+        );
+        vi.mocked(wsTransport.runJob).mockImplementationOnce(
+          async (_job, _files, onProgress) => {
+            onProgress({
+              payload: {
+                kind: "done",
+                result:
+                  status === "error"
+                    ? { err: { message: raw, elapsed_secs: 2 } }
+                    : { cancelled: { elapsed_secs: 2 } },
+              },
+            } as never);
+            throw new Error(raw);
+          },
+        );
+        const store = useFlashStore();
+        store.selectedSerialPort = "COM3";
+        await store.startOperation("read");
+        expect(store.flashMessage).toBe(expected);
+        expect(store.operationResult).toMatchObject({
+          status,
+          elapsedSecs: 2,
+          message: expected,
+        });
+      },
+    );
+
+    it("retains the original parameters after a completed read and clears them on reset", async () => {
+      vi.mocked(wsTransport.runJob).mockImplementationOnce(
+        async (_job, _files, onProgress) => {
+          onProgress({
+            payload: { kind: "done", result: { ok: { elapsed_secs: 1.5 } } },
+          } as never);
+        },
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "COM3";
+      store.selectedBaudRate = 123456;
+      store.readFileName = "original.bin";
+      await store.startOperation("read");
+      store.readFileName = "changed.bin";
+      store.selectedSerialPort = "COM99";
+      expect(store.operationResult).toMatchObject({
+        op: "read",
+        port: "COM3",
+        baud: 123456,
+        outputPath: "original.bin",
+        elapsedSecs: 1.5,
+      });
+      store.resetFlash();
+      expect(store.operationResult).toBeNull();
+    });
+
+    it("records startup failures and clears old metadata on validation errors", async () => {
+      vi.mocked(wsTransport.runJob).mockRejectedValueOnce(
+        new Error("Connection lost"),
+      );
+      const store = useFlashStore();
+      store.selectedSerialPort = "COM3";
+      await store.startOperation("read");
+      expect(store.operationResult).toMatchObject({
+        op: "read",
+        status: "error",
+        message: "Connection lost",
+      });
+      await store.startOperation("flash");
+      expect(store.operationResult).toBeNull();
+      expect(store.flashPhase).toBe("error");
+    });
+
+    it("opens only a successful desktop read's original output and reports opener failure", async () => {
+      const store = useFlashStore();
+      store.operationResult = { ...readResult };
+      await store.openReadOutput();
+      expect(openPath).not.toHaveBeenCalled();
+      vi.mocked(isTauriRuntime).mockReturnValue(true);
+      vi.mocked(openPath).mockRejectedValueOnce(new Error("No application"));
+      store.readDir = "/changed";
+      await store.openReadOutput();
+      expect(openPath).toHaveBeenCalledExactlyOnceWith("/original.bin");
+      expect(store.readOutputError).toContain("No application");
+      vi.mocked(openPath).mockResolvedValueOnce(undefined);
+      await store.openReadOutput();
+      expect(store.readOutputError).toBe("");
+      store.operationResult = { ...readResult, status: "error" };
+      await store.openReadOutput();
+      store.operationResult = { ...readResult, op: "flash" };
+      await store.openReadOutput();
+      expect(openPath).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not duplicate pending opens or attach stale failures to a new result", async () => {
+      const store = useFlashStore();
+      store.operationResult = { ...readResult };
+      vi.mocked(isTauriRuntime).mockReturnValue(true);
+      let rejectOpen!: (error: Error) => void;
+      vi.mocked(openPath).mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectOpen = reject;
+          }),
+      );
+      const pending = store.openReadOutput();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await store.openReadOutput();
+      expect(openPath).toHaveBeenCalledOnce();
+      store.operationResult = null;
+      rejectOpen(new Error("Old open failed"));
+      await pending;
+      expect(store.readOutputOpening).toBe(false);
+      expect(store.readOutputError).toBe("");
+    });
+  });
 
   // ── Initial state ───────────────────────────────────────────────
 

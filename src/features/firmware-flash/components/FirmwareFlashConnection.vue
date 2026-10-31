@@ -129,6 +129,7 @@ const chipValue = computed({
           v-model="serialPortValue"
           :options="serialPortOptions"
           :disabled="ctx.busy"
+          aria-describedby="flash-port-feedback"
           class="w-auto min-w-[8.5rem] max-w-[16rem]"
           @open="refreshDevice"
         />
@@ -177,6 +178,31 @@ const chipValue = computed({
           :disabled="ctx.busy"
           class="min-w-0 w-[9rem] max-w-[13rem]"
         />
+      </div>
+      <div
+        id="flash-port-feedback"
+        class="w-full flex flex-wrap items-center gap-2 text-xs text-[var(--ty-text-muted)]"
+      >
+        <span v-if="ctx.portsRefreshing" role="status">{{
+          t("common.loading")
+        }}</span>
+        <span v-else-if="ctx.portsRefreshError" role="alert">{{
+          ctx.portsRefreshError
+        }}</span>
+        <span v-else-if="ctx.portsScanned" role="status">{{
+          ctx.SERIAL_PORT_OPTIONS.length
+            ? t("common.portsAvailable", { n: ctx.SERIAL_PORT_OPTIONS.length })
+            : t("serialDebug.conn.noDevicesHint")
+        }}</span>
+        <button
+          type="button"
+          class="underline"
+          :disabled="ctx.busy || ctx.portsRefreshing"
+          :aria-busy="ctx.portsRefreshing"
+          @click="refreshDevice"
+        >
+          {{ t("common.refresh") }}
+        </button>
       </div>
     </template>
   </TyConnectionBar>

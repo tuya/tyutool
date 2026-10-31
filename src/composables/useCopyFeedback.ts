@@ -1,9 +1,9 @@
-import { computed, onBeforeUnmount, ref } from "vue";
-import { useI18n } from "vue-i18n";
+import { computed, onScopeDispose, ref } from "vue";
+import { i18n } from "@/i18n";
 
 /** Short local feedback, without writing copied content to diagnostic logs. */
 export function useCopyFeedback() {
-  const { t } = useI18n();
+  const { t } = i18n.global;
   const state = ref<"idle" | "copying" | "copied" | "failed">("idle");
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -35,6 +35,6 @@ export function useCopyFeedback() {
     clearTimeout(timer);
     state.value = "idle";
   }
-  onBeforeUnmount(reset);
+  onScopeDispose(reset);
   return { state, message, copy, reset };
 }

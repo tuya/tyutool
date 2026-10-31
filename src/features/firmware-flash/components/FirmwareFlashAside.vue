@@ -1,14 +1,48 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from "vue";
+import { computed, ref, watch, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
 import { PHASE_STYLES } from "../phase-styles";
+import { useCopyFeedback } from "@/composables/useCopyFeedback";
+import { isTauriRuntime } from "@/runtime";
+import { formatDuration } from "../utils";
+import type { OpKind } from "../types";
 
 const { t } = useI18n();
 const ctx = useFirmwareFlashContext();
 
 // Only destructure actions — ref state accessed via ctx.xxx for reactivity.
 const { clearLogs, copyLogs, resetFlash } = ctx;
+const emit = defineEmits<{ configure: [op: OpKind] }>();
+const hasResult = computed(
+  () => ctx.flashPhase === "success" || ctx.flashPhase === "error",
+);
+const errorCopy = useCopyFeedback();
+watch(() => [ctx.operationResult, ctx.flashMessage], errorCopy.reset);
+const resultStatus = computed(
+  () =>
+    ctx.operationResult?.status ??
+    (ctx.flashPhase === "success" ? "success" : "error"),
+);
+const resultOperation = computed(() =>
+  ctx.operationResult?.authRead
+    ? t("flash.result.authRead")
+    : ctx.operationResult
+      ? t(`flash.tabs.${ctx.operationResult.op}`)
+      : "",
+);
+const resultDuration = computed(() =>
+  ctx.operationResult?.elapsedSecs != null
+    ? formatDuration(ctx.operationResult.elapsedSecs * 1000)
+    : "",
+);
+const canOpenOutput = computed(
+  () =>
+    isTauriRuntime() &&
+    ctx.operationResult?.op === "read" &&
+    ctx.operationResult.status === "success" &&
+    !!ctx.operationResult.outputPath,
+);
 
 // Prevent progress bar width from animating backwards when phase resets to 0
 const skipWidthTransition = ref(false);
@@ -29,43 +63,141 @@ watch(
     class="flex min-h-0 w-full flex-1 flex-col gap-3"
     :aria-label="t('flash.asideAria')"
   >
-    <!-- 错误提示 -->
-    <div
-      v-if="ctx.flashPhase === 'error'"
-      class="aside-alert aside-alert-error flex gap-2 rounded-xl p-3 text-xs"
-      role="alert"
+    <section
+      v-if="hasResult"
+      class="flash-result aside-alert shrink-0 rounded-xl p-3 text-xs"
+      :class="
+        resultStatus === 'success'
+          ? 'aside-alert-success'
+          : resultStatus === 'cancelled'
+            ? 'aside-alert-cancelled'
+            : 'aside-alert-error'
+      "
+      :role="resultStatus === 'error' ? 'alert' : 'status'"
     >
-      <FontAwesomeIcon
-        :icon="['fas', 'circle-exclamation']"
-        class="size-4 shrink-0 mt-0.5"
-        aria-hidden="true"
-      />
-      <div class="min-w-0 leading-snug">{{ ctx.flashMessage }}</div>
-    </div>
-
-    <!-- 成功提示 -->
-    <div
-      v-else-if="ctx.flashPhase === 'success'"
-      class="aside-alert aside-alert-success flex gap-2 rounded-xl p-3 text-xs"
-      role="status"
-    >
-      <FontAwesomeIcon
-        :icon="['fas', 'circle-check']"
-        class="size-4 shrink-0 mt-0.5 text-[var(--ty-success)]"
-        aria-hidden="true"
-      />
-      <div class="min-w-0 leading-snug">{{ ctx.flashMessage }}</div>
-    </div>
-
-    <!-- 清除结果按钮 -->
-    <button
-      v-if="ctx.flashPhase === 'success' || ctx.flashPhase === 'error'"
-      type="button"
-      class="ty-btn-secondary inline-flex min-h-9 w-full shrink-0 justify-center rounded-xl px-3 py-2 text-xs font-medium"
-      @click="resetFlash"
-    >
-      {{ t("flash.clearResult") }}
-    </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <FontAwesomeIcon
+          :icon="[
+            'fas',
+            resultStatus === 'success'
+              ? 'circle-check'
+              : resultStatus === 'cancelled'
+                ? 'circle-info'
+                : 'circle-exclamation',
+          ]"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        />
+        <h2 class="min-w-0 flex-1 text-sm font-semibold">
+          {{ t(`flash.result.${resultStatus}`) }}
+        </h2>
+        <p v-if="resultOperation" class="text-[var(--ty-text-muted)]">
+          {{ resultOperation
+          }}<span v-if="resultDuration" class="tabular-nums">
+            · {{ resultDuration }}</span
+          >
+        </p>
+      </div>
+      <dl
+        v-if="ctx.operationResult"
+        class="mt-2 grid grid-cols-3 gap-x-3 gap-y-2 text-[var(--ty-text)]"
+      >
+        <div class="min-w-0">
+          <dt class="text-[var(--ty-text-muted)]">{{ t("flash.chip") }}</dt>
+          <dd class="mt-0.5 font-medium">
+            {{ t(`flash.chips.${ctx.operationResult.chipId}`) }}
+          </dd>
+        </div>
+        <div class="min-w-0">
+          <dt class="text-[var(--ty-text-muted)]">
+            {{ t("serialDebug.conn.port") }}
+          </dt>
+          <dd class="mt-0.5 font-mono">{{ ctx.operationResult.port }}</dd>
+        </div>
+        <div class="min-w-0">
+          <dt class="text-[var(--ty-text-muted)]">{{ t("flash.baud") }}</dt>
+          <dd class="mt-0.5 tabular-nums">{{ ctx.operationResult.baud }}</dd>
+        </div>
+        <div
+          v-if="ctx.operationResult.outputPath"
+          class="col-span-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2"
+        >
+          <dt class="text-[var(--ty-text-muted)]">
+            {{ t("flash.result.outputFile") }}
+          </dt>
+          <dd class="select-text font-mono">
+            {{ ctx.operationResult.outputPath }}
+          </dd>
+        </div>
+      </dl>
+      <p class="result-message mt-2 leading-relaxed">
+        {{ ctx.operationResult?.message ?? ctx.flashMessage }}
+      </p>
+      <p
+        v-if="
+          ctx.operationResult?.op === 'read' &&
+          resultStatus === 'success' &&
+          !isTauriRuntime()
+        "
+        class="mt-1 text-[var(--ty-text-muted)]"
+      >
+        {{ t("flash.result.browserDownload") }}
+      </p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button
+          v-if="canOpenOutput"
+          type="button"
+          class="ty-btn-primary min-h-8 rounded-lg px-2.5 py-1.5 font-medium"
+          :disabled="ctx.readOutputOpening"
+          :aria-busy="ctx.readOutputOpening"
+          @click="ctx.openReadOutput"
+        >
+          {{
+            t(
+              ctx.readOutputOpening
+                ? "flash.result.opening"
+                : "flash.result.openOutput",
+            )
+          }}
+        </button>
+        <button
+          type="button"
+          class="ty-btn-secondary min-h-8 rounded-lg px-2.5 py-1.5 font-medium"
+          @click="emit('configure', ctx.operationResult?.op ?? ctx.activeTab)"
+        >
+          {{ t("flash.result.configure") }}
+        </button>
+        <button
+          v-if="resultStatus === 'error'"
+          type="button"
+          class="ty-btn-secondary min-h-8 rounded-lg px-2.5 py-1.5 font-medium"
+          :aria-label="t('flash.result.copyError')"
+          :disabled="errorCopy.state.value === 'copying'"
+          @click="
+            errorCopy.copy(ctx.operationResult?.message ?? ctx.flashMessage)
+          "
+        >
+          {{
+            errorCopy.state.value === "copied"
+              ? t("common.copied")
+              : t("flash.result.copyError")
+          }}
+        </button>
+        <button
+          type="button"
+          class="ty-btn-secondary min-h-8 rounded-lg px-2.5 py-1.5 font-medium"
+          @click="resetFlash"
+        >
+          {{ t("flash.clearResult") }}
+        </button>
+      </div>
+      <p v-if="errorCopy.message.value" class="mt-2" role="status">
+        {{ errorCopy.message.value }}
+      </p>
+      <p v-if="ctx.readOutputError" class="mt-2" role="alert">
+        {{ ctx.readOutputError }}
+      </p>
+    </section>
 
     <!-- 进度条 -->
     <section
@@ -135,7 +267,8 @@ watch(
 
     <!-- 输出日志 -->
     <section
-      class="aside-log-card flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl lg:min-h-[11rem]"
+      class="aside-log-card flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl"
+      :class="hasResult ? 'lg:min-h-[8rem]' : 'lg:min-h-[11rem]'"
       :aria-label="t('flash.logPanelAria')"
     >
       <!-- 日志头部工具栏 -->
@@ -180,6 +313,8 @@ watch(
             type="button"
             class="aside-log-btn inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium"
             :aria-label="t('flash.ariaCopyLog')"
+            :disabled="ctx.logCopyState === 'copying'"
+            :aria-busy="ctx.logCopyState === 'copying'"
             @click="copyLogs"
           >
             <FontAwesomeIcon
@@ -187,9 +322,20 @@ watch(
               class="size-3"
               aria-hidden="true"
             />
-            {{ t("flash.copyLog") }}
+            {{
+              ctx.logCopyState === "copied"
+                ? t("common.copied")
+                : t("flash.copyLog")
+            }}
           </button>
         </div>
+        <p
+          v-if="ctx.logCopyMessage"
+          class="log-copy-feedback w-full text-xs text-[var(--ty-text-muted)]"
+          role="status"
+        >
+          {{ ctx.logCopyMessage }}
+        </p>
       </div>
 
       <!-- 日志内容 -->

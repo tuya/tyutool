@@ -177,6 +177,7 @@ const canOpen = computed(
 );
 
 async function refreshPorts(): Promise<void> {
+  if (portsLoading.value) return;
   const generation = ++portsGeneration;
   portsLoading.value = true;
   portsError.value = "";
@@ -300,7 +301,13 @@ onMounted(() => {
   void refreshPorts();
 });
 
+let firstActivation = true;
 onActivated(() => {
+  // KeepAlive also activates on initial mount, which already scans above.
+  if (firstActivation) {
+    firstActivation = false;
+    return;
+  }
   if (!s.open) void refreshPorts();
 });
 
@@ -420,11 +427,14 @@ onDeactivated(() => {
         <span v-else-if="!availablePortRows.length">{{
           t("serialDebug.conn.noDevicesHint")
         }}</span>
+        <span v-else role="status">{{
+          t("common.portsAvailable", { n: availablePortRows.length })
+        }}</span>
         <button
-          v-if="portsError || !selectedPortAvailable"
           type="button"
           class="underline"
           :disabled="portsLoading"
+          :aria-busy="portsLoading"
           @click="refreshPorts"
         >
           {{ t("common.refresh") }}

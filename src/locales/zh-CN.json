@@ -16,7 +16,8 @@
     "copyFailed": "复制失败，请选中文字手动复制。",
     "copyField": "复制{field}",
     "cancel": "取消",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "portsAvailable": "检测到 {n} 个可用串口。"
   },
   "app": {
     "tagline": "嵌入式工具",
@@ -339,7 +340,8 @@
       "eraseDone": "擦除完成。",
       "readDone": "读取完成。",
       "authDone": "授权成功。",
-      "cancelled": "已取消。"
+      "cancelled": "已取消。",
+      "authReadDone": "授权信息读取完成，详情请查看授权信息弹窗。"
     },
     "confirm": {
       "eraseTitle": "确认擦除",
@@ -501,7 +503,20 @@
     "rangeExplanation": "终止地址不包含在范围内，起始和终止地址可独立修改。",
     "segmentSummary": "文件：{size} · 范围：{range} 字节",
     "sizeUnknown": "尚未测量",
-    "byteCount": "{count} 字节"
+    "byteCount": "{count} 字节",
+    "result": {
+      "success": "操作已完成",
+      "error": "操作失败",
+      "cancelled": "操作已取消",
+      "authRead": "读取授权信息",
+      "configure": "返回配置",
+      "copyError": "复制错误",
+      "openOutput": "打开输出文件",
+      "opening": "打开中…",
+      "openFailed": "无法打开输出文件：{msg}",
+      "browserDownload": "请在浏览器下载列表中查看输出文件。",
+      "outputFile": "输出文件"
+    }
   },
   "serialDebug": {
     "tool": "工具",
@@ -552,7 +567,14 @@
       "placeholder": "输入内容…",
       "sendBtn": "发送",
       "hexParseIgnored": "已忽略 {n} 个不完整字节",
-      "history": "发送历史"
+      "history": "发送历史",
+      "sending": "发送中…",
+      "openPortHint": "打开串口后即可发送。",
+      "emptyHint": "输入要发送的数据。",
+      "byteCount": "{n} 字节",
+      "crlfPreview": "追加 CRLF（2 字节）",
+      "noCrlfPreview": "不追加换行",
+      "hexPreviewIgnored": "忽略末尾 {n} 个 Hex 字符"
     },
     "chip": {
       "addBtn": "添加过滤标签",
