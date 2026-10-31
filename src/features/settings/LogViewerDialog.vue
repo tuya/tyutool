@@ -72,6 +72,8 @@ async function loadFileList(): Promise<void> {
 // ── Content state ──────────────────────────────────────────────────────────────
 
 const MAX_TAIL_BYTES = 256 * 1024;
+const LINES_PER_PAGE = 300;
+const pageIndex = ref(0);
 
 const selectedFile = ref<LogFileInfo | null>(null);
 const rawContent = ref("");
@@ -86,11 +88,13 @@ async function openFile(file: LogFileInfo, refresh = false): Promise<void> {
   const current = () =>
     generation === contentGeneration && props.open && view.value === "content";
   const oldOffset = contentEl.value?.scrollTop ?? 0;
+  const oldPage = pageIndex.value;
   const follow =
     !refresh ||
     !contentEl.value ||
-    contentEl.value.scrollHeight - oldOffset - contentEl.value.clientHeight <=
-      2;
+    (pageIndex.value === pageCount.value - 1 &&
+      contentEl.value.scrollHeight - oldOffset - contentEl.value.clientHeight <=
+        2);
   selectedFile.value = file;
   if (!refresh) {
     searchQuery.value = "";
@@ -109,6 +113,9 @@ async function openFile(file: LogFileInfo, refresh = false): Promise<void> {
     });
     if (!current()) return;
     rawContent.value = content;
+    pageIndex.value = follow
+      ? pageCount.value - 1
+      : Math.min(oldPage, pageCount.value - 1);
     currentMatchIndex.value = clampIndex(currentMatchIndex.value);
     isTruncated.value = file.sizeBytes > MAX_TAIL_BYTES;
   } catch (e) {
@@ -180,12 +187,6 @@ function highlightMatch(raw: string, matcher: RegExp): string {
   return html + escapeHtml(raw.slice(start));
 }
 
-interface DisplayLine {
-  level: LogLevel;
-  html: string;
-  originalIndex: number;
-}
-
 // Parsing and case normalization depend on file content, not each search edit.
 const preparedLines = computed(() =>
   rawContent.value
@@ -198,25 +199,41 @@ const preparedLines = computed(() =>
       }))
     : [],
 );
-const displayLines = computed((): DisplayLine[] => {
+const filteredLines = computed(() => {
+  const needle = searchQuery.value.toLowerCase();
+  return needle
+    ? preparedLines.value.filter((line) => line.lowerText.includes(needle))
+    : preparedLines.value;
+});
+const pageCount = computed(() =>
+  Math.max(1, Math.ceil(filteredLines.value.length / LINES_PER_PAGE)),
+);
+const pageStart = computed(() => pageIndex.value * LINES_PER_PAGE);
+const displayLines = computed(() => {
   const q = searchQuery.value;
-  const needle = q.toLowerCase();
   const matcher = q
     ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
     : null;
-  const result: DisplayLine[] = [];
-  for (const line of preparedLines.value) {
-    if (needle && !line.lowerText.includes(needle)) continue;
-    result.push({
+  return filteredLines.value
+    .slice(pageStart.value, pageStart.value + LINES_PER_PAGE)
+    .map((line) => ({
       level: line.level,
       html: matcher ? highlightMatch(line.raw, matcher) : line.html,
       originalIndex: line.originalIndex,
-    });
-  }
-  return result;
+    }));
 });
 
-const matchTotal = computed(() => displayLines.value.length);
+const matchTotal = computed(() => filteredLines.value.length);
+
+async function changePage(delta: number): Promise<void> {
+  pageIndex.value = Math.max(
+    0,
+    Math.min(pageCount.value - 1, pageIndex.value + delta),
+  );
+  if (searchQuery.value) currentMatchIndex.value = pageStart.value;
+  await nextTick();
+  if (contentEl.value) contentEl.value.scrollTop = 0;
+}
 
 function clampIndex(idx: number): number {
   if (matchTotal.value === 0) return 0;
@@ -234,15 +251,19 @@ function jumpPrev(): void {
 }
 
 function scrollToMatch(idx: number): void {
+  pageIndex.value = Math.floor(idx / LINES_PER_PAGE);
   nextTick(() => {
     const el =
-      contentEl.value?.querySelectorAll<HTMLElement>("[data-line]")[idx];
+      contentEl.value?.querySelectorAll<HTMLElement>("[data-line]")[
+        idx - pageStart.value
+      ];
     el?.scrollIntoView({ block: "center" });
   });
 }
 
 watch(searchQuery, () => {
   currentMatchIndex.value = 0;
+  pageIndex.value = 0;
   if (searchQuery.value) scrollToMatch(0);
 });
 
@@ -633,7 +654,7 @@ onBeforeUnmount(() => {
             class="whitespace-pre-wrap break-words"
             :class="[
               LEVEL_CLASS[line.level],
-              idx === currentMatchIndex && searchQuery
+              pageStart + idx === currentMatchIndex && searchQuery
                 ? 'bg-[var(--ty-primary-soft)] rounded'
                 : '',
             ]"
@@ -642,6 +663,39 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Footer -->
+        <div
+          v-if="pageCount > 1"
+          class="flex shrink-0 flex-wrap items-center gap-2 text-xs"
+        >
+          <button
+            type="button"
+            class="ty-btn-sm ty-btn-secondary"
+            :disabled="contentLoading || pageIndex === 0"
+            @click="changePage(-1)"
+          >
+            {{ t("settings.logViewer.previousPage") }}
+          </button>
+          <p
+            role="status"
+            class="min-w-0 flex-1 tabular-nums text-[var(--ty-text-muted)]"
+          >
+            {{
+              t("settings.logViewer.lineRange", {
+                start: pageStart + 1,
+                end: pageStart + displayLines.length,
+                total: matchTotal,
+              })
+            }}
+          </p>
+          <button
+            type="button"
+            class="ty-btn-sm ty-btn-secondary"
+            :disabled="contentLoading || pageIndex >= pageCount - 1"
+            @click="changePage(1)"
+          >
+            {{ t("settings.logViewer.nextPage") }}
+          </button>
+        </div>
         <div class="flex flex-wrap gap-2">
           <button
             type="button"
