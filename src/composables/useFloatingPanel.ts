@@ -21,6 +21,27 @@ export function useFloatingPanel(
     maxHeight: "0px",
   });
   let generation = 0;
+  let positionFrame: number | null = null;
+  function schedulePosition(event: Event): void {
+    // Scrolling the panel's contents does not move its anchor.
+    if (
+      event.type === "scroll" &&
+      event.target instanceof Node &&
+      panel.value?.contains(event.target)
+    )
+      return;
+    if (positionFrame !== null || !open()) return;
+    positionFrame = requestAnimationFrame(() => {
+      positionFrame = null;
+      position();
+    });
+  }
+  function stopPositioning(): void {
+    window.removeEventListener("resize", schedulePosition);
+    window.removeEventListener("scroll", schedulePosition, true);
+    if (positionFrame !== null) cancelAnimationFrame(positionFrame);
+    positionFrame = null;
+  }
   function position(): void {
     const rect = anchor();
     const el = panel.value;
@@ -60,19 +81,20 @@ export function useFloatingPanel(
         await nextTick();
         if (!open() || request !== generation) return;
         position();
-        window.addEventListener("resize", position);
-        window.addEventListener("scroll", position, true);
+        window.addEventListener("resize", schedulePosition);
+        window.addEventListener("scroll", schedulePosition, {
+          capture: true,
+          passive: true,
+        });
       } else {
-        window.removeEventListener("resize", position);
-        window.removeEventListener("scroll", position, true);
+        stopPositioning();
       }
     },
     { immediate: true },
   );
   onBeforeUnmount(() => {
     generation++;
-    window.removeEventListener("resize", position);
-    window.removeEventListener("scroll", position, true);
+    stopPositioning();
   });
   return { style, position };
 }
