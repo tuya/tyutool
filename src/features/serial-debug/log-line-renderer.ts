@@ -39,6 +39,7 @@ type CachedLineBase = {
   ansiSpans?: AnsiSpan[];
   plainSpans?: AnsiSpan[];
   lastRendered?: CachedRenderedLine;
+  lastMatch?: { query: string; matches: boolean };
 };
 
 // Theme-aware fallback colors for RX lines whose ESP-IDF/Tuya level prefix
@@ -68,32 +69,30 @@ function applyLevelFallback(
   }));
 }
 
-function splitByKeyword(
+function splitByRanges(
   text: string,
-  searchQuery: string,
+  position: { offset: number; rangeIndex: number },
+  ranges: readonly [number, number][],
 ): RenderKeywordSegment[] {
-  if (!searchQuery) {
-    return [{ text, isMatch: false }];
-  }
-
   const parts: RenderKeywordSegment[] = [];
-  const lower = text.toLowerCase();
+  const offset = position.offset;
   let pos = 0;
-  while (pos < text.length) {
-    const idx = lower.indexOf(searchQuery, pos);
-    if (idx === -1) {
-      parts.push({ text: text.slice(pos), isMatch: false });
-      break;
+  for (let i = position.rangeIndex; i < ranges.length; i++) {
+    const [start, end] = ranges[i];
+    if (end <= offset) {
+      position.rangeIndex = i + 1;
+      continue;
     }
-    if (idx > pos) {
-      parts.push({ text: text.slice(pos, idx), isMatch: false });
-    }
-    parts.push({
-      text: text.slice(idx, idx + searchQuery.length),
-      isMatch: true,
-    });
-    pos = idx + searchQuery.length;
+    if (start >= offset + text.length) break;
+    const from = Math.max(0, start - offset);
+    const to = Math.min(text.length, end - offset);
+    if (from > pos) parts.push({ text: text.slice(pos, from), isMatch: false });
+    parts.push({ text: text.slice(from, to), isMatch: true });
+    pos = to;
+    if (end <= offset + text.length) position.rangeIndex = i + 1;
   }
+  if (pos < text.length || parts.length === 0)
+    parts.push({ text: text.slice(pos), isMatch: false });
   return parts;
 }
 
@@ -150,7 +149,16 @@ export class SerialDebugLogLineRenderer {
     if (!normalizedQuery) return [];
     const ids: number[] = [];
     for (const line of lines) {
-      if (this.getOrCreateBase(line).lowerPlainText.includes(normalizedQuery)) {
+      const base = this.getOrCreateBase(line);
+      // Line ids are unique for the store lifetime. Reuse the previous query's
+      // result for retained lines; only appended/preview lines need a text test.
+      if (base.lastMatch?.query !== normalizedQuery) {
+        base.lastMatch = {
+          query: normalizedQuery,
+          matches: base.lowerPlainText.includes(normalizedQuery),
+        };
+      }
+      if (base.lastMatch.matches) {
         ids.push(line.id);
       }
     }
@@ -180,11 +188,22 @@ export class SerialDebugLogLineRenderer {
       return cached.view;
     }
 
-    const spans = this.spansFor(line, base, ansiEnabled).map((span) => ({
-      text: span.text,
-      style: span.style,
-      segments: splitByKeyword(span.text, searchQuery),
-    }));
+    // Find against the complete stripped line, then clip to each styled span.
+    const ranges: [number, number][] = [];
+    if (searchQuery) {
+      for (let pos = 0; pos < base.lowerPlainText.length;) {
+        const start = base.lowerPlainText.indexOf(searchQuery, pos);
+        if (start < 0) break;
+        pos = start + searchQuery.length;
+        ranges.push([start, pos]);
+      }
+    }
+    const position = { offset: 0, rangeIndex: 0 };
+    const spans = this.spansFor(line, base, ansiEnabled).map((span) => {
+      const segments = splitByRanges(span.text, position, ranges);
+      position.offset += span.text.length;
+      return { text: span.text, style: span.style, segments };
+    });
     const view: RenderedLogLine = {
       line,
       spans,

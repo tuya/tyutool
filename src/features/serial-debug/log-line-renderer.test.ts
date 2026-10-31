@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnsiSpan } from "./ansi-parse";
 import type { DebugLogLine } from "./types";
 
@@ -32,6 +32,67 @@ function line(
 }
 
 describe("SerialDebugLogLineRenderer", () => {
+  beforeEach(() => {
+    parseAnsiMock.mockClear();
+    stripAnsiMock.mockClear();
+  });
+  it("highlights whole-text matches across ANSI styles without losing text or colors", () => {
+    parseAnsiMock.mockImplementationOnce(() => [
+      { text: "ab", style: {} },
+      { text: "cd ab", style: { fg: "red" } },
+      { text: "cd!", style: { fg: "blue" } },
+    ]);
+    const renderer = new SerialDebugLogLineRenderer();
+    const [view] = renderer.render(
+      [line(1, "ab\x1b[31mcd ab\x1b[34mcd!")],
+      true,
+      "abcd",
+    );
+    expect(view.hasMatch).toBe(true);
+    expect(view.spans.map((s) => s.style.fg)).toEqual([
+      undefined,
+      "red",
+      "blue",
+    ]);
+    const segments = view.spans.flatMap((s) => s.segments);
+    expect(segments.map((s) => s.text).join("")).toBe("abcd abcd!");
+    expect(
+      segments
+        .filter((s) => s.isMatch)
+        .map((s) => s.text)
+        .join(""),
+    ).toBe("abcdabcd");
+  });
+
+  it("checks only new text for a stable query while retaining window order and bounded caches", () => {
+    const renderer = new SerialDebugLogLineRenderer();
+    let lines = Array.from({ length: 20_000 }, (_, i) =>
+      line(i, i % 7 === 0 ? "needle" : "absent"),
+    );
+    const includes = vi.spyOn(String.prototype, "includes");
+    renderer.matchingLineIds(lines, "needle");
+    includes.mockClear();
+    for (let i = 0; i < 20; i++) {
+      lines = [...lines.slice(1), line(20_000 + i, "needle")];
+      renderer.matchingLineIds(lines, "needle");
+    }
+    const checks = includes.mock.calls.filter(
+      ([query]) => query === "needle",
+    ).length;
+    includes.mockRestore();
+    expect(checks).toBe(20);
+    const reordered = [lines[30], lines[0], lines[lines.length - 1]];
+    expect(renderer.matchingLineIds(reordered, "needle")).toEqual(
+      reordered.filter((l) => l.text.includes("needle")).map((l) => l.id),
+    );
+    expect(renderer.cacheSize()).toBe(3);
+    expect(renderer.matchingLineIds(reordered, "absent")).toEqual(
+      reordered.filter((l) => l.text.includes("absent")).map((l) => l.id),
+    );
+    expect(renderer.matchingLineIds([], "needle")).toEqual([]);
+    expect(renderer.cacheSize()).toBe(0);
+  });
+
   it("reuses parsed ANSI/plain-text results for unchanged lines", () => {
     const renderer = new SerialDebugLogLineRenderer();
     const lines = [line(1, "\x1b[31mERR\x1b[0m one"), line(2, "OK two")];
