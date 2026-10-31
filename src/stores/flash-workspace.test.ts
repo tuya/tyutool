@@ -2,6 +2,36 @@ import { describe, expect, it } from "vitest";
 import { parseFlashWorkspaceJson, WORKSPACE_VERSION } from "./flash-workspace";
 
 describe("parseFlashWorkspaceJson", () => {
+  it.each([300, 123456, 4000000])("preserves custom flash baud %s", (baud) => {
+    const workspace = parseFlashWorkspaceJson(
+      JSON.stringify({
+        v: WORKSPACE_VERSION,
+        activeTab: "flash",
+        selectedChipId: "t5ai",
+        selectedBaudRate: baud,
+        authBaudRate: baud,
+        flashSegments: [{ id: "a" }],
+      }),
+    );
+    expect(workspace?.selectedBaudRate).toBe(baud);
+    expect(workspace?.authBaudRate).toBe(115200);
+  });
+
+  it.each([null, "123456", 0, 299, 4000001, 123456.5])(
+    "falls back to the selected chip default for invalid baud %s",
+    (baud) => {
+      const workspace = parseFlashWorkspaceJson(
+        JSON.stringify({
+          v: WORKSPACE_VERSION,
+          selectedChipId: "ln882h",
+          selectedBaudRate: baud,
+          flashSegments: [{ id: "a" }],
+        }),
+      );
+      expect(workspace?.selectedBaudRate).toBe(115200);
+    },
+  );
+
   it("returns null for empty or invalid input", () => {
     expect(parseFlashWorkspaceJson(null)).toBeNull();
     expect(parseFlashWorkspaceJson("")).toBeNull();

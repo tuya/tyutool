@@ -64,12 +64,14 @@ function isValidWorkspaceChipId(chipId: string, activeTab: OpKind): boolean {
 }
 
 function normalizeBaud(chipId: string, baud: unknown): number {
-  const n =
-    typeof baud === "number" && Number.isFinite(baud)
-      ? baud
-      : chipManifest(DEFAULT_CHIP_ID).defaultBaudRate;
-  if ((BAUD_RATE_OPTIONS as readonly number[]).includes(n)) {
-    return n;
+  // Match the custom-baud field's integer range, not just its preset list.
+  if (
+    typeof baud === "number" &&
+    Number.isInteger(baud) &&
+    baud >= 300 &&
+    baud <= 4000000
+  ) {
+    return baud;
   }
   try {
     return chipManifest(chipId).defaultBaudRate;
