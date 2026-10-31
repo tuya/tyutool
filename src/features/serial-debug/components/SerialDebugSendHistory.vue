@@ -64,15 +64,31 @@ function settings(entry: SendHistoryEntry): string {
   if (entry.mode === "hex") return "Hex";
   return `ASCII · ${entry.appendCrlf ? "CRLF" : t("serialDebug.history.noNewline")}`;
 }
+const dateFormatter = computed(
+  () =>
+    new Intl.DateTimeFormat(locale.value, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+);
+const historyDates = computed(
+  () =>
+    new Map(
+      s.sendHistory.map((entry) => [
+        sendHistoryKey(entry),
+        entry.lastSentAt === null
+          ? t("serialDebug.history.unknownTime")
+          : dateFormatter.value.format(entry.lastSentAt),
+      ]),
+    ),
+);
 function date(entry: SendHistoryEntry): string {
-  return entry.lastSentAt === null
-    ? t("serialDebug.history.unknownTime")
-    : new Intl.DateTimeFormat(locale.value, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(entry.lastSentAt);
+  return (
+    historyDates.value.get(sendHistoryKey(entry)) ??
+    t("serialDebug.history.unknownTime")
+  );
 }
 function select(entry: SendHistoryEntry): void {
   selectedKey.value = sendHistoryKey(entry);
@@ -133,11 +149,14 @@ function onKey(event: KeyboardEvent): void {
         )
       ];
     if (entry) select(entry);
-    void nextTick(() =>
-      panel.value
-        ?.querySelector<HTMLElement>('.history-item[aria-pressed="true"]')
-        ?.scrollIntoView?.({ block: "nearest" }),
-    );
+    const fromSearch = event.target === queryInput.value;
+    void nextTick(() => {
+      const item = panel.value?.querySelector<HTMLElement>(
+        '.history-item[aria-pressed="true"]',
+      );
+      if (!fromSearch) item?.focus({ preventScroll: true });
+      item?.scrollIntoView?.({ block: "nearest" });
+    });
   }
 }
 function outside(event: MouseEvent): void {
