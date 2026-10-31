@@ -18,6 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   app?.unmount();
   document.body.replaceChildren();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 function mount(component: Component, props: Record<string, unknown> = {}) {
@@ -38,6 +39,49 @@ import {
   confirmDialogState,
   resolveConfirmDialog,
 } from "@/composables/confirmDialog";
+
+it("ticks only for a running batch and updates immediately on completion and restart", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  vi.setSystemTime(10_000);
+  const s = useBatchFlashAuthStore();
+  mount(Dashboard);
+  expect(vi.getTimerCount()).toBe(0);
+  expect(host.textContent).toContain("--:--:--");
+  s.batchStartTime = Date.now();
+  await nextTick();
+  expect(host.textContent).toContain("00:00:00");
+  expect(vi.getTimerCount()).toBe(1);
+  await vi.advanceTimersByTimeAsync(2500);
+  expect(host.textContent).toContain("00:00:02");
+  s.batchEndTime = s.batchStartTime + 1500;
+  await nextTick();
+  expect(host.textContent).toContain("00:00:01");
+  expect(vi.getTimerCount()).toBe(0);
+  s.batchEndTime = null;
+  await nextTick();
+  expect(host.textContent).toContain("00:00:02");
+  expect(vi.getTimerCount()).toBe(1);
+  s.batchStartTime = null;
+  await nextTick();
+  expect(host.textContent).toContain("--:--:--");
+  expect(vi.getTimerCount()).toBe(0);
+  s.batchStartTime = Date.now();
+  await nextTick();
+  app!.unmount();
+  app = undefined;
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("shows a previously completed batch immediately without starting a ticker", () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  const s = useBatchFlashAuthStore();
+  s.batchStartTime = 10_000;
+  s.batchEndTime = 75_000;
+  mount(Dashboard);
+  expect(host.textContent).toContain("00:01:05");
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it("keeps archive access after the completion notice is dismissed", async () => {
   const s = useBatchFlashAuthStore();
   s.authConfig.excelPath = "/auth.xlsx";
