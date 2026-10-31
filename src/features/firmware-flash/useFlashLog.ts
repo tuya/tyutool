@@ -12,6 +12,7 @@ export function useFlashLog() {
   ]);
   const logScrollRef = ref<HTMLDivElement | null>(null);
   const lockAutoScroll = ref(false);
+  let pendingScroll: Promise<void> | null = null;
 
   function appendLog(line: string): void {
     const ts = new Date().toLocaleTimeString([], { hour12: false });
@@ -22,13 +23,15 @@ export function useFlashLog() {
     void scrollLogToBottom();
   }
 
-  async function scrollLogToBottom(): Promise<void> {
-    await nextTick();
-    const el = logScrollRef.value;
-    if (!el || lockAutoScroll.value) {
-      return;
+  function scrollLogToBottom(): Promise<void> {
+    if (!pendingScroll) {
+      pendingScroll = nextTick().then(() => {
+        pendingScroll = null;
+        const el = logScrollRef.value;
+        if (el && !lockAutoScroll.value) el.scrollTop = el.scrollHeight;
+      });
     }
-    el.scrollTop = el.scrollHeight;
+    return pendingScroll;
   }
 
   function clearLogs(): void {
