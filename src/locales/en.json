@@ -645,7 +645,10 @@
       "archiveStopped": "This session reached its archive limit and some later lines were not archived. Raise the limit in settings to continue archiving; missing data cannot be recovered.",
       "historyReady": "Scroll to browse history. Use Back to live to follow new data.",
       "historyLoading": "Loading history…",
-      "filterReadFailed": "Could not read filter results: {msg}"
+      "filterReadFailed": "Could not read filter results: {msg}",
+      "exporting": "Saving…",
+      "exportSuccess": "Log saved.",
+      "exportFailed": "Could not save the log: {error}. Check the destination and try again."
     },
     "autoSave": {
       "label": "Auto-save logs",

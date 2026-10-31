@@ -645,7 +645,10 @@
       "archiveStopped": "本会话曾达到归档上限，之后存在未归档的数据。可在设置中提高上限继续归档，但已有缺口无法补回。",
       "historyReady": "滚动浏览历史；点击“返回实时”跟随新数据。",
       "historyLoading": "正在加载历史…",
-      "filterReadFailed": "无法读取筛选结果：{msg}"
+      "filterReadFailed": "无法读取筛选结果：{msg}",
+      "exporting": "正在保存…",
+      "exportSuccess": "日志已保存。",
+      "exportFailed": "保存日志失败：{error}。请检查保存位置后重试。"
     },
     "autoSave": {
       "label": "自动保存日志",
