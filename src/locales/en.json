@@ -515,7 +515,11 @@
       "opening": "Opening…",
       "openFailed": "Could not open the output file: {msg}",
       "browserDownload": "Check your browser downloads for the output file.",
-      "outputFile": "Output file"
+      "outputFile": "Output file",
+      "details": "Operation details",
+      "expandPaths": "Show full paths",
+      "collapsePaths": "Collapse paths",
+      "copyPath": "Copy output path"
     }
   },
   "serialDebug": {

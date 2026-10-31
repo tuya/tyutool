@@ -515,7 +515,11 @@
       "opening": "打开中…",
       "openFailed": "无法打开输出文件：{msg}",
       "browserDownload": "请在浏览器下载列表中查看输出文件。",
-      "outputFile": "输出文件"
+      "outputFile": "输出文件",
+      "details": "操作详情",
+      "expandPaths": "展开完整路径",
+      "collapsePaths": "收起路径",
+      "copyPath": "复制输出路径"
     }
   },
   "serialDebug": {

@@ -18,6 +18,15 @@ const hasResult = computed(
   () => ctx.flashPhase === "success" || ctx.flashPhase === "error",
 );
 const errorCopy = useCopyFeedback();
+const pathCopy = useCopyFeedback();
+const pathsExpanded = ref(false);
+watch(
+  () => ctx.operationResult,
+  () => {
+    pathsExpanded.value = false;
+    pathCopy.reset();
+  },
+);
 watch(() => [ctx.operationResult, ctx.flashMessage], errorCopy.reset);
 const resultStatus = computed(
   () =>
@@ -65,7 +74,7 @@ watch(
   >
     <section
       v-if="hasResult"
-      class="flash-result aside-alert shrink-0 rounded-xl p-3 text-xs"
+      class="flash-result aside-alert flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl p-3 text-xs lg:max-h-[55%]"
       :class="
         resultStatus === 'success'
           ? 'aside-alert-success'
@@ -75,7 +84,7 @@ watch(
       "
       :role="resultStatus === 'error' ? 'alert' : 'status'"
     >
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
         <FontAwesomeIcon
           :icon="[
             'fas',
@@ -98,52 +107,103 @@ watch(
           >
         </p>
       </div>
-      <dl
-        v-if="ctx.operationResult"
-        class="mt-2 grid grid-cols-3 gap-x-3 gap-y-2 text-[var(--ty-text)]"
+      <div
+        class="min-h-0 overflow-auto overscroll-contain"
+        tabindex="0"
+        :aria-label="t('flash.result.details')"
       >
-        <div class="min-w-0">
-          <dt class="text-[var(--ty-text-muted)]">{{ t("flash.chip") }}</dt>
-          <dd class="mt-0.5 font-medium">
-            {{ t(`flash.chips.${ctx.operationResult.chipId}`) }}
-          </dd>
-        </div>
-        <div class="min-w-0">
-          <dt class="text-[var(--ty-text-muted)]">
-            {{ t("serialDebug.conn.port") }}
-          </dt>
-          <dd class="mt-0.5 font-mono">{{ ctx.operationResult.port }}</dd>
-        </div>
-        <div class="min-w-0">
-          <dt class="text-[var(--ty-text-muted)]">{{ t("flash.baud") }}</dt>
-          <dd class="mt-0.5 tabular-nums">{{ ctx.operationResult.baud }}</dd>
-        </div>
-        <div
-          v-if="ctx.operationResult.outputPath"
-          class="col-span-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2"
+        <dl
+          v-if="ctx.operationResult"
+          class="mt-2 grid gap-x-3 gap-y-2 text-[var(--ty-text)]"
+          :class="pathsExpanded ? 'grid-cols-2' : 'grid-cols-3'"
         >
-          <dt class="text-[var(--ty-text-muted)]">
-            {{ t("flash.result.outputFile") }}
-          </dt>
-          <dd class="select-text font-mono">
-            {{ ctx.operationResult.outputPath }}
-          </dd>
-        </div>
-      </dl>
-      <p class="result-message mt-2 leading-relaxed">
-        {{ ctx.operationResult?.message ?? ctx.flashMessage }}
-      </p>
-      <p
-        v-if="
-          ctx.operationResult?.op === 'read' &&
-          resultStatus === 'success' &&
-          !isTauriRuntime()
-        "
-        class="mt-1 text-[var(--ty-text-muted)]"
-      >
-        {{ t("flash.result.browserDownload") }}
-      </p>
-      <div class="mt-2 flex flex-wrap gap-2">
+          <div class="min-w-0">
+            <dt class="text-[var(--ty-text-muted)]">{{ t("flash.chip") }}</dt>
+            <dd class="mt-0.5 font-medium">
+              {{ t(`flash.chips.${ctx.operationResult.chipId}`) }}
+            </dd>
+          </div>
+          <div
+            class="min-w-0"
+            :class="pathsExpanded ? 'col-span-2 order-2' : ''"
+          >
+            <dt class="text-[var(--ty-text-muted)]">
+              {{ t("serialDebug.conn.port") }}
+            </dt>
+            <dd
+              class="mt-0.5 font-mono"
+              :class="pathsExpanded ? 'break-all' : 'truncate'"
+              :title="ctx.operationResult.port"
+            >
+              {{ ctx.operationResult.port }}
+            </dd>
+          </div>
+          <div class="min-w-0">
+            <dt class="text-[var(--ty-text-muted)]">{{ t("flash.baud") }}</dt>
+            <dd class="mt-0.5 tabular-nums">{{ ctx.operationResult.baud }}</dd>
+          </div>
+          <div
+            v-if="ctx.operationResult.outputPath"
+            class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2"
+            :class="pathsExpanded ? 'col-span-2 order-3' : 'col-span-3'"
+          >
+            <dt class="text-[var(--ty-text-muted)]">
+              {{ t("flash.result.outputFile") }}
+            </dt>
+            <dd
+              class="select-text font-mono"
+              :class="pathsExpanded ? 'break-all' : 'truncate'"
+              :title="ctx.operationResult.outputPath"
+            >
+              {{ ctx.operationResult.outputPath }}
+            </dd>
+          </div>
+        </dl>
+        <p class="result-message mt-2 leading-relaxed">
+          {{ ctx.operationResult?.message ?? ctx.flashMessage }}
+        </p>
+        <p
+          v-if="
+            ctx.operationResult?.op === 'read' &&
+            resultStatus === 'success' &&
+            !isTauriRuntime()
+          "
+          class="mt-1 text-[var(--ty-text-muted)]"
+        >
+          {{ t("flash.result.browserDownload") }}
+        </p>
+        <p v-if="ctx.readOutputError" class="mt-2 break-words" role="alert">
+          {{ ctx.readOutputError }}
+        </p>
+      </div>
+      <div class="mt-2 flex shrink-0 flex-wrap gap-2">
+        <button
+          v-if="ctx.operationResult"
+          type="button"
+          class="ty-btn-secondary min-h-8 rounded-lg px-2.5 py-1.5 font-medium"
+          :aria-expanded="pathsExpanded"
+          @click="pathsExpanded = !pathsExpanded"
+        >
+          {{
+            pathsExpanded
+              ? t("flash.result.collapsePaths")
+              : t("flash.result.expandPaths")
+          }}
+        </button>
+        <button
+          v-if="ctx.operationResult?.outputPath"
+          type="button"
+          class="ty-btn-secondary min-h-8 rounded-lg px-2.5 py-1.5 font-medium"
+          :aria-label="t('flash.result.copyPath')"
+          :disabled="pathCopy.state.value === 'copying'"
+          @click="pathCopy.copy(ctx.operationResult.outputPath)"
+        >
+          {{
+            pathCopy.state.value === "copied"
+              ? t("common.copied")
+              : t("flash.result.copyPath")
+          }}
+        </button>
         <button
           v-if="canOpenOutput"
           type="button"
@@ -194,8 +254,12 @@ watch(
       <p v-if="errorCopy.message.value" class="mt-2" role="status">
         {{ errorCopy.message.value }}
       </p>
-      <p v-if="ctx.readOutputError" class="mt-2" role="alert">
-        {{ ctx.readOutputError }}
+      <p
+        v-if="pathCopy.message.value"
+        :class="pathCopy.state.value === 'copied' ? 'sr-only' : 'mt-2 shrink-0'"
+        role="status"
+      >
+        {{ pathCopy.message.value }}
       </p>
     </section>
 

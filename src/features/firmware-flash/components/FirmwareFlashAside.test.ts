@@ -56,6 +56,36 @@ describe("flash result and log feedback", () => {
     await nextTick();
   }
 
+  it("expands full paths, copies the original output and resets feedback for a new result", async () => {
+    const path =
+      "/home/user/" + "deep-project-path/".repeat(18) + "firmware.bin";
+    store.operationResult = { ...result, outputPath: path };
+    const write = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValueOnce(new Error("denied"))
+      .mockResolvedValue(undefined);
+    await nextTick();
+    const toggle = button("Show full paths");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    toggle.click();
+    await nextTick();
+    expect(button("Collapse paths").getAttribute("aria-expanded")).toBe("true");
+    button("Copy output path").click();
+    await flush();
+    expect(host.textContent).toContain(i18n.global.t("common.copyFailed"));
+    button("Copy output path").click();
+    await flush();
+    expect(write).toHaveBeenLastCalledWith(path);
+    store.operationResult = { ...result, outputPath: "new.bin" };
+    await nextTick();
+    expect(button("Show full paths").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(host.querySelector(".flash-result")?.textContent).not.toContain(
+      i18n.global.t("common.copied"),
+    );
+  });
+
   it("shows the original summary and returns keyboard focus to the operation configuration", async () => {
     store.selectedSerialPort = "COM99";
     store.readFileName = "changed.bin";
