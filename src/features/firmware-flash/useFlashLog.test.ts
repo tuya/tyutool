@@ -1,9 +1,55 @@
 // @vitest-environment happy-dom
-import { createApp, h, nextTick } from "vue";
+import { createApp, effectScope, h, nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { useFlashLog } from "./useFlashLog";
 
 describe("flash log tail following", () => {
+  it("provides local feedback in a store scope and preserves copy log entries", async () => {
+    const scope = effectScope();
+    const log = scope.run(() => useFlashLog())!;
+    const write = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValueOnce(new Error("denied"))
+      .mockResolvedValue(undefined);
+    try {
+      await log.copyLogs();
+      expect(log.copyState.value).toBe("failed");
+      expect(log.copyMessage.value).toBeTruthy();
+      await log.copyLogs();
+      expect(log.copyState.value).toBe("copied");
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(log.logLines.value).toHaveLength(3);
+    } finally {
+      scope.stop();
+      write.mockRestore();
+    }
+  });
+
+  it("suppresses overlapping log copies and ignores completion after disposal", async () => {
+    const scope = effectScope();
+    const log = scope.run(() => useFlashLog())!;
+    let finish!: () => void;
+    const write = vi.spyOn(navigator.clipboard, "writeText").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      const pending = log.copyLogs();
+      await log.copyLogs();
+      expect(write).toHaveBeenCalledOnce();
+      scope.stop();
+      finish();
+      await pending;
+      expect(log.copyState.value).toBe("idle");
+      expect(log.logLines.value).toHaveLength(1);
+    } finally {
+      scope.stop();
+      write.mockRestore();
+    }
+  });
+
   it("follows a synchronous log burst once after the DOM flush", async () => {
     let log!: ReturnType<typeof useFlashLog>;
     const host = document.createElement("div");

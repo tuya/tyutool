@@ -4,10 +4,17 @@ import { createApp, defineComponent, h, nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { t } = vi.hoisted(() => ({
-  t: (key: string, params?: { msg?: string }): string => {
+  t: (key: string, params?: { msg?: string; n?: number }): string => {
     const messages: Record<string, string> = {
       "serialDebug.send.inputLabel": "Data to send",
       "serialDebug.send.sendBtn": "Send",
+      "serialDebug.send.sending": "Sending…",
+      "serialDebug.send.openPortHint": "Open a port to send.",
+      "serialDebug.send.emptyHint": "Enter data to send.",
+      "serialDebug.send.byteCount": `${params?.n} bytes`,
+      "serialDebug.send.crlfPreview": "CRLF adds 2 bytes",
+      "serialDebug.send.noCrlfPreview": "No line ending",
+      "serialDebug.send.hexPreviewIgnored": `${params?.n} trailing Hex character ignored`,
       "serialDebug.send.invalidHex": "Enter at least one complete Hex byte.",
       "serialDebug.send.failed": `Send failed: ${params?.msg}. Your input was kept. Try sending again.`,
     };
@@ -64,9 +71,7 @@ describe("SerialDebugSendBar recovery", () => {
   }
 
   function sendButton(): HTMLButtonElement {
-    return Array.from(host.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Send",
-    )!;
+    return host.querySelector<HTMLButtonElement>(".btn-primary")!;
   }
 
   async function enterDraft(text: string): Promise<void> {
@@ -79,6 +84,64 @@ describe("SerialDebugSendBar recovery", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await nextTick();
   }
+
+  it("previews the exact lenient Hex bytes and warns about an odd trailing digit", async () => {
+    s.sendMode = "hex";
+    await enterDraft("41, 42; F!");
+    const preview = host.querySelector(".send-preview")!;
+    expect(preview.textContent).toContain("2 bytes");
+    expect(preview.textContent).toContain("1 trailing Hex character ignored");
+    sendButton().click();
+    await flush();
+    expect(write).toHaveBeenCalledWith(Uint8Array.of(0x41, 0x42));
+    await enterDraft("!");
+    expect(preview.textContent).toContain(
+      "Enter at least one complete Hex byte.",
+    );
+    expect(preview.textContent).not.toContain("trailing Hex");
+  });
+
+  it("includes UTF-8 and the optional CRLF in the ASCII byte count", async () => {
+    s.sendAppendCrlf = true;
+    await enterDraft("中");
+    const preview = host.querySelector(".send-preview")!;
+    expect(preview.textContent).toContain("5 bytes");
+    expect(preview.textContent).toContain("CRLF adds 2 bytes");
+    s.sendAppendCrlf = false;
+    await nextTick();
+    expect(preview.textContent).toContain("3 bytes");
+    expect(preview.textContent).toContain("No line ending");
+    sendButton().click();
+    await flush();
+    expect(write).toHaveBeenCalledWith(new TextEncoder().encode("中"));
+  });
+
+  it("explains empty, disconnected and pending states while keeping the draft editable", async () => {
+    await nextTick();
+    expect(host.textContent).toContain("Enter data to send.");
+    s.open = false;
+    await enterDraft("AT");
+    expect(host.textContent).toContain("Open a port to send.");
+    expect(sendButton().disabled).toBe(true);
+    s.open = true;
+    let finish!: () => void;
+    write.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await nextTick();
+    sendButton().click();
+    await flush();
+    expect(sendButton().textContent).toContain("Sending…");
+    expect(sendButton().disabled).toBe(true);
+    await enterDraft("NEXT");
+    finish();
+    await flush();
+    expect(s.sendInput).toBe("NEXT");
+    expect(sendButton().textContent).toContain("Send");
+  });
 
   it("labels the field and announces the selected send mode", async () => {
     expect(input().getAttribute("aria-label")).toBe("Data to send");
@@ -227,7 +290,14 @@ describe("SerialDebugSendBar recovery", () => {
     expect(error?.textContent).toContain(
       "Enter at least one complete Hex byte.",
     );
-    expect(input().getAttribute("aria-describedby")).toBe(error?.id);
+    expect(input().getAttribute("aria-describedby")?.split(" ")).toContain(
+      error?.id,
+    );
+    expect(
+      host
+        .querySelector(".send-feedback")
+        ?.textContent?.split("Enter at least one complete Hex byte."),
+    ).toHaveLength(2);
     await enterDraft("AA,bb");
     expect(host.querySelector('[role="alert"]')).toBeNull();
     sendButton().click();

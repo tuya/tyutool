@@ -434,6 +434,11 @@ html[data-theme] {
     background: color-mix(in srgb, var(--ty-success) 6%, var(--ty-surface));
     color: var(--ty-text);
   }
+  .aside-alert-cancelled {
+    border-color: color-mix(in srgb, var(--ty-warning) 40%, var(--ty-border));
+    background: color-mix(in srgb, var(--ty-warning) 6%, var(--ty-surface));
+    color: var(--ty-text);
+  }
   .aside-progress-pct {
     color: var(--ty-primary);
     font-size: 1.5rem;
