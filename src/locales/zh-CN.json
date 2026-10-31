@@ -167,7 +167,10 @@
       "systemDefault": "系统默认程序",
       "noOpeners": "当前未检测到可用的文本阅读器。",
       "previousMatch": "上一个匹配",
-      "nextMatch": "下一个匹配"
+      "nextMatch": "下一个匹配",
+      "previousPage": "上一段",
+      "nextPage": "下一段",
+      "lineRange": "第 {start}–{end} 行，共 {total} 行"
     },
     "reportIssue": {
       "title": "报告问题",

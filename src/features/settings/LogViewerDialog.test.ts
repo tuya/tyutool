@@ -180,6 +180,45 @@ describe("LogViewerDialog file reads", () => {
     return { reads, button, choose, open };
   }
 
+  it("bounds mounted rows, navigates matches across pages and copies the full tail", async () => {
+    const { reads, button, choose } = await mount();
+    await choose(0);
+    const text = Array.from(
+      { length: 12_000 },
+      (_, i) => `INFO entry-${i}`,
+    ).join("\n");
+    reads.get(files[0].name)!.resolve(text);
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain("INFO entry-11999"),
+    );
+    expect(host.querySelectorAll("[data-line]").length).toBeLessThanOrEqual(
+      300,
+    );
+    const write = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockResolvedValue(undefined);
+    button(en.settings.logViewer.copy).click();
+    await vi.waitFor(() => expect(write).toHaveBeenCalledWith(text));
+    write.mockRestore();
+    const input = host.querySelector<HTMLInputElement>('input[type="text"]')!;
+    input.value = "entry-";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    await nextTick();
+    expect(host.textContent).toContain("1 of 12000");
+    expect(host.querySelector("[data-line]")?.textContent).toBe("INFO entry-0");
+    host
+      .querySelector<HTMLButtonElement>(
+        `[aria-label="${en.settings.logViewer.previousMatch}"]`,
+      )!
+      .click();
+    await nextTick();
+    await nextTick();
+    expect(host.textContent).toContain("12000 of 12000");
+    expect(host.textContent).toContain("INFO entry-11999");
+    expect(host.querySelectorAll("mark").length).toBeLessThanOrEqual(300);
+  });
+
   it.each(["success", "error"])(
     "prevents late %s for A from changing B's content",
     async (kind) => {
