@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useSerialDebugStore } from "@/stores/serial-debug";
 import type { SendHistoryEntry, SendMode } from "../types";
 import SerialDebugSendHistory from "./SerialDebugSendHistory.vue";
+import { parseHexInput } from "../hex-format";
 
 const s = useSerialDebugStore();
 const { t } = useI18n();
@@ -18,6 +19,37 @@ let browsing: SendHistoryEntry[] = [];
 let draftInteraction = 0;
 const composing = ref(false);
 const sendErrorId = useId();
+const previewId = useId();
+const sendStatusId = useId();
+const hexPreview = computed(() =>
+  s.sendMode === "hex" ? parseHexInput(s.sendInput) : null,
+);
+const sendPreview = computed(() => {
+  if (!s.sendInput) return "";
+  if (hexPreview.value) {
+    const { bytes, ignoredCount } = hexPreview.value;
+    const count = t("serialDebug.send.byteCount", { n: bytes.length });
+    const hint =
+      !bytes.length && s.sendError?.kind !== "invalidHex"
+        ? ` · ${t("serialDebug.send.invalidHex")}`
+        : "";
+    return ignoredCount
+      ? `${count}${hint} · ${t("serialDebug.send.hexPreviewIgnored", { n: ignoredCount })}`
+      : `${count}${hint}`;
+  }
+  const bytes =
+    new TextEncoder().encode(s.sendInput).length + (s.sendAppendCrlf ? 2 : 0);
+  return `${t("serialDebug.send.byteCount", { n: bytes })} · ${t(s.sendAppendCrlf ? "serialDebug.send.crlfPreview" : "serialDebug.send.noCrlfPreview")}`;
+});
+const sendStatus = computed(() =>
+  s.sending
+    ? t("serialDebug.send.sending")
+    : !s.open
+      ? t("serialDebug.send.openPortHint")
+      : !s.sendInput
+        ? t("serialDebug.send.emptyHint")
+        : "",
+);
 const sendErrorText = computed(() => {
   if (s.sendError?.kind === "invalidHex")
     return t("serialDebug.send.invalidHex");
@@ -121,7 +153,7 @@ function onHistoryKey(event: KeyboardEvent): void {
 
 <template>
   <div
-    class="send-bar flex items-center gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-3"
+    class="send-bar flex flex-wrap items-center gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-3"
   >
     <div
       class="mode-toggle flex overflow-hidden rounded-lg border border-[var(--ty-border)]"
@@ -145,14 +177,14 @@ function onHistoryKey(event: KeyboardEvent): void {
         Hex
       </button>
     </div>
-    <div class="min-w-0 flex-1">
+    <div class="min-w-[8rem] flex-1">
       <input
         ref="inputRef"
         type="text"
         class="input w-full"
         :aria-label="t('serialDebug.send.inputLabel')"
         :aria-invalid="s.sendError?.kind === 'invalidHex'"
-        :aria-describedby="sendErrorText ? sendErrorId : undefined"
+        :aria-describedby="`${previewId} ${sendStatusId}${sendErrorText ? ` ${sendErrorId}` : ''}`"
         :placeholder="t('serialDebug.send.placeholder')"
         v-model="s.sendInput"
         @input="onDraftInput"
@@ -160,9 +192,6 @@ function onHistoryKey(event: KeyboardEvent): void {
         @compositionstart="composing = true"
         @compositionend="composing = false"
       />
-      <p v-if="sendErrorText" :id="sendErrorId" role="alert">
-        {{ sendErrorText }}
-      </p>
     </div>
 
     <div class="history-wrap">
@@ -208,10 +237,34 @@ function onHistoryKey(event: KeyboardEvent): void {
       type="button"
       class="btn-primary"
       :disabled="!s.open || !s.sendInput || s.sending"
+      :aria-busy="s.sending"
+      :aria-describedby="sendStatusId"
+      :title="sendStatus || undefined"
       @click="submit"
     >
-      {{ t("serialDebug.send.sendBtn") }}
+      {{
+        t(s.sending ? "serialDebug.send.sending" : "serialDebug.send.sendBtn")
+      }}
     </button>
+    <div
+      class="send-feedback flex min-h-4 w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ty-text-muted)]"
+    >
+      <span
+        :id="previewId"
+        class="send-preview"
+        :class="{ 'text-[var(--ty-warning)]': hexPreview?.ignoredCount }"
+        >{{ sendPreview }}</span
+      >
+      <span :id="sendStatusId" role="status">{{ sendStatus }}</span>
+      <p
+        v-if="sendErrorText"
+        :id="sendErrorId"
+        role="alert"
+        class="w-full text-[var(--ty-danger)]"
+      >
+        {{ sendErrorText }}
+      </p>
+    </div>
   </div>
 </template>
 

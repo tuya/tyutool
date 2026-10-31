@@ -60,6 +60,89 @@ describe("useFlashProgress reducer", () => {
     expect(p.flashPhase.value).toBe("idle");
   });
 
+  it("keeps an immutable operation snapshot and the backend elapsed time", () => {
+    const { p } = make();
+    const snapshot = {
+      op: "read" as const,
+      chipId: "t5ai",
+      port: "COM3",
+      baud: 123456,
+      outputPath: "/original.bin",
+      authRead: false,
+    };
+    p.beginOperation(snapshot);
+    p.runningOp.value = "read";
+    snapshot.port = "COM99";
+    snapshot.outputPath = "/changed.bin";
+    p.handleFlashProgressPayload({
+      kind: "done",
+      result: { ok: { elapsed_secs: 3.25 } },
+    });
+    expect(p.operationResult.value).toMatchObject({
+      op: "read",
+      port: "COM3",
+      baud: 123456,
+      outputPath: "/original.bin",
+      elapsedSecs: 3.25,
+      status: "success",
+    });
+    p.beginOperation({ ...snapshot, op: "flash" });
+    expect(p.operationResult.value).toBeNull();
+  });
+
+  it.each(["error", "cancelled"] as const)(
+    "records a distinct %s outcome",
+    (status) => {
+      const { p } = make();
+      p.beginOperation({
+        op: "erase",
+        chipId: "t5ai",
+        port: "COM3",
+        baud: 921600,
+        outputPath: null,
+        authRead: false,
+      });
+      p.runningOp.value = "erase";
+      p.handleFlashProgressPayload({
+        kind: "done",
+        result:
+          status === "error"
+            ? { err: { message: "boom", elapsed_secs: 2 } }
+            : { cancelled: { elapsed_secs: 2 } },
+      });
+      expect(p.operationResult.value).toMatchObject({ status, elapsedSecs: 2 });
+      p.clearOperationResult();
+      expect(p.operationResult.value).toBeNull();
+    },
+  );
+
+  it("distinguishes authorization reading without including credentials in the result", () => {
+    const { p } = make();
+    p.beginOperation({
+      op: "authorize",
+      chipId: "t5ai",
+      port: "COM3",
+      baud: 115200,
+      outputPath: null,
+      authRead: true,
+    });
+    p.runningOp.value = "authorize";
+    p.authOpIsRead.value = true;
+    p.handleFlashProgressPayload({
+      kind: "milestone",
+      milestone: {
+        auth_read_complete: { uuid: "private-uuid", authkey: "private-key" },
+      },
+    });
+    p.handleFlashProgressPayload({
+      kind: "done",
+      result: { ok: { elapsed_secs: 1 } },
+    });
+    expect(p.operationResult.value?.authRead).toBe(true);
+    expect(p.flashMessage.value).toBe(i18n.global.t("flash.msg.authReadDone"));
+    expect(JSON.stringify(p.operationResult.value)).not.toContain("private-");
+  });
+
   it("on done/ok sets success, 100%, and runs teardown", () => {
     const { p, logOperationDuration, onOperationSettled } = make();
     p.runningOp.value = "flash";

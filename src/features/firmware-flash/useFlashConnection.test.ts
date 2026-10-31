@@ -58,6 +58,41 @@ function makeDeps(overrides: Partial<FlashConnectionDeps> = {}) {
 }
 
 describe("useFlashConnection", () => {
+  it.each([true, false])(
+    "coalesces pending refreshes and exposes completion feedback (Tauri=%s)",
+    async (tauri) => {
+      vi.mocked(isTauriRuntime).mockReturnValue(tauri);
+      const enumerate = tauri ? invoke : listPorts;
+      let finish!: (ports: unknown[]) => void;
+      enumerate.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const { deps } = makeDeps();
+      const c = useFlashConnection(deps);
+      const first = c.refreshDevice();
+      const second = c.refreshDevice();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(enumerate).toHaveBeenCalledOnce();
+      expect(c.portsRefreshing.value).toBe(true);
+      finish([{ path: "COM3" }]);
+      await Promise.all([first, second]);
+      expect(c.portsRefreshing.value).toBe(false);
+      expect(c.portsScanned.value).toBe(true);
+      expect(c.portsRefreshError.value).toBe("");
+      expect(c.serialPortOptions.value).toHaveLength(1);
+      enumerate.mockRejectedValueOnce(new Error("Enumeration denied"));
+      await c.refreshDevice();
+      expect(c.portsRefreshError.value).toBeTruthy();
+      enumerate.mockResolvedValueOnce([{ path: "COM4" }]);
+      await c.refreshDevice();
+      expect(c.portsRefreshError.value).toBe("");
+      expect(c.serialPortOptions.value[0].value).toBe("COM4");
+    },
+  );
+
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();

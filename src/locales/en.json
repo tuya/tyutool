@@ -16,7 +16,8 @@
     "copyFailed": "Copy failed. Select the text and copy it manually.",
     "copyField": "Copy {field}",
     "cancel": "Cancel",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "portsAvailable": "Available ports: {n}."
   },
   "app": {
     "tagline": "Embedded utilities",
@@ -339,7 +340,8 @@
       "eraseDone": "Erase complete.",
       "readDone": "Read complete.",
       "authDone": "Authorization succeeded.",
-      "cancelled": "Cancelled."
+      "cancelled": "Cancelled.",
+      "authReadDone": "Authorization read complete. See the secure dialog for details."
     },
     "confirm": {
       "eraseTitle": "Confirm Erase",
@@ -501,7 +503,20 @@
     "rangeExplanation": "End address is exclusive. Start and end remain independently editable.",
     "segmentSummary": "File: {size} · Range: {range} bytes",
     "sizeUnknown": "not measured",
-    "byteCount": "{count} bytes"
+    "byteCount": "{count} bytes",
+    "result": {
+      "success": "Operation complete",
+      "error": "Operation failed",
+      "cancelled": "Operation cancelled",
+      "authRead": "Read authorization",
+      "configure": "Back to configuration",
+      "copyError": "Copy error",
+      "openOutput": "Open output file",
+      "opening": "Opening…",
+      "openFailed": "Could not open the output file: {msg}",
+      "browserDownload": "Check your browser downloads for the output file.",
+      "outputFile": "Output file"
+    }
   },
   "serialDebug": {
     "tool": "Tool",
@@ -552,7 +567,14 @@
       "placeholder": "Type to send…",
       "sendBtn": "Send",
       "hexParseIgnored": "{n} incomplete byte(s) ignored",
-      "history": "Send history"
+      "history": "Send history",
+      "sending": "Sending…",
+      "openPortHint": "Open a port to send.",
+      "emptyHint": "Enter data to send.",
+      "byteCount": "{n} bytes",
+      "crlfPreview": "CRLF adds 2 bytes",
+      "noCrlfPreview": "No line ending",
+      "hexPreviewIgnored": "{n} trailing Hex character ignored"
     },
     "chip": {
       "addBtn": "Add filter tab",
