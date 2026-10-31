@@ -37,6 +37,14 @@ const sectionIds = [
 ];
 const activeSection = ref(sectionIds[0]);
 let scrollRoot: HTMLElement | null = null;
+let scrollFrame: number | null = null;
+function scheduleActiveSection(): void {
+  if (scrollFrame !== null) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = null;
+    updateActiveSection();
+  });
+}
 function updateActiveSection(): void {
   if (!scrollRoot) return;
   if (
@@ -56,14 +64,15 @@ function updateActiveSection(): void {
 }
 onMounted(() => {
   scrollRoot = document.getElementById("app-main");
-  scrollRoot?.addEventListener("scroll", updateActiveSection, {
+  scrollRoot?.addEventListener("scroll", scheduleActiveSection, {
     passive: true,
   });
   updateActiveSection();
 });
-onUnmounted(() =>
-  scrollRoot?.removeEventListener("scroll", updateActiveSection),
-);
+onUnmounted(() => {
+  scrollRoot?.removeEventListener("scroll", scheduleActiveSection);
+  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
+});
 
 function goToSection(id: string): void {
   const heading = document.getElementById(id);
