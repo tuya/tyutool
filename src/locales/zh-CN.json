@@ -93,6 +93,7 @@
     "logsFolderDevOpenFailed": "开发服务器未能打开日志文件夹：{detail}",
     "logsFolderWebDevOk": "知道了",
     "checkUpdate": "检查更新",
+    "dialogLoadFailed": "暂时无法打开此窗口，请再次点击按钮重试。",
     "update": {
       "dialogTitle": "检查更新",
       "currentVersion": "当前版本：v{version}",
@@ -100,6 +101,20 @@
       "latestVersionLabel": "最新版本",
       "progressLabel": "下载进度",
       "checking": "正在检查...",
+      "checkAgain": "重新检查",
+      "retry": "重试",
+      "platformHint": "请选择系统与 CPU 架构，或打开发行页面选择安装包。",
+      "platformLabel": "下载平台",
+      "choosePlatform": "选择平台",
+      "openReleasePage": "打开发行页面",
+      "downloadPackage": "下载安装包",
+      "platforms": {
+        "windows-x86_64": "Windows（x64）",
+        "linux-x86_64": "Linux（x64）",
+        "linux-aarch64": "Linux（ARM64）",
+        "darwin-x86_64": "macOS（Intel）",
+        "darwin-aarch64": "macOS（Apple Silicon）"
+      },
       "available": "可更新到 v{version}（耗时 {time}s）",
       "upToDate": "已是最新版本（耗时 {time}s）",
       "failed": "检查失败",

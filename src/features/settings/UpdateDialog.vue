@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
 import { useModalFocus } from "@/composables/useModalFocus";
 import { rLog } from "@/utils/log";
 import { useI18n } from "vue-i18n";
@@ -21,6 +21,8 @@ import {
 } from "./update-dialog-state";
 import { renderMarkdown } from "./render-markdown";
 import { splitNotes, type SplitLocale } from "./split-notes";
+import { getUpdatePlatformKey, manualUpdateUrl } from "./update-platform";
+import TySelect from "@/components/TySelect.vue";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -60,10 +62,40 @@ const downloadingVersion = ref("");
 const installing = ref(false);
 const operationError = ref("");
 let checkGeneration = 0;
+const sourceChecks = UPDATE_SOURCES.map(() => 0);
+onBeforeUnmount(() => {
+  checkGeneration++;
+});
 
 const manualUpdateOnly = ref(false);
 const debRpmInstall = ref(false);
 const installTypeReady = ref(false);
+const nativePlatform = ref("");
+const selectedPlatform = ref("");
+const platformOptions = computed(() => {
+  const known = [
+    "windows-x86_64",
+    "linux-x86_64",
+    "linux-aarch64",
+    "darwin-x86_64",
+    "darwin-aarch64",
+  ] as const;
+  return known
+    .filter((key) => !!primaryAvailableSource.value?.manifest?.portable?.[key])
+    .map((key) => ({
+      value: key,
+      label: t(`settings.update.platforms.${key}`),
+    }));
+});
+const needsPlatformChoice = computed(
+  () =>
+    manualUpdateOnly.value &&
+    !debRpmInstall.value &&
+    platformOptions.value.length > 0 &&
+    !platformOptions.value.some(
+      (option) => option.value === nativePlatform.value,
+    ),
+);
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -87,6 +119,8 @@ function resetState(): void {
   installTypeReady.value = false;
   manualUpdateOnly.value = false;
   debRpmInstall.value = false;
+  nativePlatform.value = "";
+  selectedPlatform.value = "";
 }
 
 async function checkSource(
@@ -94,10 +128,16 @@ async function checkSource(
   idx: number,
   generation: number,
 ): Promise<void> {
+  const request = ++sourceChecks[idx];
   const start = Date.now();
   try {
     const manifest = await fetchLatestJson(source.url);
-    if (generation !== checkGeneration || !props.open) return;
+    if (
+      generation !== checkGeneration ||
+      request !== sourceChecks[idx] ||
+      !props.open
+    )
+      return;
     const elapsed = parseFloat(((Date.now() - start) / 1000).toFixed(1));
     const newer = isNewerVersion(manifest.version, APP_VERSION);
     sourceStates.value[idx] = {
@@ -110,7 +150,12 @@ async function checkSource(
       error: "",
     };
   } catch (error: unknown) {
-    if (generation !== checkGeneration || !props.open) return;
+    if (
+      generation !== checkGeneration ||
+      request !== sourceChecks[idx] ||
+      !props.open
+    )
+      return;
     const elapsed = parseFloat(((Date.now() - start) / 1000).toFixed(1));
     sourceStates.value[idx] = {
       id: source.id,
@@ -128,6 +173,39 @@ async function runChecks(generation = checkGeneration): Promise<void> {
   await Promise.all(
     UPDATE_SOURCES.map((source, idx) => checkSource(source, idx, generation)),
   );
+}
+
+const canRecheck = computed(
+  () => !downloading.value && !installing.value && !downloadReady.value,
+);
+const checking = computed(() =>
+  sourceStates.value.some((source) => source.status === "checking"),
+);
+
+function recheckAll(): void {
+  if (!canRecheck.value || checking.value) return;
+  operationError.value = "";
+  sourceStates.value = UPDATE_SOURCES.map((source) =>
+    makeSourceState(source, "checking"),
+  );
+  void runChecks();
+}
+
+async function retrySource(id: SourceState["id"]): Promise<void> {
+  const idx = UPDATE_SOURCES.findIndex((source) => source.id === id);
+  if (!canRecheck.value || sourceStates.value[idx].status !== "failed") return;
+  const card = dialogRef.value?.querySelector<HTMLElement>(
+    `[data-source-id="${id}"]`,
+  );
+  const restoreFocus = card?.contains(document.activeElement);
+  const generation = checkGeneration;
+  sourceStates.value[idx] = makeSourceState(UPDATE_SOURCES[idx], "checking");
+  await checkSource(UPDATE_SOURCES[idx], idx, generation);
+  if (generation === checkGeneration && props.open && restoreFocus) {
+    await nextTick();
+    const active = document.activeElement;
+    if (active === document.body || !active?.isConnected) card?.focus();
+  }
 }
 
 const summaryState = computed(() =>
@@ -336,6 +414,11 @@ watch(
         installTypeReady.value = true;
       });
       void runChecks(generation);
+      void getUpdatePlatformKey().then((key) => {
+        if (generation !== checkGeneration || !props.open) return;
+        nativePlatform.value = key;
+        if (!selectedPlatform.value) selectedPlatform.value = key;
+      });
     }
   },
   { immediate: true },
@@ -449,41 +532,18 @@ function handleClose(): void {
   }
 }
 
-function getPortablePlatformKey(): string {
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("win")) return "windows-x86_64";
-  if (ua.includes("mac")) {
-    const isArm =
-      navigator.userAgent.includes("ARM") ||
-      (navigator as { userAgentData?: { platform?: string } }).userAgentData
-        ?.platform === "macOS";
-    return isArm ? "darwin-aarch64" : "darwin-x86_64";
-  }
-  return "linux-x86_64";
-}
-
 async function openManualReleaseDownload(
   sourceState: SourceState,
 ): Promise<void> {
   if (!isTauriRuntime()) return;
 
-  let url: string;
-  if (debRpmInstall.value) {
-    const releasePageUrl = UPDATE_SOURCES.find(
-      (source) => source.id === sourceState.id,
-    )?.releasePageUrl;
-    url = releasePageUrl || "https://github.com/tuya/tyutool/releases/latest";
-  } else {
-    const platformKey = getPortablePlatformKey();
-    const portableUrl = sourceState.manifest?.portable?.[platformKey]?.url;
-    const releasePageUrl = UPDATE_SOURCES.find(
-      (source) => source.id === sourceState.id,
-    )?.releasePageUrl;
-    url =
-      portableUrl ||
-      releasePageUrl ||
-      "https://github.com/tuya/tyutool/releases/latest";
-  }
+  const source = UPDATE_SOURCES.find((source) => source.id === sourceState.id)!;
+  const url = manualUpdateUrl(
+    sourceState.manifest,
+    source,
+    selectedPlatform.value,
+    debRpmInstall.value,
+  );
 
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
@@ -675,14 +735,40 @@ async function openManualReleaseDownload(
                 </p>
               </div>
 
+              <div v-if="needsPlatformChoice" class="ud-platform-choice">
+                <p id="update-platform-hint">
+                  {{ t("settings.update.platformHint") }}
+                </p>
+                <label for="update-platform">{{
+                  t("settings.update.platformLabel")
+                }}</label>
+                <TySelect
+                  id="update-platform"
+                  v-model="selectedPlatform"
+                  :options="platformOptions"
+                  :placeholder="t('settings.update.choosePlatform')"
+                  aria-describedby="update-platform-hint"
+                />
+              </div>
+
               <div
                 v-if="
                   showInAppUpdateAction ||
                   showManualUpdateAction ||
-                  showRestartActions
+                  showRestartActions ||
+                  canRecheck
                 "
                 class="ud-overview-actions"
               >
+                <button
+                  v-if="canRecheck"
+                  type="button"
+                  class="ud-btn-secondary"
+                  :disabled="checking"
+                  @click="recheckAll"
+                >
+                  {{ t("settings.update.checkAgain") }}
+                </button>
                 <button
                   v-if="showInAppUpdateAction && primaryAvailableSource"
                   type="button"
@@ -698,7 +784,13 @@ async function openManualReleaseDownload(
                   class="ud-btn-primary"
                   @click="openManualReleaseDownload(primaryAvailableSource)"
                 >
-                  {{ t("settings.update.portableDownload") }}
+                  {{
+                    primaryAvailableSource.manifest?.portable?.[
+                      selectedPlatform
+                    ]?.url && !debRpmInstall
+                      ? t("settings.update.downloadPackage")
+                      : t("settings.update.openReleasePage")
+                  }}
                 </button>
 
                 <template v-if="showRestartActions">
@@ -780,6 +872,8 @@ async function openManualReleaseDownload(
                 <article
                   v-for="source in sourceStates"
                   :key="source.id"
+                  :data-source-id="source.id"
+                  tabindex="-1"
                   class="ud-source-card"
                   :class="`ud-source-card--${source.status}`"
                 >
@@ -846,6 +940,22 @@ async function openManualReleaseDownload(
                   </p>
 
                   <button
+                    v-if="
+                      source.status === 'failed' || source.status === 'checking'
+                    "
+                    type="button"
+                    class="ud-source-action ud-btn-secondary"
+                    :disabled="source.status === 'checking' || !canRecheck"
+                    @click="retrySource(source.id)"
+                  >
+                    {{
+                      source.status === "checking"
+                        ? t("settings.update.checking")
+                        : t("settings.update.retry")
+                    }}
+                  </button>
+
+                  <button
                     v-if="sourceActionKind(source) !== 'none'"
                     type="button"
                     class="ud-source-action"
@@ -870,6 +980,13 @@ async function openManualReleaseDownload(
 </template>
 
 <style scoped>
+.ud-platform-choice {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: var(--ty-text-muted);
+}
 .ty-dialog-backdrop {
   position: fixed;
   inset: 0;

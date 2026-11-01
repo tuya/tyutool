@@ -12,6 +12,16 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::sha256_hex;
 
+/// GUI download selection only: report the build target rather than WebView UA hints.
+#[tauri::command]
+pub(crate) fn get_update_platform() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    format!("{os}-{}", std::env::consts::ARCH)
+}
+
 /// In-app update staged by `update_check`, downloaded by `update_download`,
 /// consumed by `update_install`.
 pub(crate) struct UpdateState {

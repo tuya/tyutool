@@ -25,6 +25,13 @@ vi.mock("@/features/settings/update-sources", () => ({
 }));
 
 const getManualUpdateFlagsMock = vi.fn();
+const getUpdatePlatformKeyMock = vi.fn().mockResolvedValue("linux-aarch64");
+vi.mock("@/features/settings/update-platform", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/settings/update-platform")
+  >()),
+  getUpdatePlatformKey: getUpdatePlatformKeyMock,
+}));
 vi.mock("@/utils/install-type", () => ({
   getManualUpdateFlags: getManualUpdateFlagsMock,
 }));
@@ -202,6 +209,26 @@ describe("useAutoUpdate", () => {
     await vi.advanceTimersByTimeAsync(4000);
     expect(fetchLatestJsonMock).toHaveBeenCalledTimes(1);
     expect(setAutoUpdateLastCheckAtMock).toHaveBeenCalledWith(Date.now());
+  });
+
+  it("uses the native ARM64 platform for a portable update notification", async () => {
+    getManualUpdateFlagsMock.mockResolvedValue({
+      manualOnly: true,
+      debRpm: false,
+    });
+    fetchLatestJsonMock.mockResolvedValue({
+      version: "3.2.1",
+      portable: {
+        "linux-aarch64": { url: "https://example.test/arm64" },
+        "linux-x86_64": { url: "https://example.test/x64" },
+      },
+    });
+    const { useAutoUpdate } = await import("./useAutoUpdate");
+    const { toastState } = await import("./toastState");
+    useAutoUpdate();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(getUpdatePlatformKeyMock).toHaveBeenCalled();
+    expect(toastState.portableUrl).toBe("https://example.test/arm64");
   });
 
   it("records the successful timestamp when already up to date", async () => {

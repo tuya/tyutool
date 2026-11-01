@@ -1,11 +1,7 @@
-import type { LatestJson } from "./update-sources";
+import { isNewerVersion, type LatestJson } from "./update-sources";
 
 export type UpdateDialogSourceStatus =
-  | "idle"
-  | "checking"
-  | "available"
-  | "upToDate"
-  | "failed";
+  "idle" | "checking" | "available" | "upToDate" | "failed";
 
 export interface UpdateDialogSourceState {
   id: "github" | "tuya";
@@ -42,8 +38,14 @@ export function deriveUpdateSummaryState(input: {
   installing: boolean;
 }): UpdateSummaryState {
   const { sourceStates, downloading, downloadReady, installing } = input;
-  const availableSource =
-    sourceStates.find((source) => source.status === "available") ?? null;
+  const availableSource = sourceStates.reduce<UpdateDialogSourceState | null>(
+    (best, source) =>
+      source.status === "available" &&
+      (!best || isNewerVersion(source.version, best.version))
+        ? source
+        : best,
+    null,
+  );
   const failedCount = sourceStates.filter(
     (source) => source.status === "failed",
   ).length;

@@ -7,6 +7,15 @@ import updateDialogSource from "./UpdateDialog.vue?raw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchLatestJson, type LatestJson } from "./update-sources";
 import { updateCheck, updateDownload, updateInstall } from "./in-app-updater";
+import { getUpdatePlatformKey } from "./update-platform";
+import { getManualUpdateFlags } from "@/utils/install-type";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+vi.mock("./update-platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./update-platform")>()),
+  getUpdatePlatformKey: vi.fn().mockResolvedValue("linux-aarch64"),
+}));
 
 vi.mock("@/runtime", () => ({ isTauriRuntime: () => true }));
 vi.mock("@tauri-apps/plugin-log", () => ({ info: vi.fn(), error: vi.fn() }));
@@ -110,6 +119,12 @@ describe("UpdateDialog checks and failures", () => {
     app.unmount();
     document.body.replaceChildren();
     vi.mocked(fetchLatestJson).mockRejectedValue(new Error("Offline test"));
+    vi.mocked(getManualUpdateFlags).mockResolvedValue({
+      manualOnly: false,
+      debRpm: false,
+    });
+    vi.mocked(getUpdatePlatformKey).mockResolvedValue("linux-aarch64");
+    vi.mocked(openUrl).mockClear();
   });
   const manifest = (version: string): LatestJson => ({
     version,
@@ -139,6 +154,178 @@ describe("UpdateDialog checks and failures", () => {
     await nextTick();
     return open;
   }
+
+  it("retries one failed source without clearing the successful source and ignores repeated clicks", async () => {
+    vi.mocked(fetchLatestJson).mockImplementation((url) =>
+      url.includes("github")
+        ? Promise.reject(new Error("Offline test"))
+        : Promise.resolve(manifest("9.9.9")),
+    );
+    await mount();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("v9.9.9"),
+    );
+    const card = [...document.querySelectorAll(".ud-source-card")].find((el) =>
+      el.textContent?.includes("Offline test"),
+    )!;
+    const retry = [...card.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Retry",
+    )!;
+    expect(retry).toBeDefined();
+    let complete!: (m: LatestJson) => void;
+    vi.mocked(fetchLatestJson).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const before = vi.mocked(fetchLatestJson).mock.calls.length;
+    retry.click();
+    retry.click();
+    await nextTick();
+    expect(fetchLatestJson).toHaveBeenCalledTimes(before + 1);
+    expect(document.body.textContent).toContain("v9.9.9");
+    complete(manifest("9.9.10"));
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".ud-overview-highlight-value")?.textContent,
+      ).toContain("9.9.10"),
+    );
+  });
+
+  it("rechecks failed sources in place", async () => {
+    await mount();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("Offline test"),
+    );
+    const recheck = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Check again",
+    )!;
+    expect(recheck).toBeDefined();
+    vi.mocked(fetchLatestJson).mockResolvedValue(manifest("9.9.9"));
+    recheck.click();
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".ud-overview-highlight-value")?.textContent,
+      ).toContain("9.9.9"),
+    );
+    expect(document.body.textContent).not.toContain("Offline test");
+  });
+
+  it("does not steal focus when the user moves away during a source retry", async () => {
+    vi.mocked(fetchLatestJson).mockImplementation((url) =>
+      url.includes("github")
+        ? Promise.reject(new Error("Offline test"))
+        : Promise.resolve(manifest("9.9.9")),
+    );
+    await mount();
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".ud-overview-actions .ud-btn-primary"),
+      ).not.toBeNull(),
+    );
+    let complete!: (m: LatestJson) => void;
+    vi.mocked(fetchLatestJson).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const retry = document.querySelector<HTMLButtonElement>(
+      '[data-source-id="github"] .ud-source-action',
+    )!;
+    retry.focus();
+    retry.click();
+    await nextTick();
+    const other = document.querySelector<HTMLButtonElement>(
+      ".ud-overview-actions .ud-btn-primary",
+    )!;
+    other.focus();
+    complete(manifest("9.9.10"));
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".ud-overview-highlight-value")?.textContent,
+      ).toContain("9.9.10"),
+    );
+    expect(document.activeElement).toBe(other);
+  });
+
+  it("ignores a late retry after closing and reopening the dialog", async () => {
+    const open = await mount();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("Offline test"),
+    );
+    let complete!: (m: LatestJson) => void;
+    vi.mocked(fetchLatestJson).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const retry = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Retry",
+    )!;
+    retry.click();
+    open.value = false;
+    await nextTick();
+    vi.mocked(fetchLatestJson).mockResolvedValue(manifest("9.9.9"));
+    open.value = true;
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(".ud-overview-highlight-value")?.textContent,
+      ).toContain("9.9.9"),
+    );
+    complete(manifest("99.0.0"));
+    await nextTick();
+    await nextTick();
+    expect(document.body.textContent).not.toContain("99.0.0");
+  });
+
+  it("downloads the native ARM64 package and offers explicit choice when native detection fails", async () => {
+    vi.mocked(getManualUpdateFlags).mockResolvedValue({
+      manualOnly: true,
+      debRpm: false,
+    });
+    const available = {
+      ...manifest("9.9.9"),
+      portable: {
+        "linux-aarch64": { url: "https://example.test/arm64" },
+        "linux-x86_64": { url: "https://example.test/x64" },
+      },
+    };
+    vi.mocked(fetchLatestJson).mockResolvedValue(available);
+    const open = await mount();
+    const download = () =>
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) =>
+          button.textContent?.trim() === en.settings.update.downloadPackage,
+      );
+    await vi.waitFor(() => expect(download()).toBeDefined());
+    download()!.click();
+    await vi.waitFor(() =>
+      expect(openUrl).toHaveBeenCalledWith("https://example.test/arm64"),
+    );
+    open.value = false;
+    await nextTick();
+    vi.mocked(getUpdatePlatformKey).mockResolvedValue("");
+    open.value = true;
+    await vi.waitFor(() =>
+      expect(document.querySelector("#update-platform")).not.toBeNull(),
+    );
+    expect(download()).toBeUndefined();
+    const release = [
+      ...document.querySelectorAll<HTMLButtonElement>("button"),
+    ].find(
+      (button) =>
+        button.textContent?.trim() === en.settings.update.openReleasePage,
+    )!;
+    release.click();
+    await vi.waitFor(() =>
+      expect(openUrl).toHaveBeenCalledWith(
+        "https://github.com/tuya/tyutool/releases/latest",
+      ),
+    );
+  });
 
   it("ignores checks from a previous open after a newer check completed", async () => {
     const requests: ((m: LatestJson) => void)[] = [];

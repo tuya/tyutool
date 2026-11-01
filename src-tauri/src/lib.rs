@@ -696,6 +696,7 @@ pub fn run() {
             updater::update_check,
             updater::update_download,
             updater::update_install,
+            updater::get_update_platform,
             updater::download_auth_firmware,
             get_install_type,
             set_log_level,
