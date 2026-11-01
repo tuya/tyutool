@@ -6,10 +6,6 @@ import {
 } from "vue-router";
 import { watch } from "vue";
 import FirmwareFlashPage from "@/features/firmware-flash/FirmwareFlashPage.vue";
-import SerialDebugPage from "@/features/serial-debug/SerialDebugPage.vue";
-import BatchFlashAuthPage from "@/features/batch-flash-auth/BatchFlashAuthPage.vue";
-import ToolboxPage from "@/features/toolbox/ToolboxPage.vue";
-import { SettingsPage } from "@/features/settings";
 import { getRuntime } from "../runtime";
 import { i18n } from "../i18n";
 
@@ -39,19 +35,20 @@ export const router = createRouter({
     {
       path: "/serial-debug",
       name: "serial-debug",
-      component: SerialDebugPage,
+      component: () => import("@/features/serial-debug/SerialDebugPage.vue"),
       meta: { titleKey: "app.nav.serialDebug", layout: "fullBleed" },
     },
     {
       path: "/toolbox",
       name: "toolbox",
-      component: ToolboxPage,
+      component: () => import("@/features/toolbox/ToolboxPage.vue"),
       meta: { titleKey: "app.nav.toolbox", layout: "default" },
     },
     {
       path: "/toolbox/batch-flash-auth",
       name: "batch-flash-auth",
-      component: BatchFlashAuthPage,
+      component: () =>
+        import("@/features/batch-flash-auth/BatchFlashAuthPage.vue"),
       meta: {
         titleKey: "toolbox.batchFlashAuth.name",
         layout: "fullBleedScroll",
@@ -64,7 +61,7 @@ export const router = createRouter({
     {
       path: "/settings",
       name: "settings",
-      component: SettingsPage,
+      component: () => import("@/features/settings/SettingsPage.vue"),
       meta: { titleKey: "app.nav.settings", layout: "default" },
     },
   ],

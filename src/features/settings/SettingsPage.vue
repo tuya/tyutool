@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import TyPageHeader from "@/components/TyPageHeader.vue";
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import {
+  ref,
+  shallowRef,
+  computed,
+  watch,
+  onMounted,
+  onUnmounted,
+  nextTick,
+  type Component,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { APP_VERSION } from "@/config/app";
@@ -18,8 +27,6 @@ import type {
 import { isTauriRuntime } from "@/runtime";
 import { DISCLAIMER_KEY } from "@/features/batch-flash-auth/disclaimer";
 import { openLogsFolder as openLogsFolderAction } from "./open-logs-folder";
-import UpdateDialog from "./UpdateDialog.vue";
-import LogViewerDialog from "./LogViewerDialog.vue";
 import { buildUpdateEntryModel } from "./update-entry-model";
 import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
 import TySwitch from "@/components/TySwitch.vue";
@@ -27,6 +34,49 @@ import TySwitch from "@/components/TySwitch.vue";
 const { locale, t } = useI18n();
 const settings = useSettingsStore();
 const sd = useSerialDebugStore();
+const UpdateDialog = shallowRef<Component>();
+const LogViewerDialog = shallowRef<Component>();
+const dialogLoading = ref<"update" | "logs" | null>(null);
+const dialogError = ref("");
+const dialogErrorFor = ref<"update" | "logs" | null>(null);
+let dialogGeneration = 0;
+
+async function openDialog(kind: "update" | "logs"): Promise<void> {
+  if (dialogLoading.value) return;
+  const generation = dialogGeneration;
+  const opener =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  dialogLoading.value = kind;
+  dialogError.value = "";
+  dialogErrorFor.value = kind;
+  try {
+    const module =
+      kind === "update"
+        ? await import("./UpdateDialog.vue")
+        : await import("./LogViewerDialog.vue");
+    if (generation !== dialogGeneration) return;
+    if (kind === "update") {
+      UpdateDialog.value = module.default;
+    } else {
+      LogViewerDialog.value = module.default;
+    }
+    // Re-enable the opener before the modal captures focus; disabling a focused
+    // button while the chunk loads can move focus to body in Chromium.
+    dialogLoading.value = null;
+    await nextTick();
+    if (generation !== dialogGeneration) return;
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    if (kind === "update") showUpdateDialog.value = true;
+    else showLogViewer.value = true;
+  } catch {
+    if (generation === dialogGeneration)
+      dialogError.value = t("settings.dialogLoadFailed");
+  } finally {
+    if (generation === dialogGeneration) dialogLoading.value = null;
+  }
+}
 
 const sectionIds = [
   "appearance-heading",
@@ -70,6 +120,7 @@ onMounted(() => {
   updateActiveSection();
 });
 onUnmounted(() => {
+  dialogGeneration++;
   scrollRoot?.removeEventListener("scroll", scheduleActiveSection);
   if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
 });
@@ -90,7 +141,7 @@ watch(
   () => route.query.update,
   (value) => {
     if (value === "1") {
-      showUpdateDialog.value = true;
+      void openDialog("update");
       const query = { ...route.query };
       delete query.update;
       void router.replace({ path: route.path, query });
@@ -600,7 +651,9 @@ function resetBatchAuthDisclaimer(): void {
               <button
                 type="button"
                 class="diagnostics-action-card"
-                @click="showLogViewer = true"
+                :disabled="dialogLoading !== null"
+                :aria-busy="dialogLoading === 'logs'"
+                @click="openDialog('logs')"
               >
                 <div class="diagnostics-action-card__icon" aria-hidden="true">
                   <FontAwesomeIcon
@@ -610,7 +663,11 @@ function resetBatchAuthDisclaimer(): void {
                 </div>
                 <div class="min-w-0">
                   <strong class="diagnostics-action-card__title">
-                    {{ t("settings.viewLogs") }}
+                    {{
+                      dialogLoading === "logs"
+                        ? t("common.loading")
+                        : t("settings.viewLogs")
+                    }}
                   </strong>
                   <p class="diagnostics-action-card__copy">
                     {{ t("settings.viewLogsHint") }}
@@ -618,6 +675,13 @@ function resetBatchAuthDisclaimer(): void {
                 </div>
               </button>
             </div>
+            <p
+              v-if="dialogError && dialogErrorFor === 'logs'"
+              role="alert"
+              class="mt-2 text-sm text-[var(--ty-danger)]"
+            >
+              {{ dialogError }}
+            </p>
           </div>
         </section>
         <section
@@ -656,7 +720,9 @@ function resetBatchAuthDisclaimer(): void {
               v-if="isTauriRuntime()"
               type="button"
               class="update-entry-card update-entry-card--hero"
-              @click="showUpdateDialog = true"
+              :disabled="dialogLoading !== null"
+              :aria-busy="dialogLoading === 'update'"
+              @click="openDialog('update')"
             >
               <div class="update-entry-card__icon" aria-hidden="true">
                 <FontAwesomeIcon
@@ -674,7 +740,11 @@ function resetBatchAuthDisclaimer(): void {
                   </span>
                 </div>
                 <strong class="update-entry-card__title">
-                  {{ t(updateEntryModel.titleKey) }}
+                  {{
+                    dialogLoading === "update"
+                      ? t("common.loading")
+                      : t(updateEntryModel.titleKey)
+                  }}
                 </strong>
                 <p class="update-entry-card__subtitle">
                   {{ t(updateEntryModel.subtitleKey) }}
@@ -688,6 +758,13 @@ function resetBatchAuthDisclaimer(): void {
               </div>
             </button>
 
+            <p
+              v-if="dialogError && dialogErrorFor === 'update'"
+              role="alert"
+              class="text-sm text-[var(--ty-danger)]"
+            >
+              {{ dialogError }}
+            </p>
             <div class="settings-update-center__control">
               <div class="settings-update-center__control-copy">
                 <label
@@ -767,8 +844,18 @@ function resetBatchAuthDisclaimer(): void {
         </section>
       </div>
     </div>
-    <UpdateDialog :open="showUpdateDialog" @close="showUpdateDialog = false" />
-    <LogViewerDialog :open="showLogViewer" @close="showLogViewer = false" />
+    <component
+      :is="UpdateDialog"
+      v-if="UpdateDialog"
+      :open="showUpdateDialog"
+      @close="showUpdateDialog = false"
+    />
+    <component
+      :is="LogViewerDialog"
+      v-if="LogViewerDialog"
+      :open="showLogViewer"
+      @close="showLogViewer = false"
+    />
   </div>
 </template>
 

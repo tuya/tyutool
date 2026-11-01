@@ -111,6 +111,8 @@ export async function openUi(
   await page.locator(".main-scroll").waitFor({ state: "visible" });
   if (path.includes("serial-debug"))
     await page.locator(".pane .line-probe").waitFor({ state: "attached" });
+  if (path.includes("settings"))
+    await page.locator(".settings-layout").waitFor({ state: "visible" });
 }
 
 export async function seedSerialLines(page: Page, lines: SyntheticLine[]) {
