@@ -271,7 +271,7 @@ test.describe("LOG-02 timestamp and direction toggle semantics", () => {
   });
 });
 
-test.describe("LOG-03 @proposal: keep row prefixes visible during horizontal scroll", () => {
+test.describe("LOG-03 keep row prefixes visible during horizontal scroll", () => {
   test("timestamp/direction prefix stays within the log pane while content scrolls horizontally", async ({
     page,
   }) => {

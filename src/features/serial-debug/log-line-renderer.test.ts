@@ -36,6 +36,47 @@ describe("SerialDebugLogLineRenderer", () => {
     parseAnsiMock.mockClear();
     stripAnsiMock.mockClear();
   });
+  it.each([
+    ["İ ERROR", "error", "ERROR"],
+    ["İX", "x", "X"],
+    ["İ İX", "i", "İİ"],
+    ["ΟΣ ERROR", "error", "ERROR"],
+    ["😀İ ERROR", "error", "ERROR"],
+  ])(
+    "maps normalized matches back to source text: %s / %s",
+    (text, query, expected) => {
+      parseAnsiMock.mockImplementationOnce(() => [{ text, style: {} }]);
+      const renderer = new SerialDebugLogLineRenderer();
+      const source = line(1, text);
+      expect(renderer.matchingLineIds([source], query)).toEqual([1]);
+      const [view] = renderer.render([source], true, query);
+      const segments = view.spans.flatMap((span) => span.segments);
+      expect(segments.map((s) => s.text).join("")).toBe(text);
+      expect(
+        segments
+          .filter((s) => s.isMatch)
+          .map((s) => s.text)
+          .join(""),
+      ).toBe(expected);
+    },
+  );
+
+  it("maps expanded lowercase offsets across colored spans", () => {
+    parseAnsiMock.mockImplementationOnce(() => [
+      { text: "İ ER", style: { fg: "red" } },
+      { text: "ROR", style: { fg: "blue" } },
+    ]);
+    const renderer = new SerialDebugLogLineRenderer();
+    const [view] = renderer.render([line(1, "İ ER\x1b[34mROR")], true, "error");
+    expect(view.spans.map((span) => span.style.fg)).toEqual(["red", "blue"]);
+    expect(
+      view.spans
+        .flatMap((s) => s.segments)
+        .filter((s) => s.isMatch)
+        .map((s) => s.text)
+        .join(""),
+    ).toBe("ERROR");
+  });
   it("highlights whole-text matches across ANSI styles without losing text or colors", () => {
     parseAnsiMock.mockImplementationOnce(() => [
       { text: "ab", style: {} },
