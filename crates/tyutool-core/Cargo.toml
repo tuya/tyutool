@@ -94,5 +94,5 @@ ts-rs = { version = "12", optional = true }
 # Downloads the RAM loader assets; see the `download` feature. rustls rather than
 # native-tls so the CLI's musl builds keep working, matching tyutool-cli's own copy.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"], optional = true }
-calamine = { version = "0.26", features = ["dates"], optional = true }
+calamine = { version = "0.37", features = ["dates"], optional = true }
 rust_xlsxwriter = { version = "0.99", optional = true }
