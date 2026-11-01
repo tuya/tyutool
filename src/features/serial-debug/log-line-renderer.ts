@@ -40,6 +40,7 @@ type CachedLineBase = {
   plainSpans?: AnsiSpan[];
   lastRendered?: CachedRenderedLine;
   lastMatch?: { query: string; matches: boolean };
+  sourceOffsets?: { start: number; end: number }[];
 };
 
 // Theme-aware fallback colors for RX lines whose ESP-IDF/Tuya level prefix
@@ -195,7 +196,31 @@ export class SerialDebugLogLineRenderer {
         const start = base.lowerPlainText.indexOf(searchQuery, pos);
         if (start < 0) break;
         pos = start + searchQuery.length;
-        ranges.push([start, pos]);
+        if (base.plainText.length === base.lowerPlainText.length) {
+          ranges.push([start, pos]);
+        } else {
+          // Lowercasing can expand a character (İ -> i + combining dot).
+          // Build the source mapping only for these rare lines, on first render.
+          if (!base.sourceOffsets) {
+            base.sourceOffsets = [];
+            let offset = 0;
+            for (const character of base.plainText) {
+              for (let i = 0; i < character.toLowerCase().length; i++) {
+                base.sourceOffsets.push({
+                  start: offset,
+                  end: offset + character.length,
+                });
+              }
+              offset += character.length;
+            }
+          }
+          const from = base.sourceOffsets[start].start;
+          const to = base.sourceOffsets[pos - 1].end;
+          const previous = ranges[ranges.length - 1];
+          if (previous && from < previous[1])
+            previous[1] = Math.max(previous[1], to);
+          else ranges.push([from, to]);
+        }
       }
     }
     const position = { offset: 0, rangeIndex: 0 };

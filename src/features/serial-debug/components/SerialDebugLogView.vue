@@ -115,6 +115,7 @@ const HEX_DUMP_INSET_Y = 12;
 
 const rowProbeRef = ref<HTMLElement | null>(null);
 const scrollTop = ref(0);
+let savedScrollLeft = 0;
 const viewportHeight = ref(0);
 const measuredRowHeight = ref(0);
 
@@ -317,6 +318,7 @@ function onScroll(): void {
   const el = scrollRef.value;
   if (!el) return;
   if (!viewActive) return;
+  savedScrollLeft = el.scrollLeft;
   scrollTop.value = el.scrollTop;
   if (el.clientHeight > 0) viewportHeight.value = el.clientHeight;
   lockAutoScroll.value =
@@ -773,6 +775,7 @@ onActivated(async () => {
     applyScrollTop(el, maxScrollTop.value);
   }
   savedScrollTop = null;
+  el.scrollLeft = savedScrollLeft;
   viewActive = true;
 });
 
@@ -1889,6 +1892,7 @@ async function saveLog(): Promise<void> {
 }
 /* log lines */
 .line {
+  --line-background: var(--ty-log-bg);
   display: flex;
   align-items: baseline;
   gap: 0.625rem;
@@ -1904,16 +1908,34 @@ async function saveLog(): Promise<void> {
   font-style: italic;
 }
 .line-search-match {
+  --line-background: color-mix(
+    in srgb,
+    var(--ty-primary) 12%,
+    var(--ty-log-bg)
+  );
   background: color-mix(in srgb, var(--ty-primary) 12%, transparent) !important;
 }
 .line-search-current {
+  --line-background: color-mix(
+    in srgb,
+    var(--ty-primary) 28%,
+    var(--ty-log-bg)
+  );
   background: color-mix(in srgb, var(--ty-primary) 28%, transparent) !important;
   outline: 1px solid color-mix(in srgb, var(--ty-primary) 45%, transparent);
   outline-offset: -1px;
 }
 .prefix {
+  position: sticky;
+  left: 0.625rem;
+  z-index: 1;
+  background: var(--line-background);
+  box-shadow:
+    -0.625rem 0 var(--line-background),
+    0.625rem 0 var(--line-background);
   display: flex;
-  align-items: baseline;
+  align-self: stretch;
+  align-items: center;
   line-height: 1;
   gap: 0.25rem;
   flex-shrink: 0;
