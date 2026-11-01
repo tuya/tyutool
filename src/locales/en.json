@@ -93,6 +93,7 @@
     "logsFolderDevOpenFailed": "The dev server could not open the log folder: {detail}",
     "logsFolderWebDevOk": "OK",
     "checkUpdate": "Check for updates",
+    "dialogLoadFailed": "Could not open this dialog. Try the button again.",
     "update": {
       "dialogTitle": "Check for Updates",
       "currentVersion": "Current version: v{version}",
@@ -100,6 +101,20 @@
       "latestVersionLabel": "Latest version",
       "progressLabel": "Download progress",
       "checking": "Checking...",
+      "checkAgain": "Check again",
+      "retry": "Retry",
+      "platformHint": "Choose your system and CPU architecture, or open the release page to select a package.",
+      "platformLabel": "Download platform",
+      "choosePlatform": "Choose a platform",
+      "openReleasePage": "Open release page",
+      "downloadPackage": "Download package",
+      "platforms": {
+        "windows-x86_64": "Windows (x64)",
+        "linux-x86_64": "Linux (x64)",
+        "linux-aarch64": "Linux (ARM64)",
+        "darwin-x86_64": "macOS (Intel)",
+        "darwin-aarch64": "macOS (Apple Silicon)"
+      },
       "available": "Update to v{version} available ({time}s)",
       "upToDate": "Up to date ({time}s)",
       "failed": "Check failed",

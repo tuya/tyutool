@@ -22,6 +22,23 @@ function makeSourceState(
 }
 
 describe("deriveUpdateSummaryState", () => {
+  it("selects the highest version and keeps source priority for equal versions", () => {
+    const github = makeSourceState("available", { version: "v3.2.11" });
+    const tuya = makeSourceState("available", {
+      id: "tuya",
+      version: "3.2.12",
+    });
+    const derive = () =>
+      deriveUpdateSummaryState({
+        sourceStates: [github, tuya],
+        downloading: false,
+        downloadReady: false,
+        installing: false,
+      });
+    expect(derive().availableSource?.id).toBe("tuya");
+    github.version = "v3.2.12";
+    expect(derive().availableSource?.id).toBe("github");
+  });
   it("prefers an available update over up-to-date and failed sources", () => {
     const result = deriveUpdateSummaryState({
       sourceStates: [

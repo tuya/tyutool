@@ -10,6 +10,10 @@ import { isTauriRuntime } from "@/runtime";
 import { type AutoUpdateIntervalId, useSettingsStore } from "@/stores/settings";
 import { getManualUpdateFlags } from "@/utils/install-type";
 import { rLog } from "@/utils/log";
+import {
+  getUpdatePlatformKey,
+  manualUpdateUrl,
+} from "@/features/settings/update-platform";
 
 export const AUTO_UPDATE_STARTUP_DELAY_MS = 4000;
 
@@ -20,20 +24,6 @@ const AUTO_UPDATE_INTERVAL_MS: Record<AutoUpdateIntervalId, number> = {
   "12h": 12 * 60 * 60 * 1000,
   "24h": 24 * 60 * 60 * 1000,
 };
-
-/** Detect current platform key for portable manifest lookup */
-function getPortablePlatformKey(): string {
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("win")) return "windows-x86_64";
-  if (ua.includes("mac")) {
-    const isArm =
-      navigator.userAgent.includes("ARM") ||
-      (navigator as { userAgentData?: { platform?: string } }).userAgentData
-        ?.platform === "macOS";
-    return isArm ? "darwin-aarch64" : "darwin-x86_64";
-  }
-  return "linux-x86_64";
-}
 
 export function shouldAutoCheckForUpdate({
   isTauri,
@@ -98,13 +88,13 @@ async function checkForUpdate(settings = useSettingsStore()): Promise<void> {
         toastState.version = manifest.version;
         toastState.isPortable = flags.manualOnly;
         if (flags.manualOnly) {
-          if (flags.debRpm) {
-            toastState.portableUrl = source.releasePageUrl;
-          } else {
-            const platformKey = getPortablePlatformKey();
-            toastState.portableUrl =
-              manifest.portable?.[platformKey]?.url || source.releasePageUrl;
-          }
+          const platformKey = flags.debRpm ? "" : await getUpdatePlatformKey();
+          toastState.portableUrl = manualUpdateUrl(
+            manifest,
+            source,
+            platformKey,
+            flags.debRpm,
+          );
         }
         toastState.visible = true;
       } else {
