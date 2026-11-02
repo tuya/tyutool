@@ -928,7 +928,7 @@ mod zip_export_tests {
         let f = std::fs::File::open(&dest).unwrap();
         let mut zip = zip::ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         assert!(names.contains(&"report-info.txt".to_string()));
         assert!(names.contains(&"tyutool.log".to_string()));
@@ -1027,7 +1027,7 @@ mod zip_export_tests {
         let f = std::fs::File::open(&dest).unwrap();
         let mut zip = zip::ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         assert!(names.contains(&"report-info.txt".to_string()));
         assert!(names.contains(&"tyutool.log".to_string()));
