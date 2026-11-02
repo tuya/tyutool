@@ -33,8 +33,7 @@ fn workspace_cargo_config_forces_static_crt_for_windows_msvc() {
             config_path.display()
         )
     });
-    let parsed: toml::Value = raw
-        .parse()
+    let parsed: toml::Value = toml::from_str(&raw)
         .unwrap_or_else(|err| panic!("{} is not valid TOML: {err}", config_path.display()));
 
     let rustflags = parsed

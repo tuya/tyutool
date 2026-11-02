@@ -70,7 +70,7 @@ tempfile = "3"
 # manifests to prove none of them enables `mock-chip`. 0.8 is already in the
 # workspace lock (tyutool-bridge's dev-dependencies), so no new version enters
 # the tree.
-toml = "0.8"
+toml = "1.1"
 
 [dependencies]
 regex = "1"
