@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">tyutool</title>
+  <desc id="desc">An orange data block aligned with a dark receiving socket.</desc>
+  <!-- Generated from tyutool-data-write-logo.svg; edit the master instead. -->
+<!-- Before rotation: block 112 square; centered opening 132 wide and 104 deep.
+           The 18-unit entrance gap keeps both shapes distinct at small sizes.
+           A +112 local-Y translation seats the block partially, leaving 10-unit
+           side/bottom clearance and an 18-unit protrusion above the opening. -->
+      <g xmlns="http://www.w3.org/2000/svg" transform="translate(-17 -17)">
+        <g transform="rotate(-45 256 256)">
+          <path id="socket" fill="#263346" d="M140 184H184Q190 184 190 190V282Q190 288 196 288H316Q322 288 322 282V190Q322 184 328 184H372Q384 184 384 196V428Q384 440 372 440H140Q128 440 128 428V196Q128 184 140 184Z"/>
+          <rect id="data-block" x="200" y="54" width="112" height="112" rx="7" fill="#FF793E"/>
+        </g>
+      </g>
+</svg>
