@@ -89,7 +89,7 @@ md-5 = "0.11"
 # GD32VW553 verifies a write by having the device SHA-256 what it stored; the same
 # RustCrypto family as md-5 above, and already in the workspace lock.
 sha2 = "0.10"
-zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+zip = { version = "9", default-features = false, features = ["deflate"], optional = true }
 ts-rs = { version = "12", optional = true }
 # Downloads the RAM loader assets; see the `download` feature. rustls rather than
 # native-tls so the CLI's musl builds keep working, matching tyutool-cli's own copy.
