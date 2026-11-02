@@ -24,10 +24,9 @@ run('pnpm', existsSync(lockfile) ? ['install', '--frozen-lockfile'] : ['install'
 console.log('==> tyutool GUI: ensure Tauri icons');
 const icon32 = join(ROOT, 'src-tauri', 'icons', '32x32.png');
 if (!existsSync(icon32)) {
-  run('pnpm', ['exec', 'tsx', 'scripts/generate-icon-source.ts'], { cwd: ROOT });
   run(
     'pnpm',
-    ['exec', 'tauri', 'icon', join(ROOT, 'scripts', 'icon-source.png'), '-o', join(ROOT, 'src-tauri', 'icons')],
+    ['exec', 'tauri', 'icon', join(ROOT, 'brand', 'tyutool-data-write-icon.png'), '-o', join(ROOT, 'src-tauri', 'icons')],
     { cwd: ROOT },
   );
 }

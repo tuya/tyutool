@@ -9,7 +9,7 @@ import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
 import { useFeaturePortIndicators } from "@/features/serial-port-indicators/useFeaturePortIndicators";
 import { useSettingsStore } from "@/stores/settings";
 import { APP_VERSION } from "@/config/app";
-import appLogo from "@/assets/logo.png";
+import appLogo from "../../brand/tyutool-data-write-icon.svg";
 
 const route = useRoute();
 const mainRef = ref<HTMLElement | null>(null);
@@ -89,7 +89,11 @@ function navIndicator(name: string) {
       :aria-label="t('app.mainNav')"
     >
       <div class="workbench-brand flex items-center gap-3 px-4 py-6">
-        <img :src="appLogo" alt="" class="size-8 shrink-0 rounded-lg" />
+        <img
+          :src="appLogo"
+          alt=""
+          class="size-8 shrink-0 rounded-lg bg-white p-0.5"
+        />
         <div class="min-w-0">
           <span class="text-xl font-semibold tracking-tight">tyutool</span>
           <p class="mt-0.5 text-[11px] text-[var(--ty-text-muted)]">
