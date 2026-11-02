@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
+  <title id="title">tyutool</title>
+  <desc id="desc">An orange data block and dark receiving socket above the lowercase tyutool wordmark.</desc>
+  <!-- Master artwork. Export the standalone icon and PNG files with:
+       pnpm exec tsx scripts/export-logo-assets.ts
+       All lettering is drawn as paths; no font or raster image is required. -->
+  <defs>
+    <symbol id="tyutool-mark" viewBox="0 0 512 512">
+      <!-- Before rotation: block 112 square; centered opening 132 wide and 104 deep.
+           The 18-unit entrance gap keeps both shapes distinct at small sizes.
+           A +112 local-Y translation seats the block partially, leaving 10-unit
+           side/bottom clearance and an 18-unit protrusion above the opening. -->
+      <g transform="translate(-17 -17)">
+        <g transform="rotate(-45 256 256)">
+          <path id="socket" fill="#263346" d="M140 184H184Q190 184 190 190V282Q190 288 196 288H316Q322 288 322 282V190Q322 184 328 184H372Q384 184 384 196V428Q384 440 372 440H140Q128 440 128 428V196Q128 184 140 184Z"/>
+          <rect id="data-block" x="200" y="54" width="112" height="112" rx="7" fill="#FF793E"/>
+        </g>
+      </g>
+    </symbol>
+  </defs>
+  <use href="#tyutool-mark" x="100" y="21" width="440" height="440"/>
+  <g id="wordmark" fill="#263346" transform="translate(88 464)">
+    <path d="M16 0H32Q34 0 34 2V24H52Q54 24 54 26V40Q54 42 52 42H34V64Q34 74 44 74H52Q54 74 54 76V90Q54 92 52 92H41Q14 92 14 65V42H2Q0 42 0 40V26Q0 24 2 24H14V2Q14 0 16 0Z"/>
+    <path transform="translate(62)" d="M0 24H22L39 66L55 24H76L45 96Q38 112 22 112H8V94H20Q26 94 29 87L30 84Z"/>
+    <path transform="translate(146)" d="M0 24H20V63Q20 75 33 75Q46 75 46 63V24H66V64Q66 92 33 92Q0 92 0 64Z"/>
+    <path transform="translate(222)" d="M16 0H32Q34 0 34 2V24H52Q54 24 54 26V40Q54 42 52 42H34V64Q34 74 44 74H52Q54 74 54 76V90Q54 92 52 92H41Q14 92 14 65V42H2Q0 42 0 40V26Q0 24 2 24H14V2Q14 0 16 0Z"/>
+    <path transform="translate(286)" fill-rule="evenodd" d="M25 24H43Q68 24 68 49V67Q68 92 43 92H25Q0 92 0 67V49Q0 24 25 24ZM28 43Q20 43 20 51V65Q20 73 28 73H40Q48 73 48 65V51Q48 43 40 43Z"/>
+    <path transform="translate(364)" fill-rule="evenodd" d="M25 24H43Q68 24 68 49V67Q68 92 43 92H25Q0 92 0 67V49Q0 24 25 24ZM28 43Q20 43 20 51V65Q20 73 28 73H40Q48 73 48 65V51Q48 43 40 43Z"/>
+    <path transform="translate(444)" d="M2 0H18Q20 0 20 2V90Q20 92 18 92H2Q0 92 0 90V2Q0 0 2 0Z"/>
+  </g>
+</svg>
