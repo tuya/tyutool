@@ -105,9 +105,8 @@ fn no_shipped_crate_enables_a_test_only_feature() {
         let path = root.join(relative);
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {relative}: {e}"));
-        let manifest: toml::Value = text
-            .parse()
-            .unwrap_or_else(|e| panic!("cannot parse {relative}: {e}"));
+        let manifest: toml::Value =
+            toml::from_str(&text).unwrap_or_else(|e| panic!("cannot parse {relative}: {e}"));
 
         for feature in TEST_ONLY_FEATURES {
             assert!(
