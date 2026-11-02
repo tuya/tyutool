@@ -26,7 +26,7 @@ hex = "0.4"
 self-replace = "1"
 flate2 = "1"
 tar = "0.4"
-zip = "2"
+zip = "9"
 semver = { version = "1", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"

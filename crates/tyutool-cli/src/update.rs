@@ -138,7 +138,7 @@ fn extract_binary_from_zip(data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::E
     let mut archive = zip::ZipArchive::new(cursor)?;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        let name = file.name().to_string();
+        let name = file.name()?.to_string();
         if name.ends_with("tyutool_cli.exe")
             || name.ends_with("tyutool_cli")
             || name.ends_with("tyutool.exe")
