@@ -282,3 +282,75 @@ for (const theme of ["light", "dark"] as const) {
     await expect(group.getByRole("radio", { checked: true })).toBeFocused();
   });
 }
+
+for (const theme of ["light", "dark"] as const) {
+  test(`${theme}: current log search result keeps timestamps and direction labels readable`, async ({
+    page,
+  }) => {
+    await openUi(page, "/serial-debug");
+    await page.evaluate(async (theme) => {
+      const settingsUrl = "/src/stores/settings.ts";
+      const serialUrl = "/src/stores/serial-debug.ts";
+      const { useSettingsStore } = await import(settingsUrl);
+      const { useSerialDebugStore } = await import(serialUrl);
+      useSettingsStore().setTheme(theme);
+      Object.assign(useSerialDebugStore(), {
+        showTimestamp: true,
+        showDirBadge: true,
+        lines: ["tx", "rx", "sys"].map((direction, i) => ({
+          id: i + 1,
+          tsMs: 1700000000000 + i,
+          direction,
+          text: "match sample",
+        })),
+      });
+    }, theme);
+    await page.locator(".pane").click();
+    await page.keyboard.press("Control+f");
+    await page.locator(".search-input").fill("match");
+    const current = page.locator(".line-search-current");
+    await expect(current).toBeVisible();
+    for (let i = 0; i < 3; i++) {
+      await expect(current).toHaveAttribute("data-dir", ["tx", "rx", "sys"][i]);
+      const ratios = await current.evaluate((line) => {
+        const context = document.createElement("canvas").getContext("2d")!;
+        const rgba = (color: string) => {
+          context.clearRect(0, 0, 1, 1);
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+          return [...context.getImageData(0, 0, 1, 1).data];
+        };
+        const luminance = (rgb: number[]) =>
+          rgb.slice(0, 3).reduce((sum, value, j) => {
+            const c = value / 255;
+            return (
+              sum +
+              (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4) *
+                [0.2126, 0.7152, 0.0722][j]
+            );
+          }, 0);
+        return [...line.querySelectorAll(".ts,.dir-badge")].map((el) => {
+          const ancestors: Element[] = [];
+          for (let node: Element | null = el; node; node = node.parentElement)
+            ancestors.unshift(node);
+          const bg = ancestors.reduce(
+            (under, node) => {
+              const over = rgba(getComputedStyle(node).backgroundColor);
+              return under.map(
+                (channel, j) =>
+                  (over[j] * over[3]) / 255 + channel * (1 - over[3] / 255),
+              );
+            },
+            [255, 255, 255],
+          );
+          const a = luminance(rgba(getComputedStyle(el).color)),
+            b = luminance(bg);
+          return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        });
+      });
+      expect(ratios).toHaveLength(2);
+      for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+      await page.locator(".search-input").press("Enter");
+    }
+  });
+}
