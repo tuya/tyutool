@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, effectScope, nextTick } from "vue";
+import { serialPortDiscovery } from "@/features/serial-port-indicators/discovery";
 import type { ComputedRef } from "vue";
 
 // ── Hoisted mock fns (must exist when hoisted vi.mock factories run) ──
@@ -388,4 +389,37 @@ describe("useFlashConnection", () => {
     await c.deviceReset();
     expect(appendLog).toHaveBeenCalled();
   });
+});
+
+it("defers device-event enumeration while a flash operation is busy", async () => {
+  setActivePinia(createPinia());
+  vi.mocked(isTauriRuntime).mockReturnValue(true);
+  let changed!: () => void;
+  const stop = vi.fn();
+  const subscribe = vi
+    .spyOn(serialPortDiscovery, "subscribe")
+    .mockImplementation((callback) => {
+      changed = callback;
+      return stop;
+    });
+  const scope = effectScope();
+  const { deps, busyRef, selectedSerialPort } = makeDeps();
+  selectedSerialPort.value = "COM3";
+  busyRef.value = true;
+  invoke.mockResolvedValue([{ path: "COM4" }]);
+  scope.run(() => useFlashConnection(deps));
+  const before = invoke.mock.calls.length;
+  changed();
+  await nextTick();
+  expect(invoke.mock.calls.length).toBe(before);
+  expect(selectedSerialPort.value).toBe("COM3");
+  busyRef.value = false;
+  await nextTick();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(invoke.mock.calls.length).toBe(before + 1);
+  expect(selectedSerialPort.value).toBe("COM4");
+  scope.stop();
+  expect(stop).toHaveBeenCalledOnce();
+  subscribe.mockRestore();
+  serialPortDiscovery.invalidate();
 });

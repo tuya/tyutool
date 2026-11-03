@@ -1229,3 +1229,31 @@ describe("singleton export", () => {
     expect(wsTransport).toBeInstanceOf(WsTransport);
   });
 });
+
+describe("serial device notifications", () => {
+  it("reattaches on reconnect and removes its listener when unsubscribed", async () => {
+    const transport = new WsTransport();
+    const changed = vi.fn();
+    const subscribed = transport.onSerialPortsChanged(changed);
+    await flush();
+    const first = latest();
+    first.open();
+    const stop = await subscribed;
+    first.recv({ type: "serial_ports_changed" });
+    expect(changed).toHaveBeenCalledOnce();
+    first.fireClose();
+    const ports = transport.listPorts();
+    await flush();
+    const second = latest();
+    second.open();
+    await flush();
+    second.recv({ type: "ports", ports: ["COM3"] });
+    await ports;
+    second.recv({ type: "serial_ports_changed" });
+    expect(changed).toHaveBeenCalledTimes(2);
+    stop();
+    expect(second.listenerCount).toBe(0);
+    second.recv({ type: "serial_ports_changed" });
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+});

@@ -36,6 +36,38 @@ export interface WsProgressEvent {
 }
 
 export class WsTransport {
+  private serialPortsChanged = new Set<() => void>();
+
+  async onSerialPortsChanged(callback: () => void): Promise<() => void> {
+    this.serialPortsChanged.add(callback);
+    try {
+      const ws = await this.connect();
+      ws.removeEventListener("message", this.handleSerialPortsChanged);
+      ws.addEventListener("message", this.handleSerialPortsChanged);
+    } catch (error) {
+      this.serialPortsChanged.delete(callback);
+      throw error;
+    }
+    return () => {
+      this.serialPortsChanged.delete(callback);
+      if (!this.serialPortsChanged.size) {
+        this.ws?.removeEventListener("message", this.handleSerialPortsChanged);
+      }
+    };
+  }
+
+  private handleSerialPortsChanged = (event: MessageEvent) => {
+    let message: { type?: string };
+    try {
+      message = JSON.parse(event.data as string) as typeof message;
+    } catch {
+      return;
+    }
+    if (message.type === "serial_ports_changed") {
+      for (const callback of this.serialPortsChanged) callback();
+    }
+  };
+
   private ws: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
   private activeSerialDebugChunkHandler: ((ev: MessageEvent) => void) | null =
@@ -70,6 +102,9 @@ export class WsTransport {
     this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
       const url = wsUrl();
       const ws = new WebSocket(url);
+      if (this.serialPortsChanged.size) {
+        ws.addEventListener("message", this.handleSerialPortsChanged);
+      }
       ws.onopen = () => {
         this.ws = ws;
         this.connectPromise = null;

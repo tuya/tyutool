@@ -97,3 +97,6 @@ pub use serial_debug_bridge::{
     SERIAL_DEBUG_CHUNK_FLUSH_MS, SERIAL_DEBUG_CHUNK_QUEUE_CAPACITY,
 };
 pub use usb_port_survey::{usb_port_survey, UsbPortSurveyEntry, UsbPortSurveyUsb};
+
+#[cfg(feature = "serial-hotplug")]
+pub mod serial_hotplug;

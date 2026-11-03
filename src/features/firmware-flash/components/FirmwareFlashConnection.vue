@@ -8,10 +8,6 @@ import TyConnectionBar from "@/components/TyConnectionBar.vue";
 const { t } = useI18n();
 const ctx = useFirmwareFlashContext();
 
-// Only destructure actions (functions) — ref state must be accessed via ctx.xxx
-// to preserve Pinia reactive() wrapper (destructuring unwraps refs into snapshots).
-const { refreshDevice } = ctx;
-
 /** True when the authorize tab is active — baud rate then controls auth baud. */
 const isAuthTab = computed(() => ctx.activeTab === "authorize");
 
@@ -135,17 +131,7 @@ const chipValue = computed({
               : undefined
           "
           class="w-auto min-w-[8.5rem] max-w-[16rem]"
-          @open="refreshDevice"
         />
-        <button
-          type="button"
-          class="ty-btn-secondary shrink-0 px-2 py-1 text-xs"
-          :disabled="ctx.busy || ctx.portsRefreshing"
-          :aria-busy="ctx.portsRefreshing"
-          @click="refreshDevice"
-        >
-          {{ t("common.refresh") }}
-        </button>
       </div>
 
       <!-- 波特率（授权 Tab 时显示授权波特率，其余 Tab 显示烧录波特率） -->
