@@ -29,6 +29,7 @@ vi.mock("vue-i18n", () => ({
 }));
 
 vi.mock("vue-router", () => ({
+  onBeforeRouteLeave: vi.fn(),
   useRouter: () => ({
     push: pushSpy,
   }),
@@ -88,14 +89,6 @@ vi.mock("./components/BatchFlashAuthSlotList.vue", () => ({
   default: defineComponent({
     setup() {
       return () => h("div", "slot-list");
-    },
-  }),
-}));
-
-vi.mock("@/features/toolbox/components/ToolboxBreadcrumb.vue", () => ({
-  default: defineComponent({
-    setup() {
-      return () => h("div", "breadcrumb");
     },
   }),
 }));

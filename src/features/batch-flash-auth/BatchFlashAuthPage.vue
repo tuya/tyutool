@@ -3,7 +3,7 @@
 import TyPageHeader from "@/components/TyPageHeader.vue";
 import { computed, onMounted, onUnmounted, ref, unref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import TyPortActivityIndicator from "@/components/TyPortActivityIndicator.vue";
 import { useFeaturePortIndicators } from "@/features/serial-port-indicators/useFeaturePortIndicators";
 import { useBatchFlashAuthStore } from "@/stores/batch-flash-auth";
@@ -12,7 +12,6 @@ import BatchFlashAuthConfig from "./components/BatchFlashAuthConfig.vue";
 import BatchAuthConfig from "./components/BatchAuthConfig.vue";
 import BatchFlashAuthToolbar from "./components/BatchFlashAuthToolbar.vue";
 import BatchFlashAuthSlotList from "./components/BatchFlashAuthSlotList.vue";
-import ToolboxBreadcrumb from "@/features/toolbox/components/ToolboxBreadcrumb.vue";
 import DisclaimerModal from "./components/DisclaimerModal.vue";
 import { DISCLAIMER_KEY } from "./disclaimer";
 
@@ -23,6 +22,9 @@ const indicatorPaletteMode = computed(() => unref(portIndicators.paletteMode));
 const indicatorActivePorts = computed(() => unref(portIndicators.activePorts));
 
 const router = useRouter();
+const pageLocked = ref(false);
+
+onBeforeRouteLeave(() => !pageLocked.value);
 
 const showDisclaimer = ref(false);
 
@@ -70,22 +72,40 @@ onUnmounted(() => {
       @confirm="onDisclaimerConfirm"
       @cancel="onDisclaimerCancel"
     />
-    <div>
-      <ToolboxBreadcrumb :toolName="t('toolbox.batchFlashAuth.name')" />
-      <TyPageHeader
-        :title="t('batchFlashAuth.title')"
-        :description="t('batchFlashAuth.subtitle')"
-      >
-        <template #actions
-          ><TyPortActivityIndicator
-            :indicator="portIndicators.indicatorForFeature('toolbox')"
-            :active-ports="indicatorActivePorts"
-            :palette-mode="indicatorPaletteMode"
-            feature="toolbox"
-            surface="batch-flash-auth-header"
-        /></template>
-      </TyPageHeader>
-    </div>
+    <TyPageHeader :title="t('batchFlashAuth.title')">
+      <template #actions>
+        <TyPortActivityIndicator
+          :indicator="portIndicators.indicatorForFeature('toolbox')"
+          :active-ports="indicatorActivePorts"
+          :palette-mode="indicatorPaletteMode"
+          feature="toolbox"
+          surface="batch-flash-auth-header"
+        />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 px-3 py-2 text-sm"
+          :class="pageLocked ? 'ty-btn-primary-solid' : 'ty-btn-secondary'"
+          :aria-pressed="pageLocked"
+          :title="
+            pageLocked
+              ? t('batchFlashAuth.pageLockedHint')
+              : t('batchFlashAuth.lockPage')
+          "
+          @click="pageLocked = !pageLocked"
+        >
+          <FontAwesomeIcon
+            :icon="['fas', pageLocked ? 'lock' : 'lock-open']"
+            class="size-3.5"
+            aria-hidden="true"
+          />
+          {{
+            pageLocked
+              ? t("batchFlashAuth.unlockPage")
+              : t("batchFlashAuth.lockPage")
+          }}
+        </button>
+      </template>
+    </TyPageHeader>
 
     <BatchFlashAuthDashboard />
 

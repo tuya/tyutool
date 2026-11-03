@@ -74,7 +74,9 @@ function applyTitle(route: RouteLocationNormalized) {
   document.title = label ? `${label} · ${base}` : base;
 }
 
-router.afterEach(applyTitle);
+router.afterEach((to, _from, failure) => {
+  if (!failure) applyTitle(to);
+});
 
 // Re-resolve the title when the user switches language so the window
 // title (visible in the OS taskbar / window chrome) follows the UI.
