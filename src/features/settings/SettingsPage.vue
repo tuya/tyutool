@@ -998,20 +998,20 @@ function resetBatchAuthDisclaimer(): void {
   grid-template-columns: 24% 1fr;
   gap: 8px;
   padding: 8px;
-  background: #f1f2ef;
+  background: #f4f8fb;
   border-radius: 3px;
-  --mini-rail: #dce4dd;
+  --mini-rail: #eaf2f8;
   --mini-panel: #ffffff;
-  --mini-accent: #006b5e;
+  --mini-accent: #1267a5;
 }
 .theme-preview--dark {
-  background: #111518;
-  --mini-rail: #232b30;
-  --mini-panel: #1a2024;
-  --mini-accent: #74ddc9;
+  background: #0c141c;
+  --mini-rail: #11212f;
+  --mini-panel: #1d3040;
+  --mini-accent: #78c6f4;
 }
 .theme-preview--system {
-  background: linear-gradient(110deg, #f1f2ef 50%, #111518 50%);
+  background: linear-gradient(110deg, #f4f8fb 50%, #0c141c 50%);
 }
 .theme-preview-side {
   display: flex;

@@ -272,7 +272,7 @@ for (const theme of ["light", "dark"] as const) {
       );
     });
     expect(colors).toEqual(
-      theme === "light" ? ["#f1f2ef", "#006b5e"] : ["#111518", "#74ddc9"],
+      theme === "light" ? ["#f4f8fb", "#1267a5"] : ["#0c141c", "#78c6f4"],
     );
     await expect(page.locator(".theme-preview")).toHaveCount(3);
     const group = page.getByRole("radiogroup");
