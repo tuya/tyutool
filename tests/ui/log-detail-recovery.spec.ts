@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "playwright/test";
 import { openUi, seedSerialLines } from "./helpers/serial-log";
+import { remountSettings } from "./helpers/settings";
 
 async function restoreFinished(page: Page, locale: string, theme: string) {
   await page.locator(".ty-route-enter-active").waitFor({ state: "hidden" });
@@ -138,6 +139,7 @@ for (const locale of ["en", "zh-CN"]) {
             },
           });
         });
+        await remountSettings(page);
         await page
           .getByRole("button", {
             name: zh ? "查看日志" : "View Logs",

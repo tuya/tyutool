@@ -1,5 +1,6 @@
 import { test, expect } from "playwright/test";
 import { openUi } from "./helpers/serial-log";
+import { remountSettings } from "./helpers/settings";
 
 for (const theme of ["light", "dark"] as const) {
   for (const width of [375, 1024, 1549]) {
@@ -65,6 +66,20 @@ for (const [width, height] of [
             page.locator(".ty-route-enter-active,.ty-route-leave-active"),
           ).toHaveCount(0);
           await expect(page.locator("#app-main h1")).toHaveCount(1);
+          if (path === "/settings") {
+            await expect(page.locator(".page-header-section")).toHaveCount(0);
+            await expect(page.locator(".page-header-desc")).toHaveCount(0);
+            await expect(
+              page.locator('.settings-nav a[href="#serial-debug-heading"]'),
+            ).toHaveText(locale === "en" ? "Serial Logs" : "串口日志");
+            await expect(
+              page.locator("#settings-serial-archive-limit-hint"),
+            ).toContainText(
+              locale === "en"
+                ? "Auto-saved log files and batch flash logs are unaffected"
+                : "自动保存的日志文件和批量烧录日志不受影响",
+            );
+          }
           const metrics = await page.evaluate(() => {
             const main = document.querySelector("#app-main")!;
             const toolbar = main.querySelector(".log-toolbar");
@@ -211,6 +226,7 @@ for (const theme of ["light", "dark"] as const) {
         },
       });
     }, theme);
+    await remountSettings(page);
     const opener = page.getByRole("button", {
       name: "View Logs",
       exact: false,

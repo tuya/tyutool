@@ -34,6 +34,7 @@ import TySwitch from "@/components/TySwitch.vue";
 const { locale, t } = useI18n();
 const settings = useSettingsStore();
 const sd = useSerialDebugStore();
+const isDevPreview = import.meta.env.DEV;
 const UpdateDialog = shallowRef<Component>();
 const LogViewerDialog = shallowRef<Component>();
 const dialogLoading = ref<"update" | "logs" | null>(null);
@@ -307,11 +308,7 @@ function resetBatchAuthDisclaimer(): void {
 
 <template>
   <div class="flex min-h-0 min-w-0 flex-col gap-5">
-    <TyPageHeader
-      :title="t('settings.title')"
-      :section="t('settings.section')"
-      :description="t('settings.subtitle')"
-    />
+    <TyPageHeader :title="t('settings.title')" />
 
     <div class="settings-layout">
       <nav class="settings-nav" :aria-label="t('settings.title')">
@@ -474,10 +471,23 @@ function resetBatchAuthDisclaimer(): void {
                 <p class="settings-row__hint">
                   {{ t("serialDebug.autoSave.description") }}
                 </p>
+                <p
+                  v-if="!isTauriRuntime()"
+                  id="settings-auto-save-desktop-hint"
+                  class="settings-row__hint"
+                >
+                  {{ t("settings.desktopOnly") }}
+                </p>
               </div>
               <TySwitch
                 :model-value="sd.autoSave"
                 :aria-label="t('serialDebug.autoSave.label')"
+                :disabled="!isTauriRuntime()"
+                :aria-describedby="
+                  !isTauriRuntime()
+                    ? 'settings-auto-save-desktop-hint'
+                    : undefined
+                "
                 @update:model-value="sd.setAutoSaveEnabled"
               />
             </div>
@@ -486,6 +496,9 @@ function resetBatchAuthDisclaimer(): void {
                 <span class="settings-row__title">{{
                   t("serialDebug.autoSave.dirLabel")
                 }}</span>
+                <p class="settings-row__hint">
+                  {{ t("serialDebug.autoSave.dirHint") }}
+                </p>
                 <div class="path-scroll min-w-0 max-w-full overflow-x-auto">
                   <span class="settings-row__value">{{
                     sd.autoSaveDir || "—"
@@ -495,6 +508,12 @@ function resetBatchAuthDisclaimer(): void {
               <button
                 type="button"
                 class="ty-btn-secondary settings-inline-action"
+                :disabled="!isTauriRuntime()"
+                :aria-describedby="
+                  !isTauriRuntime()
+                    ? 'settings-auto-save-desktop-hint'
+                    : undefined
+                "
                 @click="sd.pickAutoSaveDir()"
               >
                 {{ t("serialDebug.autoSave.pickDir") }}
@@ -516,6 +535,12 @@ function resetBatchAuthDisclaimer(): void {
               <TySwitch
                 v-model="sd.autoSaveTimestamp"
                 :aria-label="t('serialDebug.autoSave.timestamp')"
+                :disabled="!isTauriRuntime()"
+                :aria-describedby="
+                  !isTauriRuntime()
+                    ? 'settings-auto-save-desktop-hint'
+                    : undefined
+                "
               />
             </div>
             <div class="settings-row">
@@ -595,12 +620,25 @@ function resetBatchAuthDisclaimer(): void {
                   t("settings.logEnabled")
                 }}</span>
                 <p class="settings-row__hint">
-                  {{ t("settings.diagnosticsHint") }}
+                  {{ t("settings.logEnabledHint") }}
+                </p>
+                <p
+                  v-if="!isTauriRuntime()"
+                  id="settings-diagnostics-desktop-hint"
+                  class="settings-row__hint"
+                >
+                  {{ t("settings.desktopOnly") }}
                 </p>
               </div>
               <TySwitch
                 :model-value="settings.logEnabled"
                 :aria-label="t('settings.logEnabled')"
+                :disabled="!isTauriRuntime()"
+                :aria-describedby="
+                  !isTauriRuntime()
+                    ? 'settings-diagnostics-desktop-hint'
+                    : undefined
+                "
                 @update:model-value="settings.setLogEnabled"
               />
             </div>
@@ -620,7 +658,7 @@ function resetBatchAuthDisclaimer(): void {
                 aria-describedby="settings-log-level-hint"
                 id="settings-log-level"
                 :options="logLevelOptions"
-                :disabled="!settings.logEnabled"
+                :disabled="!isTauriRuntime() || !settings.logEnabled"
                 class="settings-row__control settings-row__control--select"
                 @update:model-value="settings.setLogLevel($event as LogLevelId)"
               />
@@ -630,6 +668,7 @@ function resetBatchAuthDisclaimer(): void {
               <button
                 type="button"
                 class="diagnostics-action-card"
+                :disabled="!isTauriRuntime() && !isDevPreview"
                 @click="openLogsFolder"
               >
                 <div class="diagnostics-action-card__icon" aria-hidden="true">
@@ -643,7 +682,11 @@ function resetBatchAuthDisclaimer(): void {
                     {{ t("settings.logsFolder") }}
                   </strong>
                   <p class="diagnostics-action-card__copy">
-                    {{ t("settings.logsFolderHint") }}
+                    {{
+                      isTauriRuntime() || isDevPreview
+                        ? t("settings.logsFolderHint")
+                        : t("settings.desktopOnly")
+                    }}
                   </p>
                 </div>
               </button>
@@ -651,7 +694,7 @@ function resetBatchAuthDisclaimer(): void {
               <button
                 type="button"
                 class="diagnostics-action-card"
-                :disabled="dialogLoading !== null"
+                :disabled="!isTauriRuntime() || dialogLoading !== null"
                 :aria-busy="dialogLoading === 'logs'"
                 @click="openDialog('logs')"
               >
@@ -670,7 +713,11 @@ function resetBatchAuthDisclaimer(): void {
                     }}
                   </strong>
                   <p class="diagnostics-action-card__copy">
-                    {{ t("settings.viewLogsHint") }}
+                    {{
+                      isTauriRuntime()
+                        ? t("settings.viewLogsHint")
+                        : t("settings.desktopOnly")
+                    }}
                   </p>
                 </div>
               </button>
@@ -717,10 +764,9 @@ function resetBatchAuthDisclaimer(): void {
             </div>
 
             <button
-              v-if="isTauriRuntime()"
               type="button"
               class="update-entry-card update-entry-card--hero"
-              :disabled="dialogLoading !== null"
+              :disabled="!isTauriRuntime() || dialogLoading !== null"
               :aria-busy="dialogLoading === 'update'"
               @click="openDialog('update')"
             >
@@ -747,7 +793,11 @@ function resetBatchAuthDisclaimer(): void {
                   }}
                 </strong>
                 <p class="update-entry-card__subtitle">
-                  {{ t(updateEntryModel.subtitleKey) }}
+                  {{
+                    isTauriRuntime()
+                      ? t(updateEntryModel.subtitleKey)
+                      : t("settings.desktopOnly")
+                  }}
                 </p>
               </div>
               <div class="update-entry-card__arrow" aria-hidden="true">
@@ -773,14 +823,30 @@ function resetBatchAuthDisclaimer(): void {
                 >
                   {{ t("settings.autoUpdate") }}
                 </label>
-                <p class="settings-update-center__control-hint">
+                <p
+                  id="settings-auto-update-interval-hint"
+                  class="settings-update-center__control-hint"
+                >
                   {{ t("settings.autoUpdateHint") }}
+                </p>
+                <p
+                  v-if="!isTauriRuntime()"
+                  id="settings-auto-update-desktop-hint"
+                  class="settings-update-center__control-hint"
+                >
+                  {{ t("settings.desktopOnly") }}
                 </p>
               </div>
               <TySelect
                 id="settings-auto-update-interval"
                 v-model="autoUpdateIntervalValue"
                 :options="autoUpdateIntervalOptions"
+                :disabled="!isTauriRuntime()"
+                :aria-describedby="
+                  isTauriRuntime()
+                    ? 'settings-auto-update-interval-hint'
+                    : 'settings-auto-update-interval-hint settings-auto-update-desktop-hint'
+                "
                 class="settings-update-center__control-select"
                 style="height: 2.75rem"
               />
@@ -1098,8 +1164,13 @@ function resetBatchAuthDisclaimer(): void {
   text-align: left;
   cursor: pointer;
 }
-.update-entry-card:hover {
+.update-entry-card:hover:not(:disabled) {
   background: var(--ty-surface-muted);
+}
+.update-entry-card:disabled,
+.diagnostics-action-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 .update-entry-card__body {
   min-width: 0;
@@ -1144,7 +1215,7 @@ function resetBatchAuthDisclaimer(): void {
   text-align: left;
   cursor: pointer;
 }
-.diagnostics-action-card:hover {
+.diagnostics-action-card:hover:not(:disabled) {
   border-color: var(--ty-border-strong);
 }
 .diagnostics-action-card__icon {

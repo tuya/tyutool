@@ -1,11 +1,22 @@
 import { test, expect } from "playwright/test";
 import { openUi } from "./helpers/serial-log";
+import { remountSettings } from "./helpers/settings";
 
 for (const leave of [false, true]) {
   test(`delayed dialog import ${leave ? "cannot reopen after navigation" : "keeps busy feedback and restores opener focus"}`, async ({
     page,
   }) => {
     await openUi(page, "/settings");
+    await page.evaluate(() => {
+      Object.assign(window, {
+        __TAURI_INTERNALS__: {
+          invoke: async () => [],
+          transformCallback: () => 0,
+          unregisterCallback: () => {},
+        },
+      });
+    });
+    await remountSettings(page);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
