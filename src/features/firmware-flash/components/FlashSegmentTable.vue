@@ -93,19 +93,19 @@ const segmentErrors = computed<Record<string, string>>(() => {
 
     <!-- Use the table only when the operation card has enough room for every field. -->
     <div class="segment-layout hidden overflow-x-auto @min-[600px]:block">
-      <table class="w-full border-collapse text-left text-sm">
+      <table class="w-full table-fixed border-collapse text-left text-sm">
         <thead>
           <tr class="border-b border-[var(--ty-border)]">
             <th scope="col" class="w-9 pb-2 pr-1 text-center align-bottom">
               <span class="ops-field-label">#</span>
             </th>
-            <th scope="col" class="min-w-[7.5rem] pb-2 pr-2 align-bottom">
+            <th scope="col" class="w-32 pb-2 pr-2 align-bottom">
               <span class="ops-field-label">{{ t("flash.addrStart") }}</span>
             </th>
-            <th scope="col" class="min-w-[7.5rem] pb-2 pr-2 align-bottom">
+            <th scope="col" class="w-32 pb-2 pr-2 align-bottom">
               <span class="ops-field-label">{{ t("flash.addrEnd") }}</span>
             </th>
-            <th scope="col" class="min-w-[12rem] pb-2 align-bottom">
+            <th scope="col" class="pb-2 align-bottom">
               <span class="ops-field-label">{{ t("flash.firmwareFile") }}</span>
             </th>
             <th scope="col" class="w-9 pb-2 align-bottom" aria-hidden="true" />

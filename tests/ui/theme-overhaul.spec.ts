@@ -442,8 +442,10 @@ for (const theme of ["light", "dark"] as const) {
             overflow: log.scrollWidth - log.clientWidth,
           };
         });
-        expect(layout.logWidth / layout.opsWidth).toBeLessThanOrEqual(0.51);
-        expect(layout.logWidth / layout.opsWidth).toBeGreaterThan(0.45);
+        expect(layout.logWidth / layout.opsWidth).toBeLessThanOrEqual(
+          width === 1024 ? 0.47 : 0.35,
+        );
+        expect(layout.logWidth).toBeGreaterThanOrEqual(230);
         expect(layout.overflow).toBeLessThanOrEqual(1);
         for (const name of locale === "en"
           ? ["Erase", "Read", "Authorize", "Flash"]
@@ -465,13 +467,14 @@ for (const theme of ["light", "dark"] as const) {
           const url = "/src/stores/flash.ts";
           const { useFlashStore } = await import(url);
           const store = useFlashStore();
-          store.flashSegments[0].firmwarePath = "/tmp/demo.bin";
+          store.flashSegments[0].firmwarePath =
+            "C:\\Users\\LENOVO\\Downloads\\neo_tuya_1.3.0_nolicence\\firmware_application.bin";
           store.flashSegments[0].firmwareSize = 1024;
         });
         await expect(page.locator(".segment-summary").first()).toContainText(
           "1024",
         );
-        if (width === 1549) {
+        if (width >= 1282) {
           const alignment = await page
             .locator("table tbody tr")
             .first()
@@ -482,9 +485,24 @@ for (const theme of ["light", "dark"] as const) {
               const file = row
                 .querySelector('input[id$="-file"]')!
                 .getBoundingClientRect();
-              return Math.abs(start.top - file.top);
+              const end = row
+                .querySelector('input[id$="-end"]')!
+                .getBoundingClientRect();
+              const input =
+                row.querySelector<HTMLInputElement>('input[id$="-file"]')!;
+              return {
+                topDelta: Math.abs(start.top - file.top),
+                startWidth: start.width,
+                endWidth: end.width,
+                fileWidth: file.width,
+                fullPath: input.title === input.value,
+              };
             });
-          expect(alignment).toBeLessThanOrEqual(1);
+          expect(alignment.topDelta).toBeLessThanOrEqual(1);
+          expect(alignment.startWidth).toBeLessThanOrEqual(128);
+          expect(alignment.endWidth).toBeLessThanOrEqual(128);
+          expect(alignment.fileWidth).toBeGreaterThan(alignment.startWidth * 2);
+          expect(alignment.fullPath).toBe(true);
         }
         await page.evaluate(async () => {
           const url = "/src/stores/flash.ts";
@@ -507,10 +525,15 @@ for (const theme of ["light", "dark"] as const) {
           const sidebar = element.parentElement!.getBoundingClientRect();
           return {
             buttonRowDelta: Math.abs(buttons[0].top - buttons[1].top),
-            versionBelowButtons: version.top >= buttons[0].bottom,
-            versionCenterOffset: Math.abs(
-              version.x + version.width / 2 - (sidebar.x + sidebar.width / 2),
+            versionRowDelta: Math.abs(
+              version.y +
+                version.height / 2 -
+                (buttons[0].y + buttons[0].height / 2),
             ),
+            versionFits:
+              version.left >= sidebar.left &&
+              version.right <= sidebar.right &&
+              version.bottom <= sidebar.bottom,
             controlsFit: buttons.every(
               (rect) =>
                 rect.left >= sidebar.left &&
@@ -520,8 +543,8 @@ for (const theme of ["light", "dark"] as const) {
           };
         });
         expect(footerLayout.buttonRowDelta).toBeLessThanOrEqual(1);
-        expect(footerLayout.versionBelowButtons).toBe(true);
-        expect(footerLayout.versionCenterOffset).toBeLessThanOrEqual(1);
+        expect(footerLayout.versionRowDelta).toBeLessThanOrEqual(1);
+        expect(footerLayout.versionFits).toBe(true);
         expect(footerLayout.controlsFit).toBe(true);
         await footer.getByRole("button").first().click();
         await expect
