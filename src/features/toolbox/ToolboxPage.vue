@@ -24,11 +24,7 @@ const tools = computed(() =>
 
 <template>
   <div class="flex min-w-0 flex-col gap-3 sm:gap-4">
-    <TyPageHeader
-      :title="t('app.nav.toolbox')"
-      :section="t('toolbox.section')"
-      :description="t('toolbox.subtitle')"
-    />
+    <TyPageHeader :title="t('app.nav.toolbox')" />
 
     <div
       class="grid min-w-0 gap-3 sm:gap-4"
@@ -41,20 +37,20 @@ const tools = computed(() =>
         :key="tool.to"
         :to="tool.to"
         :data-tool-id="tool.id"
-        class="ty-card tool-card group flex cursor-pointer items-center gap-6 p-6 transition-colors hover:bg-[var(--ty-field)]"
+        class="ty-card tool-card group flex w-full max-w-xl cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-[var(--ty-field)]"
       >
         <div
-          class="tool-card-icon flex size-14 shrink-0 items-center justify-center text-[var(--ty-primary)]"
+          class="tool-card-icon flex size-10 shrink-0 items-center justify-center text-[var(--ty-primary)]"
         >
           <TyBatchFlashAuthIcon
             v-if="tool.icon === 'batch-flash-auth'"
-            class="size-8 text-[var(--ty-primary)]"
+            class="size-6 text-[var(--ty-primary)]"
           />
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-2">
             <p
-              class="min-w-0 flex-1 text-lg font-semibold text-[var(--ty-text)]"
+              class="min-w-0 flex-1 text-base font-semibold text-[var(--ty-text)]"
             >
               {{ tool.name }}
             </p>
@@ -68,17 +64,10 @@ const tools = computed(() =>
             />
           </div>
           <p
-            class="mt-2 max-w-xl text-[13px] leading-relaxed text-[var(--ty-text-muted)]"
+            class="mt-1 text-[13px] leading-relaxed text-[var(--ty-text-muted)]"
           >
             {{ tool.desc }}
           </p>
-          <span
-            class="mt-5 inline-flex items-center gap-2 rounded-md bg-[var(--ty-primary-soft)] px-3 py-2 text-xs font-semibold text-[var(--ty-primary)]"
-            >{{ t("toolbox.openTool")
-            }}<FontAwesomeIcon
-              :icon="['fas', 'arrow-right']"
-              aria-hidden="true"
-          /></span>
         </div>
         <FontAwesomeIcon
           :icon="['fas', 'chevron-right']"
@@ -89,19 +78,3 @@ const tools = computed(() =>
     </div>
   </div>
 </template>
-
-<style scoped>
-.tool-card {
-  min-height: 220px;
-}
-@media (max-width: 600px) {
-  .tool-card {
-    min-height: 180px;
-    gap: 16px;
-    padding: 20px;
-  }
-  .tool-card-icon {
-    width: 32px;
-  }
-}
-</style>
