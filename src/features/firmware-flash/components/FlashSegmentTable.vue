@@ -124,7 +124,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
               >
                 {{ index + 1 }}
               </td>
-              <td class="py-2.5 pr-2 align-middle">
+              <td class="py-2.5 pr-2 align-top">
                 <label :for="`flash-${seg.id}-start`" class="sr-only">{{
                   t("flash.addrStart")
                 }}</label>
@@ -144,7 +144,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
                   :disabled="ctx.busy"
                 />
               </td>
-              <td class="py-2.5 pr-2 align-middle">
+              <td class="py-2.5 pr-2 align-top">
                 <label :for="`flash-${seg.id}-end`" class="sr-only">{{
                   t("flash.addrEnd")
                 }}</label>
@@ -164,7 +164,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
                   :disabled="ctx.busy"
                 />
               </td>
-              <td class="min-w-0 py-2.5 align-middle">
+              <td class="min-w-0 py-2.5 align-top">
                 <div class="flex min-w-0 items-center gap-1.5">
                   <label :for="`flash-${seg.id}-file`" class="sr-only">{{
                     t("flash.firmwareFile")
@@ -181,14 +181,17 @@ const segmentErrors = computed<Record<string, string>>(() => {
                   />
                   <button
                     type="button"
-                    class="ops-browse-btn flex h-9 min-w-[4.75rem] shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3.5 text-sm font-semibold"
+                    class="ops-browse-btn flex h-[2.125rem] min-w-[4.75rem] shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3.5 text-sm font-semibold"
                     :disabled="ctx.busy"
                     @click="onPickFile(index)"
                   >
                     {{ t("flash.browse") }}
                   </button>
                 </div>
-                <p class="mt-1 text-xs text-[var(--ty-text-muted)]">
+                <p
+                  v-if="seg.firmwarePath"
+                  class="segment-summary mt-1 text-xs text-[var(--ty-text-muted)]"
+                >
                   {{ segmentSummary(index) }}
                 </p>
               </td>
@@ -342,7 +345,10 @@ const segmentErrors = computed<Record<string, string>>(() => {
         >
           {{ segmentErrors[seg.id] }}
         </p>
-        <p class="mt-2 text-xs text-[var(--ty-text-muted)]">
+        <p
+          v-if="seg.firmwarePath"
+          class="segment-summary mt-2 text-xs text-[var(--ty-text-muted)]"
+        >
           {{ segmentSummary(index) }}
         </p>
       </div>

@@ -382,8 +382,9 @@ html[data-theme] {
     border-radius: 0;
   }
   .ops-tab-active {
-    color: var(--ty-text);
-    font-weight: 600;
+    background: var(--ty-primary-soft);
+    color: var(--ty-primary);
+    font-weight: 700;
     border-bottom-color: var(--ty-primary);
   }
   .ops-tab-inactive {
@@ -479,7 +480,8 @@ html[data-theme] {
     scrollbar-gutter: stable;
   }
   .aside-log-line {
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     min-height: 1.5em;
   }
   .aside-log-btn,

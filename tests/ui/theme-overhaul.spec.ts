@@ -354,3 +354,97 @@ for (const theme of ["light", "dark"] as const) {
     }
   });
 }
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1024, 1549]) {
+    test(`${theme} ${width}: compact flash workspace aligns fields and wraps long logs`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: width === 1024 ? 680 : 884 });
+      await openUi(page, "/flash");
+      await page.evaluate(async (theme) => {
+        const settingsUrl = "/src/stores/settings.ts";
+        const flashUrl = "/src/stores/flash.ts";
+        const { useSettingsStore } = await import(settingsUrl);
+        const { useFlashStore } = await import(flashUrl);
+        useSettingsStore().setTheme(theme);
+        useFlashStore().logLines = ["protocol frame " + "A".repeat(800)];
+      }, theme);
+      await expect(page.locator(".workbench-location")).toHaveCount(0);
+      await expect(page.locator(".page-header-section")).toHaveCount(0);
+      await expect(page.locator("#flash-port-feedback")).not.toBeVisible();
+      await expect(page.locator(".segment-summary")).toHaveCount(0);
+      await expect(
+        page
+          .locator(".conn-bar")
+          .getByRole("button", { name: "Refresh", exact: true }),
+      ).toBeEnabled();
+      const log = page.getByRole("log");
+      await expect(log).toContainText("A".repeat(800));
+      const layout = await page.evaluate(() => {
+        const ops = document
+          .querySelector(".ops-card")!
+          .getBoundingClientRect();
+        const log = document.querySelector(".aside-log-body")!;
+        return {
+          opsWidth: ops.width,
+          logWidth: log.getBoundingClientRect().width,
+          overflow: log.scrollWidth - log.clientWidth,
+        };
+      });
+      expect(layout.logWidth).toBeLessThan(layout.opsWidth);
+      expect(layout.overflow).toBeLessThanOrEqual(1);
+      for (const name of ["Erase", "Read", "Authorize", "Flash"]) {
+        const tab = page.getByRole("tab", { name, exact: true });
+        await tab.click();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
+        const background = await tab.evaluate((el) => {
+          const probe = document.createElement("span");
+          probe.style.backgroundColor = "var(--ty-primary-soft)";
+          el.append(probe);
+          const color = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return color;
+        });
+        await expect(tab).toHaveCSS("background-color", background);
+      }
+      await page.evaluate(async () => {
+        const url = "/src/stores/flash.ts";
+        const { useFlashStore } = await import(url);
+        const store = useFlashStore();
+        store.flashSegments[0].firmwarePath = "/tmp/demo.bin";
+        store.flashSegments[0].firmwareSize = 1024;
+      });
+      await expect(page.locator(".segment-summary").first()).toContainText(
+        "1024",
+      );
+      if (width === 1549) {
+        const alignment = await page
+          .locator("table tbody tr")
+          .first()
+          .evaluate((row) => {
+            const start = row
+              .querySelector('input[id$="-start"]')!
+              .getBoundingClientRect();
+            const file = row
+              .querySelector('input[id$="-file"]')!
+              .getBoundingClientRect();
+            return Math.abs(start.top - file.top);
+          });
+        expect(alignment).toBeLessThanOrEqual(1);
+      }
+      await page.evaluate(async () => {
+        const url = "/src/stores/flash.ts";
+        const { useFlashStore } = await import(url);
+        useFlashStore().portsRefreshError = "Device enumeration failed";
+      });
+      await expect(page.locator("#flash-port-feedback")).toContainText(
+        "Device enumeration failed",
+      );
+      await expect(page.locator("#serial-port")).toHaveAttribute(
+        "aria-describedby",
+        "flash-port-feedback",
+      );
+    });
+  }
+}

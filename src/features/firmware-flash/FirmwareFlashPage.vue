@@ -33,7 +33,7 @@ async function resetWindowSize(): Promise<void> {
 
 <template>
   <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 md:gap-3">
-    <TyPageHeader :title="t('flash.pageTitle')" :section="t('flash.tool')">
+    <TyPageHeader :title="t('flash.pageTitle')">
       {{ t("flash.introLead") }}{{ t("flash.introRest") }}
       <template v-if="isTauriRuntime()" #actions>
         <button
@@ -50,7 +50,7 @@ async function resetWindowSize(): Promise<void> {
     <FirmwareFlashConnection />
 
     <div
-      class="flash-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
+      class="flash-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]"
     >
       <FirmwareFlashOperations ref="operationsRef" />
       <FirmwareFlashAside @configure="showConfiguration" />
