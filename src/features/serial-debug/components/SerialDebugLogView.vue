@@ -1969,6 +1969,12 @@ async function saveLog(): Promise<void> {
   background: color-mix(in srgb, var(--ty-text-muted) 8%, transparent);
   color: var(--ty-text-muted);
 }
+/* Keep metadata readable over the stronger current-match background. */
+.line.line-search-current,
+.line-search-current .ts,
+.line.line-search-current .dir-badge {
+  color: var(--ty-text);
+}
 .text {
   /* `pre`, not `pre-wrap`: soft wrapping would make row heights vary and break
      the fixed-height row model. Long lines scroll horizontally instead. */
