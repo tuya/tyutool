@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "playwright/test";
 import { openUi } from "./helpers/serial-log";
+import { remountSettings } from "./helpers/settings";
 
 async function history(page: Page) {
   await openUi(page, "/serial-debug");
@@ -182,6 +183,7 @@ for (const theme of ["light", "dark"]) {
         },
       });
     }, theme);
+    await remountSettings(page);
     await page.getByRole("button", { name: /View Logs/ }).click();
     await page.locator(".log-file-button").click();
     const content = page.getByRole("dialog").locator("div[aria-busy]");
