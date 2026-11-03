@@ -740,6 +740,9 @@
   },
   "batchFlashAuth": {
     "title": "Batch Flash & Auth",
+    "lockPage": "Lock page",
+    "unlockPage": "Unlock page",
+    "pageLockedHint": "Page locked. Unlock to switch to another page.",
     "subtitle": "Flash firmware and write auth codes to up to 32 ports in parallel",
     "configurationSection": "Configuration",
     "configurationHint": "Set up chip, firmware and auth source before running a batch",

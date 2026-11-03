@@ -221,8 +221,8 @@ for (const point of [
   }) => {
     await page.setViewportSize({ width: 1024, height: 680 });
     await open(page, "/toolbox/batch-flash-auth");
-    await seed(page, "batch-flash-auth", "s.addPorts(['COM31']);");
-    const row = page.locator('[data-port="COM31"]');
+    const row = page.locator('[data-port="MOCK_PORT_1"]');
+    await expect(row).toHaveCount(1);
     await row.evaluate(
       (el, point) =>
         el.dispatchEvent(

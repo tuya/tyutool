@@ -740,6 +740,9 @@
   },
   "batchFlashAuth": {
     "title": "批量烧录授权",
+    "lockPage": "锁定界面",
+    "unlockPage": "解锁界面",
+    "pageLockedHint": "界面已锁定，解锁后可切换到其他页面",
     "subtitle": "同时向多个串口并行烧录固件并写入授权码，最多 32 个",
     "configurationSection": "配置",
     "configurationHint": "运行批量任务前，先配置芯片、固件与授权来源",
