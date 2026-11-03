@@ -50,7 +50,7 @@ async function resetWindowSize(): Promise<void> {
     <FirmwareFlashConnection />
 
     <div
-      class="flash-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]"
+      class="flash-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
     >
       <FirmwareFlashOperations ref="operationsRef" />
       <FirmwareFlashAside @configure="showConfiguration" />
