@@ -119,6 +119,65 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     return app.mount(host!);
   }
 
+  it.each([
+    { role: undefined, expected: "COM22" },
+    { role: "log", expected: "COM23" },
+  ])(
+    "replaces a missing idle port with $expected",
+    async ({ role, expected }) => {
+      const s = useSerialDebugStore();
+      s.port = "COM6";
+      vi.mocked(wsTransport.listPorts).mockResolvedValue([
+        { path: "COM22", name: "wch.cn USB-Enhanced-SERIAL-A CH342 (COM22)" },
+        {
+          path: "COM23",
+          name: "wch.cn USB-Enhanced-SERIAL-B CH342 (COM23)",
+          portRole: role,
+        },
+      ]);
+      const open = vi.spyOn(s, "openPort").mockResolvedValue(undefined);
+      mountComponent();
+      await flush();
+      expect(s.port).toBe(expected);
+      expect(host!.querySelector("#sd-port")?.textContent).toContain(expected);
+      expect(host!.textContent).not.toContain("COM6");
+      expect(open).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a selected port that is still available", async () => {
+    const s = useSerialDebugStore();
+    s.port = "COM3";
+    mountComponent();
+    await flush();
+    expect(s.port).toBe("COM3");
+  });
+
+  it.each(["open", "opening"] as const)(
+    "keeps a missing port while %s and selects a replacement when idle",
+    async (state) => {
+      const s = useSerialDebugStore();
+      s.port = "COM6";
+      s[state] = true;
+      mountComponent();
+      await flush();
+      expect(s.port).toBe("COM6");
+      s[state] = false;
+      await flush();
+      expect(s.port).toBe("COM4");
+    },
+  );
+
+  it("keeps a remembered port when no replacements are available", async () => {
+    const s = useSerialDebugStore();
+    s.port = "COM6";
+    vi.mocked(wsTransport.listPorts).mockResolvedValue([]);
+    mountComponent();
+    await flush();
+    expect(s.port).toBe("COM6");
+    expect(host!.querySelector("#sd-port")?.textContent).toContain("COM6");
+  });
+
   it("scans once on first activation and again when returning while disconnected", async () => {
     const visible = ref(true);
     mountComponent(visible);
