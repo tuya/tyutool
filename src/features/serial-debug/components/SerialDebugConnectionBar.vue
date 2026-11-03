@@ -370,7 +370,7 @@ onDeactivated(() => {
               : undefined
           "
           :disabled="s.open || s.opening"
-          class="min-w-[12rem]"
+          class="w-[13rem] min-w-0"
         />
       </div>
 
@@ -417,24 +417,32 @@ onDeactivated(() => {
       </p>
       <div
         id="sd-port-feedback"
-        class="w-full flex flex-wrap items-center gap-2 text-xs text-[var(--ty-text-muted)]"
+        class="w-full min-w-0 flex items-center gap-2 text-xs text-[var(--ty-text-muted)]"
       >
         <span v-if="portsLoading" role="status">{{ t("common.loading") }}</span>
         <span v-else-if="portsError" role="alert">{{
           t("serialDebug.conn.portsFailed", { msg: portsError })
         }}</span>
-        <span v-else-if="s.port && !selectedPortAvailable">{{
-          t("serialDebug.conn.rememberedUnavailable", { port: s.port })
-        }}</span>
-        <span v-else-if="!availablePortRows.length">{{
-          t("serialDebug.conn.noDevicesHint")
-        }}</span>
+        <span
+          v-else-if="s.port && !selectedPortAvailable"
+          class="min-w-0 truncate"
+          :title="t('serialDebug.conn.rememberedUnavailable', { port: s.port })"
+          >{{
+            t("serialDebug.conn.rememberedUnavailable", { port: s.port })
+          }}</span
+        >
+        <span
+          v-else-if="!availablePortRows.length"
+          class="min-w-0 truncate"
+          :title="t('serialDebug.conn.noDevicesHint')"
+          >{{ t("serialDebug.conn.noDevicesHint") }}</span
+        >
         <span v-else role="status">{{
           t("common.portsAvailable", { n: availablePortRows.length })
         }}</span>
         <button
           type="button"
-          class="underline"
+          class="shrink-0 underline"
           :disabled="portsLoading"
           :aria-busy="portsLoading"
           @click="refreshPorts"

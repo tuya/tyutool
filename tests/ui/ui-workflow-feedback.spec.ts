@@ -110,6 +110,108 @@ async function noHorizontalOverflow(page: Page) {
   }
 }
 
+for (const width of [1024, 1549]) {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const path of [
+      "/flash",
+      "/serial-debug",
+      "/toolbox/batch-flash-auth",
+    ]) {
+      test(`${locale} ${width} ${path}: device events keep the workspace layout stable`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({
+          width,
+          height: width === 1024 ? 680 : 884,
+        });
+        await page.addInitScript(() =>
+          localStorage.setItem("tyutool-batch-auth-disclaimer-v1", "true"),
+        );
+        const state = await openWorkflow(page, path, locale);
+        const selectors =
+          path === "/flash"
+            ? [
+                ".conn-bar",
+                ".flash-workspace",
+                "#serial-port",
+                "#baud-rate",
+                "#chip-select",
+              ]
+            : path === "/serial-debug"
+              ? [".conn-bar", ".send-bar", "#sd-port", "#sd-baud"]
+              : ['.main-scroll [class*="min-w-[38rem]"] > div:first-child'];
+        const snapshot = () =>
+          page.evaluate(
+            (selectors) =>
+              selectors.map((selector) => {
+                const rect = document
+                  .querySelector(selector)!
+                  .getBoundingClientRect();
+                return {
+                  selector,
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                };
+              }),
+            selectors,
+          );
+        await expect.poll(() => state.scans).toBeGreaterThan(0);
+        // Wait for initialization to finish before measuring the settled layout.
+        if (path === "/flash")
+          await expect(page.locator("#flash-port-feedback")).not.toBeVisible();
+        else if (path === "/serial-debug")
+          await expect(page.locator("#sd-port-feedback")).toContainText(
+            locale === "en" ? "Available ports: 1." : "检测到 1 个可用串口。",
+          );
+        else
+          await expect(
+            page
+              .locator(".main-scroll")
+              .getByText("MOCK_PORT_1", { exact: true }),
+          ).toBeVisible();
+        const before = await snapshot();
+        for (const ports of [["MOCK_PORT_1", "MOCK_PORT_2"], []]) {
+          state.ports = ports;
+          state.holdScan = true;
+          const scans = state.scans;
+          state.deviceChanged();
+          await expect.poll(() => state.scans).toBe(scans + 1);
+          expect(await snapshot()).toEqual(before);
+          state.holdScan = false;
+          state.finishScan();
+          await expect.poll(snapshot).toEqual(before);
+          // Ensure the device update has settled before measuring or starting another scan.
+          if (path === "/flash")
+            await expect(page.locator("#serial-port")).toContainText(
+              ports.length
+                ? "MOCK_PORT_1"
+                : locale === "en"
+                  ? "No ports"
+                  : "无可用串口",
+            );
+          else if (path === "/serial-debug")
+            await expect(page.locator("#sd-port-feedback")).toContainText(
+              ports.length
+                ? locale === "en"
+                  ? "Available ports: 2."
+                  : "检测到 2 个可用串口。"
+                : "MOCK_PORT_1",
+            );
+          else
+            await expect(
+              page
+                .locator(".main-scroll")
+                .getByText("MOCK_PORT_2", { exact: true }),
+            ).toHaveCount(ports.length ? 1 : 0);
+          expect(await snapshot()).toEqual(before);
+        }
+      });
+    }
+  }
+}
+
 test("restored custom baud is visible after asynchronous workspace restoration", async ({
   page,
 }) => {
