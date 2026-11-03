@@ -4,22 +4,22 @@
   darktheme: dark;
 }
 
-/* Precision Workbench: stable semantic roles shared by every feature. */
+/* Lake Blue: stable semantic roles shared by every feature. */
 :root {
   color-scheme: light;
-  --ty-canvas: #f1f2ef;
-  --ty-sidebar: #e8ebe7;
+  --ty-canvas: #f4f8fb;
+  --ty-sidebar: #eaf2f8;
   --ty-surface: #ffffff;
   --ty-surface-elevated: #ffffff;
-  --ty-surface-muted: #f3f5f2;
-  --ty-field: #f8f9f6;
-  --ty-border: #d7ddd7;
-  --ty-border-strong: #7a8780;
-  --ty-text: #202b28;
-  --ty-text-muted: #56665f;
-  --ty-primary: #006b5e;
-  --ty-primary-hover: #00594e;
-  --ty-primary-soft: #e4f2ed;
+  --ty-surface-muted: #f1f6fa;
+  --ty-field: #f8fbfd;
+  --ty-border: #d5e1eb;
+  --ty-border-strong: #71869a;
+  --ty-text: #1d2c3b;
+  --ty-text-muted: #52677b;
+  --ty-primary: #1267a5;
+  --ty-primary-hover: #105987;
+  --ty-primary-soft: #e2f1fc;
   --ty-on-primary: #ffffff;
   --ty-action: var(--ty-primary);
   --ty-action-hover: var(--ty-primary-hover);
@@ -30,13 +30,13 @@
   --ty-danger: #b03436;
   --ty-on-danger: #ffffff;
   --ty-warning: #895709;
-  --ty-log-bg: #f8faf7;
+  --ty-log-bg: #f7fafc;
   --ty-log-fg: var(--ty-text);
   --ty-ring: var(--ty-primary);
   --ty-ring-offset: var(--ty-surface);
   --ty-radius: 0.625rem;
   --ty-control-radius: 0.375rem;
-  --ty-overlay-shadow: 0 16px 48px #20302926;
+  --ty-overlay-shadow: 0 16px 48px #28496726;
   --ty-scrim: #11151880;
   --phase-erase-from: var(--ty-primary);
   --phase-erase-to: var(--ty-primary);
@@ -53,25 +53,25 @@
 }
 .dark {
   color-scheme: dark;
-  --ty-canvas: #111518;
-  --ty-sidebar: #151a1d;
-  --ty-surface: #1a2024;
-  --ty-surface-elevated: #232b30;
-  --ty-surface-muted: #232b30;
-  --ty-field: #151b1f;
-  --ty-border: #303a40;
-  --ty-border-strong: #607077;
-  --ty-text: #edf2f2;
-  --ty-text-muted: #a0adb3;
-  --ty-primary: #74ddc9;
-  --ty-primary-hover: #8de7d6;
-  --ty-primary-soft: #223d39;
-  --ty-on-primary: #112824;
+  --ty-canvas: #0c141c;
+  --ty-sidebar: #11212f;
+  --ty-surface: #1d3040;
+  --ty-surface-elevated: #294354;
+  --ty-surface-muted: #294354;
+  --ty-field: #101f2c;
+  --ty-border: #526b80;
+  --ty-border-strong: #91a8bb;
+  --ty-text: #fafdff;
+  --ty-text-muted: #c4d6e5;
+  --ty-primary: #78c6f4;
+  --ty-primary-hover: #91d2f7;
+  --ty-primary-soft: #244c66;
+  --ty-on-primary: #102532;
   --ty-success: #9bdbaf;
   --ty-danger: #ff9b98;
   --ty-on-danger: #301413;
   --ty-warning: #f0c780;
-  --ty-log-bg: #13191c;
+  --ty-log-bg: #0e1923;
   --ty-overlay-shadow: 0 16px 48px #0006;
   --ty-scrim: #080c10a6;
 }
