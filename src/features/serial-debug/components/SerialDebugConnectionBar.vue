@@ -175,6 +175,22 @@ const canOpen = computed(
     (s.customBaudRate ?? s.baudRate) > 0,
 );
 
+function selectAvailablePort(): void {
+  if (s.open || s.opening || selectedPortAvailable.value) return;
+  const preferred =
+    availablePortRows.value.find((row) => row.portRole?.trim() === "log") ??
+    availablePortRows.value[0];
+  if (preferred) s.port = preferred.path;
+}
+
+watch(
+  () => s.open || s.opening,
+  (busy) => {
+    if (!busy && !portsLoading.value && !portsError.value)
+      selectAvailablePort();
+  },
+);
+
 async function refreshPorts(): Promise<void> {
   if (portsLoading.value) return;
   const generation = ++portsGeneration;
@@ -184,7 +200,7 @@ async function refreshPorts(): Promise<void> {
     const rows = await serialPortDiscovery.listPorts();
     if (generation !== portsGeneration) return;
     availablePortRows.value = rows;
-    if (!s.port.trim() && rows.length) s.port = rows[0].path;
+    selectAvailablePort();
   } catch (error) {
     if (generation === portsGeneration)
       portsError.value = error instanceof Error ? error.message : String(error);

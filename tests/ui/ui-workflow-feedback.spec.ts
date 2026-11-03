@@ -315,6 +315,44 @@ test("flash and serial debug share a device-event scan and keep a fresh dropdown
   expect(state.scans).toBe(before + 2);
 });
 
+for (const locale of ["en", "zh-CN"]) {
+  test(`serial debug replaces a missing idle port after a device event ${locale}`, async ({
+    page,
+  }) => {
+    const state = await openWorkflow(page, "/serial-debug", locale);
+    const port = page.locator("#sd-port");
+    state.ports = ["COM6"];
+    state.deviceChanged();
+    await expect(port).toHaveText("COM6");
+
+    await port.click();
+    state.ports = [];
+    state.deviceChanged();
+    await expect(port).toContainText("COM6");
+    await expect(page.getByRole("option", { name: /COM6/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+
+    state.ports = ["COM22", "COM23"];
+    state.deviceChanged();
+    await expect(port).toHaveText("COM22");
+    await expect(port).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("option", { name: /COM6/ })).toHaveCount(0);
+    await page.getByRole("option", { name: "COM23", exact: true }).click();
+
+    state.ports.push("COM24");
+    state.deviceChanged();
+    await expect(port).toHaveText("COM23");
+    await expect(
+      page.getByRole("button", {
+        name: locale === "en" ? "Open" : "打开",
+        exact: true,
+      }),
+    ).toBeVisible();
+  });
+}
+
 test("reboot control dropdown opens without scanning and updates while expanded", async ({
   page,
 }) => {
