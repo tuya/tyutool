@@ -1,6 +1,35 @@
 import { test, expect } from "playwright/test";
 import { openUi } from "./helpers/serial-log";
 
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [375, 1024, 1549]) {
+    test(`${theme} ${width}: toolbox entry stays compact and opens its tool`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 884 });
+      await openUi(page, "/toolbox", "zh-CN");
+      await page.evaluate(async (theme) => {
+        const url = "/src/stores/settings.ts";
+        const { useSettingsStore } = await import(url);
+        useSettingsStore().setTheme(theme);
+      }, theme);
+      await expect(page.locator(".page-header h1")).toHaveText("工具箱");
+      await expect(page.locator(".page-header-section")).toHaveCount(0);
+      await expect(page.locator(".page-header-desc")).toHaveCount(0);
+      const card = page.locator('[data-tool-id="batch-flash-auth"]');
+      await expect(card).toContainText("批量烧录授权");
+      const bounds = await card.boundingBox();
+      expect(bounds!.height).toBeLessThanOrEqual(140);
+      expect(bounds!.width).toBeLessThanOrEqual(576);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      await card.focus();
+      await expect(card).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(/\/toolbox\/batch-flash-auth$/);
+    });
+  }
+}
+
 for (const [width, height] of [
   [1280, 800],
   [1024, 680],
