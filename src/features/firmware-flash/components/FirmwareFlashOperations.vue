@@ -172,7 +172,9 @@ const operationHint = computed(
         {{ copyMessage }}
       </p>
       <!-- 内容区 -->
-      <div class="px-3.5 pb-3.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+      <div
+        class="relative px-3.5 pb-3.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
+      >
         <div class="space-y-3">
           <!-- 烧录 Tab -->
           <div
