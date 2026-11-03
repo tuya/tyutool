@@ -69,8 +69,8 @@ jobs:
       # offline (cache, digest and manifest parsing) and reach no network.
       - name: Clippy and test tyutool-core's optional features
         run: |
-          cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download -- -D warnings
-          cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download
+          cargo clippy -p tyutool-core --all-targets --features zip,excel,mock-chip,record-io,download,serial-hotplug -- -D warnings
+          cargo test -p tyutool-core --features zip,excel,mock-chip,record-io,download,serial-hotplug
       - name: Bindings are up to date
         run: |
           cargo test -p tyutool-core --features ts-rs

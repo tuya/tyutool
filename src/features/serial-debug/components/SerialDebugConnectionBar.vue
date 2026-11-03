@@ -12,13 +12,12 @@ import { useModalFocus } from "@/composables/useModalFocus";
 import { useI18n } from "vue-i18n";
 import { faCircleNotch } from "@fortawesome/free-solid-svg-icons";
 import { useSerialDebugStore } from "@/stores/serial-debug";
-import { isTauriRuntime } from "@/runtime";
 import {
   formatSerialPortLabel,
   type TauriSerialPortRow,
   tuyaDualSerialHoverTooltip,
 } from "@/utils/serial-port-label";
-import { wsTransport } from "@/transport/ws-transport";
+import { serialPortDiscovery } from "@/features/serial-port-indicators/discovery";
 import { useFlashStore } from "@/stores/flash";
 import {
   AUTH_ONLY_CHIP_ID,
@@ -182,11 +181,7 @@ async function refreshPorts(): Promise<void> {
   portsLoading.value = true;
   portsError.value = "";
   try {
-    let rows: TauriSerialPortRow[];
-    if (isTauriRuntime()) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      rows = await invoke<TauriSerialPortRow[]>("list_serial_ports_cmd");
-    } else rows = await wsTransport.listPorts();
+    const rows = await serialPortDiscovery.listPorts();
     if (generation !== portsGeneration) return;
     availablePortRows.value = rows;
     if (!s.port.trim() && rows.length) s.port = rows[0].path;
@@ -297,6 +292,11 @@ async function triggerDeviceReset(): Promise<void> {
   );
 }
 
+const stopDeviceNotifications = serialPortDiscovery.subscribe(() => {
+  void refreshPorts();
+});
+onBeforeUnmount(stopDeviceNotifications);
+
 onMounted(() => {
   void refreshPorts();
 });
@@ -312,6 +312,9 @@ onActivated(() => {
 });
 
 onDeactivated(() => {
+  // A scan started for the previous activation must not become the new
+  // activation's result (or error) through the shared pending request.
+  if (portsLoading.value) serialPortDiscovery.invalidate();
   portsGeneration++;
   portsLoading.value = false;
   showSettings.value = false;
@@ -368,7 +371,6 @@ onDeactivated(() => {
           "
           :disabled="s.open || s.opening"
           class="min-w-[12rem]"
-          @open="refreshPorts"
         />
       </div>
 

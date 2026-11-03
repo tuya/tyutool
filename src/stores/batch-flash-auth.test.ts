@@ -2,7 +2,7 @@
 // src/stores/batch-flash-auth.test.ts
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { nextTick } from "vue";
-import { setActivePinia, createPinia } from "pinia";
+import { setActivePinia, createPinia, disposePinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useBatchFlashAuthStore } from "./batch-flash-auth";
 import type { BatchSlotState } from "@/features/batch-flash-auth/types";
@@ -2596,5 +2596,120 @@ describe("Excel validation follows the selected file", () => {
     expect(s.excelStats).toBeNull();
     expect(s.canStart).toBe(false);
     s.cleanup();
+  });
+});
+
+describe("batch serial device notifications", () => {
+  const devices = { enumerate: vi.fn(), stop: vi.fn(), changed: () => {} };
+  let useDeviceStore: typeof useBatchFlashAuthStore;
+  beforeEach(async () => {
+    vi.resetModules();
+    devices.enumerate.mockReset();
+    devices.stop.mockReset();
+    vi.doMock("@/runtime", () => ({
+      isTauriRuntime: () => false,
+      getRuntime: () => "web",
+    }));
+    const { createSerialPortDiscovery } = await vi.importActual<
+      typeof import("@/features/serial-port-indicators/discovery")
+    >("@/features/serial-port-indicators/discovery");
+    vi.doMock("@/features/serial-port-indicators/discovery", () => ({
+      serialPortDiscovery: createSerialPortDiscovery({
+        enumerate: devices.enumerate,
+        async listen(changed) {
+          devices.changed = changed;
+          return devices.stop;
+        },
+      }),
+    }));
+    ({ useBatchFlashAuthStore: useDeviceStore } =
+      await import("./batch-flash-auth"));
+    setActivePinia(createPinia());
+    devices.enumerate.mockResolvedValue([{ path: "COM1" }]);
+  });
+
+  it("updates idle slots, applies filters and preserves active tasks and results", async () => {
+    const store = useDeviceStore();
+    await store.ensureListener();
+    store.addPorts(["COM1", "COM2", "COM3", "COM4"]);
+    store.slots[1].status = "authorizing";
+    store.slots[2].status = "done";
+    store.slots[3].status = "failed";
+    const active = store.slots[1];
+    store.filterConfig.blockedPorts = ["COM6"];
+    devices.enumerate.mockResolvedValue([{ path: "COM5" }, { path: "COM6" }]);
+    devices.changed();
+    await vi.waitFor(() => expect(store.portsLoading).toBe(false));
+    expect(store.slots.map((slot) => slot.port)).toEqual([
+      "COM2",
+      "COM3",
+      "COM4",
+      "COM5",
+    ]);
+    expect(store.slots[0]).toBe(active);
+    expect(store.slots[3].status).toBe("idle");
+    expect(store.lastScannedPorts).toEqual(["COM5", "COM6"]);
+    await store.autoAssign();
+    expect(devices.enumerate).toHaveBeenCalledTimes(1);
+    store.cleanup();
+  });
+
+  it("keeps usable slots on event scan failure and retries on the next event", async () => {
+    const store = useDeviceStore();
+    await store.ensureListener();
+    store.addPorts(["COM1"]);
+    devices.enumerate.mockRejectedValueOnce(new Error("Device scan failed"));
+    devices.changed();
+    await vi.waitFor(() => expect(store.portsError).toBe("Device scan failed"));
+    expect(store.slots.map((slot) => slot.port)).toEqual(["COM1"]);
+    devices.enumerate.mockResolvedValue([]);
+    devices.changed();
+    await vi.waitFor(() => expect(store.slots).toEqual([]));
+    expect(store.portsError).toBe("");
+    store.cleanup();
+  });
+
+  it("preserves a cancelled current-run slot and an uncertain write", async () => {
+    const store = useDeviceStore();
+    await store.ensureListener();
+    store.addPorts(["COM1", "COM2", "COM3"]);
+    store.currentBatchPorts = ["COM1"];
+    store.slots[1].writeUncertain = true;
+    devices.enumerate.mockResolvedValue([]);
+    devices.changed();
+    await vi.waitFor(() => expect(store.portsLoading).toBe(false));
+    expect(store.slots.map((slot) => slot.port)).toEqual(["COM1", "COM2"]);
+    store.cleanup();
+  });
+
+  it("subscribes once and ignores an in-flight scan after cleanup", async () => {
+    const store = useDeviceStore();
+    await store.ensureListener();
+    await store.ensureListener();
+    store.addPorts(["COM1"]);
+    let finish!: (rows: { path: string }[]) => void;
+    devices.enumerate.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    devices.changed();
+    expect(devices.enumerate).toHaveBeenCalledTimes(1);
+    store.cleanup();
+    finish([{ path: "COM2" }]);
+    await vi.waitFor(() => expect(devices.stop).toHaveBeenCalledTimes(1));
+    expect(store.slots.map((slot) => slot.port)).toEqual(["COM1"]);
+    devices.changed();
+    expect(devices.enumerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases device subscription when the store is disposed", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useDeviceStore();
+    await store.ensureListener();
+    disposePinia(pinia);
+    await vi.waitFor(() => expect(devices.stop).toHaveBeenCalledTimes(1));
   });
 });

@@ -1,4 +1,5 @@
-import { ref } from "vue";
+import { ref, watch, getCurrentScope, onScopeDispose } from "vue";
+import { serialPortDiscovery } from "@/features/serial-port-indicators/discovery";
 import type { ComputedRef, Ref } from "vue";
 import { i18n } from "@/i18n";
 import { isTauriRuntime } from "@/runtime";
@@ -11,7 +12,6 @@ import {
   formatSerialPortLabel,
   tuyaDualSerialHoverTooltip,
   type SerialPortDropdownOption,
-  type TauriSerialPortRow,
 } from "@/utils/serial-port-label";
 
 const t = i18n.global.t;
@@ -53,13 +53,25 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
     return pendingScan;
   }
 
+  let deviceRefreshDeferred = false;
+  if (getCurrentScope()) {
+    const stop = serialPortDiscovery.subscribe(() => {
+      if (deps.busy.value) deviceRefreshDeferred = true;
+      else void refreshDevice();
+    });
+    onScopeDispose(stop);
+    watch(deps.busy, (busy) => {
+      if (!busy && deviceRefreshDeferred) {
+        deviceRefreshDeferred = false;
+        void refreshDevice();
+      }
+    });
+  }
+
   async function scanPorts(): Promise<void> {
     if (isTauriRuntime()) {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const ports = await invoke<TauriSerialPortRow[]>(
-          "list_serial_ports_cmd",
-        );
+        const ports = await serialPortDiscovery.listPorts();
         serialPortOptions.value = ports.map((p) => {
           const tip = tuyaDualSerialHoverTooltip(
             p.usbVid,
@@ -118,7 +130,7 @@ export function useFlashConnection(deps: FlashConnectionDeps) {
     } else {
       // Web mode: ask the local serve process for ports
       try {
-        const ports = await wsTransport.listPorts();
+        const ports = await serialPortDiscovery.listPorts();
         serialPortOptions.value = ports.map((p) => {
           const tip = tuyaDualSerialHoverTooltip(
             p.usbVid,

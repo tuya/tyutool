@@ -20,6 +20,8 @@ use tyutool_core::{
 /// Set once at startup; included in exported issue-report metadata.
 static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+struct SerialHotplugState(StdMutex<Option<tyutool_core::serial_hotplug::SerialPortWatcher>>);
+
 struct FlashState {
     /// Cancel signal for the current operation. The slot guarantees a new
     /// operation gets a *fresh* flag rather than a reset one, so starting a job
@@ -672,6 +674,17 @@ pub fn run() {
             if let Ok(log_dir) = app.path().app_log_dir() {
                 tyutool_core::prune_log_files(&log_dir, &logs::LOG_RETENTION);
             }
+            match tyutool_core::serial_hotplug::SerialPortWatcher::start({
+                let handle = app.handle().clone();
+                move || {
+                    let _ = handle.emit("serial-ports-changed", ());
+                }
+            }) {
+                Ok(watcher) => {
+                    app.manage(SerialHotplugState(StdMutex::new(Some(watcher))));
+                }
+                Err(error) => log::warn!("Serial device notifications unavailable: {error}"),
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -745,6 +758,13 @@ pub fn run() {
                     });
                 }
                 RunEvent::ExitRequested { .. } => {
+                    // Stop before dropping the app: the watcher callback owns an
+                    // AppHandle and must release it to avoid a state/handle cycle.
+                    if let Some(state) = app_handle.try_state::<SerialHotplugState>() {
+                        if let Ok(mut watcher) = state.0.lock() {
+                            drop(watcher.take());
+                        }
+                    }
                     // Signal cancel for all batch flash threads and collect handles
                     let flash_threads: Vec<JoinHandle<()>> = {
                         let mut v = Vec::new();

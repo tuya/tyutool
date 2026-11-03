@@ -1,8 +1,8 @@
-import { ref, shallowRef, computed, watch } from "vue";
+import { ref, shallowRef, computed, watch, onScopeDispose } from "vue";
 import { defineStore } from "pinia";
 import type { FlashProgressPayload } from "@/features/firmware-flash/flash-ipc-types";
 import { chipManifest } from "@/features/firmware-flash/chip-manifests";
-import { wsTransport } from "@/transport/ws-transport";
+import { serialPortDiscovery } from "@/features/serial-port-indicators/discovery";
 import { isTauriRuntime } from "@/runtime";
 import { i18n } from "@/i18n";
 import { rLog } from "@/utils/log";
@@ -140,6 +140,7 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
   let unlistenAuth: (() => void) | undefined;
   let unlistenFwProgress: (() => void) | undefined;
   let unlistenRead: (() => void) | undefined;
+  let unlistenPorts: (() => void) | undefined;
   let _saveStatsTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -404,23 +405,24 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     }
   }
 
-  async function autoAssign() {
+  async function refreshPorts(preserveResults: boolean) {
     const generation = ++portsGeneration;
     portsLoading.value = true;
     portsError.value = "";
     try {
-      let all: Array<{ path: string }>;
-      if (isTauriRuntime()) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        all = await invoke("list_serial_ports_cmd");
-      } else all = await wsTransport.listPorts();
+      const all = await serialPortDiscovery.listPorts();
       if (generation !== portsGeneration) return;
       lastScannedPorts.value = all.map((row) => row.path);
-      // Keep active slots; pruning stale idle results follows the existing refresh contract.
+      // Device events must not discard task results while updating available ports.
       const present = new Set(lastScannedPorts.value);
       slots.value = slots.value.filter(
         (slot) =>
-          ACTIVE_STATUSES.includes(slot.status) || present.has(slot.port),
+          ACTIVE_STATUSES.includes(slot.status) ||
+          (preserveResults &&
+            (slot.status !== "idle" ||
+              currentBatchPorts.value.includes(slot.port) ||
+              isQuarantinedSlot(slot))) ||
+          present.has(slot.port),
       );
       addPorts(
         applyPortFilter(
@@ -435,6 +437,10 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     } finally {
       if (generation === portsGeneration) portsLoading.value = false;
     }
+  }
+
+  async function autoAssign() {
+    await refreshPorts(false);
   }
 
   async function validateExcel(path: string) {
@@ -1373,6 +1379,9 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
 
   // ── Event listener lifecycle ──────────────────────────────────────────────
   async function ensureListener() {
+    unlistenPorts ??= serialPortDiscovery.subscribe(() => {
+      void refreshPorts(true);
+    });
     if (!isTauriRuntime()) return;
     const { listen } = await import("@tauri-apps/api/event");
     if (!unlisten) {
@@ -1413,11 +1422,19 @@ export const useBatchFlashAuthStore = defineStore("batch-flash-auth", () => {
     }
   }
 
+  function stopPortDiscovery() {
+    portsGeneration++;
+    portsLoading.value = false;
+    unlistenPorts?.();
+    unlistenPorts = undefined;
+  }
+
+  onScopeDispose(stopPortDiscovery);
+
   function cleanup() {
     archiveGeneration++;
     if (archiveStatus.value === "archiving") archiveStatus.value = "idle";
-    portsGeneration++;
-    portsLoading.value = false;
+    stopPortDiscovery();
     excelValidationGeneration++;
     excelLoading.value = false;
     clearTimeout(_saveStatsTimer);

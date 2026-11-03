@@ -109,6 +109,7 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    SerialPortsChanged,
     Ports {
         ports: Vec<SerialPortEntry>,
     },
@@ -228,6 +229,20 @@ pub async fn run_serve(port: u16) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
 
+    let (device_events, _) = tokio::sync::broadcast::channel::<()>(16);
+    let _watcher = match tyutool_core::serial_hotplug::SerialPortWatcher::start({
+        let sender = device_events.clone();
+        move || {
+            let _ = sender.send(());
+        }
+    }) {
+        Ok(watcher) => Some(watcher),
+        Err(error) => {
+            log::warn!("Serial device notifications unavailable: {error}");
+            None
+        }
+    };
+
     println!("tyutool-cli serve listening on ws://{addr}");
     println!("Press Ctrl+C to stop.");
 
@@ -235,7 +250,7 @@ pub async fn run_serve(port: u16) -> anyhow::Result<()> {
         match listener.accept().await {
             Ok((stream, peer)) => {
                 log::info!("WS connection from {peer}");
-                tokio::spawn(handle_connection(stream));
+                tokio::spawn(handle_connection(stream, device_events.subscribe()));
             }
             Err(e) => log::warn!("accept error: {e}"),
         }
@@ -324,7 +339,17 @@ fn forbidden(reason: &str) -> tokio_tungstenite::tungstenite::http::Response<Opt
 
 // ── Per-connection handler ───────────────────────────────────────────────────
 
-async fn handle_connection(stream: tokio::net::TcpStream) {
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn handle_connection(
+    stream: tokio::net::TcpStream,
+    mut device_events: tokio::sync::broadcast::Receiver<()>,
+) {
     // Cap WS message size at 16 MiB (default is 64 MiB) to bound per-connection
     // memory amplification from a malicious client streaming a large base64 blob.
     // WebSocketConfig is #[non_exhaustive] since tungstenite 0.26 — set fields
@@ -362,6 +387,18 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
     // the sink in a single drainer task fed by an unbounded mpsc.
     use tokio::sync::mpsc;
     let (sink_tx, mut sink_rx) = mpsc::unbounded_channel::<ServerMessage>();
+    let device_sink = sink_tx.clone();
+    let _notifications = AbortOnDrop(tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = device_sink.closed() => break,
+                event = device_events.recv() => {
+                    if matches!(event, Err(tokio::sync::broadcast::error::RecvError::Closed)) { break; }
+                    if device_sink.send(ServerMessage::SerialPortsChanged).is_err() { break; }
+                }
+            }
+        }
+    }));
     // The chunk bridge and every archive-ingest path share one sink for the
     // life of the connection; it is just a channel handle.
     let ws_sink = WsSink {
@@ -868,6 +905,9 @@ async fn handle_connection(stream: tokio::net::TcpStream) {
         }
     }
 
+    // Release all connection senders before waiting for the sink to drain.
+    drop(_notifications);
+    drop(ws_sink);
     drop(sink_tx);
     let _ = pump.await;
 
@@ -1145,6 +1185,38 @@ mod tests {
     }
 
     use super::*;
+
+    #[tokio::test]
+    async fn device_notification_is_pushed_without_a_client_scan() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("loopback listener");
+        let address = listener.local_addr().expect("listener address");
+        let (events, _) = tokio::sync::broadcast::channel(4);
+        let receiver = events.subscribe();
+        let handler = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("client connection");
+            super::handle_connection(stream, receiver).await;
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .expect("local websocket");
+        events.send(()).expect("device notification receiver");
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), client.next())
+            .await
+            .expect("notification timeout")
+            .expect("notification frame")
+            .expect("websocket frame");
+        assert_eq!(
+            frame.to_text().expect("notification text"),
+            r#"{"type":"serial_ports_changed"}"#
+        );
+        client.close(None).await.expect("close client");
+        tokio::time::timeout(std::time::Duration::from_secs(2), handler)
+            .await
+            .expect("connection cleanup")
+            .expect("handler join");
+    }
 
     #[test]
     fn deserialize_list_ports() {

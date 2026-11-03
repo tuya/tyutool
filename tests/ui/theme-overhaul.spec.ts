@@ -428,7 +428,7 @@ for (const theme of ["light", "dark"] as const) {
             name: locale === "en" ? "Refresh" : "刷新",
             exact: true,
           }),
-        ).toBeEnabled();
+        ).toHaveCount(0);
         const log = page.getByRole("log");
         await expect(log).toContainText("A".repeat(800));
         const layout = await page.evaluate(() => {

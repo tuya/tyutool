@@ -5,6 +5,9 @@ edition = "2021"
 description = "Shared flash/erase plugin registry and serial helpers for tyutool CLI and GUI"
 
 [features]
+# Native serial device notifications. GUI and dev-serve enable this; bridge
+# leaves it off. Linux uses inotify, keeping CLI musl builds libudev-free.
+serial-hotplug = ["dep:libc", "dep:windows-sys", "dep:core-foundation-sys", "dep:io-kit-sys"]
 # Enables libudev-backed port enumeration on Linux (GUI / glibc builds only).
 # CLI musl builds and CI must leave this disabled; the Tauri shell enables it.
 libudev = ["serialport/libudev"]
@@ -96,3 +99,13 @@ ts-rs = { version = "12", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"], optional = true }
 calamine = { version = "0.37", features = ["dates"], optional = true }
 rust_xlsxwriter = { version = "0.99", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation-sys = { version = "0.8", optional = true }
+io-kit-sys = { version = "0.4", optional = true }

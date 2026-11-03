@@ -36,8 +36,12 @@ async function openWorkflow(
     errorMessage: "Port disconnected",
     holdScan: false,
     finishScan: () => {},
+    ports: ["MOCK_PORT_1"],
+    deviceChanged: () => {},
   };
   await page.routeWebSocket(/^ws:\/\/127\.0\.0\.1:9527\/?$/, (socket) => {
+    state.deviceChanged = () =>
+      socket.send(JSON.stringify({ type: "serial_ports_changed" }));
     socket.onMessage((message) => {
       if (typeof message !== "string") return;
       const request = JSON.parse(message) as {
@@ -48,9 +52,7 @@ async function openWorkflow(
       if (request.type === "list_ports") {
         state.scans++;
         const finish = () =>
-          socket.send(
-            JSON.stringify({ type: "ports", ports: ["MOCK_PORT_1"] }),
-          );
+          socket.send(JSON.stringify({ type: "ports", ports: state.ports }));
         if (state.holdScan) state.finishScan = finish;
         else finish();
       } else if (request.type === "serial_debug_open") {
@@ -114,6 +116,168 @@ test("restored custom baud is visible after asynchronous workspace restoration",
   await openWorkflow(page, "/flash");
   await expect(page.locator("#baud-rate-custom")).toHaveValue("123456");
   await expect(page.locator("#baud-rate")).toContainText("Custom");
+});
+
+test("flash port dropdown opens without scanning or a separate refresh button", async ({
+  page,
+}) => {
+  const state = await openWorkflow(page, "/flash");
+  const port = page.locator("#serial-port");
+  await expect(page.locator("#flash-port-feedback")).not.toBeVisible();
+  await expect(
+    page
+      .locator(".conn-bar")
+      .getByRole("button", { name: "Refresh", exact: true }),
+  ).toHaveCount(0);
+  const before = state.scans;
+  await port.click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  expect(state.scans).toBe(before);
+  await port.press("Escape");
+  await page.waitForTimeout(1100);
+  await expect(page.locator("#flash-port-feedback")).not.toBeVisible();
+  await port.click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  expect(state.scans).toBe(before);
+});
+
+test("device notifications update flash ports immediately and suppress a nearby dropdown scan", async ({
+  page,
+}) => {
+  const state = await openWorkflow(page, "/flash");
+  await expect(page.locator("#flash-port-feedback")).not.toBeVisible();
+  const before = state.scans;
+  state.ports.push("MOCK_PORT_2");
+  state.deviceChanged();
+  await expect.poll(() => state.scans).toBe(before + 1);
+  const port = page.locator("#serial-port");
+  await port.click();
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
+  ).toBeVisible();
+  expect(state.scans).toBe(before + 1);
+  await port.press("ArrowDown");
+  state.ports = ["MOCK_PORT_1"];
+  state.deviceChanged();
+  await expect.poll(() => state.scans).toBe(before + 2);
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
+  ).toHaveCount(0);
+  await expect(port).toHaveAttribute("aria-expanded", "true");
+  const activeOption = await port.getAttribute("aria-activedescendant");
+  await expect(page.locator(`[id="${activeOption}"]`)).toContainText(
+    "MOCK_PORT_1",
+  );
+  expect(state.scans).toBe(before + 2);
+  state.ports.push("MOCK_PORT_3");
+  state.deviceChanged();
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_3", exact: true }),
+  ).toBeVisible();
+  await expect(port).toHaveAttribute("aria-expanded", "true");
+  expect(state.scans).toBe(before + 3);
+});
+
+test("flash and serial debug share a device-event scan and keep a fresh dropdown", async ({
+  page,
+}) => {
+  const state = await openWorkflow(page, "/serial-debug");
+  await expect(page.locator("#sd-port-feedback")).toContainText(
+    "Available ports: 1.",
+  );
+  const port = page.locator("#sd-port");
+  const before = state.scans;
+  await port.click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await expect(page.locator("#sd-port-feedback")).toContainText(
+    "Available ports: 1.",
+  );
+  expect(state.scans).toBe(before);
+  state.ports.push("MOCK_PORT_2");
+  state.deviceChanged();
+  await expect(page.locator("#sd-port-feedback")).toContainText(
+    "Available ports: 2.",
+  );
+  expect(state.scans).toBe(before + 1);
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
+  ).toBeVisible();
+  await expect(port).toHaveAttribute("aria-expanded", "true");
+  expect(state.scans).toBe(before + 1);
+  state.ports = ["MOCK_PORT_1"];
+  state.deviceChanged();
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
+  ).toHaveCount(0);
+  await expect(port).toHaveAttribute("aria-expanded", "true");
+  expect(state.scans).toBe(before + 2);
+});
+
+test("reboot control dropdown opens without scanning and updates while expanded", async ({
+  page,
+}) => {
+  const state = await openWorkflow(page, "/serial-debug");
+  await expect(page.locator("#sd-port-feedback")).toContainText(
+    "Available ports: 1.",
+  );
+  await page.getByRole("button", { name: "Change", exact: true }).click();
+  const port = page.getByRole("combobox", {
+    name: "Control port",
+    exact: true,
+  });
+  const before = state.scans;
+  await port.click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  expect(state.scans).toBe(before);
+  await expect(page.locator("#sd-port-feedback")).toContainText(
+    "Available ports: 1.",
+  );
+  state.ports.push("MOCK_PORT_2");
+  state.deviceChanged();
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
+  ).toBeVisible();
+  await expect(port).toHaveAttribute("aria-expanded", "true");
+  expect(state.scans).toBe(before + 1);
+  state.ports = ["MOCK_PORT_1"];
+  state.deviceChanged();
+  await expect(
+    page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
+  ).toHaveCount(0);
+  await expect(port).toHaveAttribute("aria-expanded", "true");
+  expect(state.scans).toBe(before + 2);
+  await port.press("Escape");
+  await port.click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  expect(state.scans).toBe(before + 2);
+});
+
+test("batch authorization updates device slots and shares notification scans with other features", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("tyutool-batch-auth-disclaimer-v1", "true"),
+  );
+  const state = await openWorkflow(page, "/toolbox/batch-flash-auth");
+  const slots = page.locator(".main-scroll");
+  await expect(slots.getByText("MOCK_PORT_1", { exact: true })).toBeVisible();
+  const before = state.scans;
+  state.ports.push("MOCK_PORT_2");
+  state.deviceChanged();
+  await expect(slots.getByText("MOCK_PORT_2", { exact: true })).toBeVisible();
+  expect(state.scans).toBe(before + 1);
+  state.ports = ["MOCK_PORT_2"];
+  state.deviceChanged();
+  await expect(slots.getByText("MOCK_PORT_1", { exact: true })).toHaveCount(0);
+  expect(state.scans).toBe(before + 2);
+  await page.locator('a[href="/settings"]').click();
+  state.ports.push("MOCK_PORT_3");
+  state.deviceChanged();
+  await expect.poll(() => state.scans).toBe(before + 3);
+  await page.locator('a[href="/toolbox"]').click();
+  await page.locator('a[href="/toolbox/batch-flash-auth"]').click();
+  await expect(slots.getByText("MOCK_PORT_3", { exact: true })).toBeVisible();
+  expect(state.scans).toBe(before + 3);
 });
 
 test("sidebar activation scans once and pending explicit refresh is not duplicated", async ({

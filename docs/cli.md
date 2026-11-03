@@ -606,6 +606,15 @@ It binds `127.0.0.1` only, requires a loopback `Host` header (blocking DNS-rebin
 
 For the shipped, hardened variant of this idea — token grants, an Origin allowlist, an audit log — see the separate `tyutool-bridge` binary.
 
+On Windows, macOS and Linux, `serve` listens for native serial-device changes and
+pushes `{"type":"serial_ports_changed"}` to connected clients. The GUI/dev-web
+client refreshes the port list on that notification. Opening a port dropdown
+does not enumerate devices. Page initialization and explicit scans reuse a
+successful notification-triggered scan for 1 second (`DEVICE_EVENT_REFRESH_WINDOW_MS` in
+`src/features/serial-port-indicators/discovery.ts`). Another device event
+invalidates that result immediately. If native notification setup fails, the
+server logs a warning; initial and explicit enumeration remain available.
+
 ---
 
 ### `logs` — inspect the session log files

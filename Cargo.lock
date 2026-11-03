@@ -5764,9 +5764,12 @@ name = "tyutool-core"
 version = "3.2.10"
 dependencies = [
  "calamine",
+ "core-foundation-sys",
  "crc32fast",
  "dirs 7.0.0",
  "espflash",
+ "io-kit-sys",
+ "libc",
  "log",
  "md-5 0.11.0",
  "regex",
@@ -5780,6 +5783,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
  "ts-rs",
+ "windows-sys 0.61.2",
  "zip 9.1.3",
 ]
 
