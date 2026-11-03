@@ -172,16 +172,6 @@ function navIndicator(name: string) {
       </div>
     </aside>
     <div class="workbench-content flex min-h-0 min-w-0 flex-1 flex-col">
-      <div
-        v-if="!hideChrome"
-        class="workbench-location flex shrink-0 items-center border-b border-[var(--ty-border)] px-6 py-3 text-xs text-[var(--ty-text-muted)]"
-      >
-        <span>{{ t("app.workbench") }}</span
-        ><span class="mx-2" aria-hidden="true">/</span
-        ><span>{{
-          route.meta.titleKey ? t(route.meta.titleKey) : "tyutool"
-        }}</span>
-      </div>
       <main
         ref="mainRef"
         id="app-main"

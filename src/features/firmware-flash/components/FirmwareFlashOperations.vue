@@ -148,7 +148,7 @@ const operationHint = computed(
           :aria-controls="`${tabId}-${tab.id}-panel`"
           :tabindex="ctx.activeTab === tab.id ? 0 : -1"
           :aria-selected="ctx.activeTab === tab.id"
-          class="ops-tab flex-1 px-2 py-2 text-sm font-medium transition-colors"
+          class="ops-tab flex-1 px-2 py-2 text-sm transition-colors"
           :class="
             ctx.activeTab === tab.id ? 'ops-tab-active' : 'ops-tab-inactive'
           "
