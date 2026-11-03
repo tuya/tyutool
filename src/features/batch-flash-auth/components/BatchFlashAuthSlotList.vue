@@ -52,6 +52,7 @@ async function onRead(port: string) {
       v-if="store.portsLoading"
       role="status"
       class="px-3 py-2 text-xs text-[var(--ty-text-muted)]"
+      :class="{ 'sr-only': store.lastScannedPorts !== null }"
     >
       {{ t("common.loading") }}
     </p>

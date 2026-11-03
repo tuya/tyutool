@@ -130,7 +130,7 @@ const chipValue = computed({
               ? 'flash-port-feedback'
               : undefined
           "
-          class="w-auto min-w-[8.5rem] max-w-[16rem]"
+          class="w-[13rem] min-w-0"
         />
       </div>
 
@@ -182,6 +182,10 @@ const chipValue = computed({
         v-if="ctx.portsRefreshing || ctx.portsRefreshError"
         id="flash-port-feedback"
         class="w-full flex flex-wrap items-center gap-2 text-xs text-[var(--ty-text-muted)]"
+        :class="{
+          'sr-only':
+            ctx.portsRefreshing && ctx.portsScanned && !ctx.portsRefreshError,
+        }"
       >
         <span v-if="ctx.portsRefreshing" role="status">{{
           t("common.loading")
