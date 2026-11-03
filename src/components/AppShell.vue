@@ -141,9 +141,9 @@ function navIndicator(name: string) {
 
       <!-- Quick theme + language toggles (md+ only; mobile users go to /settings) -->
       <div
-        class="hidden flex-col items-center gap-1.5 border-t border-[var(--ty-border)] p-3 md:flex"
+        class="hidden items-center justify-center gap-1 border-t border-[var(--ty-border)] px-2 py-3 md:flex"
       >
-        <div class="flex items-center justify-center gap-1.5">
+        <div class="flex shrink-0 items-center justify-center gap-0.5">
           <button
             type="button"
             class="flex size-9 items-center justify-center rounded-lg text-[var(--ty-text-muted)] transition-colors hover:bg-[var(--ty-surface-muted)] hover:text-[var(--ty-text)]"
@@ -167,9 +167,10 @@ function navIndicator(name: string) {
             {{ langBadge }}
           </button>
         </div>
-        <span class="font-mono text-[11px] text-[var(--ty-text-muted)]">{{
-          APP_VERSION
-        }}</span>
+        <span
+          class="shrink-0 whitespace-nowrap font-mono text-[11px] text-[var(--ty-text-muted)]"
+          >{{ APP_VERSION }}</span
+        >
       </div>
     </aside>
     <div class="workbench-content flex min-h-0 min-w-0 flex-1 flex-col">
