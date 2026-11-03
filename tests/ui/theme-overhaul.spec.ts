@@ -493,3 +493,80 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+for (const viewport of [
+  { width: 1024, height: 680 },
+  { width: 1282, height: 801 },
+  { width: 1549, height: 884 },
+]) {
+  test(`${viewport.width}: flash segments stay contained and usable`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await openUi(page, "/flash", "zh-CN", ["MOCK_PORT_1"]);
+    await page.evaluate(async () => {
+      const url = "/src/stores/flash.ts";
+      const { useFlashStore } = await import(url);
+      const store = useFlashStore();
+      store.selectedChipId = "esp32c6";
+      store.flashSegments[0].firmwarePath = "C:\\firmware\\bootloader.bin";
+      for (let index = 1; index < 8; index++) {
+        store.addSegment();
+        store.flashSegments[index].firmwarePath =
+          `C:\\firmware\\part-${index}.bin`;
+      }
+    });
+    await expect(page.locator(".conn-bar")).toContainText("ESP32-C6");
+
+    const metrics = await page.evaluate(() => {
+      const documentElement = document.documentElement;
+      const main = document.querySelector<HTMLElement>("#app-main")!;
+      const panel = document.querySelector<HTMLElement>(
+        '[role="tabpanel"][aria-labelledby$="-flash"]',
+      )!;
+      const content = panel.parentElement!.parentElement!;
+      return {
+        documentHeight: documentElement.scrollHeight,
+        viewportHeight: documentElement.clientHeight,
+        mainHeight: main.scrollHeight,
+        mainClientHeight: main.clientHeight,
+        contentHeight: content.scrollHeight,
+        contentClientHeight: content.clientHeight,
+      };
+    });
+    expect(metrics.documentHeight).toBeLessThanOrEqual(metrics.viewportHeight);
+    expect(metrics.mainHeight).toBeLessThanOrEqual(metrics.mainClientHeight);
+    expect(metrics.contentHeight).toBeGreaterThan(metrics.contentClientHeight);
+
+    const content = page
+      .locator('[role="tabpanel"][aria-labelledby$="-flash"]')
+      .locator("xpath=../..");
+    await content.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(
+      page.getByRole("button", { name: /添加烧录分段/ }),
+    ).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: /开始烧录/ }),
+    ).toBeInViewport();
+
+    const browse = page.getByRole("button", { name: /浏览/ }).first();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      browse.click(),
+    ]);
+    await chooser.setFiles({
+      name: "selected.bin",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from([0x01, 0x02]),
+    });
+    await expect(
+      page.getByRole("textbox", { name: "分段 1: 固件文件" }),
+    ).toHaveValue("selected.bin");
+
+    await page.screenshot({
+      path: testInfo.outputPath(`firmware-scroll-${viewport.width}.png`),
+    });
+  });
+}
