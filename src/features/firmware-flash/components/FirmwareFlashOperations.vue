@@ -108,9 +108,6 @@ function onTabKey(event: KeyboardEvent): void {
 const credentialErrors = computed(() =>
   authorizeCredentialErrors(ctx.authorizeUuid, ctx.authorizeAuthKey),
 );
-const operationHint = computed(
-  () => ctx.operationDisabledReasons[ctx.activeTab],
-);
 </script>
 
 <template>
@@ -577,20 +574,11 @@ const operationHint = computed(
 
       <!-- 底部操作按钮 -->
       <div class="ops-footer shrink-0 px-3.5 pb-3.5 pt-2.5">
-        <p
-          v-if="operationHint"
-          id="flash-operation-hint"
-          class="mb-2 text-xs leading-snug text-[var(--ty-text-muted)]"
-          role="status"
-        >
-          {{ operationHint }}
-        </p>
         <button
           v-if="ctx.activeTab === 'flash'"
           type="button"
           class="ty-btn-primary-solid w-full"
           :disabled="!ctx.canFlash"
-          :aria-describedby="operationHint ? 'flash-operation-hint' : undefined"
           @click="startOperation('flash')"
         >
           <span
@@ -609,7 +597,6 @@ const operationHint = computed(
           type="button"
           class="ty-btn-danger-solid inline-flex min-h-[2.75rem] w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition-all duration-200"
           :disabled="!ctx.canErase"
-          :aria-describedby="operationHint ? 'flash-operation-hint' : undefined"
           @click="startOperation('erase')"
         >
           <span
@@ -628,7 +615,6 @@ const operationHint = computed(
           type="button"
           class="ty-btn-primary-solid w-full"
           :disabled="!ctx.canRead"
-          :aria-describedby="operationHint ? 'flash-operation-hint' : undefined"
           @click="startOperation('read')"
         >
           <span
@@ -664,9 +650,6 @@ const operationHint = computed(
             type="button"
             class="ty-btn-primary-solid flex-1"
             :disabled="!ctx.canAuthorize"
-            :aria-describedby="
-              operationHint ? 'flash-operation-hint' : undefined
-            "
             @click="startOperation('authorize')"
           >
             <span

@@ -211,7 +211,8 @@ test("UI-08 flash prerequisites and authorization field errors stay near the con
   await openUi(page, "/flash", "en", ["MOCK_PORT_1"]);
   const start = page.getByRole("button", { name: "Start flash", exact: true });
   await expect(start).toBeDisabled();
-  await expect(page.locator(".ops-footer")).toContainText(
+  await expect(page.locator("#flash-operation-hint")).toHaveCount(0);
+  await expect(page.locator(".ops-footer")).not.toContainText(
     "Please select a firmware file.",
   );
   await page.getByRole("tab", { name: "Authorize", exact: true }).click();
