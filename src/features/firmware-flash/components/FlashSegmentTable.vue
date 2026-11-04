@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, nextTick } from "vue";
+import {
+  computed,
+  ref,
+  nextTick,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+} from "vue";
 import { useI18n } from "vue-i18n";
+import { useCopyFeedback } from "@/composables/useCopyFeedback";
 import { useFirmwareFlashContext } from "../context";
 import { validateAddrRange, parseHexAddr } from "../hex";
 
@@ -18,6 +26,42 @@ import { validateAddrRange, parseHexAddr } from "../hex";
 const { t } = useI18n();
 const ctx = useFirmwareFlashContext();
 const { onPickFile, addSegment, removeSegment } = ctx;
+const rootRef = ref<HTMLElement | null>(null);
+const { state: copyState, message: copyMessage, copy } = useCopyFeedback();
+async function copyPath(path: string): Promise<void> {
+  if (path) await copy(path);
+}
+function copyPathOnKey(event: KeyboardEvent, path: string): void {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  void copyPath(path);
+}
+function scrollPathsToEnd(): void {
+  for (const input of rootRef.value?.querySelectorAll<HTMLInputElement>(
+    ".segment-path-input",
+  ) ?? []) {
+    input.scrollLeft = input.scrollWidth;
+  }
+}
+function onWindowResize(): void {
+  void nextTick(scrollPathsToEnd);
+}
+function onPathFocus(event: FocusEvent): void {
+  const input = event.currentTarget as HTMLInputElement;
+  input.scrollLeft = input.scrollWidth;
+}
+onMounted(() => {
+  scrollPathsToEnd();
+  window.addEventListener("resize", onWindowResize);
+});
+onBeforeUnmount(() => window.removeEventListener("resize", onWindowResize));
+watch(
+  () => ctx.flashSegments.map((segment) => segment.firmwarePath),
+  async () => {
+    await nextTick();
+    scrollPathsToEnd();
+  },
+);
 
 const MAX_SEGMENTS = 10;
 const addRef = ref<HTMLButtonElement | null>(null);
@@ -81,7 +125,8 @@ const segmentErrors = computed<Record<string, string>>(() => {
 
 <template>
   <div
-    class="ops-range-block @container rounded-xl p-3"
+    ref="rootRef"
+    class="ops-range-block relative @container rounded-xl p-3"
     aria-labelledby="flash-segments-title"
   >
     <p id="flash-segments-title" class="ty-block-label mb-2.5">
@@ -117,6 +162,8 @@ const segmentErrors = computed<Record<string, string>>(() => {
               class="border-b border-[var(--ty-border)] last:border-0"
               :class="{
                 '!border-b-0': !!segmentErrors[seg.id],
+                'bg-[color-mix(in_srgb,var(--ty-surface-muted)_42%,transparent)]':
+                  index % 2 === 1,
               }"
             >
               <td
@@ -171,13 +218,18 @@ const segmentErrors = computed<Record<string, string>>(() => {
                   }}</label>
                   <input
                     :id="`flash-${seg.id}-file`"
-                    :aria-label="fieldLabel(index, 'flash.firmwareFile')"
+                    :aria-label="`${fieldLabel(index, 'flash.firmwareFile')}, ${t('common.copy')}`"
                     :title="seg.firmwarePath"
                     v-model="seg.firmwarePath"
                     type="text"
+                    dir="ltr"
                     readonly
+                    @click="copyPath(seg.firmwarePath)"
+                    @keydown="copyPathOnKey($event, seg.firmwarePath)"
+                    @focus="onPathFocus"
+                    @mousedown.prevent
                     :placeholder="t('flash.noFile')"
-                    class="ops-text-input min-w-0 flex-1 cursor-default truncate bg-[var(--ty-surface-muted)] py-1.5 text-xs"
+                    class="segment-path-input ops-text-input min-w-0 flex-1 cursor-pointer text-left bg-[var(--ty-surface-muted)] py-1.5 text-xs"
                   />
                   <button
                     type="button"
@@ -218,6 +270,11 @@ const segmentErrors = computed<Record<string, string>>(() => {
             <tr
               v-if="segmentErrors[seg.id]"
               class="border-b border-[var(--ty-border)] last:border-0"
+              :class="
+                index % 2 === 1
+                  ? 'bg-[color-mix(in_srgb,var(--ty-surface-muted)_42%,transparent)]'
+                  : ''
+              "
             >
               <td />
               <td colspan="4" class="pb-2 pr-2">
@@ -241,6 +298,7 @@ const segmentErrors = computed<Record<string, string>>(() => {
         v-for="(seg, index) in ctx.flashSegments"
         :key="seg.id"
         class="rounded-lg border border-[var(--ty-border)] bg-[color-mix(in_srgb,var(--ty-surface-muted)_88%,transparent)] p-3"
+        :class="index % 2 === 1 ? 'segment-card-striped' : ''"
       >
         <p class="mb-2 text-xs font-semibold text-[var(--ty-text)]">
           {{ t("flash.segment") }} {{ index + 1 }}
@@ -256,13 +314,18 @@ const segmentErrors = computed<Record<string, string>>(() => {
           >
             <input
               :id="`flash-m-${seg.id}-file`"
-              :aria-label="fieldLabel(index, 'flash.firmwareFile')"
+              :aria-label="`${fieldLabel(index, 'flash.firmwareFile')}, ${t('common.copy')}`"
               :title="seg.firmwarePath"
               v-model="seg.firmwarePath"
               type="text"
+              dir="ltr"
               readonly
+              @click="copyPath(seg.firmwarePath)"
+              @keydown="copyPathOnKey($event, seg.firmwarePath)"
+              @focus="onPathFocus"
+              @mousedown.prevent
               :placeholder="t('flash.noFile')"
-              class="ops-text-input min-h-[2.25rem] min-w-0 flex-1 cursor-default truncate bg-[var(--ty-surface-muted)] py-1.5 text-xs"
+              class="segment-path-input ops-text-input min-h-[2.25rem] min-w-0 flex-1 cursor-pointer text-left bg-[var(--ty-surface-muted)] py-1.5 text-xs"
             />
             <div class="flex shrink-0 gap-2 min-[400px]:items-stretch">
               <button
@@ -369,5 +432,28 @@ const segmentErrors = computed<Record<string, string>>(() => {
         }})</span
       >
     </button>
+    <p
+      v-if="copyMessage"
+      class="absolute right-3 top-2 z-10 rounded-md border border-[var(--ty-border)] bg-[var(--ty-surface)] px-2 py-1 text-xs shadow-sm"
+      :class="
+        copyState === 'failed'
+          ? 'text-[var(--ty-danger)]'
+          : 'text-[var(--ty-success)]'
+      "
+      :role="copyState === 'failed' ? 'alert' : 'status'"
+      aria-live="polite"
+    >
+      {{ copyMessage }}
+    </p>
   </div>
 </template>
+
+<style scoped>
+.segment-card-striped {
+  background: color-mix(
+    in srgb,
+    var(--ty-surface-muted) 42%,
+    var(--ty-surface)
+  );
+}
+</style>

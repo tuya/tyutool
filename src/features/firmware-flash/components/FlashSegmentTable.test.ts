@@ -4,6 +4,10 @@ import { createPinia, setActivePinia } from "pinia";
 import { createI18n } from "vue-i18n";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import en from "@/locales/en.json";
+const originalScrollWidthDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLInputElement.prototype,
+  "scrollWidth",
+);
 vi.mock("@/runtime", () => ({
   isTauriRuntime: () => false,
   getRuntime: () => "web",
@@ -19,6 +23,16 @@ afterEach(() => {
   app?.unmount();
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  if (originalScrollWidthDescriptor) {
+    Object.defineProperty(
+      HTMLInputElement.prototype,
+      "scrollWidth",
+      originalScrollWidthDescriptor,
+    );
+  } else {
+    Reflect.deleteProperty(HTMLInputElement.prototype, "scrollWidth");
+  }
 });
 function mount(component: Component, props: Record<string, unknown> = {}) {
   app = createApp({ render: () => h(component, props) });
@@ -105,4 +119,74 @@ it("returns focus to a remaining control when deleting a segment", async () => {
   expect(document.activeElement).not.toBe(document.body);
   expect(document.activeElement?.isConnected).toBe(true);
   expect(context.flashSegments).toHaveLength(1);
+});
+
+it("keeps firmware paths read-only, shows their tail, and copies by click or keyboard", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", {
+    ...navigator,
+    clipboard: { writeText },
+  });
+  Object.defineProperty(HTMLInputElement.prototype, "scrollWidth", {
+    configurable: true,
+    get() {
+      return this.classList.contains("segment-path-input") ? 240 : 0;
+    },
+  });
+  mount(Table);
+  await flush();
+
+  const paths = [
+    ...host.querySelectorAll<HTMLInputElement>(".segment-path-input"),
+  ];
+  expect(paths).toHaveLength(4);
+  expect(paths.every((input) => input.readOnly)).toBe(true);
+  expect(paths.every((input) => input.dir === "ltr")).toBe(true);
+  expect(paths[0].scrollLeft).toBe(240);
+  expect(paths[0].title).toBe("/long/file.bin");
+
+  paths[0].click();
+  await flush();
+  expect(writeText).toHaveBeenLastCalledWith("/long/file.bin");
+  paths[2].dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  await flush();
+  expect(writeText).toHaveBeenLastCalledWith("/long/file.bin");
+  expect(host.querySelector('[role="status"]')?.textContent).toContain(
+    en.common.copied,
+  );
+
+  paths[0].scrollLeft = 0;
+  paths[0].dispatchEvent(new FocusEvent("focus"));
+  expect(paths[0].scrollLeft).toBe(240);
+  paths[0].scrollLeft = 0;
+  window.dispatchEvent(new Event("resize"));
+  await flush();
+  expect(paths[0].scrollLeft).toBe(240);
+
+  writeText.mockRejectedValueOnce(new Error("clipboard unavailable"));
+  paths[0].click();
+  await flush();
+  const failure = host.querySelector<HTMLElement>('[role="alert"]');
+  expect(failure?.textContent).toContain(en.common.copyFailed);
+  expect(failure?.className).not.toContain("sr-only");
+});
+
+it("uses matching subtle stripe backgrounds for each segment and its address error", async () => {
+  context.flashSegments[1].startAddr = "BAD!";
+  mount(Table);
+  await flush();
+
+  const tableRows = host.querySelectorAll("tbody tr");
+  expect(tableRows[1].className).toContain("bg-[color-mix");
+  expect(tableRows[2].className).toContain("bg-[color-mix");
+  expect(host.querySelectorAll(".segment-card-striped")[0].className).toContain(
+    "segment-card-striped",
+  );
+  expect(
+    host
+      .querySelectorAll(".segment-card-striped")[0]
+      .querySelector('[role="alert"]'),
+  ).not.toBeNull();
 });
