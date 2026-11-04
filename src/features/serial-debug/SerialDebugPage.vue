@@ -15,7 +15,7 @@ useSerialAutoSave(s);
 </script>
 
 <template>
-  <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-3">
+  <div class="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2">
     <TyPageHeader :title="t('serialDebug.pageTitle')" />
     <SerialDebugConnectionBar />
     <SerialDebugLogView

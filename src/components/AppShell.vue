@@ -173,14 +173,17 @@ function navIndicator(name: string) {
         >
       </div>
     </aside>
-    <div class="workbench-content flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      class="workbench-content flex min-h-0 min-w-0 flex-1 flex-col"
+      :class="{ 'workbench-content-full-height': fullBleedMain }"
+    >
       <main
         ref="mainRef"
         id="app-main"
         class="main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden"
         :class="
           fullBleedMain
-            ? 'flex flex-col px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-5 max-lg:overflow-y-auto lg:overflow-hidden'
+            ? 'main-full-height flex flex-col px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:pt-3 md:pb-5 max-lg:overflow-y-auto lg:overflow-hidden'
             : fullBleedScrollMain
               ? 'overflow-y-auto px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-5'
               : 'overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 md:px-6 md:py-5'
@@ -248,6 +251,26 @@ function navIndicator(name: string) {
 @media (min-width: 768px) {
   .workbench-sidebar {
     width: 160px;
+    height: calc(100% - 24px);
+    max-height: calc(100% - 24px);
+    margin: 12px 0 12px 12px;
+    overflow: hidden;
+    border: 1px solid var(--ty-border);
+    border-radius: var(--ty-radius);
+  }
+  .workbench-content {
+    margin: 12px 12px 12px 0;
+  }
+  .main-full-height {
+    padding-bottom: 0;
+  }
+}
+@media (min-width: 768px) and (max-height: 720px) {
+  .workbench-content {
+    margin-block: 0;
+  }
+  .workbench-content-full-height {
+    margin-bottom: 12px;
   }
 }
 @media (min-width: 768px) and (max-width: 1100px) {
