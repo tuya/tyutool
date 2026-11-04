@@ -221,13 +221,17 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     ).toBe(false);
   });
 
-  it("always exposes refresh and reports loading, failure and retry near the control", async () => {
+  it("exposes refresh without a normal feedback row and reports loading, failure and retry", async () => {
     mountComponent();
     await flush();
     const refresh = [...host!.querySelectorAll("button")].find(
-      (b) => b.textContent?.trim() === "Refresh",
+      (b) => b.getAttribute("aria-label") === "Refresh",
     )!;
     expect(refresh).toBeDefined();
+    expect(host!.querySelector("#sd-port-feedback")).toBeNull();
+    expect(
+      host!.querySelector("#sd-port")?.getAttribute("aria-describedby"),
+    ).toBeNull();
     let reject!: (error: Error) => void;
     vi.mocked(wsTransport.listPorts).mockImplementationOnce(
       () =>
@@ -238,9 +242,8 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     refresh.click();
     await flush();
     expect(refresh.disabled).toBe(true);
-    expect(host!.querySelector("#sd-port-feedback")?.textContent).toContain(
-      "Loading…",
-    );
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
+    expect(host!.querySelector("#sd-port-feedback")).toBeNull();
     const port = host!.querySelector<HTMLButtonElement>("#sd-port")!;
     port.click();
     await flush();
@@ -261,9 +264,7 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     );
     refresh.click();
     await flush();
-    expect(host!.querySelector("#sd-port-feedback")?.textContent).not.toContain(
-      "Enumeration denied",
-    );
+    expect(host!.querySelector("#sd-port-feedback")).toBeNull();
     expect(wsTransport.listPorts).toHaveBeenCalledTimes(3);
   });
 

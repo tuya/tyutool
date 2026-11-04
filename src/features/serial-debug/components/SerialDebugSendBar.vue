@@ -45,7 +45,7 @@ const sendStatus = computed(() =>
   s.sending
     ? t("serialDebug.send.sending")
     : !s.open
-      ? t("serialDebug.send.openPortHint")
+      ? ""
       : !s.sendInput
         ? t("serialDebug.send.emptyHint")
         : "",
@@ -184,7 +184,15 @@ function onHistoryKey(event: KeyboardEvent): void {
         class="input w-full"
         :aria-label="t('serialDebug.send.inputLabel')"
         :aria-invalid="s.sendError?.kind === 'invalidHex'"
-        :aria-describedby="`${previewId} ${sendStatusId}${sendErrorText ? ` ${sendErrorId}` : ''}`"
+        :aria-describedby="
+          [
+            sendPreview ? previewId : '',
+            sendStatus ? sendStatusId : '',
+            sendErrorText ? sendErrorId : '',
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined
+        "
         :placeholder="t('serialDebug.send.placeholder')"
         v-model="s.sendInput"
         @input="onDraftInput"
@@ -238,7 +246,7 @@ function onHistoryKey(event: KeyboardEvent): void {
       class="btn-primary"
       :disabled="!s.open || !s.sendInput || s.sending"
       :aria-busy="s.sending"
-      :aria-describedby="sendStatusId"
+      :aria-describedby="sendStatus ? sendStatusId : undefined"
       :title="sendStatus || undefined"
       @click="submit"
     >
@@ -247,15 +255,19 @@ function onHistoryKey(event: KeyboardEvent): void {
       }}
     </button>
     <div
+      v-if="sendPreview || sendStatus || sendErrorText"
       class="send-feedback flex min-h-4 w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ty-text-muted)]"
     >
       <span
+        v-if="sendPreview"
         :id="previewId"
         class="send-preview"
         :class="{ 'text-[var(--ty-warning)]': hexPreview?.ignoredCount }"
         >{{ sendPreview }}</span
       >
-      <span :id="sendStatusId" role="status">{{ sendStatus }}</span>
+      <span v-if="sendStatus" :id="sendStatusId" role="status">{{
+        sendStatus
+      }}</span>
       <p
         v-if="sendErrorText"
         :id="sendErrorId"

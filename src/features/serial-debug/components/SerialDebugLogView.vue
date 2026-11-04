@@ -1606,11 +1606,6 @@ async function saveLog(): Promise<void> {
       </div>
     </div>
 
-    <p
-      class="border-t border-[var(--ty-border)] px-3 py-1 text-[11px] leading-snug text-[var(--ty-text-muted)]"
-    >
-      {{ t("serialDebug.log.selectionHint") }}
-    </p>
     <!-- right-click context menu -->
     <Teleport to="body">
       <div

@@ -165,6 +165,13 @@ function onCustomBaudInput(v: string): void {
   s.customBaudRate = customBaudValid.value ? Number(v) : null;
 }
 
+const portFeedback = computed(() =>
+  portsError.value
+    ? t("serialDebug.conn.portsFailed", { msg: portsError.value })
+    : s.port && !selectedPortAvailable.value
+      ? t("serialDebug.conn.rememberedUnavailable", { port: s.port })
+      : "",
+);
 const canOpen = computed(
   () =>
     !s.opening &&
@@ -379,7 +386,7 @@ onDeactivated(() => {
           v-model="s.port"
           :options="serialPortOptions"
           :aria-label="t('serialDebug.conn.port')"
-          aria-describedby="sd-port-feedback"
+          :aria-describedby="portFeedback ? 'sd-port-feedback' : undefined"
           :placeholder="
             allKnownPortRows.length === 0
               ? t('flash.noPortsPlaceholder')
@@ -388,6 +395,17 @@ onDeactivated(() => {
           :disabled="s.open || s.opening"
           class="w-[13rem] min-w-0"
         />
+        <button
+          type="button"
+          class="port-refresh conn-btn-action flex size-8 shrink-0 items-center justify-center rounded-lg"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
+          :disabled="portsLoading"
+          :aria-busy="portsLoading"
+          @click="refreshPorts"
+        >
+          <FontAwesomeIcon icon="rotate" class="size-3.5" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="flex min-w-0 items-center gap-1.5">
@@ -431,41 +449,6 @@ onDeactivated(() => {
       >
         {{ customBaudError }}
       </p>
-      <div
-        id="sd-port-feedback"
-        class="w-full min-w-0 flex items-center gap-2 text-xs text-[var(--ty-text-muted)]"
-      >
-        <span v-if="portsLoading" role="status">{{ t("common.loading") }}</span>
-        <span v-else-if="portsError" role="alert">{{
-          t("serialDebug.conn.portsFailed", { msg: portsError })
-        }}</span>
-        <span
-          v-else-if="s.port && !selectedPortAvailable"
-          class="min-w-0 truncate"
-          :title="t('serialDebug.conn.rememberedUnavailable', { port: s.port })"
-          >{{
-            t("serialDebug.conn.rememberedUnavailable", { port: s.port })
-          }}</span
-        >
-        <span
-          v-else-if="!availablePortRows.length"
-          class="min-w-0 truncate"
-          :title="t('serialDebug.conn.noDevicesHint')"
-          >{{ t("serialDebug.conn.noDevicesHint") }}</span
-        >
-        <span v-else role="status">{{
-          t("common.portsAvailable", { n: availablePortRows.length })
-        }}</span>
-        <button
-          type="button"
-          class="shrink-0 underline"
-          :disabled="portsLoading"
-          :aria-busy="portsLoading"
-          @click="refreshPorts"
-        >
-          {{ t("common.refresh") }}
-        </button>
-      </div>
     </template>
     <template #actions>
       <button
@@ -552,6 +535,14 @@ onDeactivated(() => {
       </button>
     </template>
   </TyConnectionBar>
+  <p
+    v-if="portFeedback"
+    id="sd-port-feedback"
+    :role="portsError ? 'alert' : 'status'"
+    class="text-xs text-[var(--ty-danger)]"
+  >
+    {{ portFeedback }}
+  </p>
 
   <Teleport to="body">
     <SerialDebugSettingsModal
