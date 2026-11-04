@@ -95,10 +95,12 @@ describe("SerialDebugSendBar recovery", () => {
     await flush();
     expect(write).toHaveBeenCalledWith(Uint8Array.of(0x41, 0x42));
     await enterDraft("!");
-    expect(preview.textContent).toContain(
+    expect(host.querySelector(".send-preview")?.textContent).toContain(
       "Enter at least one complete Hex byte.",
     );
-    expect(preview.textContent).not.toContain("trailing Hex");
+    expect(host.querySelector(".send-preview")?.textContent).not.toContain(
+      "trailing Hex",
+    );
   });
 
   it("includes UTF-8 and the optional CRLF in the ASCII byte count", async () => {
@@ -121,8 +123,14 @@ describe("SerialDebugSendBar recovery", () => {
     expect(host.textContent).toContain("Enter data to send.");
     s.open = false;
     await enterDraft("AT");
-    expect(host.textContent).toContain("Open a port to send.");
+    expect(host.textContent).not.toContain("Open a port to send.");
+    expect(host.querySelector(".send-preview")?.textContent).toContain("bytes");
     expect(sendButton().disabled).toBe(true);
+    await enterDraft("");
+    expect(host.querySelector(".send-feedback")).toBeNull();
+    expect(input().getAttribute("aria-describedby")).toBeNull();
+    expect(sendButton().getAttribute("aria-describedby")).toBeNull();
+    await enterDraft("AT");
     s.open = true;
     let finish!: () => void;
     write.mockImplementationOnce(
