@@ -310,15 +310,33 @@ for (const theme of ["light", "dark"] as const) {
       useSettingsStore().setTheme(theme);
     }, theme);
     await expect(page.locator(".ty-route-enter-active")).toHaveCount(0);
-    const colors = await page.evaluate(() => {
+    const colors = await page.evaluate((theme) => {
       const css = getComputedStyle(document.documentElement);
-      return ["--ty-canvas", "--ty-primary"].map((key) =>
-        css.getPropertyValue(key).trim(),
-      );
-    });
-    expect(colors).toEqual(
-      theme === "light" ? ["#f4f8fb", "#1267a5"] : ["#0c141c", "#78c6f4"],
-    );
+      const preview = document.querySelector(`.theme-preview--${theme}`)!;
+      return {
+        canvas: css.getPropertyValue("--ty-canvas").trim(),
+        action: css.getPropertyValue("--ty-action").trim(),
+        previewCanvas: getComputedStyle(preview).backgroundColor,
+        previewAction: getComputedStyle(
+          preview.querySelector(".theme-preview-side i")!,
+        ).backgroundColor,
+      };
+    }, theme);
+    expect(colors.canvas).toBe(theme === "light" ? "#f2f2f2" : "#171717");
+    expect(colors.action).toBe(theme === "light" ? "#303030" : "#dedede");
+    const rgb = (value: string) => {
+      const hex = value.match(/^#([\da-f]{6})$/i);
+      if (hex)
+        return [0, 2, 4].map((offset) =>
+          Number.parseInt(hex[1].slice(offset, offset + 2), 16),
+        );
+      return value
+        .match(/[\d.]+/g)
+        ?.slice(0, 3)
+        .map(Number);
+    };
+    expect(rgb(colors.previewCanvas)).toEqual(rgb(colors.canvas));
+    expect(rgb(colors.previewAction)).toEqual(rgb(colors.action));
     await expect(page.locator(".theme-preview")).toHaveCount(3);
     const group = page.getByRole("radiogroup");
     const selected = group.getByRole("radio", { checked: true });
@@ -326,6 +344,150 @@ for (const theme of ["light", "dark"] as const) {
     await page.keyboard.press("ArrowRight");
     await expect(group.getByRole("radio", { checked: true })).toBeFocused();
   });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  for (const [width, height] of [
+    [1024, 680],
+    [1549, 884],
+  ]) {
+    for (const [pageName, path, panelSelector] of [
+      ["flash", "/flash", ".ops-card"],
+      ["serial", "/serial-debug", ".ty-card"],
+      ["toolbox", "/toolbox", '[data-tool-id="batch-flash-auth"]'],
+      ["batch-auth", "/toolbox/batch-flash-auth", ".ty-card"],
+      ["settings", "/settings", ".settings-sections > .ty-card"],
+    ]) {
+      test(`${theme} ${width} ${pageName}: neutral island screenshot and no horizontal overflow`, async ({
+        page,
+      }, testInfo) => {
+        await page.setViewportSize({ width, height });
+        await page.addInitScript(() =>
+          localStorage.setItem("tyutool-batch-auth-disclaimer-v1", "true"),
+        );
+        await openUi(page, path, "en", ["COM6"]);
+        await page.evaluate(async (theme) => {
+          const url = "/src/stores/settings.ts";
+          const { useSettingsStore } = await import(url);
+          useSettingsStore().setTheme(theme);
+        }, theme);
+        await expect(page.locator(".ty-route-enter-active")).toHaveCount(0);
+        await expect(page.locator(panelSelector).first()).toBeVisible();
+        const palette = await page.evaluate((panelSelector) => {
+          const root = getComputedStyle(document.documentElement);
+          const canvas = document.querySelector(".app-shell")!;
+          const panel = document.querySelector(panelSelector);
+          return {
+            canvas: root.getPropertyValue("--ty-canvas").trim(),
+            surface: root.getPropertyValue("--ty-surface").trim(),
+            action: root.getPropertyValue("--ty-action").trim(),
+            border: root.getPropertyValue("--ty-border").trim(),
+            canvasBackground: getComputedStyle(canvas).backgroundColor,
+            panelBackground: panel
+              ? getComputedStyle(panel).backgroundColor
+              : null,
+            panelShadow: panel ? getComputedStyle(panel).boxShadow : null,
+            overflow: document.documentElement.scrollWidth - innerWidth,
+          };
+        }, panelSelector);
+        expect(palette.canvas).not.toBe(palette.surface);
+        const channels = (value: string) => {
+          const match = value.match(/^#([0-9a-f]{6})$/i);
+          expect(match, `${value} should be six digit hex`).not.toBeNull();
+          return match![1]
+            .match(/../g)!
+            .map((channel) => parseInt(channel, 16));
+        };
+        for (const token of [palette.canvas, palette.surface, palette.action]) {
+          const [red, green, blue] = channels(token);
+          expect(red).toBe(green);
+          expect(green).toBe(blue);
+        }
+        expect(palette.panelBackground).not.toBeNull();
+        expect(palette.panelShadow).not.toBeNull();
+        expect(palette.canvasBackground).not.toBe(palette.panelBackground);
+        expect(palette.panelShadow).not.toBe("none");
+        expect(palette.overflow).toBeLessThanOrEqual(1);
+        if (width >= 768) {
+          const shell = await page.locator(".workbench-sidebar").boundingBox();
+          expect(shell?.x).toBeGreaterThanOrEqual(8);
+          expect(shell?.y).toBeGreaterThanOrEqual(8);
+        }
+        if (path === "/flash" || path === "/serial-debug") {
+          const selectors = [
+            ".workbench-sidebar",
+            ...(path === "/flash"
+              ? [".ops-card", ".aside-log-card"]
+              : [".send-bar"]),
+          ];
+          for (const selector of selectors) {
+            const panel = page.locator(selector);
+            await expect(panel).toBeVisible();
+            const bounds = await panel.boundingBox();
+            expect(
+              bounds,
+              `${selector} must have a bounding box`,
+            ).not.toBeNull();
+            const bottom = bounds!.y + bounds!.height;
+            expect(
+              Math.abs(bottom - (height - 12)),
+              `${selector} bottom=${bottom}, expected=${height - 12}`,
+            ).toBeLessThanOrEqual(1);
+          }
+        }
+        if (path === "/flash") {
+          const clipped = await page
+            .locator(".flash-workspace")
+            .evaluate((root) => {
+              const box = root.getBoundingClientRect();
+              return [...root.querySelectorAll("button")]
+                .filter((button) => {
+                  const bounds = button.getBoundingClientRect();
+                  return (
+                    button.getClientRects().length > 0 &&
+                    bounds.width > 0 &&
+                    bounds.height > 0 &&
+                    (bounds.right > box.right + 1 || bounds.left < box.left - 1)
+                  );
+                })
+                .map((button) => {
+                  const { x, y, width, height, left, right, top, bottom } =
+                    button.getBoundingClientRect();
+                  return {
+                    label:
+                      button.getAttribute("aria-label") ||
+                      button.innerText.trim() ||
+                      button.title ||
+                      "(unlabeled button)",
+                    bounds: { x, y, width, height, left, right, top, bottom },
+                    workspace: {
+                      left: box.left,
+                      right: box.right,
+                      width: box.width,
+                    },
+                  };
+                });
+            });
+          expect(
+            clipped,
+            `Clipped visible controls: ${JSON.stringify(clipped)}`,
+          ).toEqual([]);
+        }
+        if (path === "/serial-debug" && width === 1024) {
+          expect(
+            await page
+              .locator(".pane")
+              .last()
+              .evaluate((el) => el.clientHeight),
+          ).toBeGreaterThan(120);
+        }
+        await page.screenshot({
+          path: testInfo.outputPath(`island-${pageName}-${theme}-${width}.png`),
+          animations: "disabled",
+        });
+      });
+    }
+  }
 }
 
 for (const theme of ["light", "dark"] as const) {

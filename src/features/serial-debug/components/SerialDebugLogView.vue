@@ -1102,7 +1102,7 @@ async function saveLog(): Promise<void> {
   <div
     ref="containerRef"
     tabindex="0"
-    class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ty-border)] bg-[var(--ty-log-bg)] outline-none"
+    class="ty-card relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ty-border)] bg-[var(--ty-log-bg)] outline-none"
     @keydown="onContainerKeydown"
   >
     <div
