@@ -239,6 +239,17 @@ test("UI-08 flash prerequisites and authorization field errors stay near the con
 });
 
 test.describe("UI-09 primary button text contrast", () => {
+  async function waitForButtonTransitions(
+    button: import("playwright/test").Locator,
+  ) {
+    // Theme changes switch text color immediately but transition the background.
+    await button.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished),
+      );
+    });
+  }
+
   for (const theme of ["light", "dark"]) {
     test(`${theme} enabled flash button meets normal text contrast`, async ({
       page,
@@ -261,6 +272,7 @@ test.describe("UI-09 primary button text contrast", () => {
       await expect(button).toBeEnabled();
       for (const hover of [false, true]) {
         if (hover) await button.hover();
+        await waitForButtonTransitions(button);
         const ratios = await button.evaluate((el) => {
           const css = getComputedStyle(el);
           const brightness = Number(
