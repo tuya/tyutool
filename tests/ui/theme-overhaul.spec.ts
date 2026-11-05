@@ -633,9 +633,20 @@ for (const theme of ["light", "dark"] as const) {
             "C:\\Users\\LENOVO\\Downloads\\neo_tuya_1.3.0_nolicence\\firmware_application.bin";
           store.flashSegments[0].firmwareSize = 1024;
         });
-        await expect(page.locator(".segment-summary").first()).toContainText(
-          "1024",
-        );
+        await expect(page.locator(".segment-summary")).toHaveCount(0);
+        const firmwarePath = page
+          .locator(".segment-path-input:visible")
+          .first();
+        await expect(firmwarePath).toBeVisible();
+        await expect(firmwarePath).toHaveValue(/firmware_application\.bin$/);
+        await expect
+          .poll(() =>
+            firmwarePath.evaluate(
+              (input) =>
+                input.scrollWidth - input.clientWidth - input.scrollLeft,
+            ),
+          )
+          .toBeLessThanOrEqual(1);
         if (width >= 1282) {
           const alignment = await page
             .locator("table tbody tr")
