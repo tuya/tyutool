@@ -76,21 +76,6 @@ function fieldInvalid(id: string, field: "start" | "end"): boolean {
 function fieldLabel(index: number, key: string): string {
   return `${t("flash.segment")} ${index + 1}: ${t(key)}`;
 }
-function segmentSummary(index: number): string {
-  const seg = ctx.flashSegments[index];
-  const start = parseHexAddr(seg.startAddr);
-  const end = parseHexAddr(seg.endAddr);
-  const size = seg.firmwareFile?.size ?? seg.firmwareSize;
-  const range =
-    start !== null && end !== null && end >= start ? String(end - start) : "—";
-  return t("flash.segmentSummary", {
-    size:
-      size === undefined
-        ? t("flash.sizeUnknown")
-        : t("flash.byteCount", { count: size }),
-    range,
-  });
-}
 async function deleteSegment(index: number, event: MouseEvent): Promise<void> {
   const layout = (event.currentTarget as HTMLElement).closest(
     ".segment-layout",
@@ -240,12 +225,6 @@ const segmentErrors = computed<Record<string, string>>(() => {
                     {{ t("flash.browse") }}
                   </button>
                 </div>
-                <p
-                  v-if="seg.firmwarePath"
-                  class="segment-summary mt-1 text-xs text-[var(--ty-text-muted)]"
-                >
-                  {{ segmentSummary(index) }}
-                </p>
               </td>
               <td class="py-2.5 align-middle">
                 <div class="flex size-7 shrink-0 items-center justify-center">
@@ -407,12 +386,6 @@ const segmentErrors = computed<Record<string, string>>(() => {
           role="alert"
         >
           {{ segmentErrors[seg.id] }}
-        </p>
-        <p
-          v-if="seg.firmwarePath"
-          class="segment-summary mt-2 text-xs text-[var(--ty-text-muted)]"
-        >
-          {{ segmentSummary(index) }}
         </p>
       </div>
     </div>
