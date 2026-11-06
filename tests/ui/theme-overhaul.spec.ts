@@ -615,14 +615,17 @@ for (const theme of ["light", "dark"] as const) {
           const tab = page.getByRole("tab", { name, exact: true });
           await tab.click();
           await expect(tab).toHaveAttribute("aria-selected", "true");
-          const background = await tab.evaluate((el) => {
+          const background = await tab.evaluate((el, theme) => {
             const probe = document.createElement("span");
-            probe.style.backgroundColor = "var(--ty-primary-soft)";
+            probe.style.backgroundColor =
+              theme === "dark"
+                ? "color-mix(in srgb, var(--ty-surface-elevated) 88%, var(--ty-text) 12%)"
+                : "var(--ty-surface-elevated)";
             el.append(probe);
             const color = getComputedStyle(probe).backgroundColor;
             probe.remove();
             return color;
-          });
+          }, theme);
           await expect(tab).toHaveCSS("background-color", background);
         }
         await page.evaluate(async () => {
