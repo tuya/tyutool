@@ -389,27 +389,47 @@ html[data-theme] {
     border-bottom: 1px solid var(--ty-border);
   }
   .ops-tabs {
-    border-bottom: 1px solid var(--ty-border);
+    width: 100%;
+    padding: 0.1875rem;
+    border: 1px solid var(--ty-border);
+    border-radius: 0.625rem;
+    background: var(--ty-surface-muted);
   }
   .ops-tab {
-    min-height: 2.375rem;
-    font-size: 0.8125rem;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
+    min-height: 2.5rem;
+    font-size: 0.875rem;
+    border: 1px solid transparent;
+    border-radius: var(--ty-control-radius);
+    color: var(--ty-text);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .ops-tab-active {
-    background: var(--ty-primary-soft);
-    color: var(--ty-primary);
+    background: var(--ty-surface-elevated);
+    color: var(--ty-text);
     font-weight: 700;
-    border-bottom-color: var(--ty-primary);
+    border-color: var(--ty-border);
+  }
+  .dark .ops-tab-active {
+    background: color-mix(
+      in srgb,
+      var(--ty-surface-elevated) 88%,
+      var(--ty-text) 12%
+    );
+    border-color: var(--ty-border-strong);
   }
   .ops-tab-inactive {
-    color: var(--ty-text-muted);
-    font-weight: 500;
+    color: var(--ty-text);
   }
   .ops-tab-inactive:hover:not(:disabled) {
-    background: var(--ty-surface-muted);
+    background: color-mix(in srgb, var(--ty-text) 8%, transparent);
     color: var(--ty-text);
+  }
+  .ops-tab:focus-visible {
+    outline: 2px solid var(--ty-ring);
+    outline-offset: 1px;
   }
   .ops-tab:disabled {
     cursor: not-allowed;

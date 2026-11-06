@@ -115,45 +115,44 @@ const credentialErrors = computed(() =>
     <section
       class="ops-card flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden"
     >
-      <!-- 卡片头部 -->
-      <div class="ops-card-header flex items-center gap-2.5 px-3.5 py-2.5">
-        <div
-          class="ops-header-icon flex size-8 shrink-0 items-center justify-center rounded-lg"
-          aria-hidden="true"
-        >
-          <FontAwesomeIcon :icon="['fas', 'microchip']" class="size-4" />
-        </div>
-        <div class="min-w-0">
+      <!-- 卡片头部与操作选项卡 -->
+      <div class="ops-card-header flex flex-col gap-2.5 px-3.5 py-3.5">
+        <div class="flex items-center gap-2.5">
+          <div
+            class="ops-header-icon flex size-8 shrink-0 items-center justify-center rounded-lg"
+            aria-hidden="true"
+          >
+            <FontAwesomeIcon :icon="['fas', 'microchip']" class="size-4" />
+          </div>
           <p class="ty-block-label">{{ t("flash.deviceOps") }}</p>
         </div>
-      </div>
 
-      <!-- Tab 选项卡 -->
-      <div
-        class="ops-tabs mb-4 flex shrink-0 gap-2 px-3"
-        ref="tabsRef"
-        role="tablist"
-        @keydown="onTabKey"
-        :aria-label="t('flash.tabsAria')"
-      >
-        <button
-          v-for="tab in ctx.tabList"
-          :key="tab.id"
-          type="button"
-          role="tab"
-          :id="`${tabId}-${tab.id}`"
-          :aria-controls="`${tabId}-${tab.id}-panel`"
-          :tabindex="ctx.activeTab === tab.id ? 0 : -1"
-          :aria-selected="ctx.activeTab === tab.id"
-          class="ops-tab flex-1 px-2 py-2 text-sm transition-colors"
-          :class="
-            ctx.activeTab === tab.id ? 'ops-tab-active' : 'ops-tab-inactive'
-          "
-          :disabled="ctx.busy"
-          @click="ctx.activeTab = tab.id"
+        <div
+          class="ops-tabs flex w-full min-w-0 items-center gap-1"
+          ref="tabsRef"
+          role="tablist"
+          @keydown="onTabKey"
+          :aria-label="t('flash.tabsAria')"
         >
-          {{ tab.label }}
-        </button>
+          <button
+            v-for="tab in ctx.tabList"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            :id="`${tabId}-${tab.id}`"
+            :aria-controls="`${tabId}-${tab.id}-panel`"
+            :tabindex="ctx.activeTab === tab.id ? 0 : -1"
+            :aria-selected="ctx.activeTab === tab.id"
+            class="ops-tab min-w-0 flex-1 px-2.5 py-2 text-sm transition-colors"
+            :class="
+              ctx.activeTab === tab.id ? 'ops-tab-active' : 'ops-tab-inactive'
+            "
+            :disabled="ctx.busy"
+            @click="ctx.activeTab = tab.id"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
       </div>
 
       <p
