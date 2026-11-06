@@ -210,12 +210,14 @@ for (const width of [1024, 1549]) {
   }
 }
 
-test("restored custom baud is visible after asynchronous workspace restoration", async ({
+test("restored custom baud is editable after asynchronous workspace restoration", async ({
   page,
 }) => {
   await openWorkflow(page, "/flash");
-  await expect(page.locator("#baud-rate-custom")).toHaveValue("123456");
-  await expect(page.locator("#baud-rate")).toContainText("Custom");
+  const baud = page.locator("#baud-rate");
+  await expect(baud).toHaveValue("123456");
+  await expect(baud).toHaveAttribute("role", "combobox");
+  await expect(page.locator("#baud-rate-custom")).toHaveCount(0);
 });
 
 test("flash port dropdown opens without scanning or a separate refresh button", async ({

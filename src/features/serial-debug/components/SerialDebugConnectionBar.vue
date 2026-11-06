@@ -27,6 +27,7 @@ import {
   type ChipId,
 } from "@/features/firmware-flash/constants";
 import TySelect from "@/components/TySelect.vue";
+import TyBaudRateInput from "@/components/TyBaudRateInput.vue";
 import TyConnectionBar from "@/components/TyConnectionBar.vue";
 import SerialDebugSettingsModal from "./SerialDebugSettingsModal.vue";
 
@@ -65,30 +66,6 @@ const serialPortOptions = computed(() => {
       undefined,
   }));
 });
-const useCustomBaud = ref(s.customBaudRate !== null);
-const customBaudInput = ref(
-  s.customBaudRate === null ? "" : String(s.customBaudRate),
-);
-const customBaudValid = computed(
-  () =>
-    /^\d+$/.test(customBaudInput.value) &&
-    Number(customBaudInput.value) > 0 &&
-    Number(customBaudInput.value) <= 0xffffffff,
-);
-const customBaudError = computed(() =>
-  useCustomBaud.value && !customBaudValid.value
-    ? t("serialDebug.conn.invalidCustomBaud")
-    : "",
-);
-watch(
-  () => s.customBaudRate,
-  (value) => {
-    if (value !== null) {
-      useCustomBaud.value = true;
-      customBaudInput.value = String(value);
-    }
-  },
-);
 const portsLoading = ref(false);
 const portsError = ref("");
 let portsGeneration = 0;
@@ -136,34 +113,18 @@ const rebootChipOptions = computed(() =>
   })),
 );
 
-const baudOptions = computed(() => {
-  const opts = s.commonBaudRates.map((r) => ({
-    value: String(r),
-    label: String(r),
-  }));
-  opts.push({ value: "custom", label: t("serialDebug.conn.customBaud") });
-  return opts;
-});
-
-const selectedBaudValue = computed({
-  get: () => (useCustomBaud.value ? "custom" : String(s.baudRate)),
-  set: (v: string) => {
-    if (v === "custom") {
-      useCustomBaud.value = true;
-      customBaudInput.value = customBaudInput.value || String(s.baudRate);
-      onCustomBaudInput(customBaudInput.value);
-    } else {
-      useCustomBaud.value = false;
+const baudRateValid = ref(true);
+const selectedBaudRate = computed({
+  get: () => s.customBaudRate ?? s.baudRate,
+  set: (value: number) => {
+    if (s.commonBaudRates.some((rate) => rate === value)) {
       s.customBaudRate = null;
-      s.baudRate = parseInt(v, 10);
+      s.baudRate = value;
+    } else {
+      s.customBaudRate = value;
     }
   },
 });
-
-function onCustomBaudInput(v: string): void {
-  customBaudInput.value = v;
-  s.customBaudRate = customBaudValid.value ? Number(v) : null;
-}
 
 const portFeedback = computed(() =>
   portsError.value
@@ -178,8 +139,8 @@ const canOpen = computed(
     !portsLoading.value &&
     !portsError.value &&
     selectedPortAvailable.value &&
-    !customBaudError.value &&
-    (s.customBaudRate ?? s.baudRate) > 0,
+    baudRateValid.value &&
+    selectedBaudRate.value > 0,
 );
 
 function selectAvailablePort(): void {
@@ -400,41 +361,15 @@ onDeactivated(() => {
           class="conn-field-label shrink-0 text-xs font-semibold"
           >{{ t("serialDebug.conn.baud") }}</label
         >
-        <TySelect
+        <TyBaudRateInput
           id="sd-baud"
-          :model-value="selectedBaudValue"
-          :options="baudOptions"
-          :aria-label="t('serialDebug.conn.baud')"
-          :disabled="s.open"
-          @update:model-value="selectedBaudValue = $event"
+          v-model="selectedBaudRate"
+          :options="s.commonBaudRates"
+          :disabled="s.open || s.opening"
+          @validity-change="baudRateValid = $event"
           class="w-[8rem]"
         />
-        <input
-          v-if="useCustomBaud"
-          type="number"
-          min="1"
-          max="4294967295"
-          step="1"
-          id="sd-custom-baud"
-          :aria-label="t('serialDebug.conn.customBaud')"
-          :aria-invalid="!!customBaudError"
-          aria-describedby="sd-baud-error"
-          class="conn-select w-[6.5rem] min-w-0"
-          :value="customBaudInput"
-          :disabled="s.open"
-          @input="
-            (e) => onCustomBaudInput((e.target as HTMLInputElement).value)
-          "
-        />
       </div>
-      <p
-        v-if="customBaudError"
-        id="sd-baud-error"
-        role="alert"
-        class="w-full text-xs text-[var(--ty-danger)]"
-      >
-        {{ customBaudError }}
-      </p>
     </template>
     <template #actions>
       <button
