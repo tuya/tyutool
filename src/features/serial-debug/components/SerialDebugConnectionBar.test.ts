@@ -28,7 +28,6 @@ const { t } = vi.hoisted(() => ({
             "serialDebug.conn.statusConnected": "Connected",
             "serialDebug.conn.open": "Open",
             "serialDebug.conn.close": "Close",
-            "serialDebug.conn.customBaud": "Custom",
             "serialDebug.conn.rebootControlPort": "Control port",
             "serialDebug.conn.rebootControlPortUnset": "Not selected",
             "serialDebug.conn.changeRebootTarget": "Change",
@@ -306,8 +305,11 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     const open = vi.spyOn(s, "openPort").mockResolvedValue(undefined);
     mountComponent();
     await flush();
-    const input = host!.querySelector<HTMLInputElement>('input[type="number"]');
+    const input = host!.querySelector<HTMLInputElement>(
+      'input[role="combobox"]',
+    );
     expect(input?.value).toBe("123456");
+    expect(input?.getAttribute("maxlength")).toBe("10");
     for (const value of ["", "0", "-1", "1.5"]) {
       input!.value = value;
       input!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -316,6 +318,8 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
         (b) => b.textContent?.trim() === "Open",
       )!;
       expect(button.disabled).toBe(true);
+      expect(input!.value).toBe(value);
+      expect(s.customBaudRate).toBe(123456);
       expect(input!.getAttribute("aria-invalid")).toBe("true");
       button.click();
     }

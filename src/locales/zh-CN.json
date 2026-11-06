@@ -17,7 +17,13 @@
     "copyField": "复制{field}",
     "cancel": "取消",
     "refresh": "刷新",
-    "portsAvailable": "检测到 {n} 个可用串口。"
+    "portsAvailable": "检测到 {n} 个可用串口。",
+    "baud": {
+      "label": "波特率",
+      "inputHint": "输入波特率或选择常用值",
+      "invalid": "请输入正整数波特率。",
+      "commonValues": "常用波特率"
+    }
   },
   "app": {
     "tagline": "嵌入式工具",
@@ -209,7 +215,6 @@
     "serialSection": "串口与连接",
     "serial": "串口",
     "baud": "波特率",
-    "baudCustom": "自定义",
     "chip": "芯片平台",
     "refresh": "刷新设备",
     "deviceReset": "设备复位",
@@ -551,7 +556,6 @@
       "port": "串口",
       "refresh": "刷新端口",
       "baud": "波特率",
-      "customBaud": "自定义",
       "dataBits": "数据位",
       "parity": "校验位",
       "parityNone": "无",
@@ -578,7 +582,6 @@
       "rebootTargetDialogTitle": "选择重启控制口和芯片",
       "rebootTargetChip": "芯片类型",
       "rebootTargetConfirm": "确认",
-      "invalidCustomBaud": "请输入 1 至 4294967295 之间的整数波特率。",
       "portUnavailable": "当前不可用",
       "rememberedUnavailable": "记住的端口 {port} 当前不可用，请连接设备或选择可用端口。",
       "noDevicesHint": "未发现串口设备，请连接设备后刷新端口。",

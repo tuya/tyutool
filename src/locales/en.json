@@ -17,7 +17,13 @@
     "copyField": "Copy {field}",
     "cancel": "Cancel",
     "refresh": "Refresh",
-    "portsAvailable": "Available ports: {n}."
+    "portsAvailable": "Available ports: {n}.",
+    "baud": {
+      "label": "Baud rate",
+      "inputHint": "Enter a value or choose a common baud rate",
+      "invalid": "Enter a positive whole-number baud rate.",
+      "commonValues": "Common baud rates"
+    }
   },
   "app": {
     "tagline": "Embedded utilities",
@@ -209,7 +215,6 @@
     "serialSection": "Serial & connection",
     "serial": "Port",
     "baud": "Baud rate",
-    "baudCustom": "Custom",
     "chip": "Chip platform",
     "refresh": "Refresh devices",
     "deviceReset": "Reset device",
@@ -551,7 +556,6 @@
       "port": "Port",
       "refresh": "Refresh ports",
       "baud": "Baud",
-      "customBaud": "Custom",
       "dataBits": "Data bits",
       "parity": "Parity",
       "parityNone": "None",
@@ -578,7 +582,6 @@
       "rebootTargetDialogTitle": "Choose reboot control port and chip",
       "rebootTargetChip": "Chip",
       "rebootTargetConfirm": "Confirm",
-      "invalidCustomBaud": "Enter a whole baud rate from 1 to 4294967295.",
       "portUnavailable": "Unavailable",
       "rememberedUnavailable": "Remembered port {port} is unavailable. Connect the device or select an available port.",
       "noDevicesHint": "No serial devices found. Connect a device and refresh the ports.",

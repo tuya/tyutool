@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFirmwareFlashContext } from "../context";
 import TySelect, { type TySelectOption } from "@/components/TySelect.vue";
 import TyConnectionBar from "@/components/TyConnectionBar.vue";
+import TyBaudRateInput from "@/components/TyBaudRateInput.vue";
 
 const { t } = useI18n();
 const ctx = useFirmwareFlashContext();
@@ -11,29 +12,10 @@ const ctx = useFirmwareFlashContext();
 /** True when the authorize tab is active — baud rate then controls auth baud. */
 const isAuthTab = computed(() => ctx.activeTab === "authorize");
 
-const baudIsCustom = ref(
-  !(ctx.BAUD_RATE_OPTIONS as readonly number[]).includes(ctx.selectedBaudRate),
-);
-
-const baudSelectVal = computed({
-  get() {
-    if (isAuthTab.value) {
-      return String(ctx.selectedAuthBaudRate);
-    }
-    return baudIsCustom.value ? "custom" : String(ctx.selectedBaudRate);
-  },
+const authBaudSelectVal = computed({
+  get: () => String(ctx.selectedAuthBaudRate),
   set(val: string) {
-    if (isAuthTab.value) {
-      // Auth baud only has standard options — no custom entry.
-      ctx.selectedAuthBaudRate = Number(val);
-      return;
-    }
-    if (val === "custom") {
-      baudIsCustom.value = true;
-    } else {
-      baudIsCustom.value = false;
-      ctx.selectedBaudRate = Number(val);
-    }
+    ctx.selectedAuthBaudRate = Number(val);
   },
 });
 
@@ -50,16 +32,7 @@ const serialPortOptions = computed<TySelectOption[]>(() => {
   }));
 });
 
-const baudOptions = computed<TySelectOption[]>(() => [
-  { value: "custom", label: t("flash.baudCustom") },
-  ...(ctx.BAUD_RATE_OPTIONS as readonly number[]).map((b) => ({
-    value: String(b),
-    label: String(b),
-  })),
-]);
-
-/** For authorize tab: standard options only, no custom entry. */
-const baudOptionsNoCustom = computed<TySelectOption[]>(() =>
+const standardBaudOptions = computed<TySelectOption[]>(() =>
   (ctx.BAUD_RATE_OPTIONS as readonly number[]).map((b) => ({
     value: String(b),
     label: String(b),
@@ -142,23 +115,21 @@ const chipValue = computed({
         >
           {{ isAuthTab ? t("flash.authBaud") : t("flash.baud") }}
         </label>
-        <TySelect
+        <TyBaudRateInput
+          v-if="!isAuthTab"
           id="baud-rate"
-          v-model="baudSelectVal"
-          :options="isAuthTab ? baudOptionsNoCustom : baudOptions"
+          v-model="ctx.selectedBaudRate"
+          :options="ctx.BAUD_RATE_OPTIONS"
           :disabled="ctx.busy"
           class="w-[8rem] min-w-0"
         />
-        <input
-          v-if="baudIsCustom && !isAuthTab"
-          id="baud-rate-custom"
-          v-model.number="ctx.selectedBaudRate"
-          type="number"
-          min="300"
-          max="4000000"
-          step="1"
-          class="conn-select w-[6.5rem] min-w-0 text-sm"
+        <TySelect
+          v-else
+          id="baud-rate"
+          v-model="authBaudSelectVal"
+          :options="standardBaudOptions"
           :disabled="ctx.busy"
+          class="w-[8rem] min-w-0"
         />
       </div>
 
