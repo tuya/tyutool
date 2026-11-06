@@ -153,7 +153,7 @@ function onHistoryKey(event: KeyboardEvent): void {
 
 <template>
   <div
-    class="send-bar flex flex-wrap items-center gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-3"
+    class="send-bar flex flex-wrap items-center gap-2 rounded-xl border border-[var(--ty-border)] bg-[var(--ty-surface)] p-2"
   >
     <div
       class="mode-toggle flex overflow-hidden rounded-lg border border-[var(--ty-border)]"

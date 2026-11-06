@@ -221,17 +221,7 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
     ).toBe(false);
   });
 
-  it("exposes refresh without a normal feedback row and reports loading, failure and retry", async () => {
-    mountComponent();
-    await flush();
-    const refresh = [...host!.querySelectorAll("button")].find(
-      (b) => b.getAttribute("aria-label") === "Refresh",
-    )!;
-    expect(refresh).toBeDefined();
-    expect(host!.querySelector("#sd-port-feedback")).toBeNull();
-    expect(
-      host!.querySelector("#sd-port")?.getAttribute("aria-describedby"),
-    ).toBeNull();
+  it("auto-discovers ports without a manual refresh control and retries after activation", async () => {
     let reject!: (error: Error) => void;
     vi.mocked(wsTransport.listPorts).mockImplementationOnce(
       () =>
@@ -239,33 +229,24 @@ describe("SerialDebugConnectionBar reboot target UI", () => {
           reject = fail;
         }),
     );
-    refresh.click();
+    const visible = ref(true);
+    mountComponent(visible);
     await flush();
-    expect(refresh.disabled).toBe(true);
-    expect(refresh.getAttribute("aria-busy")).toBe("true");
+    expect(host!.querySelector("h1")?.textContent).toContain("Serial debug");
+    expect(host!.querySelector('button[aria-label="Refresh"]')).toBeNull();
     expect(host!.querySelector("#sd-port-feedback")).toBeNull();
-    const port = host!.querySelector<HTMLButtonElement>("#sd-port")!;
-    port.click();
-    await flush();
-    expect(wsTransport.listPorts).toHaveBeenCalledTimes(2);
-    expect(refresh.disabled).toBe(true);
-    port.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Escape",
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
     reject(new Error("Enumeration denied"));
     await flush();
-    expect(refresh.disabled).toBe(false);
     expect(host!.querySelector("#sd-port-feedback")?.textContent).toContain(
       "Enumeration denied",
     );
-    refresh.click();
+
+    visible.value = false;
     await flush();
+    visible.value = true;
+    await flush();
+    expect(wsTransport.listPorts).toHaveBeenCalledTimes(2);
     expect(host!.querySelector("#sd-port-feedback")).toBeNull();
-    expect(wsTransport.listPorts).toHaveBeenCalledTimes(3);
   });
 
   it("shows the currently resolved reboot control port next to the reboot action", async () => {
