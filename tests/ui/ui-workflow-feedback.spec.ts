@@ -162,10 +162,7 @@ for (const width of [1024, 1549]) {
         if (path === "/flash")
           await expect(page.locator("#flash-port-feedback")).not.toBeVisible();
         else if (path === "/serial-debug")
-          await expect(page.locator(".port-refresh")).toHaveAttribute(
-            "aria-busy",
-            "false",
-          );
+          await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
         else
           await expect(
             page
@@ -193,10 +190,6 @@ for (const width of [1024, 1549]) {
                   : "无可用串口",
             );
           else if (path === "/serial-debug") {
-            await expect(page.locator(".port-refresh")).toHaveAttribute(
-              "aria-busy",
-              "false",
-            );
             await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
             if (ports.length)
               await expect(page.locator("#sd-port-feedback")).toHaveCount(0);
@@ -289,28 +282,17 @@ test("flash and serial debug share a device-event scan and keep a fresh dropdown
   page,
 }) => {
   const state = await openWorkflow(page, "/serial-debug");
-  await expect(page.locator(".port-refresh")).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
+  await expect(page.locator(".port-refresh")).toHaveCount(0);
   await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
   const port = page.locator("#sd-port");
   const before = state.scans;
   await port.click();
   await expect(page.getByRole("listbox")).toBeVisible();
-  await expect(page.locator(".port-refresh")).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
   await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
   expect(state.scans).toBe(before);
   state.ports.push("MOCK_PORT_2");
   state.deviceChanged();
-  await expect(page.locator(".port-refresh")).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
-  expect(state.scans).toBe(before + 1);
+  await expect.poll(() => state.scans).toBe(before + 1);
   await expect(
     page.getByRole("option", { name: "MOCK_PORT_2", exact: true }),
   ).toBeVisible();
@@ -367,10 +349,6 @@ test("reboot control dropdown opens without scanning and updates while expanded"
   page,
 }) => {
   const state = await openWorkflow(page, "/serial-debug");
-  await expect(page.locator(".port-refresh")).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
   await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
   await page.getByRole("button", { name: "Change", exact: true }).click();
   const port = page.getByRole("combobox", {
@@ -381,10 +359,6 @@ test("reboot control dropdown opens without scanning and updates while expanded"
   await port.click();
   await expect(page.getByRole("listbox")).toBeVisible();
   expect(state.scans).toBe(before);
-  await expect(page.locator(".port-refresh")).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
   await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
   state.ports.push("MOCK_PORT_2");
   state.deviceChanged();
@@ -434,7 +408,7 @@ test("batch authorization updates device slots and shares notification scans wit
   expect(state.scans).toBe(before + 3);
 });
 
-test("sidebar activation scans once and pending explicit refresh is not duplicated", async ({
+test("sidebar activation scans once without a manual refresh control", async ({
   page,
 }) => {
   const state = await openWorkflow(page, "/settings");
@@ -442,28 +416,15 @@ test("sidebar activation scans once and pending explicit refresh is not duplicat
   await page.locator('a[href="/serial-debug"]').click();
   await expect(page.locator(".send-bar")).toBeVisible();
   await expect.poll(() => state.scans).toBe(before + 1);
-  await expect(page.locator(".port-refresh")).toHaveAttribute(
-    "aria-busy",
-    "false",
-  );
+  await expect(page.locator(".port-refresh")).toHaveCount(0);
   await expect(page.locator("#sd-port")).toContainText("MOCK_PORT_1");
-  state.holdScan = true;
-  const refresh = page.locator(".port-refresh");
-  await refresh.click();
-  await expect(refresh).toBeDisabled();
-  await expect(refresh).toHaveAttribute("aria-busy", "true");
-  await expect(page.locator("#sd-port-feedback")).toHaveCount(0);
-  await expect.poll(() => state.scans).toBe(before + 2);
   await page.locator("#sd-port").click();
   await expect(page.getByRole("listbox")).toBeVisible();
-  expect(state.scans).toBe(before + 2);
+  expect(state.scans).toBe(before + 1);
   await page.locator("#sd-port").press("Escape");
-  state.holdScan = false;
-  state.finishScan();
-  await expect(refresh).toBeEnabled();
   await page.locator('a[href="/settings"]').click();
   await page.locator('a[href="/serial-debug"]').click();
-  await expect.poll(() => state.scans).toBe(before + 3);
+  await expect.poll(() => state.scans).toBe(before + 2);
 });
 
 for (const locale of ["en", "zh-CN"])

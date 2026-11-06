@@ -356,7 +356,9 @@ onDeactivated(() => {
       </div>
     </template>
     <template #status>
-      <p class="conn-section-label">{{ t("serialDebug.conn.port") }}</p>
+      <h1 class="text-sm font-semibold text-[var(--ty-text)]">
+        {{ t("serialDebug.pageTitle") }}
+      </h1>
       <div class="mt-0.5 flex items-center gap-1.5">
         <span
           class="conn-status-dot inline-block size-2 shrink-0 rounded-full"
@@ -376,11 +378,6 @@ onDeactivated(() => {
     </template>
     <template #fields>
       <div class="flex min-w-0 items-center gap-1.5">
-        <label
-          for="sd-port"
-          class="conn-field-label shrink-0 text-xs font-semibold"
-          >{{ t("serialDebug.conn.port") }}</label
-        >
         <TySelect
           id="sd-port"
           v-model="s.port"
@@ -395,17 +392,6 @@ onDeactivated(() => {
           :disabled="s.open || s.opening"
           class="w-[13rem] min-w-0"
         />
-        <button
-          type="button"
-          class="port-refresh conn-btn-action flex size-8 shrink-0 items-center justify-center rounded-lg"
-          :aria-label="t('common.refresh')"
-          :title="t('common.refresh')"
-          :disabled="portsLoading"
-          :aria-busy="portsLoading"
-          @click="refreshPorts"
-        >
-          <FontAwesomeIcon icon="rotate" class="size-3.5" aria-hidden="true" />
-        </button>
       </div>
 
       <div class="flex min-w-0 items-center gap-1.5">

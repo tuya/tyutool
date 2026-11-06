@@ -1129,7 +1129,7 @@ async function saveLog(): Promise<void> {
     </p>
     <!-- toolbar -->
     <div
-      class="log-toolbar flex items-center gap-2 border-b border-[var(--ty-border)] px-3 py-2.5"
+      class="log-toolbar flex items-center gap-1.5 border-b border-[var(--ty-border)] px-2 py-1.5"
     >
       <span class="toolbar-title">{{ t("serialDebug.log.title") }}</span>
 
