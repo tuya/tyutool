@@ -10,6 +10,7 @@ pub mod gd32;
 pub mod ln882h;
 #[cfg(feature = "mock-chip")]
 pub mod mock;
+pub mod rtl8711daf;
 pub mod t1;
 pub mod t2;
 pub mod t3;
@@ -26,6 +27,7 @@ pub use gd32::Gd32vw553Plugin;
 pub use ln882h::Ln882hPlugin;
 #[cfg(feature = "mock-chip")]
 pub use mock::MockPlugin;
+pub use rtl8711daf::Rtl8711dafPlugin;
 pub use t1::T1Plugin;
 pub use t2::T2Plugin;
 pub use t3::T3Plugin;

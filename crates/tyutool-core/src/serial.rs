@@ -548,6 +548,8 @@ pub(crate) fn device_reset_serial_port(
 ///   post-flash reset in `plugins::esp::common::run_esp`.
 /// - **GD32VW553**: a plain reset pulse on DTR with BOOT0 released — deliberately *not*
 ///   `plugins::gd32::protocol::enter_isp_mode`, which would leave the part in the boot ROM.
+/// - **RTL8711DAF**: the `BekenBk` RTS pulse (RTS wired to CHIP_EN, as in Realtek's
+///   `Reset.cfg`) — the same reset its flash plugin falls back to for download-mode entry.
 pub fn device_reset_dtr_rts(port: &str, chip_id: &str) -> Result<(), FlashError> {
     let mut handle = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(500))
@@ -584,6 +586,11 @@ mod hw_reset_tests {
         );
         assert_eq!(
             device_reset_strategy_for_chip("BK7231N", 0),
+            DeviceResetStrategy::BekenBk
+        );
+        // RTS→CHIP_EN pulse, same timing as Realtek's Reset.cfg.
+        assert_eq!(
+            device_reset_strategy_for_chip("RTL8711DAF", 0),
             DeviceResetStrategy::BekenBk
         );
     }

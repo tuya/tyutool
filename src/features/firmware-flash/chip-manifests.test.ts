@@ -98,6 +98,16 @@ describe("chipManifest", () => {
     expect(m.flashSize).toBe("0x00400000");
   });
 
+  it("returns manifest for rtl8711daf", () => {
+    const m = chipManifest("rtl8711daf");
+    expect(m.rustPluginId).toBe("RTL8711DAF");
+    // Must stay in step with `default_baud` / `monitor_default_baud` in
+    // crates/tyutool-cli/src/main.rs: flashing and the log both use the 1.5 Mbaud log UART.
+    expect(m.defaultBaudRate).toBe(1500000);
+    expect(m.defaultLogBaudRate).toBe(1500000);
+    expect(m.flashSize).toBe("0x00400000");
+  });
+
   it("returns manifest for ESP32 chips", () => {
     expect(chipManifest("esp32").rustPluginId).toBe("ESP32");
     expect(chipManifest("esp32c3").rustPluginId).toBe("ESP32C3");
@@ -143,6 +153,7 @@ describe("rustPluginIdForChip", () => {
     expect(rustPluginIdForChip("esp32c3")).toBe("ESP32C3");
     expect(rustPluginIdForChip("esp32p4")).toBe("ESP32P4");
     expect(rustPluginIdForChip("esp32s3")).toBe("ESP32S3");
+    expect(rustPluginIdForChip("rtl8711daf")).toBe("RTL8711DAF");
   });
 
   it("maps auth-only other via manifest", () => {

@@ -1,9 +1,10 @@
 //! On-demand RAM loader assets.
 //!
-//! Two chips cannot be flashed by their own mask ROM: it can do little more than write
+//! Some chips cannot be flashed by their own mask ROM: it can do little more than write
 //! SRAM and jump to it, so tyutool has to upload a vendor downloader *first* and let
-//! that program the flash. Those images (`ram-loader-ln882h-*.bin`,
-//! `ram-loader-gd32vw553-*.bin`) used to be `include_bytes!`-compiled into this crate.
+//! that program the flash. The first two images (`ram-loader-ln882h-*.bin`,
+//! `ram-loader-gd32vw553-*.bin`) used to be `include_bytes!`-compiled into this crate;
+//! `ram-loader-rtl8711daf-*.bin` never was.
 //! They are now published assets — sources in `assets/ram-loader/`, released to the
 //! `ram-loader` tag on GitHub/Gitee and mirrored on the Tuya CDN — downloaded once and
 //! cached, so no shipped binary carries vendor firmware. See

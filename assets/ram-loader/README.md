@@ -1,6 +1,6 @@
 # RAM Loader Assets (ram-loader)
 
-Source directory for the **RAM loaders** two chips cannot be flashed without:
+Source directory for the **RAM loaders** three chips cannot be flashed without:
 their mask ROM can do little more than write SRAM and jump to it, so tyutool has
 to upload a downloader *first* and let that program the flash.
 
@@ -8,6 +8,7 @@ to upload a downloader *first* and let that program the flash.
 |---|---|---|
 | `ln882h` | Vendor RAM code, XMODEM-uploaded, answers `RAMCODE` | `0x20000000` |
 | `gd32vw553` | Vendor USART downloader, uploaded over the AN3155 ROM bootloader | `0x20002000` |
+| `rtl8711daf` | Realtek AmebaImageTool flash loader, uploaded over the ROM UART download mode | `0x3000A000` |
 
 These used to be `include_bytes!`-compiled into `tyutool-core`
 (`plugins/ln882h/ram.bin`, `plugins/gd32/loader.bin`). They are now published
