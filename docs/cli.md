@@ -145,9 +145,9 @@ Everything humans read — the startup banner, progress, phase lines, prompts, m
 
 So `tyutool list-ports --json | jq .` and `source <(tyutool completions bash)` work with no extra flags. `usb-port-survey` and `completions` additionally suppress the banner and skip log-file setup entirely, so their stdout stays byte-clean even if a redirect merges the two streams.
 
-### RAM loader downloads (LN882H and GD32VW553 only)
+### RAM loader downloads (LN882H, GD32VW553 and RTL8711DAF only)
 
-Those two chips cannot be flashed by their own mask ROM: tyutool has to upload a vendor
+Those three chips cannot be flashed by their own mask ROM: tyutool has to upload a vendor
 RAM loader first and let *that* program the flash. The loader images are **not** part of
 the binary — they are published assets, fetched once over HTTPS and then cached:
 
@@ -219,7 +219,7 @@ tyutool write -d <DEVICE> -f <FILE> [-p <PORT>] [-b <BAUD>] [-s <START>] [--end 
 | `-d`, `--device` | chip name | **yes** | — |
 | `-f`, `--file` | path to a firmware `.bin` | **yes** | — |
 | `-p`, `--port` | serial port (`/dev/ttyUSB0`, `COM3`) | no | [auto-detect or prompt](#port-selection) |
-| `-b`, `--baud` | baud rate, decimal | no | [chip-specific](#device-and-baud-table) — 921600 Beken/T-series, 460800 ESP32, 115200 LN882H, 2000000 GD32VW553 |
+| `-b`, `--baud` | baud rate, decimal | no | [chip-specific](#device-and-baud-table) — 921600 Beken/T-series, 460800 ESP32, 115200 LN882H, 2000000 GD32VW553, 1500000 RTL8711DAF |
 | `-s`, `--start` | flash start address, hex | no | `0x00000000` |
 | `--end` | flash end address, hex (no short form) | no | `start + file size`, formatted `0x%08X` |
 
@@ -251,6 +251,8 @@ tyutool --plain --verbose write -d ln882h -f app.bin -p /dev/ttyUSB0
 LN882H needs the BOOT/A9 pin held low to enter download mode; the CLI prints that as an actionable warning while it waits.
 
 GD32VW553 needs the board in boot mode. If **DTR is wired to RESET and RTS to BOOT0**, the tool gets it there itself; on a board whose BOOT is a button, hold it down and reset or power-cycle — the CLI prints an actionable warning as soon as the boot ROM stays quiet and keeps retrying (resetting for you on each try) for 30 s, so you can do it after starting the command. It is then flashed in two stages: a RAM loader goes in over the boot ROM at 57600 baud, and that loader erases, programs and SHA-256-verifies the image at `-b` (2000000 by default). `-s` accepts either a flash offset (`0x0`) or the mapped address the datasheet uses (`0x08000000`), and must be 4 KiB aligned.
+
+RTL8711DAF is flashed over its **log UART** (the one that prints at 1500000 baud). The tool enters UART download mode itself: it types `reboot uartburn` into the running firmware's console; if the firmware does not answer, it resets the chip by pulsing **RTS, if RTS is wired to CEN**, and tries again; only if both fail does the CLI print an actionable warning asking you to pull Log_Tx to GND, power-cycle, and reconnect Log_Tx, and it waits 60 s for that. It is then flashed in two stages: a flash loader goes in over the boot ROM, and that loader erases, programs and checksum-verifies the image at `-b` (1500000 by default; it must be a rate the boot ROM supports, otherwise 1500000 is used and a warning says so). `-s` accepts either a flash offset (`0x14000`) or the mapped address (`0x08014000`) and must be 4 KiB aligned. Data past `--end` is not written — flashing only the application partition of a TuyaOS QIO image is `-s 0x14000 -f km0_km4_app.bin`, which leaves the bootloader at `0x0` untouched.
 
 ---
 
@@ -387,7 +389,7 @@ tyutool reset [-p <PORT>] [-d <DEVICE>]
 | `-p`, `--port` | serial port | no | [auto-detect or prompt](#port-selection) |
 | `-d`, `--device` | chip name | no | `bk7231n` |
 
-Toggles the DTR/RTS lines to reboot the device without touching flash. `-d` matters because the pulse differs per family: the Beken/T-series parts use the same pulse as their flash handshake (`bk7231n`/`t2` differ from `t5ai`/`t3`/`t1`), the ESP32 parts use espflash's hard-reset sequence, and `gd32vw553` pulses RESET with BOOT0 left released, so it comes up in its application rather than in the boot ROM. Using the wrong family usually means the device simply does not reboot.
+Toggles the DTR/RTS lines to reboot the device without touching flash. `-d` matters because the pulse differs per family: the Beken/T-series parts use the same pulse as their flash handshake (`bk7231n`/`t2` differ from `t5ai`/`t3`/`t1`), the ESP32 parts use espflash's hard-reset sequence, `gd32vw553` pulses RESET with BOOT0 left released, so it comes up in its application rather than in the boot ROM, and `rtl8711daf` pulses RTS (wired to the chip's CEN pin) the same way `bk7231n` does. Using the wrong family usually means the device simply does not reboot.
 
 **Success is silent.** The command prints only the startup banner and exits 0; the confirmation is a diagnostic log line, so add `--verbose` if you want to see it on screen.
 
@@ -764,6 +766,7 @@ tyutool usb-port-survey | jq '.[] | select(.wouldListInTyutool == false)'
 | `t9` | T9 | 921600 | **460800** | 8 MiB (`0x800000`) |
 | `ln882h` | LN882H | 115200 | 115200 | 2 MiB (`0x200000`) |
 | `gd32vw553` | GD32VW553 | 2000000 | 115200 | 4 MiB (`0x400000`) |
+| `rtl8711daf` | RTL8711DAF | 1500000 | **1500000** | 4 MiB (`0x400000`) |
 | `esp32` | ESP32 | 460800 | 115200 | 4 MiB (`0x400000`) |
 | `esp32c3` | ESP32-C3 | 460800 | 115200 | 4 MiB (`0x400000`) |
 | `esp32c6` | ESP32-C6 | 460800 | 115200 | 8 MiB (`0x800000`) |
@@ -822,7 +825,7 @@ Flash OK  3.2s
 | `cannot open log file '<path>': …` | `monitor -l` could not create or append to the path. Check the directory exists and is writable. |
 | `--- Monitor stopped: serial port <p> disconnected or unavailable. ---` | The adapter went away mid-session (unplugged, or the device reset the USB link). Not a failure — exit code is 0. |
 | Unreadable garbage in `monitor` | Wrong baud. The monitor defaults are 460800 for `t5ai` and 115200 elsewhere — different from the flash defaults. Try `-b 921600`. |
-| `LN882H needs its RAM loader ram-loader-ln882h-<v>.bin, which is not cached locally and …` | The loader could not be fetched (no network, or a blocked mirror). Connect once so it can be cached, or supply it by hand with `TYUTOOL_RAM_LOADER_DIR` — see [RAM loader downloads](#ram-loader-downloads-ln882h-and-gd32vw553-only). |
+| `LN882H needs its RAM loader ram-loader-ln882h-<v>.bin, which is not cached locally and …` | The loader could not be fetched (no network, or a blocked mirror). Connect once so it can be cached, or supply it by hand with `TYUTOOL_RAM_LOADER_DIR` — see [RAM loader downloads](#ram-loader-downloads-ln882h-gd32vw553-and-rtl8711daf-only). |
 | `ram-loader-<chip>-<v>.bin SHA-256 mismatch: expected …, got …` | The file in `TYUTOOL_RAM_LOADER_DIR` (or a corrupt cache entry) is not the loader this build pins. Replace it with the one from the `ram-loader` release matching your tyutool version. |
 | `All update sources failed. Check your network connection.` | Neither manifest could be fetched. On a mainland-China network try `--source tuya`. |
 | `SHA256 checksum mismatch! Download may be corrupted.` | The download did not match the manifest; nothing was replaced. Retry, or fetch the archive from Releases by hand. |

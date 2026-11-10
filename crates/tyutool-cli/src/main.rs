@@ -217,6 +217,7 @@ const SUPPORTED_DEVICES: &[&str] = &[
     "t9",
     "ln882h",
     "gd32vw553",
+    "rtl8711daf",
     "esp32",
     "esp32c3",
     "esp32c6",
@@ -255,18 +256,21 @@ fn default_baud(device: &str) -> u32 {
         // The RAM loader is told this rate and follows the host to it; 2 Mbaud is what
         // the vendor tool uses.
         "gd32vw553" => 2000000,
+        // An entry of the boot ROM's BAUDSET table; the loader is told this rate too.
+        "rtl8711daf" => 1500000,
         _ => 921600,
     }
 }
 
 // Must stay in sync with `defaultLogBaudRate` in
 // src/features/firmware-flash/chip-manifests.ts: T5AI, T3 and T9 log at 460800,
-// every other chip (and no `-d`) at 115200. The GUI reads the same port at the
-// same rate, so a chip listed at 460800 there and 115200 here would show the
-// user solid garbage in one of the two.
+// RTL8711DAF at 1500000, every other chip (and no `-d`) at 115200. The GUI reads
+// the same port at the same rate, so a chip listed at 460800 there and 115200
+// here would show the user solid garbage in one of the two.
 fn monitor_default_baud(device: Option<&str>) -> u32 {
     match device.map(|d| d.to_ascii_lowercase()).as_deref() {
         Some("t5ai") | Some("t3") | Some("t9") => 460800,
+        Some("rtl8711daf") => 1500000,
         _ => 115200,
     }
 }
@@ -962,6 +966,7 @@ mod tests {
             ("LN882H", "ln882h"),
             ("GD32VW553", "gd32vw553"),
             ("Gd32Vw553", "gd32vw553"),
+            ("RTL8711DAF", "rtl8711daf"),
             ("ESP32", "esp32"),
             ("ESP32C3", "esp32c3"),
             ("ESP32C6", "esp32c6"),
@@ -993,6 +998,8 @@ mod tests {
         assert_eq!(default_baud("LN882H"), 115200);
         assert_eq!(default_baud("gd32vw553"), 2000000);
         assert_eq!(default_baud("GD32VW553"), 2000000);
+        assert_eq!(default_baud("rtl8711daf"), 1500000);
+        assert_eq!(default_baud("RTL8711DAF"), 1500000);
         assert_eq!(default_baud("esp32"), 460800);
         assert_eq!(default_baud("esp32c3"), 460800);
         assert_eq!(default_baud("esp32c6"), 460800);
@@ -1017,6 +1024,8 @@ mod tests {
         assert_eq!(monitor_default_baud(Some("t2")), 115200);
         assert_eq!(monitor_default_baud(Some("ln882h")), 115200);
         assert_eq!(monitor_default_baud(Some("gd32vw553")), 115200);
+        assert_eq!(monitor_default_baud(Some("rtl8711daf")), 1500000);
+        assert_eq!(monitor_default_baud(Some("RTL8711DAF")), 1500000);
         assert_eq!(monitor_default_baud(Some("esp32")), 115200);
         assert_eq!(monitor_default_baud(None), 115200);
     }

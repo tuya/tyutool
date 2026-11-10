@@ -48,8 +48,8 @@ ts-rs = ["dep:ts-rs"]
 mock-chip = []
 # Enables downloading the on-demand RAM loader assets (`ram_loader`) over HTTPS when
 # they are not already cached. Every *shipped* binary that can flash must enable it
-# (tyutool-cli, src-tauri, tyutool-bridge) — LN882H and GD32VW553 cannot be flashed
-# without their loader, and nothing embeds it any more. Leaving it off keeps the crate
+# (tyutool-cli, src-tauri, tyutool-bridge) — LN882H, GD32VW553 and RTL8711DAF cannot
+# be flashed without their loader, and nothing embeds it any more. Leaving it off keeps the crate
 # HTTP-free and restricts `ram_loader::resolve` to the local cache and
 # `TYUTOOL_RAM_LOADER_DIR`: that is the right shape for tyutool-serve (a dev shim whose
 # only binary, tyutool-cli, already turns the feature on) and for tests.

@@ -1,0 +1,15 @@
+RTL8711DAF (Realtek AmebaDplus) flash loader (vendor binary, "floader").
+
+Taken unmodified from Realtek AmebaImageTool, Devices/Floaders/floader_amebadplus.bin,
+as shipped in the TuyaOS rtl8711daf vendor SDK
+(rtl8711daf_os/tools/ameba/ImageTool, ChangeLog up to v2.8.10 / 2025-05-27).
+Do not confuse it with the 32000-byte ImageTool/Floaders/floader_amebadplus.bin
+next to it: that older image speaks the legacy protocol and is not this one.
+
+The vendor ships no version number for the image itself. It starts with the Ameba
+image signature 99 99 96 96 3F CC 66 FC, declares 0x6140 bytes loaded at
+0x3000A020, entry 0x3000B819. The 1.0.0 above is tyutool's own asset version.
+
+29024 bytes; uploaded through the mask-ROM UART download mode (xmodem-style STX
+packets, followed by the transfer baud as a u32 LE and zero padding) to 0x3000A000
+and entered there.

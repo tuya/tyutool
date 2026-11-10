@@ -175,6 +175,20 @@ export const CHIP_MANIFEST: Record<ChipId, ChipManifest> = {
       fullChip: { start: "0x00000000", end: "0x00400000" },
     },
   },
+  rtl8711daf: {
+    rustPluginId: "RTL8711DAF",
+    // An entry of the boot ROM's BAUDSET table; the plugin falls back to 1.5 Mbaud
+    // (with a warning) for rates the ROM does not have.
+    defaultBaudRate: 1500000,
+    defaultAuthBaudRate: 115200,
+    // The log UART — also the flashing port — runs at 1.5 Mbaud.
+    defaultLogBaudRate: 1500000,
+    flashSize: "0x00400000", // 4 MiB — confirmed on hardware (flash MID 0x85)
+    eraseRequires4KAlignment: true,
+    erasePresets: {
+      fullChip: { start: "0x00000000", end: "0x00400000" },
+    },
+  },
   ln882h: {
     rustPluginId: "LN882H",
     defaultBaudRate: 115200,
