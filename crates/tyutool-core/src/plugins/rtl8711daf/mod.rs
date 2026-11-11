@@ -125,6 +125,13 @@ fn erased_word_sum(len: u32) -> u32 {
     (len / 4).wrapping_mul(0xFFFF_FFFF)
 }
 
+/// Whole-page span `[first, end)` covering `[start, end)`, clamped to the flash size.
+fn page_span(start: u32, end: u32, page: u32, capacity: u32) -> (u32, u32) {
+    let first = start - start % page;
+    let last = end.div_ceil(page).saturating_mul(page).min(capacity);
+    (first, last)
+}
+
 /// JEDEC id as the other plugins report it: manufacturer, memory type, capacity.
 fn jedec_id(info: &DeviceInfo) -> u32 {
     let [ty, cap] = info.flash_did.to_le_bytes();
@@ -490,26 +497,31 @@ fn run_read(
         }
         phase(progress, FlashPhase::Read);
         log::info!("RTL8711DAF: reading 0x{start:08x}..0x{end:08x}");
-        let total = (end - start) as u64;
-        let mut buf = Vec::with_capacity(total as usize);
+        // The loader rejects READ sizes that are not a whole page (error 0xff), so
+        // read whole pages and cut the requested range out afterwards.
+        let (first, last_end) = page_span(start, end, info.page_size, info.capacity);
+        let total = (last_end - first) as u64;
+        let mut pages = Vec::with_capacity(total as usize);
         let mut last = u8::MAX;
-        let mut off = start;
-        while off < end {
-            let n = info.page_size.min(end - off);
-            buf.extend_from_slice(&fl.read(FLASH_BASE + off, n)?);
-            off += n;
-            percent(progress, (off - start) as u64, total, &mut last);
+        let mut off = first;
+        while off < last_end {
+            pages.extend_from_slice(&fl.read(FLASH_BASE + off, info.page_size)?);
+            off += info.page_size;
+            percent(progress, (off - first) as u64, total, &mut last);
         }
 
         phase(progress, FlashPhase::Verify);
-        if buf.len().is_multiple_of(4) {
-            verify_checksum(fl, start, buf.len() as u32, floader::word_sum(&buf), "read")?;
-        } else {
-            log::info!("RTL8711DAF: read length not a multiple of 4, checksum verify skipped");
-        }
+        verify_checksum(
+            fl,
+            first,
+            pages.len() as u32,
+            floader::word_sum(&pages),
+            "read",
+        )?;
+        let buf = &pages[(start - first) as usize..(end - first) as usize];
 
         phase(progress, FlashPhase::Save);
-        std::fs::write(&file_path, &buf)?;
+        std::fs::write(&file_path, buf)?;
         log::info!("RTL8711DAF: saved {} bytes to {file_path}", buf.len());
         Ok(())
     })
@@ -645,6 +657,18 @@ mod tests {
         // measured on hardware: CHKSM of an erased 4 KiB sector
         assert_eq!(erased_word_sum(0x1000), 0xffff_fc00);
         assert_eq!(erased_word_sum(0x1000), floader::word_sum(&[0xFF; 0x1000]));
+    }
+
+    #[test]
+    fn read_span_is_whole_pages() {
+        // the loader answers 0xff to a READ shorter than a page
+        assert_eq!(page_span(0x0, 0x100, 1024, 0x40_0000), (0x0, 0x400));
+        assert_eq!(page_span(0x123, 0x900, 1024, 0x40_0000), (0x0, 0xC00));
+        assert_eq!(page_span(0x400, 0x800, 1024, 0x40_0000), (0x400, 0x800));
+        assert_eq!(
+            page_span(0x3F_FF00, 0x40_0000, 1024, 0x40_0000),
+            (0x3F_FC00, 0x40_0000)
+        );
     }
 
     #[test]
