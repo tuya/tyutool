@@ -824,7 +824,7 @@ Flash OK  3.2s
 | `authorize: provide both --uuid and --authkey to write, or neither to read` | Exactly one half of the pair was given. Supply both to write, or drop both to read. |
 | `cannot open log file '<path>': …` | `monitor -l` could not create or append to the path. Check the directory exists and is writable. |
 | `--- Monitor stopped: serial port <p> disconnected or unavailable. ---` | The adapter went away mid-session (unplugged, or the device reset the USB link). Not a failure — exit code is 0. |
-| Unreadable garbage in `monitor` | Wrong baud. The monitor defaults are 460800 for `t5ai` and 115200 elsewhere — different from the flash defaults. Try `-b 921600`. |
+| Unreadable garbage in `monitor` | Wrong baud. The monitor defaults are 460800 for `t5ai`, 1500000 for `rtl8711daf` and 115200 elsewhere — different from the flash defaults. Try `-b 921600`. |
 | `LN882H needs its RAM loader ram-loader-ln882h-<v>.bin, which is not cached locally and …` | The loader could not be fetched (no network, or a blocked mirror). Connect once so it can be cached, or supply it by hand with `TYUTOOL_RAM_LOADER_DIR` — see [RAM loader downloads](#ram-loader-downloads-ln882h-gd32vw553-and-rtl8711daf-only). |
 | `ram-loader-<chip>-<v>.bin SHA-256 mismatch: expected …, got …` | The file in `TYUTOOL_RAM_LOADER_DIR` (or a corrupt cache entry) is not the loader this build pins. Replace it with the one from the `ram-loader` release matching your tyutool version. |
 | `All update sources failed. Check your network connection.` | Neither manifest could be fetched. On a mainland-China network try `--source tuya`. |

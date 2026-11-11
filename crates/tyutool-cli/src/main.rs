@@ -136,7 +136,7 @@ enum Commands {
         /// Uart baud rate (default: chip-specific monitor baud; 115200 without -d)
         #[arg(short = 'b', long = "baud")]
         baud: Option<u32>,
-        /// Chip type — selects the default monitor baud (t5ai/t3/t9: 460800, others: 115200)
+        /// Chip type — selects the default monitor baud (t5ai/t3/t9: 460800, rtl8711daf: 1500000, others: 115200)
         #[arg(short = 'd', long = "device", value_parser = chip_value_parser())]
         device: Option<String>,
         /// Append received data to this file
