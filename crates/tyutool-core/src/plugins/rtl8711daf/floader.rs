@@ -68,12 +68,12 @@ pub fn parse_reply_body(header: &[u8; 3], body: &[u8]) -> Result<Vec<u8>, String
 /// Sum of little-endian u32 words, wrapping (vendor checksum for CHKSM verification).
 /// A trailing partial word contributes `byte[i] << (8 * i)`.
 pub fn word_sum(data: &[u8]) -> u32 {
-    let mut chunks = data.chunks_exact(4);
+    let (chunks, remainder) = data.as_chunks::<4>();
     let mut s = 0u32;
-    for c in &mut chunks {
-        s = s.wrapping_add(u32::from_le_bytes([c[0], c[1], c[2], c[3]]));
+    for &c in chunks {
+        s = s.wrapping_add(u32::from_le_bytes(c));
     }
-    for (i, &b) in chunks.remainder().iter().enumerate() {
+    for (i, &b) in remainder.iter().enumerate() {
         s = s.wrapping_add((b as u32) << (8 * i));
     }
     s

@@ -54,13 +54,9 @@ fn is_phantom_port(path: &str, pt: &serialport::SerialPortType) -> bool {
     // On Linux, /dev/ttyS* ports with type Unknown are legacy 8250/16550 UARTs
     // that exist in every kernel config but are rarely wired to anything.
     // Real USB/ACM/PCI serial devices have a known type.
-    if cfg!(target_os = "linux")
+    cfg!(target_os = "linux")
         && matches!(pt, serialport::SerialPortType::Unknown)
         && path.starts_with("/dev/ttyS")
-    {
-        return true;
-    }
-    false
 }
 
 /// macOS lists every device twice as `/dev/tty.*` (dial-in) and `/dev/cu.*` (call-out).
@@ -75,13 +71,10 @@ fn should_list_serial_port_macos(path: &str, pt: &serialport::SerialPortType) ->
     if path.to_ascii_lowercase().contains("bluetooth") {
         return false;
     }
-    if matches!(
+    !matches!(
         pt,
         serialport::SerialPortType::BluetoothPort | serialport::SerialPortType::PciPort
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
